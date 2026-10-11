@@ -85,6 +85,7 @@ export const tools: ToolDef[] = [
       "Exiting can land in 'change_review' rather than 'editing' when editor commands (not game code) ran during play: that state holds those edits pending, and a second 'exit' discards them, exactly as the toolbar Stop button does. " +
       "This never switches the editor to the fullscreen game layout, so the dock layout you set up survives a play session (activateGameView changes which tab is in front, nothing else), " +
       "and it skips the toolbar's pre-play pending-download prompt — playing proceeds even if assets are still downloading. " +
+      "While game scripts are building, 'enter' answers with 'waitingForScriptBuild': true and 'playMode' 'editing': the editor shows its Entering Play Mode dialog and enters when the build finishes, or stays in editing when the build fails or the dialog is canceled; poll get_editor_state for the outcome. 'exit' during that wait drops the entry and answers 'entryCanceled': true. After a failed script build, 'enter' is refused until the module rebuilds. " +
       "IF YOUR SESSION TOUCHES GAME UI, PASS activateGameView — read its description first; without it managed UI resolves nothing and looks broken.",
     schema: {
       action: z.enum(["enter", "exit", "pause", "resume"]).describe(

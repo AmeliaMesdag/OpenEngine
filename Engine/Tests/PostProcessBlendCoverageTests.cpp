@@ -722,7 +722,7 @@ TEST(PostProcessChromaticAberration, UsesDepthAwareFocusAndPixelCorrectSeparatio
     const std::filesystem::path root = std::filesystem::path(GE_RENDERER_REPO_ROOT);
     const std::filesystem::path shader = root /
         "Packages/chromatic-aberration/Assets/Shaders/chromatic_aberration.frag";
-    const std::filesystem::path graph = root / "Assets/RenderPipelines/ForwardPlus.rendergraph";
+    const std::filesystem::path graph = root / "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph";
 
     std::ifstream shaderStream(shader);
     ASSERT_TRUE(shaderStream.is_open()) << shader;
@@ -770,7 +770,7 @@ TEST(PostProcessVhs, UsesSkippableMitLicensedPixelCorrectLdrPass)
     const std::filesystem::path chromaBandsShader =
         root / "Engine/Modules/Rendering/Shaders/vhs_chroma_bands.frag";
     const std::filesystem::path graph =
-        root / "Assets/RenderPipelines/ForwardPlus.rendergraph";
+        root / "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph";
 
     std::ifstream shaderStream(shader);
     ASSERT_TRUE(shaderStream.is_open()) << shader;
@@ -1117,7 +1117,7 @@ TEST(PostProcessFogGlowControls, ExtractsFogRadianceWithoutSceneSilhouettes)
         "Engine/Modules/Rendering/Shaders/fog_glow_fast.frag";
     const std::filesystem::path prefilterShader = root /
         "Engine/Modules/Rendering/Shaders/fog_glow_prefilter.frag";
-    const std::filesystem::path graph = root / "Assets/RenderPipelines/ForwardPlus.rendergraph";
+    const std::filesystem::path graph = root / "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph";
 
     auto readText = [](const std::filesystem::path& path) {
         std::ifstream stream(path);
@@ -1172,7 +1172,7 @@ TEST(PostProcessVolumetricClouds, PortsLagueMarchWithTemporalHistoryAndBakedNois
         "Engine/Modules/VolumetricClouds/Shaders/volumetric_clouds_shape_noise.comp";
     const std::filesystem::path upstream = root /
         "Engine/Modules/VolumetricClouds/ThirdParty/SebLague-Clouds/UPSTREAM.md";
-    const std::filesystem::path graph = root / "Assets/RenderPipelines/ForwardPlus.rendergraph";
+    const std::filesystem::path graph = root / "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph";
 
     auto readText = [](const std::filesystem::path& path) {
         std::ifstream stream(path);

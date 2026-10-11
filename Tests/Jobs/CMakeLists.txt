@@ -32,6 +32,7 @@ set(JOB_SYSTEM_TEST_SOURCES
     QueueFairnessTests.cpp
     ParallelForTests.cpp
     TaskSlabPoolTests.cpp
+    TaskQueueAllocationTests.cpp
     TopologyCensusBench.cpp
     PerformanceRegressionTests.cpp
     ../Performance/WorkStealingTest.cpp

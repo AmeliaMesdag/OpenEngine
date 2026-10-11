@@ -120,7 +120,7 @@ struct StarInstanceGPU
 };
 
 // Engine-owned moon art, relative to the install assets root. The Editor's and Player's
-// asset staging copy the repo's Assets/Textures tree next to the executable, so this is a
+// asset staging copy the repo's Engine/Assets/Textures tree next to the executable, so this is a
 // staged-tree path and never a repo path.
 inline constexpr const char* kSkyMoonFullTextureRelativePath = "Textures/Sky/MoonPhases/moon_full.png";
 

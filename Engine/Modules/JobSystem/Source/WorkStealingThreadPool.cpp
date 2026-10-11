@@ -594,7 +594,7 @@ void WorkStealingThreadPool::CommitRecycledTaskData(
     }
 }
 
-moodycamel::ConcurrentQueue<SharedPtr<TaskHandle::TaskData>>&
+ConcurrentQueue<SharedPtr<TaskHandle::TaskData>>&
 WorkStealingThreadPool::TaskDataFreelist() {
     // IMMORTAL for the same reason as the slab freelist (TaskSlabPool.cpp):
     // recycles can run during static destruction; a destructed freelist would
@@ -603,7 +603,7 @@ WorkStealingThreadPool::TaskDataFreelist() {
     // TaskData (~500B each) are ever pinned.
     static constexpr size_t kTaskDataFreelistCapacity = 256;
     static auto* const s_Freelist =
-        new moodycamel::ConcurrentQueue<SharedPtr<TaskHandle::TaskData>>(
+        new ConcurrentQueue<SharedPtr<TaskHandle::TaskData>>(
             kTaskDataFreelistCapacity);
     return *s_Freelist;
 }
@@ -2224,7 +2224,7 @@ void WorkStealingThreadPool::EnqueueTaskGlobal(UniquePtr<TaskBase> task, JobPrio
     NotifyAfterPublish(); // (P2..P4)
 }
 
-moodycamel::ConcurrentQueue<UniquePtr<TaskBase>>& WorkStealingThreadPool::PriorityLane(JobPriority priority) {
+ConcurrentQueue<UniquePtr<TaskBase>>& WorkStealingThreadPool::PriorityLane(JobPriority priority) {
     return priority == JobPriority::Background ? m_BackgroundQueue : m_GlobalQueue;
 }
 

@@ -6,7 +6,7 @@
 
 A modern, high-performance, open-source game engine built for the community, by the community, with the goals of bringing power, scale, ease of use and true ownership to game developers.
 
-It also builds for the web: the same engine runs in the browser on WebGPU, shipped as the `@openengine/web` package with live examples. Its Web API is designed to bring the capabilities and performance of the engine into an HTML canvas anywhere.
+It also builds for the web: the same engine runs in the browser on WebGPU, shipped as the `@game-crafters-guild/openengine-web` package with live examples. Its Web API is designed to bring the capabilities and performance of the engine into an HTML canvas anywhere.
 
 **Platforms:** Windows x64 and ARM64 (primary), macOS on Apple Silicon and Intel (native Metal renderer), Linux, Steam Deck.
 
@@ -33,7 +33,7 @@ Live examples, built from the engine and published with each release (WebGPU):
 - [Model viewer](https://game-crafters-guild.github.io/opengine-web/package/examples/model-viewer/index.html): sample models or your own `.glb`, orbit and pan, time of day, exposure, and the model's animation clips.
 - [Instancing](https://game-crafters-guild.github.io/opengine-web/package/examples/instancing/index.html): one model drawn up to 100,000 times, each copy an entity.
 
-The library behind them is [`@openengine/web`](https://www.npmjs.com/package/@openengine/web) (`npm install @openengine/web@alpha`); its README is the guide. The examples' source and the built package live in [opengine-web](https://github.com/Game-Crafters-Guild/opengine-web).
+The library behind them is [`@game-crafters-guild/openengine-web`](https://www.npmjs.com/package/@game-crafters-guild/openengine-web) (`npm install @game-crafters-guild/openengine-web@alpha`); its README is the guide. The examples' source and the built package live in [opengine-web](https://github.com/Game-Crafters-Guild/opengine-web).
 
 ## Build
 
@@ -53,13 +53,13 @@ The first configure bootstraps vcpkg and builds the third-party dependencies onc
 
 ```
 Engine/               The engine library: Include/, Source/, and one library per subsystem under Modules/
+  Assets/             Engine content the build stages beside the Editor and the Player: materials, render pipelines, textures, UI, graphs
   ECSModules/         Shared ECS components (Audio, Components, Rendering)
 Apps/Editor/          The editor (C++, with CSS/XML UI)
 Apps/Player/          The game runtime the editor exports games with
-Apps/WebLibrary/      The web build: the WebGPU engine module and the @openengine/web library
+Apps/WebLibrary/      The web build: the WebGPU engine module and the @game-crafters-guild/openengine-web library
 Managed/              C# side: CoreBridge, HotReload, Scripting.ABI, CompileServerHost
 Packages/             Add-on packages: the AI assistant, version-control integrations, post effects, import tools
-Assets/               Engine assets: materials, render pipelines, textures, UI, graphs
 Examples/             Standalone demos (BUILD_EXAMPLES)
 Tests/                Integration tests (module unit tests live next to each module)
 ThirdParty/           Bundled third-party code, each with its own license
@@ -78,6 +78,12 @@ This is an alpha: APIs and file formats may change between releases.
 The engine is yours as much as ours: open issues, send pull requests, and help shape it. [CONTRIBUTING.md](CONTRIBUTING.md) and [CodingStyle.md](CodingStyle.md) say how.
 
 Join us on Discord: https://discord.gg/c8JASm4q8
+
+## A note on AI
+
+AI tools were used in the development of Open Engine. The engine is not "vibe coded": every change draws on its developers' experience and passes human review before it lands, and the same review stands at the door for contributions. Pull requests are judged on design, correctness and evidence, whoever or whatever wrote them; generated code that is not understood, tested and explained by its author is not accepted.
+
+The team welcomes the responsible use of AI. The engine ships with built-in MCP tools and integrations to enable agentic workflows driven by human creativity and design.
 
 ## License
 

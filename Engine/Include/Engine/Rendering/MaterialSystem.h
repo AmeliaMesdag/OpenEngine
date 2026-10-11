@@ -27,6 +27,7 @@
 
 #include "AssetCore/AssetReloadInvalidator.h"
 #include "Engine/Rendering/MaterialRegistry.h"
+#include "Engine/Rendering/MaterialRegistryStamp.h"
 #include "Engine/Rendering/ShaderCompilationCache.h"
 #include "Engine/Rendering/ShaderCompileErrorLog.h"
 #include "Rendering/Core/Device.h"
@@ -290,6 +291,13 @@ class MaterialSystem
     // equal (generation, depth-class bytes) implies the extraction-visible
     // derived material state did not move.
     uint64_t MaterialSSBOGeneration() const { return m_MaterialSSBOGeneration; }
+
+    /// The stamp per-frame consumers gate their registry sweeps on (see
+    /// MaterialRegistryStamp).
+    MaterialRegistryStamp GetRegistryStamp() const
+    {
+        return MaterialRegistryStamp{m_MaterialSSBOGeneration, Material::GetGlobalContentEpoch()};
+    }
     // Rebuilds the color-class map if the material set changed, then returns it.
     std::span<const uint32_t> MaterialColorClassSpan();
 

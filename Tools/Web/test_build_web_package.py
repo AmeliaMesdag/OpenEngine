@@ -82,7 +82,7 @@ class PackageTests(unittest.TestCase):
         self.assertIn("## coi-serviceworker", notices)
 
         manifest = json.loads((self.out / "package.json").read_text(encoding="utf-8"))
-        self.assertEqual((manifest["name"], manifest["version"]), ("@openengine/web", kSourceVersion))
+        self.assertEqual((manifest["name"], manifest["version"]), ("@game-crafters-guild/openengine-web", kSourceVersion))
         self.assertEqual(manifest["exports"]["."]["default"], "./opengine.mjs")
         self.assertIs(manifest["sideEffects"], False)
         self.assertEqual(sorted(manifest["files"]),

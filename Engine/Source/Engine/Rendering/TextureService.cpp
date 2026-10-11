@@ -1334,9 +1334,14 @@ void TextureService::BindAwaitedTexture(Material* mat, StringId slotName)
 {
     if (!mat)
         return;
-    ApplyMaterialSlotBinding(mat, slotName, Rendering::TextureHandle{},
-                             DefaultBindlessIndex(AwaitedSlotDefault(TextureSlotFromName(slotName))));
+    // Not ApplyMaterialSlotBinding: its SetTexture would end the wait this
+    // starts, and a clear followed by a wait moves the material content epoch
+    // on every replay of a still-pending load.
     mat->MarkTextureAwaited(slotName);
+    mat->SetBindlessTextureIndex(slotName,
+                                 DefaultBindlessIndex(AwaitedSlotDefault(TextureSlotFromName(slotName))));
+    if (m_IndexingMode == MaterialIndexingMode::Classic)
+        m_MaterialBindings.Invalidate(mat->GetGuid());
 }
 
 Rendering::TextureHandle TextureService::ResolveDefaultTexture(std::string_view bindingName) const

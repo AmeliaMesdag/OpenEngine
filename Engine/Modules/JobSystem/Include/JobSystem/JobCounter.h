@@ -49,6 +49,7 @@
 // quiescence — without Reset, a reused counter's later waves inherit an
 // earlier wave's failure.
 
+#include "JobSystem/ConcurrentQueue.h"
 #include "JobSystem/Types.h"
 #include "Logger/Logger.h"
 
@@ -59,25 +60,6 @@
 #include <mutex>
 #include <thread>
 #include <utility>
-
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 6326 6011)
-#endif
-
-#if __has_include(<concurrentqueue/moodycamel/concurrentqueue.h>)
-#include <concurrentqueue/moodycamel/concurrentqueue.h>
-#elif __has_include(<concurrentqueue/concurrentqueue.h>)
-#include <concurrentqueue/concurrentqueue.h>
-#elif __has_include(<concurrentqueue.h>)
-#include <concurrentqueue.h>
-#else
-#error "moodycamel concurrentqueue headers not found - ensure vcpkg concurrentqueue package is installed"
-#endif
-
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
 
 namespace JobSystem
 {
@@ -258,7 +240,7 @@ class JobCounter
     {
         // One block to start with: the queue grows to a counter's high-water
         // mark and, recycled, keeps those blocks for the next counter.
-        moodycamel::ConcurrentQueue<IJob*> Queue{moodycamel::ConcurrentQueue<IJob*>::BLOCK_SIZE};
+        ConcurrentQueue<IJob*> Queue{ConcurrentQueue<IJob*>::BLOCK_SIZE};
         // The one producer every Run enqueues through. Run enqueues under
         // m_Mutex, so the token never serves two threads at once, and a
         // consumer's dequeue scans one producer however many threads have

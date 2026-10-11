@@ -20,10 +20,13 @@
 #include "NativeScripting/ToolchainFingerprint.h"
 #include "NativeScripting/UserSystemRegistry.h"
 
+#include "InFlightModuleBuild.h"
+
 #include "ECS/Entity.h" // full ECS::World definition (ECS.h only forward-declares it)
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -1067,6 +1070,37 @@ TEST(PrebuiltModuleBinaries, LookupFindsMatchingDllAndHonorsMarker)
     lookup = ns::FindPrebuiltModule(prebuilt, host, "WaterPack", "abi123");
     EXPECT_EQ(lookup.Dll, platformDir / dllName);
 
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+// Play mode waits on builds of modules that ship with the game (PlayModeEntryGate), not on a batch
+// of editor-only modules; a shipped module whose build failed is named, with its first error line.
+TEST(NativeScriptManager, PlayWaitsOnShippedModuleBuildsAndReadsTheirFailure)
+{
+    const std::filesystem::path root = std::filesystem::temp_directory_path() /
+        ("ge_nsm_shipped_pending_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    {
+        ns::Testing::InFlightModuleBuild editorOnly(root / "editor" / "src", root / "editor" / "cache",
+                                                    root / "editor" / "scratch", "Probe.Editor",
+                                                    ns::Testing::ModuleKind::EditorOnly, nullptr);
+        EXPECT_FALSE(editorOnly.Manager().AreShippedModuleBuildsPending())
+            << "an editor-only batch held play mode";
+        editorOnly.TickUntilCompleted(deadline);
+        EXPECT_TRUE(editorOnly.Manager().FailedShippedModules().empty());
+    }
+    {
+        ns::Testing::InFlightModuleBuild shipped(root / "shipped" / "src", root / "shipped" / "cache",
+                                                 root / "shipped" / "scratch", "Probe", ns::Testing::ModuleKind::Shipped,
+                                                 nullptr);
+        EXPECT_TRUE(shipped.Manager().AreShippedModuleBuildsPending());
+        shipped.TickUntilCompleted(deadline);
+        ASSERT_EQ(shipped.Completions(), 1);
+        EXPECT_FALSE(shipped.Manager().AreShippedModuleBuildsPending());
+        EXPECT_EQ(shipped.Manager().FailedShippedModules(), std::vector<std::string>{"Probe"});
+        EXPECT_FALSE(shipped.Manager().FirstBuildErrorLine("Probe").empty());
+    }
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
 }

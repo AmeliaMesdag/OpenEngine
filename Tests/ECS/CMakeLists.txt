@@ -47,6 +47,7 @@ set(ECS_CORE_TEST_SOURCES
     StandaloneECSTest.cpp
     ECSCoreTest.cpp
     OversizedChunkAllocationTest.cpp
+    ChunkAllocationCounterTest.cpp
     RegisterComponentsTest.cpp
     QueryInvalidationAndOverflowTest.cpp
     CommandBufferRingTest.cpp

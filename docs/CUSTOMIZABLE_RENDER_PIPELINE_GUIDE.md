@@ -26,7 +26,7 @@ This guide explains how to **use** the new data-driven render pipeline system an
   - `RenderPipelines/ForwardPlus.rendergraph`
 
 In the repo, it exists at:
-- `Assets/RenderPipelines/ForwardPlus.rendergraph`
+- `Engine/Assets/RenderPipelines/ForwardPlus.rendergraph`
 
 For the Editor, this folder is staged into the Editor's runtime `Assets/` folder on build.
 

@@ -102,6 +102,7 @@ set(EDITOR_SOURCES
     Source/Projects/ProjectCatalog.cpp
     Source/Projects/ProjectCatalogService.cpp
     Source/Projects/ProjectAcquisition.cpp
+    Source/Projects/ProjectStartupScene.cpp
     Source/Projects/SubprocessStream.cpp
     Source/Projects/ZipArchive.cpp
     Source/Panels/SaveSceneAsModal.cpp
@@ -148,6 +149,8 @@ set(EDITOR_SOURCES
     Source/Panels/PackageManagerPanel.cpp
     Source/MissingAssetTracker.cpp
     Source/Panels/WebPanel.cpp
+    Source/PlayMode/PlayModeEntryGate.cpp
+    Source/PlayMode/PlayModeEntryModal.cpp
     Source/PlayMode/PlayModeManager.cpp
     Source/PlayMode/ModelAnimationPlayMode.cpp
     Source/PlayMode/AnimationPlayModeHelpers.cpp
@@ -1249,7 +1252,7 @@ if(EMSCRIPTEN)
 	# chrome is not an editor.
 	set(_ge_webeditor_preload
 		"SHELL:--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/Assets@/Assets"
-		"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/Assets/SkeletonProfiles@/Assets/SkeletonProfiles"
+		"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/Engine/Assets/SkeletonProfiles@/Assets/SkeletonProfiles"
 		# The UI faces ship cut down here, and only here: full Roboto is ten
 		# faces of ~2770 codepoints each, 1.9 MB of the compressed payload,
 		# where the editor's chrome draws ASCII plus about sixty symbols. The
@@ -1261,7 +1264,7 @@ if(EMSCRIPTEN)
 		# The engine's render pipeline assets. Without a project the orchestrator
 		# resolves RenderPipelines/ForwardPlus.rendergraph by default, and when
 		# that lookup fails nothing is drawn.
-		"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/Assets/RenderPipelines@/Assets/RenderPipelines"
+		"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/Engine/Assets/RenderPipelines@/Assets/RenderPipelines"
 		"SHELL:--preload-file ${GE_WEB_EDITOR_SHADER_DIR}@/Assets/Shaders"
 		"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Shaders/Adapters@/Assets/Shaders/Adapters"
 		"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Shaders/Includes@/Assets/Shaders/Includes"
@@ -1389,7 +1392,7 @@ if(EMSCRIPTEN)
 	file(GLOB_RECURSE _ge_webeditor_preload_files CONFIGURE_DEPENDS
 		"${CMAKE_CURRENT_SOURCE_DIR}/Assets/*"
 		"${CMAKE_CURRENT_SOURCE_DIR}/WebFonts/*"
-		"${CMAKE_SOURCE_DIR}/Assets/RenderPipelines/*"
+		"${CMAKE_SOURCE_DIR}/Engine/Assets/RenderPipelines/*"
 		"${CMAKE_SOURCE_DIR}/Packages/eztree/package.json"
 		"${CMAKE_SOURCE_DIR}/Packages/eztree/Assets/*"
 		"${CMAKE_SOURCE_DIR}/Packages/eztree/Assets/Textures/EZTree/leaves/*"
@@ -2130,10 +2133,10 @@ file(GLOB_RECURSE _GE_STAGE_INPUTS CONFIGURE_DEPENDS
 	"${CMAKE_SOURCE_DIR}/Managed/licenses/*"
 	"${CMAKE_CURRENT_SOURCE_DIR}/Assets/*"
 	"${CMAKE_CURRENT_SOURCE_DIR}/ProjectTemplates/*"
-	"${CMAKE_SOURCE_DIR}/Assets/SkeletonProfiles/*"
-	"${CMAKE_SOURCE_DIR}/Assets/Materials/*"
-	"${CMAKE_SOURCE_DIR}/Assets/RenderPipelines/*"
-	"${CMAKE_SOURCE_DIR}/Assets/Textures/*"
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/SkeletonProfiles/*"
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/Materials/*"
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/RenderPipelines/*"
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/Textures/*"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Shaders/Adapters/*"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Shaders/Includes/*"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Shaders/Surfaces/*"
@@ -2144,8 +2147,8 @@ file(GLOB_RECURSE _GE_STAGE_INPUTS CONFIGURE_DEPENDS
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/GPUFogParticles/Shaders/*"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/TerrainGrass/Shaders/*"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Shaders/CBT/*"
-	"${CMAKE_SOURCE_DIR}/Assets/UI/UIDemoPanel.xml"
-	"${CMAKE_SOURCE_DIR}/Assets/UI/UIDemoPanel.css"
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/UI/UIDemoPanel.xml"
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/UI/UIDemoPanel.css"
 )
 list(FILTER _GE_STAGE_INPUTS EXCLUDE REGEX "/(\\.DS_Store|\\._[^/]+)$")
 set(_GE_STAGE_INPUTS_LIST "${CMAKE_CURRENT_BINARY_DIR}/stage-stamps/editor-assets.list")
@@ -2211,17 +2214,17 @@ _ge_editor_mirror_commands(_GE_EDITOR_MIRROR_COMMANDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/ProjectTemplates" "${_GE_EDITOR_TEMPLATES_DEST}")
 # Runtime humanoid profiles are shared by Editor and Player.
 _ge_editor_mirror_commands(_GE_EDITOR_MIRROR_COMMANDS
-	"${CMAKE_SOURCE_DIR}/Assets/SkeletonProfiles" "${_GE_EDITOR_ASSETS_DEST}/SkeletonProfiles")
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/SkeletonProfiles" "${_GE_EDITOR_ASSETS_DEST}/SkeletonProfiles")
 # Engine-level Materials (Material v2 surfaces, templates, etc.) so `.material`
-# assets can reference surface shaders that live under the engine Assets tree.
+# assets can reference surface shaders that live under Engine/Assets.
 _ge_editor_mirror_commands(_GE_EDITOR_MIRROR_COMMANDS
-	"${CMAKE_SOURCE_DIR}/Assets/Materials" "${_GE_EDITOR_ASSETS_DEST}/Materials")
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/Materials" "${_GE_EDITOR_ASSETS_DEST}/Materials")
 # Engine-level textures used by built-in materials and native modules.
 _ge_editor_mirror_commands(_GE_EDITOR_MIRROR_COMMANDS
-	"${CMAKE_SOURCE_DIR}/Assets/Textures" "${_GE_EDITOR_ASSETS_DEST}/Textures")
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/Textures" "${_GE_EDITOR_ASSETS_DEST}/Textures")
 # Default render pipelines the Editor loads when the project names none.
 _ge_editor_mirror_commands(_GE_EDITOR_MIRROR_COMMANDS
-	"${CMAKE_SOURCE_DIR}/Assets/RenderPipelines" "${_GE_EDITOR_ASSETS_DEST}/RenderPipelines")
+	"${CMAKE_SOURCE_DIR}/Engine/Assets/RenderPipelines" "${_GE_EDITOR_ASSETS_DEST}/RenderPipelines")
 # Shader adapter templates (Adapters, Includes, Surfaces) for runtime material
 # compilation via MaterialBuildService / ShaderComposer.
 _ge_editor_mirror_commands(_GE_EDITOR_MIRROR_COMMANDS
@@ -2286,14 +2289,14 @@ endforeach()
 set(_GE_EDITOR_ASSETS_STAMP "${_GE_EDITOR_STAGE_STAMP_DIR}/.stage-assets.stamp")
 add_custom_command(OUTPUT "${_GE_EDITOR_ASSETS_STAMP}"
 	${_GE_EDITOR_MIRROR_COMMANDS}
-	# Shared UI demo assets that live under the engine-level Assets/UI directory,
+	# Shared UI demo assets that live under Engine/Assets/UI,
 	# staged as editor assets. Named files, not a mirror: the directory holds
 	# more than ships.
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
-	        "${CMAKE_SOURCE_DIR}/Assets/UI/UIDemoPanel.xml"
+	        "${CMAKE_SOURCE_DIR}/Engine/Assets/UI/UIDemoPanel.xml"
 	        "${_GE_EDITOR_ASSETS_DEST}/UI/UIDemoPanel.xml"
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
-	        "${CMAKE_SOURCE_DIR}/Assets/UI/UIDemoPanel.css"
+	        "${CMAKE_SOURCE_DIR}/Engine/Assets/UI/UIDemoPanel.css"
 	        "${_GE_EDITOR_ASSETS_DEST}/UI/UIDemoPanel.css"
 	# Stage third-party notices required by bundled engine modules/assets.
 	COMMAND ${CMAKE_COMMAND}

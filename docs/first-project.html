@@ -77,7 +77,7 @@
   <div class="step"><b>1.</b> In the picker, choose <b>New project</b>. The <b>Templates</b> tab lists the built-in templates.</div>
   <div class="step"><b>2.</b> Pick a template. <b>Basic 3D</b> starts with a lit scene, <code>Assets/Scenes/Main.scene</code>. <b>Blank</b> starts with an empty <code>Assets/</code> folder. <b>Open World</b> currently creates an empty project, like Blank.</div>
   <div class="step"><b>3.</b> Type a name under <b>PROJECT NAME</b> and choose a folder under <b>LOCATION</b> with <b>Browse</b>. The location must be an existing folder; the editor creates <code>&lt;location&gt;/&lt;name&gt;</code> and refuses a name that already exists there. Keep projects outside the engine checkout and its <code>build/</code> folder.</div>
-  <div class="step"><b>4.</b> Choose <b>Create project</b>. The editor opens the new project.</div>
+  <div class="step"><b>4.</b> Choose <b>Create project</b>. The editor opens the new project on its startup scene (see <a href="#open">Open a project</a>).</div>
 
   <h2 id="open">Open a project</h2>
 
@@ -92,6 +92,15 @@
     <li><b>From the command line:</b> pass <code>--project &lt;folder&gt;</code>. The editor
     skips the picker and opens that folder, creating it if it does not exist.</li>
   </ul>
+
+  <p>Opening a project from the picker, or the last project at startup, opens the project's
+  startup scene: the first scene in the build's scene list, else the scene named by
+  <code>project.startupScene</code> in <code>.Editor/ProjectSettings.json</code>, else the
+  scene you last opened in that project, else a new empty scene. Creating a project from a
+  template or a community project sets <code>project.startupScene</code> to the scene its
+  <code>game.config</code> names, or to its only scene. When the open scene has unsaved
+  changes, the editor asks to save them before it switches projects; <b>Cancel</b> keeps the
+  current project. With <code>--project</code> the editor opens no scene.</p>
 
 <pre><code># macOS
 build/macos-arm64-local/bin/Debug/Apps/Editor/Editor.app/Contents/MacOS/Editor --project ~/GameProjects/MyGame

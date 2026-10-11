@@ -104,6 +104,9 @@ void EditorApplication::RequestEnterPlayFullscreenAndPlay()
 {
     if (!m_PlayMode || m_PlayMode->GetState() != Editor::PlayModeState::Edit || !CanEnterPlayFullscreen())
         return;
+    // Held here rather than in EnterPlayMode, so the editor does not go fullscreen around a build.
+    if (m_PlayMode->GetEntryGate().Hold([this]() { RequestEnterPlayFullscreenAndPlay(); }))
+        return;
     m_DeferredPreUiActions.EnqueueUnique("editor.enter-play-fullscreen", [this]() {
         if (m_PlayMode->GetState() != Editor::PlayModeState::Edit || m_Windows.empty())
             return;

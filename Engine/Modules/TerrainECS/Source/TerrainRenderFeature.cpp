@@ -1780,7 +1780,7 @@ void TerrainRenderFeature::WarnIfUploadPassMissing()
         "than bindlessly, so it is not gated at all and reads an image nothing has written — "
         "undefined per driver, which on MoltenVK comes back zero and renders as flat terrain. "
         "Add a TerrainUpload node to the pipeline's .rendergraph (see "
-        "Assets/RenderPipelines/ForwardPlus.rendergraph).",
+        "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph).",
         m_TexturesAwaitingGpuInit.size(), m_FramesAwaitingUploadPass);
 }
 

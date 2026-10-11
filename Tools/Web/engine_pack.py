@@ -27,7 +27,7 @@ Layout:
                                                (builtin_shader_cook.py)
     Assets/Shaders/**/*.shaderpkg
     Assets/Fonts/Roboto-Regular.ttf !          the UI fallback font: a page has no system fonts
-    Assets/SkeletonProfiles/*.profile.json !   the engine's skeleton profiles (Assets/SkeletonProfiles):
+    Assets/SkeletonProfiles/*.profile.json !   the engine's skeleton profiles (Engine/Assets/SkeletonProfiles):
                                                every model load resolves the humanoid one
     Assets/Textures/Sky/MoonPhases/moon_full.png ! the moon the sky pass draws (SkyRenderer.h)
     .workspace/.Cache/Shaders/** !             the material variant cache, cooked by
@@ -73,6 +73,7 @@ kIblStageShaders = ("brdf_lut.comp", "fullscreen_noinput.vert", "sky_capture_cub
 kEngineShaders = kRepoRoot / "Engine" / "Modules" / "Rendering" / "Shaders"
 kShaderCook = kRepoRoot / "Tools" / "ShaderCook" / "shadercook.py"
 kFont = kRepoRoot / export_web_player.kFallbackFont
+kEngineContent = kRepoRoot / "Engine"
 kSkeletonProfiles = Path("Assets") / "SkeletonProfiles"
 kMoonTexture = Path("Assets") / "Textures" / "Sky" / "MoonPhases" / "moon_full.png"
 kToolConfigs = ("DebugFast", "Release", "RelWithDebInfo", "Debug")
@@ -126,9 +127,9 @@ def build_engine_pack(out_path: Path, build_tree: Path, seed_project: Path = kSe
         export_web_player.CopyEngineRuntimeAssets(kEngineShaders, kFont, staging)
         (staging / kPipeline).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(kPipelineSource, staging / kPipeline)
-        shutil.copytree(kRepoRoot / kSkeletonProfiles, staging / kSkeletonProfiles)
+        shutil.copytree(kEngineContent / kSkeletonProfiles, staging / kSkeletonProfiles)
         (staging / kMoonTexture).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(kRepoRoot / kMoonTexture, staging / kMoonTexture)
+        shutil.copy2(kEngineContent / kMoonTexture, staging / kMoonTexture)
 
         failures = builtin_shader_cook.CookBuiltinPackages(
             shaderpkgDir, kEngineShaders, staging / export_web_player.kShaderAssetDir,

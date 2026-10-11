@@ -4,6 +4,7 @@
 #include "Editor/Settings/SettingsStore.h"
 #include "FileSystem/FileSystem.h"
 #include "Logger/Logger.h"
+#include "Projects/ProjectStartupScene.h"
 #include "Projects/SubprocessStream.h"
 #include "Platform/HttpClient.h"
 #include "Projects/ZipArchive.h"
@@ -194,6 +195,13 @@ void StampProjectSettings(const ProjectAcquireRequest& request, const fs::path& 
              request.Entry.Source.Type == ProjectSourceType::Local)
     {
         settings.SetString("project.template", request.Entry.Id);
+    }
+    std::string startupScene;
+    if (!settings.TryGetString(kProjectStartupSceneKey, startupScene) || startupScene.empty())
+    {
+        startupScene = FindNewProjectStartupScene(request.Destination);
+        if (!startupScene.empty())
+            settings.SetString(kProjectStartupSceneKey, startupScene);
     }
     if (!settings.Save(&err))
         Logger::Log::Warning("Project acquisition: could not save project settings: {}", err);

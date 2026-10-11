@@ -346,6 +346,7 @@ add_library(RenderServices OBJECT
 	Source/Engine/Rendering/DDGIMaterialMapAtlas.cpp
 	Source/Engine/Rendering/DDGISceneService.cpp
 	Source/Engine/Rendering/DDGIEmitterAreas.cpp
+	Source/Engine/Rendering/DDGIEmitterMaterials.cpp
 	Source/Engine/Rendering/DDGIUberMaterialBake.cpp
 	Source/Engine/Rendering/DDGIFieldRanges.cpp
 	Source/Engine/Rendering/DDGICameraIdleGate.cpp
@@ -2106,6 +2107,7 @@ endif()
                 Tests/DDGIGlossyAtlasLayoutTests.cpp
                 Tests/DDGIReflectionParallaxTests.cpp
                 Tests/DDGIMaterialMapContractTests.cpp
+                Tests/DDGIMaterialSweepGateTests.cpp
                 Tests/DDGICameraIdleGateTests.cpp
                 Tests/DDGISolveBudgetTests.cpp
                 Tests/DDGIProbeWindowTests.cpp
@@ -3081,13 +3083,13 @@ endif()
 	endif()
 
 	# Engine tests: ModelAsset::PostLoad humanoid auto-bootstrap on real
-	# store-licensed test fixtures. Skip-gated when Assets/Models/FBXTest/ isn't present.
+	# store-licensed test fixtures. Skip-gated when Engine/Assets/Models/FBXTest/ isn't present.
 	if(GTest_FOUND OR TARGET GTest::gtest)
 	    add_executable(RuntimeHumanoidProfileTests Tests/RuntimeHumanoidProfileTests.cpp
 	        ${CMAKE_SOURCE_DIR}/Tests/EngineShutdownTestEnvironment.cpp)
 	    target_link_libraries(RuntimeHumanoidProfileTests PRIVATE Engine GTest::gtest GTest::gtest_main)
 	    target_compile_definitions(RuntimeHumanoidProfileTests PRIVATE
-	        RUNTIME_PROFILE_FIXTURE="${CMAKE_SOURCE_DIR}/Assets/SkeletonProfiles/HumanoidStandard.profile.json")
+	        RUNTIME_PROFILE_FIXTURE="${CMAKE_SOURCE_DIR}/Engine/Assets/SkeletonProfiles/HumanoidStandard.profile.json")
 	    set_target_properties(RuntimeHumanoidProfileTests PROPERTIES
 	        CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON FOLDER "Engine/Tests")
 	    ge_set_output_tests(RuntimeHumanoidProfileTests)

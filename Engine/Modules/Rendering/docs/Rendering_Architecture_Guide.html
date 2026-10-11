@@ -562,7 +562,7 @@ Quick reference: <a href="RenderGraph.md">RenderGraph.md</a>.</p>
 
 <h2 id="the-data-driven-pipeline">The Data-Driven Pipeline</h2>
 
-<p>The canonical pipeline is JSON: <a href="../../../../Assets/RenderPipelines/ForwardPlus.rendergraph">Assets/RenderPipelines/ForwardPlus.rendergraph</a>. The Editor loads it at startup (default editor scene) or whenever a project specifies one. Each entry in <code>passes[]</code> has a <code>type</code> string that maps to a pipeline node class.</p>
+<p>The canonical pipeline is JSON: <a href="../../../Assets/RenderPipelines/ForwardPlus.rendergraph">Engine/Assets/RenderPipelines/ForwardPlus.rendergraph</a>. The Editor loads it at startup (default editor scene) or whenever a project specifies one. Each entry in <code>passes[]</code> has a <code>type</code> string that maps to a pipeline node class.</p>
 
 <div class="diagram-wrap">
 <div class="diagram-label">Data-driven pipeline load flow</div>
@@ -983,13 +983,13 @@ under <code>Engine/Source/Engine/Rendering/Pipeline/Nodes/</code> (post-FX stage
 <table>
 <thead><tr><th>Need to...</th><th>Open</th></tr></thead>
 <tbody>
-<tr><td>Understand the main pipeline</td><td><a href="../../../../Assets/RenderPipelines/ForwardPlus.rendergraph">Assets/RenderPipelines/ForwardPlus.rendergraph</a></td></tr>
+<tr><td>Understand the main pipeline</td><td><a href="../../../Assets/RenderPipelines/ForwardPlus.rendergraph">Engine/Assets/RenderPipelines/ForwardPlus.rendergraph</a></td></tr>
 <tr><td>Modify cluster cull</td><td><a href="../Shaders/clustered_light_cull.comp">Shaders/clustered_light_cull.comp</a></td></tr>
 <tr><td>Modify cluster light traversal in fragment shaders</td><td><a href="../Shaders/Includes/clustered_lighting.glsl">Shaders/Includes/clustered_lighting.glsl</a></td></tr>
 <tr><td>Modify shadow filtering</td><td><a href="../Shaders/Includes/shadow_sampling.glsl">Shaders/Includes/shadow_sampling.glsl</a></td></tr>
 <tr><td>Tune shadow CPU side (cascade splits, PCSS, SDSM)</td><td><a href="../../../../Engine/Include/Engine/Rendering/CascadedShadowRenderFeature.h">Engine/Include/Engine/Rendering/CascadedShadowRenderFeature.h</a></td></tr>
 <tr><td>Modify PBR BRDF</td><td><a href="../Shaders/Includes/standard_pbr.glsl">Shaders/Includes/standard_pbr.glsl</a></td></tr>
-<tr><td>Modify post chain</td><td><a href="../../../../Assets/RenderPipelines/ForwardPlus.rendergraph">Assets/RenderPipelines/ForwardPlus.rendergraph</a> (JSON) &mdash; or edit <code>bloom_*.frag</code>, <code>tonemap.frag</code></td></tr>
+<tr><td>Modify post chain</td><td><a href="../../../Assets/RenderPipelines/ForwardPlus.rendergraph">Engine/Assets/RenderPipelines/ForwardPlus.rendergraph</a> (JSON) &mdash; or edit <code>bloom_*.frag</code>, <code>tonemap.frag</code></td></tr>
 <tr><td>See how world geometry submits draws</td><td><a href="../../../../Engine/Source/Engine/Rendering/Pipeline/Nodes/WorldRenderNode.cpp">WorldRenderNode.cpp</a></td></tr>
 <tr><td>See how shadow maps are rendered</td><td><a href="../../../../Engine/Source/Engine/Rendering/Pipeline/Nodes/ShadowMapNode.cpp">ShadowMapNode.cpp</a></td></tr>
 <tr><td>Add a fullscreen post effect (pure JSON)</td><td>Edit ForwardPlus.rendergraph; type=<code>FullscreenShader</code></td></tr>

@@ -7311,7 +7311,7 @@ TEST(RenderPipelineDeclareTests, SkipWhenDeclaresOnMismatchAndStitchesOnMatch)
 namespace
 {
 // One declared frame of the shipped bloom and scattering passes, copied verbatim
-// from Assets/RenderPipelines/ForwardPlus.rendergraph and fed by a world pass that
+// from Engine/Assets/RenderPipelines/ForwardPlus.rendergraph and fed by a world pass that
 // stands in for HDRUpscaled.
 struct ShippedBloomFrame
 {
@@ -7334,7 +7334,7 @@ std::string LastNameSegment(std::string_view name)
 ShippedBloomFrame DeclareShippedBloomFrame(FxChainFixture& f, const PostProcessSettings& settings)
 {
     std::ifstream stream(std::filesystem::path(GE_RENDERER_REPO_ROOT) /
-                         "Assets/RenderPipelines/ForwardPlus.rendergraph");
+                         "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph");
     const nlohmann::json graph = nlohmann::json::parse(stream);
 
     ShippedBloomFrame result;

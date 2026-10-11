@@ -49,6 +49,7 @@
 #include "DebugServer/ParallaxDebugHandlers.h"
 #include "DebugServer/PhysicsDebugHandlers.h"
 #include "DebugServer/PlayModeRequest.h"
+#include "PlayMode/PlayModeEntryGate.h"
 #include "DebugServer/PointerCoordsRequest.h"
 #include "DebugServer/SceneDegradedReport.h"
 #include "DebugServer/SceneHierarchyReport.h"
@@ -2977,6 +2978,15 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         if (!playMode)
             return Editor::RefuseRequest("Play mode is not available");
 
+        // An exit while an entry waits for the script build drops the entry: the caller asked to
+        // stay out of play mode, so play must not start when the build finishes.
+        if (ctx.params.value("action", "") == "exit" && playMode->GetState() == Editor::PlayModeState::Edit &&
+            playMode->GetEntryGate().GetPhase() == Editor::PlayModeEntryGate::Phase::Waiting)
+        {
+            playMode->ExitPlayMode();
+            return json{{"playMode", Editor::PlayModeStateToString(playMode->GetState())}, {"entryCanceled", true}};
+        }
+
         const Editor::PlayModeRequest request(ctx.params, playMode->GetState());
         if (!request.Error().empty())
             return Editor::RefuseRequest(request.Error(),
@@ -3010,6 +3020,28 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         {
             result["gameViewActive"] = activation->active;
             result["gameViewViewportFocused"] = activation->viewportFocused;
+        }
+
+        // A script build holds the entry: play mode starts when it finishes, and the
+        // "Entering Play Mode" dialog shows the build until then.
+        if (request.IsEnter() && after == Editor::PlayModeState::Edit &&
+            playMode->GetEntryGate().GetPhase() == Editor::PlayModeEntryGate::Phase::Waiting)
+        {
+            result["waitingForScriptBuild"] = true;
+            return result;
+        }
+
+        // A failed script build refuses play until the module rebuilds; say which build.
+        if (request.IsEnter() && after == Editor::PlayModeState::Edit &&
+            playMode->GetEntryGate().GetPhase() == Editor::PlayModeEntryGate::Phase::Failed)
+        {
+            const Editor::ScriptBuildSnapshot& build = playMode->GetEntryGate().GetSnapshot();
+            std::string why = "play mode did not start; the latest script build failed:";
+            for (const std::string& module : build.FailedModules)
+                why += " " + module;
+            if (!build.FirstError.empty())
+                why += " (" + build.FirstError + ")";
+            return Editor::RefuseRequest(why, std::move(result));
         }
 
         // EnterPlayMode refuses without a world, or while a deferred scene build is

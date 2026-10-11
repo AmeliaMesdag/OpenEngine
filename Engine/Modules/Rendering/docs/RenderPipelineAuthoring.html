@@ -188,7 +188,7 @@
 
 <h3>Built-in pipeline files</h3>
 
-<p>Currently shipped in <a href="../../../../Assets/RenderPipelines/"><code>Assets/RenderPipelines/</code></a>:</p>
+<p>Currently shipped in <a href="../../../Assets/RenderPipelines/"><code>Engine/Assets/RenderPipelines/</code></a>:</p>
 
 <table>
   <thead>
@@ -422,7 +422,7 @@ flowchart TD
 
 <h2 id="walkthrough-forwardplus">Walkthrough: <code>ForwardPlus.rendergraph</code> (the canonical pipeline)</h2>
 
-<p>The full production pipeline. Worth reading <a href="../../../../Assets/RenderPipelines/ForwardPlus.rendergraph">the whole file</a> end-to-end &mdash; it's the most concrete reference for everything below.</p>
+<p>The full production pipeline. Worth reading <a href="../../../Assets/RenderPipelines/ForwardPlus.rendergraph">the whole file</a> end-to-end &mdash; it's the most concrete reference for everything below.</p>
 
 <h3>Frame flow</h3>
 
@@ -519,11 +519,11 @@ Per-view buffers:   ClusterBuffer, LightIndexBuffer, ClusterParams, LightBuffer,
 
 <h3>Step 1: write the JSON</h3>
 
-<p>Create <code>Assets/RenderPipelines/MyPipeline.rendergraph</code>. Start from <code>Sample_PostStack.rendergraph</code> as a template and add what you need.</p>
+<p>Create <code>Engine/Assets/RenderPipelines/MyPipeline.rendergraph</code>. Start from <code>Sample_PostStack.rendergraph</code> as a template and add what you need.</p>
 
 <h3>Step 2: the build copies it to the staged location</h3>
 
-<p>Standard build copies <code>Assets/RenderPipelines/*.rendergraph</code> to <code>build\&lt;preset&gt;\bin\&lt;config&gt;\Apps\Editor\Assets\RenderPipelines\</code>. <strong>For hot-reload while the editor runs, edit the staged copy directly.</strong></p>
+<p>Standard build copies <code>Engine/Assets/RenderPipelines/*.rendergraph</code> to <code>build\&lt;preset&gt;\bin\&lt;config&gt;\Apps\Editor\Assets\RenderPipelines\</code>. <strong>For hot-reload while the editor runs, edit the staged copy directly.</strong></p>
 
 <h3>Step 3: tell the project which pipeline to use</h3>
 

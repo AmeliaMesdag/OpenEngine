@@ -205,6 +205,7 @@
 #include "Markups/MarkupEditorSurfaces.h"
 #include "SceneView/BuiltInSceneViewTools.h"
 #include "Placement/RecipeControllers.h"
+#include "PlayMode/PlayModeEntryModal.h"
 #include "PlayMode/PlayModeManager.h"
 #include "PlayMode/RuntimeInputConnection.h"
 #include "Scene/SceneEditorController.h"
@@ -2958,9 +2959,7 @@ bool EditorApplication::Initialize()
                         m_SelectedProjectPath = path;
                         m_ProjectFolderSelected = true;
                         Logger::Log::Info("Editor: Project folder selected: {}", path.string());
-                        
-                        // Update the project root by reinitializing AssetManager
-                        SetProjectFolder(path); });
+                        OpenPickedProject(path); });
                     modal->SetOnCancelled([this]()
                                           {
                         Logger::Log::Info("Editor: Project folder selection cancelled");
@@ -3008,7 +3007,7 @@ bool EditorApplication::Initialize()
                                 m_ProjectFolderSelected = true;
                                 if (m_ProjectFolderModal)
                                     m_ProjectFolderModal->SetPath(*lastProject);
-                                SetProjectFolder(*lastProject);
+                                SetProjectFolder(*lastProject, /*outgoingChangesDiscarded=*/false);
                                 autoLoaded = true;
                             }
                             else if (!config.AutoOpenLastProjectOnBoot)
@@ -3084,6 +3083,10 @@ bool EditorApplication::Initialize()
                 auto dlModal = std::make_unique<DownloadInProgressModal>();
                 m_DownloadModal = dlModal.get();
                 rootEl->AddChild(std::move(dlModal));
+
+                auto playEntryModal = std::make_unique<PlayModeEntryModal>(m_PlayMode->GetEntryGate());
+                m_PlayEntryModal = playEntryModal.get();
+                rootEl->AddChild(std::move(playEntryModal));
             }
         }
 
@@ -5266,7 +5269,27 @@ void EditorApplication::ConsumePackageEditorStyleSheet(
 }
 
 
-void EditorApplication::SetProjectFolder(const std::filesystem::path& projectPath)
+void EditorApplication::OpenPickedProject(const std::filesystem::path& projectPath)
+{
+    if (!m_SceneEditor)
+    {
+        SetProjectFolder(projectPath, /*outgoingChangesDiscarded=*/false);
+        return;
+    }
+    // The save prompt is answered with the picker closed: it would otherwise sit over the prompt.
+    if (m_SceneEditor->IsSceneDirty() && m_ProjectFolderModal)
+    {
+        m_ProjectFolderModal->HideLoading();
+        m_ProjectFolderModal->Hide();
+    }
+    m_SceneEditor->PromptSaveBefore(
+        "opening another project",
+        [this, projectPath](bool changesDiscarded) { SetProjectFolder(projectPath, changesDiscarded); },
+        [projectPath]()
+        { Logger::Log::Info("Editor: kept the current project; '{}' was not opened", projectPath.string()); });
+}
+
+void EditorApplication::SetProjectFolder(const std::filesystem::path& projectPath, bool outgoingChangesDiscarded)
 {
     if (projectPath.empty())
     {
@@ -5328,6 +5351,7 @@ void EditorApplication::SetProjectFolder(const std::filesystem::path& projectPat
     pending.OldAssetRoot = currentAssetRoot;
     pending.OldDbFile = currentDbFile;
     pending.OldCacheRoot = currentCacheRoot;
+    pending.OutgoingChangesDiscarded = outgoingChangesDiscarded;
 
     // Rebind just the project source. Editor source + loaded editor assets are preserved.
     AssetManager::SourceRebindDesc rebindDesc;
@@ -5500,20 +5524,22 @@ void EditorApplication::FinishProjectFolderSwitch(const ProjectSwitch& pending)
 
     const std::filesystem::path deferredProjectPath = projectPath;
     const std::filesystem::path deferredAssetRoot = newAssetRoot;
+    const bool outgoingChangesDiscarded = pending.OutgoingChangesDiscarded;
     if (!m_Windows.empty() && m_Windows[0] && m_Windows[0]->ui && m_Windows[0]->ui->GetDispatcher())
     {
-        m_Windows[0]->ui->PostToUI([this, deferredProjectPath, deferredAssetRoot]()
-        { ApplyProjectFolderUiAsync(deferredProjectPath, deferredAssetRoot); });
+        m_Windows[0]->ui->PostToUI([this, deferredProjectPath, deferredAssetRoot, outgoingChangesDiscarded]()
+        { ApplyProjectFolderUiAsync(deferredProjectPath, deferredAssetRoot, outgoingChangesDiscarded); });
     }
     else
     {
-        ApplyProjectFolderUiAsync(deferredProjectPath, deferredAssetRoot);
+        ApplyProjectFolderUiAsync(deferredProjectPath, deferredAssetRoot, outgoingChangesDiscarded);
     }
     m_ProjectSwitchPending = false;
 }
 
 void EditorApplication::ApplyProjectFolderUiAsync(const std::filesystem::path& projectPath,
-                                                    const std::filesystem::path& newAssetRoot)
+                                                    const std::filesystem::path& newAssetRoot,
+                                                    bool outgoingChangesDiscarded)
 {
     if (m_IsShuttingDown)
         return;
@@ -5555,6 +5581,9 @@ void EditorApplication::ApplyProjectFolderUiAsync(const std::filesystem::path& p
     }
 
     Logger::Log::Info("Editor: Project folder updated successfully. New asset root: {}", newAssetRoot.string());
+
+    if (m_SceneEditor)
+        m_SceneEditor->OpenProjectStartupScene(projectPath, outgoingChangesDiscarded);
 
     // Save the project path to preferences for next launch
     {
@@ -6550,6 +6579,8 @@ void EditorApplication::Update(float64 deltaTime)
     // Poll download-in-progress modal (auto-dismiss when all downloads finish).
     if (m_DownloadModal)
         m_DownloadModal->Poll();
+    if (m_PlayEntryModal)
+        m_PlayEntryModal->Poll();
 
     // Poll completed Polyhaven downloads and replace placeholder entities with full models.
     if (m_DownloadManager)
@@ -7344,7 +7375,7 @@ bool EditorApplication::TryInterceptQuitForDirtyScene()
     }
 
     if (sceneDirty && m_SceneEditor)
-        m_SceneEditor->PromptSaveBeforeQuit(checkGraph);
+        m_SceneEditor->PromptSaveBefore("quitting", [checkGraph](bool) { checkGraph(); }, {});
     else
         checkGraph();
 

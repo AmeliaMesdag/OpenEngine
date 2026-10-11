@@ -24,6 +24,10 @@ using Rendering::VertexAttributeFlags;
 // LOD crossfade) asks for a variant no cook produced, and the runtime says so
 // by name rather than drawing wrong. Widen the table when the shipped pipeline
 // grows a pass.
+//
+// The material's own keywords are derived, not declared: VariantsFor adds what the document decides
+// (DeriveBaseVariantKey: its lobes and AlphaTest) to every row, as registration keeps them in every
+// key it asks for, and adds the transmissive pass's scene-colour-grab rows for a transmissive one.
 constexpr MaterialKeyword kForwardColor =
     MaterialKeyword::Instanced | MaterialKeyword::ForwardPlus | MaterialKeyword::Shadows;
 constexpr MaterialKeyword kDepth = MaterialKeyword::Instanced;

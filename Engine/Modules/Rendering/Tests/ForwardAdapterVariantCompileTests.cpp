@@ -47,7 +47,7 @@ namespace fs = std::filesystem;
 // every set below carries it.
 constexpr MaterialKeyword kWorldDrawBase = MaterialKeyword::Instanced;
 
-// Assets/RenderPipelines/ForwardPlus_DebugOverlay.rendergraph, "World" pass:
+// Engine/Assets/RenderPipelines/ForwardPlus_DebugOverlay.rendergraph, "World" pass:
 // keywords ["ForwardPlus"] — no Shadows, no IBL. Mirrored by hand because
 // ParseWorldPassKeywords lives in the Engine layer, above this module;
 // DebugOverlayGraphStillDeclaresTheMirroredKeywords pins the mirror.

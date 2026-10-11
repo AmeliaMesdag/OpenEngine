@@ -1,5 +1,6 @@
 #include "PlayMode/PlayModeManager.h"
 #include "PlayMode/ModelAnimationPlayMode.h"
+#include "PlayMode/PlayModeEntryGate.h"
 #include "Inspectors/AnimationPreviewManager.h"
 #include "EditorChangeNotifications.h"
 
@@ -68,7 +69,10 @@ struct PlayModeManager::UndoHistoryStash
     UndoRedoService::History playHistory{};
 };
 
-PlayModeManager::PlayModeManager() = default;
+PlayModeManager::PlayModeManager(PlayModeEntryGate::BuildProbe scriptBuildProbe)
+    : m_EntryGate(std::move(scriptBuildProbe))
+{
+}
 PlayModeManager::~PlayModeManager() = default;
 
 void PlayModeManager::InvalidateManagedPlayModeBindings()
@@ -198,6 +202,11 @@ void PlayModeManager::EnterPlayMode()
         return;
     }
 
+    // Entering now would run the game without the scripts a build is about to load, or without the
+    // current code of a module whose latest build failed.
+    if (m_EntryGate.Hold([this]() { EnterPlayMode(); }))
+        return;
+
     SetState(PlayModeState::EnteringPlay);
 
     // Isolate undo history for play mode.
@@ -312,7 +321,10 @@ void PlayModeManager::EnterPlayMode()
 void PlayModeManager::ExitPlayMode()
 {
     if (m_State == PlayModeState::Edit)
+    {
+        m_EntryGate.Cancel();
         return;
+    }
     if (m_State == PlayModeState::ChangeReview)
         return;
 
@@ -499,6 +511,7 @@ void PlayModeManager::DiscardPendingChanges()
 
 void PlayModeManager::Tick(float deltaSeconds)
 {
+    m_EntryGate.Update();
     if (m_State != PlayModeState::Play)
         return;
 

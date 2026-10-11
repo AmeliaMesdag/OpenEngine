@@ -1,8 +1,8 @@
-# @openengine/web
+# @game-crafters-guild/openengine-web
 
 The engine on a web page: a WebGPU renderer (clustered lighting, cascaded shadows, a physical sky) and an entity-component world behind a small TypeScript API.
 
-**Early access (alpha).** The engine and this API change between releases. Prereleases are published as `2026.10.0-alpha.1` and later under the `alpha` npm dist-tag (`npm install @openengine/web@alpha`); nothing is published as `latest` yet.
+**Early access (alpha).** The engine and this API change between releases. Prereleases are published as `2026.10.0-alpha.1` and later under the `alpha` npm dist-tag (`npm install @game-crafters-guild/openengine-web@alpha`); nothing is published as `latest` yet.
 
 The engine module and the engine pack carry third-party code and content; `THIRD_PARTY_NOTICES.md` beside this file holds their licenses.
 
@@ -11,7 +11,7 @@ Status: the engine module is built from source: the `WebLibrary` target writes `
 ## A model with an orbit camera
 
 ```js
-import { Engine, OrbitControls, Light } from '@openengine/web';
+import { Engine, OrbitControls, Light } from '@game-crafters-guild/openengine-web';
 
 const canvas = document.querySelector('canvas');
 if (!canvas) throw new Error('The page needs a <canvas> element.');
@@ -71,7 +71,7 @@ The camera meters the whole frame and exposes it like a photograph, so a bright 
 While `forEachChunk` runs, the world holds still. Creating or destroying entities, adding or removing components and reparenting throw; make them after it returns. The arrays are valid until the callback returns or calls into the engine. Make the query once and run it every frame.
 
 ```js
-import { Engine, MeshRenderer, Transform } from '@openengine/web';
+import { Engine, MeshRenderer, Transform } from '@game-crafters-guild/openengine-web';
 
 const canvas = document.querySelector('canvas');
 if (!canvas) throw new Error('The page needs a <canvas> element.');
@@ -89,7 +89,7 @@ engine.run();
 A skinned model with animation clips plays them through `entity.animation` on the entity `scene.load` returned: `fox.animation.clips` lists the clip names in the model's order, `fox.animation.play('Run', { speed: 1.5 })` plays one, looping, at a multiple of its authored rate (default 1), and `fox.animation.pause()` holds the pose. Calling `play` for the clip that is already playing keeps its place, so it changes the speed or resumes after a pause; another clip starts from its beginning. A clip name the model does not have throws, naming the ones it has. A change takes effect on the next frame. The model rests in its bind pose until the page plays a clip.
 
 ```js
-import { Engine } from '@openengine/web';
+import { Engine } from '@game-crafters-guild/openengine-web';
 
 const canvas = document.querySelector('canvas');
 if (!canvas) throw new Error('The page needs a <canvas> element.');
@@ -127,7 +127,7 @@ The engine keeps running while a model loads: frames, `onFrame` callbacks, the o
 The engine is a download of some 20 MB, and a model can be more; on a slow connection that is minutes. `Engine.create({ canvas, onProgress })` and `scene.load(url, { onProgress })` report the downloads as `{ phase, loaded, total }`, so a page can draw a bar and say how far it is. The bytes are network bytes when the server sends `Content-Length` (a file it compresses counts its compressed size), and otherwise the file's decompressed bytes; `loaded / total` is the fraction done either way, so show a percentage rather than megabytes. `total` is 0 while a size is unknown: a model the server compresses has none until it has arrived (draw the bar without a value then).
 
 ```js
-import { Engine } from '@openengine/web';
+import { Engine } from '@game-crafters-guild/openengine-web';
 
 const canvas = document.querySelector('canvas');
 const status = document.querySelector('output');

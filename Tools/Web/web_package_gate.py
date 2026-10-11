@@ -506,7 +506,7 @@ def ViewerStep(cdp: browser_gate.Cdp, name: str, rule: str, act, check: str, exp
 #   contactBand  the belly where the model meets the floor;
 #   crease       the fold under the head.
 kGiRegions = """(async () => {
-    const { Camera } = await import('@openengine/web');
+    const { Camera } = await import('@game-crafters-guild/openengine-web');
     const v = globalThis.viewer; const { size } = v.model().bounds;
     const radius = 0.5 * Math.hypot(size.x, size.y, size.z);
     const halfFov = ((v.engine.scene.camera.get(Camera)?.fovY ?? 60) * Math.PI) / 360;
@@ -544,7 +544,7 @@ kGiMinLumaDelta = 2.0
 kGiLumaTolerance = 1.0
 # The GI cases' exposure: the camera's own default manual EV100, so no arm moves the meter.
 kGiExposureEv = 15.4
-kPinExposure = f"""(async () => {{ const {{ Camera }} = await import('@openengine/web');
+kPinExposure = f"""(async () => {{ const {{ Camera }} = await import('@game-crafters-guild/openengine-web');
     globalThis.viewer.engine.scene.camera.set(Camera, {{ exposureControl: 'Manual', manualExposureEV: {kGiExposureEv} }});
     return 'ok'; }})()"""
 # Counts the page's frames from here on (globalThis.__giFrames).
@@ -950,7 +950,7 @@ kBoxInHull = """((box, hull) => {
         && box.top >= hull.top - slack && box.bottom <= hull.bottom + slack;
 })""".replace("HULL_POINTS", str(kHullPoints))
 kModelFramedIn = """(async (mode) => {
-    const { Camera } = await import('@openengine/web');
+    const { Camera } = await import('@game-crafters-guild/openengine-web');
     const v = globalThis.viewer; const model = v?.model();
     if (!model) return 'no model';
     // The box the page fits: the model's box as shown (before any turn), which the page keeps (a
@@ -1333,7 +1333,7 @@ kTurntableFlag = "?turntable=1"
 kInstanceCount = 100_000
 # The copies the engine holds: the page's entities that carry a MeshRenderer, asked of the engine.
 kCountInstances = """(async () => {
-    const { MeshRenderer } = await import('@openengine/web');
+    const { MeshRenderer } = await import('@game-crafters-guild/openengine-web');
     return globalThis.demo?.instances.filter((entity) => entity.has(MeshRenderer)).length ?? null;
 })()"""
 kSetInstanceCount = """(() => { const slider = document.querySelector('.panel [name=count]');

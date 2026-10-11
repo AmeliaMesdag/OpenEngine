@@ -169,8 +169,14 @@ class EditorApplication : public Application
     // Editor toolbar accessor
     EditorToolbar* GetToolbar() const { return m_EditorToolbar.get(); }
 
-    // Update project folder (called when user selects a folder)
-    void SetProjectFolder(const std::filesystem::path& projectPath);
+    // Switches the open project: the boot auto-load, and OpenPickedProject once the scene is saved
+    // or discarded.
+    // outgoingChangesDiscarded: the user chose Don't Save for the outgoing scene, so the
+    // project's startup scene replaces it without asking again.
+    void SetProjectFolder(const std::filesystem::path& projectPath, bool outgoingChangesDiscarded);
+    // The picker's choice: asks to save a dirty scene first, then switches; Cancel keeps the
+    // current project.
+    void OpenPickedProject(const std::filesystem::path& projectPath);
     void RequestHdrOutputRefreshForAllWindows();
     // Re-apply the project settings file's renderer knobs (MSAA, AA mode, TAAU
     // render scale, render-scale mode + dynamic target, mesh LOD) to every
@@ -342,6 +348,8 @@ class EditorApplication : public Application
     std::unique_ptr<Editor::SceneEditorController> m_SceneEditor;
     std::unique_ptr<Editor::SceneThumbnailCapture> m_SceneThumbnailCapture;
     std::unique_ptr<Editor::PlayModeManager> m_PlayMode;
+    // Shows m_PlayMode's entry gate.
+    class PlayModeEntryModal* m_PlayEntryModal = nullptr; // owned by UI tree
     std::unique_ptr<Editor::MovieRecorderController> m_MovieRecorder;
     std::unique_ptr<Editor::RecipeControllers> m_RecipeControllers;
     std::unique_ptr<MissingAssetTracker> m_MissingAssetTracker;
@@ -670,7 +678,7 @@ class EditorApplication : public Application
     // Heavy UI/asset-browser refresh after project open; queued so SetProjectFolder returns quickly
     // (avoids stalling the modal callback and nested UI work on the same stack).
     void ApplyProjectFolderUiAsync(const std::filesystem::path& projectPath,
-                                   const std::filesystem::path& newAssetRoot);
+                                   const std::filesystem::path& newAssetRoot, bool outgoingChangesDiscarded);
 
     // What a project switch still needs once its asset sources have finished
     // ejecting. Unmounting the old packages and rebinding the project source
@@ -683,6 +691,7 @@ class EditorApplication : public Application
         std::filesystem::path OldAssetRoot;
         std::filesystem::path OldDbFile;
         std::filesystem::path OldCacheRoot;
+        bool OutgoingChangesDiscarded = false;
     };
 
     // The second half of SetProjectFolder: everything that may only run once

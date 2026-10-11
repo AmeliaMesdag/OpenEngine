@@ -14,15 +14,16 @@ endif()
 # module's ResourceHandleManagerTests target (Engine/Modules/Rendering/Tests).
 
 # Many native tests assume `ApplicationConfig.assetDirectory = "Assets"` and run
-# with WORKING_DIRECTORY = ${CMAKE_BINARY_DIR}. Stage the repo Assets into the
-# per-preset build root so these tests remain hermetic (and we avoid global
-# configure-time copies in the top-level CMakeLists).
+# with WORKING_DIRECTORY = ${CMAKE_BINARY_DIR}. Stage the engine content
+# (Engine/Assets) into Assets/ under the per-preset build root so these tests
+# remain hermetic (and we avoid global configure-time copies in the top-level
+# CMakeLists).
 #
 # Test FIXTURES are staged the same way, mirroring their repo-relative paths
 # under the build root; suites resolve them exe-anchored via
 # Engine/Tests/StagedTestPaths.h (StagedRoot()) instead of climbing from the
 # CWD or __FILE__ into the source tree. Fixture roots staged here:
-#   Assets/                            asset-loading suites (also carries the
+#   Engine/Assets/ -> Assets/          asset-loading suites (also carries the
 #                                      optional, gitignored Models/FBXTest .fbx
 #                                      payload when a dev machine has it)
 #   Engine/Tests/Fixtures/             authored-LOD glTF/FBX fixtures
@@ -31,7 +32,7 @@ endif()
 #   Tools/Web/smoke-project/Assets/Scenes/ web seed-project scenes
 #   Tools/Web/smoke-project/Assets/Particles/ the particle stack they reference
 #   Tests/Assets/TestData/BigglesCaseShadow.assetdb  frozen pre-migration journal
-if(EXISTS ${CMAKE_SOURCE_DIR}/Assets)
+if(EXISTS ${CMAKE_SOURCE_DIR}/Engine/Assets)
   # Each mirror is copy + orphan prune: copy_directory_if_different never
   # deletes, so without the prune a staged mirror keeps files whose sources
   # were deleted from the repo and suites keep passing against assets a fresh
@@ -40,10 +41,10 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/Assets)
   # the staged root — script assemblies, derived cache, logs — is never touched.
   add_custom_target(StageTestAssets
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-            ${CMAKE_SOURCE_DIR}/Assets
+            ${CMAKE_SOURCE_DIR}/Engine/Assets
             ${CMAKE_BINARY_DIR}/Assets
     COMMAND ${CMAKE_COMMAND}
-            -DSRC=${CMAKE_SOURCE_DIR}/Assets
+            -DSRC=${CMAKE_SOURCE_DIR}/Engine/Assets
             -DDST=${CMAKE_BINARY_DIR}/Assets
             -P ${CMAKE_SOURCE_DIR}/cmake/PruneStagedMirrorOrphans.cmake
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
@@ -401,7 +402,7 @@ endif()
 # hosted archive exists). License holders configure their own copy:
 #   -DGE_FBXTEST_URL=file:///C:/path/to/fbxtest-fixtures-v1.zip
 #   cmake --build --preset <preset> --target FetchFbxTestFixtures
-# (or just place the five .fbx files in Assets/Models/FBXTest/). Unlocks
+# (or just place the five .fbx files in Engine/Assets/Models/FBXTest/). Unlocks
 # ModelAssetHumanoidPostLoadTests, HumanoidRetargetRealAssetTests,
 # EditorSkinnedSpawnTests and the .fbx half of BlenderToFbxRetargetTest;
 # without them those suites skip gracefully. Two optional creatures in the same
@@ -427,7 +428,7 @@ if(GE_FBXTEST_SHA256)
 endif()
 add_custom_target(FetchFbxTestFixtures
   COMMAND ${CMAKE_COMMAND}
-          -DFBXTEST_ROOT=${CMAKE_SOURCE_DIR}/Assets/Models/FBXTest
+          -DFBXTEST_ROOT=${CMAKE_SOURCE_DIR}/Engine/Assets/Models/FBXTest
           -DSTAGED_ROOT=${CMAKE_BINARY_DIR}/Assets/Models/FBXTest
           -DDOWNLOAD_DIR=${CMAKE_BINARY_DIR}/_fixture_downloads
           ${_ge_fbxtest_overrides}
@@ -813,7 +814,7 @@ ge_stage_runtime_dependencies(PathsAndSettingsTests)
 # copy the test could only check string composition, and deleting a staging rule would leave
 # it green.
 ge_stage_test_asset(PathsAndSettingsTests
-  "${CMAKE_SOURCE_DIR}/Assets/Textures/Sky/MoonPhases/moon_full.png"
+  "${CMAKE_SOURCE_DIR}/Engine/Assets/Textures/Sky/MoonPhases/moon_full.png"
   "Assets/Textures/Sky/MoonPhases/moon_full.png")
 add_test(NAME PathsAndSettingsTests COMMAND $<TARGET_FILE:PathsAndSettingsTests>)
 set_tests_properties(PathsAndSettingsTests PROPERTIES

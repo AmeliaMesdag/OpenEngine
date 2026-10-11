@@ -48,6 +48,7 @@
 #include "Assets/MaterialAsset.h"
 #include "Assets/Packages/PackageManifest.h"
 #include "Assets/Packages/PackageResolver.h"
+#include "Engine/Rendering/MaterialRegistry.h"
 #include "Engine/Rendering/MaterialShaderPackageBuilder.h"
 #include "Particles/Rendering/ParticleMaterials.h"
 #include "Logger/Logger.h"
@@ -172,6 +173,10 @@ std::vector<VariantRequest> VariantsFor(const CookTarget& target, bool web)
     const bool bindsHeightMap =
         target.Variants.empty() && heightMap != document.textures.end() && !heightMap->second.empty();
     GameEngine::Tools::MaterialCook::ExpandParallaxDepthVariants(rows, bindsHeightMap, web);
+    const MaterialKeyword materialKeywords = Engine::Renderer::DeriveBaseVariantKey(document).materialKeywords;
+    GameEngine::Tools::MaterialCook::ExpandSceneColorGrabVariants(
+        rows, HasKeyword(materialKeywords, MaterialKeyword::Transmission));
+    GameEngine::Tools::MaterialCook::AddMaterialKeywords(rows, materialKeywords);
     return rows;
 }
 

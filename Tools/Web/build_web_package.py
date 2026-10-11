@@ -64,7 +64,7 @@ kRepoRoot = Path(__file__).resolve().parents[2]
 kLibraryDir = kRepoRoot / "Apps" / "WebLibrary"
 kFacadeDir = kLibraryDir / "ts"
 
-kPackageName = "@openengine/web"
+kPackageName = "@game-crafters-guild/openengine-web"
 kBuilds = ("st", "mt")
 kFacadeName = "opengine.mjs"
 kBindingName = "opengine-core-binding.js"
@@ -120,8 +120,8 @@ kReleaseTag = re.compile(r"^v(\d{4}\.\d{1,2}\.\d+)(?:-(alpha|beta)\.\d+)?$")
 
 # The examples import the library by this specifier; in the source tree the import map points
 # it at the facade's tsc output, in the package at the bundled facade two folders up.
-kSourceImportTarget = '"@openengine/web": "../../ts/dist/src/index.js"'
-kPackageImportTarget = '"@openengine/web": "../../opengine.mjs"'
+kSourceImportTarget = '"@game-crafters-guild/openengine-web": "../../ts/dist/src/index.js"'
+kPackageImportTarget = '"@game-crafters-guild/openengine-web": "../../opengine.mjs"'
 # The gallery links the examples beside it in the source tree; on the site they sit in package/.
 kGalleryExamplesLink = 'href="../examples/'
 kSiteExamplesLink = 'href="package/examples/'

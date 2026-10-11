@@ -891,7 +891,7 @@ TEST(SunGlareSourceContract, TheProbeReadsThePostWorldDepthAttachmentWithNoResol
     const std::string node = LoadRepoFileWithoutComments(
         "Engine/Source/Engine/Rendering/Pipeline/Nodes/SunGlareRenderNode.cpp");
     const std::string graph =
-        LoadRepoFileWithoutComments("Assets/RenderPipelines/ForwardPlus.rendergraph");
+        LoadRepoFileWithoutComments("Engine/Assets/RenderPipelines/ForwardPlus.rendergraph");
     if (node.empty() || graph.empty())
         GTEST_SKIP() << "GE_RENDERER_REPO_ROOT not defined; source unavailable";
 
@@ -986,7 +986,7 @@ TEST(SunGlareSourceContract, TheProbeRingStaysCloseToTheDisc)
 TEST(SunGlareSourceContract, BlueprintCompositesTheGlareBeforeTonemap)
 {
     const std::string graph =
-        LoadRepoFileWithoutComments("Assets/RenderPipelines/ForwardPlus.rendergraph");
+        LoadRepoFileWithoutComments("Engine/Assets/RenderPipelines/ForwardPlus.rendergraph");
     if (graph.empty())
         GTEST_SKIP() << "GE_RENDERER_REPO_ROOT not defined; blueprint unavailable";
 

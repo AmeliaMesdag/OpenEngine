@@ -48,7 +48,7 @@ another (the <b>target rig</b>), even when the two differ in bone names (<code>m
 <p>Three JSON asset types describe a retarget. All are GUID-keyed and hot-reload-watched.</p>
 <table>
 <tr><th>Type</th><th>Filename pattern</th><th>Where it lives</th><th>Purpose</th></tr>
-<tr><td><code>SkeletonProfile</code></td><td><code>*.profile.json</code></td><td>Default: <code>Assets/SkeletonProfiles/HumanoidStandard.profile.json</code>, staged beside Editor/Player, or included in a packaged project manifest with its original GUID</td><td>The canonical humanoid bone set and reference T-pose that rigs map onto</td></tr>
+<tr><td><code>SkeletonProfile</code></td><td><code>*.profile.json</code></td><td>Default: <code>Engine/Assets/SkeletonProfiles/HumanoidStandard.profile.json</code>, staged beside Editor/Player, or included in a packaged project manifest with its original GUID</td><td>The canonical humanoid bone set and reference T-pose that rigs map onto</td></tr>
 <tr><td><code>HumanoidRig</code></td><td><code>*.humanoidrig.json</code></td><td>Next to the model, named after it: <code>&lt;model&gt;.humanoidrig.json</code></td><td>Per-model bone map, retarget pose, chains, attachments and translation bones</td></tr>
 <tr><td><code>RetargetMap</code></td><td><code>*.retargetmap.json</code></td><td>Next to the target model: <code>&lt;source&gt;_to_&lt;target&gt;.retargetmap.json</code></td><td>Source-to-target pairing: the two rigs, per-chain settings and an op stack</td></tr>
 </table>

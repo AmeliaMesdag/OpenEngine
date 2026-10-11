@@ -144,6 +144,13 @@ class ScriptManager
     String GetAsyncHotReloadStatus() const;
 
     /**
+     * @brief Why the last finished async hot reload failed; empty when it succeeded or none has
+     * finished. A reload superseded by a newer edit leaves it unchanged. The outcome is recorded
+     * when IsAsyncHotReloadInProgress sees the reload finish.
+     */
+    String GetLastAsyncHotReloadError() const;
+
+    /**
      * @brief Get CoreCLR host
      */
     CoreCLRHost& GetCLRHost() { return m_ClrHost; }
@@ -506,6 +513,9 @@ class ScriptManager
     // consumed by IsAsyncHotReloadInProgress and Shutdown, so every access holds m_CurrentAsyncFutureMutex.
     mutable std::future<HotReloadPipeline::PipelineStats> m_CurrentAsyncFuture;
     mutable std::mutex m_CurrentAsyncFutureMutex;
+    // The last finished reload's failure (GetLastAsyncHotReloadError); guarded by
+    // m_CurrentAsyncFutureMutex.
+    mutable String m_LastAsyncHotReloadError;
 
     // Shutdown/lifetime: prevents work from being queued during teardown and allows
     // us to join fire-and-forget tasks that capture `this`.

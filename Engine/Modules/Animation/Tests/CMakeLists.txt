@@ -266,7 +266,7 @@ gtest_discover_tests(AutoImportDispatchTests)
 # via a path relative to its own exe location.
 add_custom_command(TARGET HumanoidStandardProfileTests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/Assets/SkeletonProfiles/HumanoidStandard.profile.json
+        ${CMAKE_SOURCE_DIR}/Engine/Assets/SkeletonProfiles/HumanoidStandard.profile.json
         $<TARGET_FILE_DIR:HumanoidStandardProfileTests>/TestAssets/SkeletonProfiles/HumanoidStandard.profile.json
     COMMENT "Staging HumanoidStandard.profile.json for HumanoidStandardProfileTests"
     VERBATIM

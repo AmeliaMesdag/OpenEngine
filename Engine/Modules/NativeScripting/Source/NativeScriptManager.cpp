@@ -109,6 +109,29 @@ void LogCompilerErrors(const std::string& buildOutput)
         ++logged;
     }
 }
+// The first line of a build's output that reports a compiler or linker error ("file.cpp(296):
+// error C2059: ..." from MSVC, "file.cpp:296:5: error: ..." from clang and gcc), else the
+// result's one-line failure summary.
+std::string FirstErrorLine(const NativeBuildResult& result)
+{
+    std::size_t start = 0;
+    while (start < result.Output.size())
+    {
+        std::size_t end = result.Output.find('\n', start);
+        if (end == std::string::npos)
+            end = result.Output.size();
+        const std::string_view line(result.Output.data() + start, end - start);
+        if (line.find(": error") != std::string_view::npos || line.find(": fatal error") != std::string_view::npos)
+        {
+            const std::size_t first = line.find_first_not_of(" \t");
+            const std::size_t last = line.find_last_not_of(" \t\r");
+            return std::string(line.substr(first, last - first + 1));
+        }
+        start = end + 1;
+    }
+    return result.Error;
+}
+
 } // namespace
 
 NativeScriptManager::NativeScriptManager() = default;
@@ -277,6 +300,7 @@ void NativeScriptManager::RecordModuleOutcomeLocked(const std::string& moduleId,
     {
         if (it != m_FailedShippedModules.end())
             m_FailedShippedModules.erase(it);
+        m_FirstBuildErrors.erase(moduleId);
         return;
     }
     if (it == m_FailedShippedModules.end() && m_EditorModuleIds.count(moduleId) == 0)
@@ -573,6 +597,7 @@ std::filesystem::path NativeScriptManager::BuildOnly(const NativeBuildConfig& co
     const bool scannerConfigured = !cfg.DotnetExe.empty() && !cfg.ComponentScannerDll.empty();
     if (scannerConfigured)
     {
+        SetBuildStage("scanning components and systems");
         std::string scanError;
         ComponentScanStats stats;
         const std::filesystem::path gen = CMakeInvoker::RunComponentScanner(cfg, result.Output, scanError, stats);
@@ -623,6 +648,7 @@ std::filesystem::path NativeScriptManager::BuildOnly(const NativeBuildConfig& co
     }
 
     // 1. Generate the standalone user-project CMakeLists (content-compared).
+    SetBuildStage("generating the build project");
     bool changed = false;
     std::string genError;
     const std::filesystem::path cmakeLists = UserProjectGenerator::Generate(cfg, changed, genError);
@@ -637,6 +663,7 @@ std::filesystem::path NativeScriptManager::BuildOnly(const NativeBuildConfig& co
     //    selected when MsvcToolchain validated a COMPLETE env (UCRT include + LIB), so a build
     //    failure here is a real user-code/compile error — reported directly (no slow VS retry
     //    that would double every iteration's compile-error turnaround).
+    SetBuildStage("compiling");
     std::string buildError;
     const std::filesystem::path dll = CMakeInvoker::ConfigureAndBuild(
         cfg, /*forceConfigure=*/changed, result.Output, buildError,
@@ -1076,6 +1103,31 @@ bool NativeScriptManager::AreModulesPending() const
            HasDeferredHotReloadPending();
 }
 
+bool NativeScriptManager::AreShippedModuleBuildsPending() const
+{
+    // Atomics, and a module list only the main thread writes, so the main thread reads them
+    // without the settle lock.
+    return m_ModuleLoadingSupported && IsModuleBuildPendingLocked();
+}
+
+std::string NativeScriptManager::FirstBuildErrorLine(const std::string& moduleId) const
+{
+    const auto it = m_FirstBuildErrors.find(moduleId);
+    return it == m_FirstBuildErrors.end() ? std::string{} : it->second;
+}
+
+NativeScriptManager::BuildProgress NativeScriptManager::CurrentBuildProgress() const
+{
+    std::lock_guard<std::mutex> lock(m_ProgressMutex);
+    return m_Progress;
+}
+
+void NativeScriptManager::SetBuildStage(const char* stage)
+{
+    std::lock_guard<std::mutex> lock(m_ProgressMutex);
+    m_Progress.Stage = stage;
+}
+
 void NativeScriptManager::SetModuleLoadingSupported(bool supported)
 {
     m_ModuleLoadingSupported = supported;
@@ -1273,8 +1325,13 @@ void NativeScriptManager::KickBuild()
         };
         std::vector<ModuleOutcome> outcomes;
         outcomes.reserve(staleModules.size());
-        for (const StaleModule& stale : staleModules)
+        for (std::size_t moduleIndex = 0; moduleIndex < staleModules.size(); ++moduleIndex)
         {
+            const StaleModule& stale = staleModules[moduleIndex];
+            {
+                std::lock_guard<std::mutex> progressLock(m_ProgressMutex);
+                m_Progress = BuildProgress{stale.Config.ModuleName, {}, moduleIndex + 1, staleModules.size()};
+            }
             ModuleOutcome outcome;
             outcome.ModuleId = stale.Config.ModuleName;
             outcome.BuildDir = stale.Config.BuildDir;
@@ -1296,6 +1353,10 @@ void NativeScriptManager::KickBuild()
             outcomes.push_back(std::move(outcome));
             if (m_CancelBuild.load(std::memory_order_relaxed))
                 break; // shutdown: skip the remaining modules
+        }
+        {
+            std::lock_guard<std::mutex> progressLock(m_ProgressMutex);
+            m_Progress = {};
         }
 
         // Always queue the completion (clears m_BuildInFlight + fires the callback), even
@@ -1360,7 +1421,10 @@ void NativeScriptManager::KickBuild()
                                       SwapMs(beforeHookEnd - swapStart).count(),
                                       SwapMs(loadEnd - beforeHookEnd).count(), SwapMs(swapEnd - loadEnd).count());
                 }
-                RecordModuleOutcomeLocked(outcome.ModuleId, !outcome.Dll.empty() && outcome.Result.Registered);
+                const bool succeeded = !outcome.Dll.empty() && outcome.Result.Registered;
+                if (!succeeded && m_EditorModuleIds.count(outcome.ModuleId) == 0)
+                    m_FirstBuildErrors[outcome.ModuleId] = FirstErrorLine(outcome.Result);
+                RecordModuleOutcomeLocked(outcome.ModuleId, succeeded);
                 if (m_OnBuildComplete)
                     m_OnBuildComplete(outcome.Result);
             }

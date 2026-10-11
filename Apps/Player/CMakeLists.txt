@@ -227,7 +227,7 @@ add_custom_command(TARGET Player POST_BUILD
 add_custom_target(StagePlayerHumanoidProfile
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_GE_PLAYER_CONTENT_DIR}/Assets/SkeletonProfiles"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/Assets/SkeletonProfiles/HumanoidStandard.profile.json"
+            "${CMAKE_SOURCE_DIR}/Engine/Assets/SkeletonProfiles/HumanoidStandard.profile.json"
             "${_GE_PLAYER_CONTENT_DIR}/Assets/SkeletonProfiles/HumanoidStandard.profile.json"
     COMMENT "Staging the runtime humanoid profile for Player"
     VERBATIM)
@@ -241,7 +241,7 @@ add_dependencies(Player StagePlayerHumanoidProfile)
 add_custom_command(TARGET Player POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_GE_PLAYER_CONTENT_DIR}/Assets/Textures"
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-            "${CMAKE_SOURCE_DIR}/Assets/Textures"
+            "${CMAKE_SOURCE_DIR}/Engine/Assets/Textures"
             "${_GE_PLAYER_CONTENT_DIR}/Assets/Textures"
     COMMENT "Staging engine texture assets for Player"
     VERBATIM
@@ -258,7 +258,7 @@ add_custom_command(TARGET Player POST_BUILD
 add_custom_command(TARGET Player POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_GE_PLAYER_CONTENT_DIR}/Assets/RenderPipelines"
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-            "${CMAKE_SOURCE_DIR}/Assets/RenderPipelines"
+            "${CMAKE_SOURCE_DIR}/Engine/Assets/RenderPipelines"
             "${_GE_PLAYER_CONTENT_DIR}/Assets/RenderPipelines"
     COMMENT "Staging engine render pipelines for Player"
     VERBATIM

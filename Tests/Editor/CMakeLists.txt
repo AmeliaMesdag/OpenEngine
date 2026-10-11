@@ -488,6 +488,8 @@ set(EDITOR_TEST_SOURCES
 	# spelling shared with get_editor_state. Leaf TU (nlohmann + the state enum), so it
 	# compiles in directly rather than dragging DebugHandlers.cpp.
 	PlayModeRequestTests.cpp
+	SaveBeforeProjectSwitchTests.cpp
+	PlayModeEntryGateTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/DebugServer/PlayModeRequest.cpp
 	# focus_view's view -> panel + focus-policy mapping. The Scene View needs UI focus
 	# CLEARED (or UIManager eats its W/A/S/D camera keys) and the Game View needs its
@@ -611,8 +613,12 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewTransformTool.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewSelectionTool.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/AnimationPreviewManager.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/PlayModeEntryGate.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/PlayModeManager.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Scene/SceneEditorController.cpp
+	# SceneEditorController opens a project's startup scene from its build scenes and settings.
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectStartupScene.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/BuildSettingsStore.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Scene/SceneDocumentManager.cpp
 	# SceneDocumentManager's asset resolver reports references it could bind to
 	# neither a record nor a file into the tracker.
@@ -1348,14 +1354,17 @@ add_test(NAME PanelDeferredBindLatchTests
 
 # The project picker's network jobs on their channels: the community catalog fetch and a
 # project acquisition hold no compute worker, and the catalog service's destructor waits for a
-# fetch in flight. Its own target because it points GE_EDITOR_USER_DATA_ROOT at a scratch
-# preferences file for the whole process.
+# fetch in flight; and the startup scene a project opens on and is given when created. Its own
+# target because it points GE_EDITOR_USER_DATA_ROOT at a scratch preferences file for the
+# whole process.
 add_executable(ProjectPickerJobTests
 	ProjectCatalogServiceTests.cpp
 	ProjectAcquisitionTests.cpp
+	ProjectStartupSceneTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectCatalogService.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectCatalog.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectAcquisition.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectStartupScene.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/SubprocessStream.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ZipArchive.cpp
 	${CMAKE_SOURCE_DIR}/Engine/Source/ThirdParty/miniz/miniz.c

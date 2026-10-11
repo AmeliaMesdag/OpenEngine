@@ -1,23 +1,7 @@
 #include "JobSystem/TaskSlabPool.h"
 
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 6326 6011)
-#endif
-
-#if __has_include(<concurrentqueue/moodycamel/concurrentqueue.h>)
-#include <concurrentqueue/moodycamel/concurrentqueue.h>
-#elif __has_include(<concurrentqueue/concurrentqueue.h>)
-#include <concurrentqueue/concurrentqueue.h>
-#elif __has_include(<concurrentqueue.h>)
-#include <concurrentqueue.h>
-#else
-#error "moodycamel concurrentqueue headers not found - ensure vcpkg concurrentqueue package is installed"
-#endif
-
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+#include "JobSystem/ConcurrentQueue.h"
+#include <type_traits>
 
 namespace JobSystem::Detail
 {
@@ -43,13 +27,15 @@ SlabStats s_Stats;
 // non-allocating try_enqueue. The default index (32 blocks of 32) would let
 // one thread hold only 1,024 slabs, a quarter of the cap; this one indexes
 // the whole cap, so a single releasing thread can fill the freelist.
-struct SlabFreelistTraits : moodycamel::ConcurrentQueueDefaultTraits
+struct SlabFreelistTraits : QueueAllocationTraits
 {
     static const size_t IMPLICIT_INITIAL_INDEX_SIZE =
-        kTaskSlabPoolCapacity / moodycamel::ConcurrentQueueDefaultTraits::BLOCK_SIZE;
+        kTaskSlabPoolCapacity / QueueAllocationTraits::BLOCK_SIZE;
 };
 
 using SlabFreelist = moodycamel::ConcurrentQueue<void*, SlabFreelistTraits>;
+static_assert(std::is_base_of_v<QueueAllocationTraits, SlabFreelistTraits>,
+              "the slab freelist allocates through the counted queue traits");
 
 SlabFreelist& Freelist()
 {

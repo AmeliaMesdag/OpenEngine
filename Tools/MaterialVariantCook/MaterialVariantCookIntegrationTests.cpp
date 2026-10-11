@@ -5,10 +5,15 @@
 #include "Assets/Packages/PackageMounts.h"
 #include "Assets/Packages/PackageResolver.h"
 #include "Engine/Build/CancellableShellProcess.h"
+#include "Engine/Rendering/MaterialPrewarmVariants.h"
+#include "Engine/Rendering/MaterialRegistry.h"
 #include "Engine/Rendering/MaterialShaderPackageBuilder.h"
 #include "Engine/Rendering/PackageShaderDirs.h"
 #include "Particles/Rendering/ParticleMaterials.h"
 #include "Rendering/Core/Device.h"
+#include "Rendering/Core/RendererProfile.h"
+#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/ShaderProfileDefines.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 #include "StagedTestPaths.h"
 #include "TestTempDir.h"
@@ -196,6 +201,62 @@ bool DeclaresCapability(const std::vector<uint8_t>& bytes, uint32_t capability)
     return false;
 }
 
+// Two materials whose lobes the runtime compiles into every program it asks for: a clear coat, and a
+// transmissive glass, which the transmissive pass also draws with the scene-colour grab bound.
+void WriteLobeMaterials(const fs::path& project)
+{
+    const fs::path materials = project / "Assets/Materials";
+    fs::create_directories(materials);
+    std::ofstream(materials / "ClearCoat.material") << R"({
+  "schemaVersion": 3,
+  "materialName": "ClearCoat",
+  "lightingModel": "StandardPBR",
+  "alphaMode": "Opaque",
+  "surfaceShader": "Surfaces/standard_pbr.glsl",
+  "properties": {"enableClearCoat": true, "clearCoat": 1.0, "clearCoatRoughness": 0.1}
+})";
+    std::ofstream(materials / "Glass.material") << R"({
+  "schemaVersion": 3,
+  "materialName": "Glass",
+  "lightingModel": "StandardPBR",
+  "alphaMode": "Opaque",
+  "surfaceShader": "Surfaces/standard_pbr.glsl",
+  "properties": {"enableTransmission": true, "transmissionWeight": 1.0}
+})";
+}
+
+// The editor's world pass: ForwardPlus.rendergraph's world and transmissive nodes.
+constexpr GameEngine::Rendering::MaterialKeyword kEditorWorldPass =
+    GameEngine::Rendering::MaterialKeyword::Instanced | GameEngine::Rendering::MaterialKeyword::ForwardPlus |
+    GameEngine::Rendering::MaterialKeyword::Shadows | GameEngine::Rendering::MaterialKeyword::IBL;
+
+// The keys registration asks for that the cook's table declares: the base program and every
+// forward-lit colour program, the transmissive pass's grab variants among them. The prewarm's
+// crossfade tails, asset-preview pass and depth heads are left out; the cook does not declare those.
+std::vector<GameEngine::Rendering::ShaderVariantKey> CookedRuntimeColorKeys(const GameEngine::MaterialDocument& document)
+{
+    using GameEngine::Rendering::MaterialKeyword;
+    const GameEngine::Rendering::ShaderVariantKey base = GameEngine::Engine::Renderer::DeriveBaseVariantKey(document);
+    std::vector<GameEngine::Rendering::ShaderVariantKey> keys;
+    for (const auto& key : GameEngine::Engine::Renderer::MaterialPrewarmVariantKeys(
+             base, kEditorWorldPass, document.customVertexShader, GameEngine::Engine::Renderer::DeriveRenderedAlphaMode(document)))
+    {
+        if (GameEngine::Rendering::HasKeyword(key.materialKeywords, MaterialKeyword::LodCrossfade))
+            continue;
+        if (GameEngine::Rendering::HasKeyword(key.materialKeywords, MaterialKeyword::ForwardPlus) ||
+            key.materialKeywords == base.materialKeywords)
+            keys.push_back(key);
+    }
+    return keys;
+}
+
+// Restores the compiler on every exit, including a failed assertion.
+struct ScopedCookOnlyRuntime
+{
+    ScopedCookOnlyRuntime() { GameEngine::Rendering::ShaderCompileService::SetCompilerAvailable(false); }
+    ~ScopedCookOnlyRuntime() { GameEngine::Rendering::ShaderCompileService::SetCompilerAvailable(true); }
+};
+
 std::map<std::string, fs::file_time_type> PackageWriteTimes(const fs::path& cache)
 {
     std::map<std::string, fs::file_time_type> result;
@@ -381,6 +442,73 @@ TEST(MaterialVariantCookIntegration, TheDesktopCookComposesTheReliefForADeviceWi
         EXPECT_TRUE(DeclaresCapability(fragment->second, kCapabilityInterpolationFunction))
             << variant << " marches without the interpolation functions a desktop device composes it with";
     }
+}
+
+// A material's lobes (clear coat, transmission and the rest DeriveBaseVariantKey reads from the
+// document) are part of every key the runtime asks for, so a cooked-only runtime finds a lobed
+// material's programs only if the cook keyed its rows with them. A transmissive material is also drawn
+// by the transmissive pass with the scene-colour grab bound. Each key is resolved here as the runtime's
+// ShaderCompilationCache builds it (the compile spec's document, the key's keywords and layout), with
+// the compiler switched off.
+TEST(MaterialVariantCookIntegration, LobedMaterialsCookTheKeysTheRuntimeAsksFor)
+{
+    using namespace GameEngine;
+    TestUtils::ScopedTempDir project{TestUtils::MakeUniqueTempDirectory("material_lobe_cook")};
+    ASSERT_NO_FATAL_FAILURE(WriteLobeMaterials(project.Path()));
+    const ShellProcessResult result = Cook(project.Path());
+    ASSERT_FALSE(result.cancelled) << result.output;
+    ASSERT_EQ(result.exitCode, 0) << result.output;
+
+    const fs::path fixtures = TestPaths::StagedRoot();
+    Rendering::MaterialBuildContext context;
+    context.AdapterShaderDir = fixtures / "Engine/Modules/Rendering/Shaders";
+    context.PackageShaderDirs = {fixtures / "Engine/Modules/GPUFogParticles/Shaders",
+                                 TestPaths::ExecutableDirectory() / "Fixtures/MaterialVariantCook/PackageShaders"};
+    context.ProjectRoots = {project.Path() / "Assets"};
+    context.AssetSourceRoots.push_back({"project", project.Path() / "Assets"});
+    context.CacheRoot = project.Path() / ".Cache/Shaders";
+    // The compile inputs the desktop cook keys its rows at: the full profile, and the SPIR-V target of
+    // a process that created no device.
+    Rendering::ApplyShaderCompileProfile(Rendering::RendererProfile{});
+    const auto previousTarget = Rendering::ShaderCompileService::MaxSupportedSpirv();
+    Rendering::ShaderCompileService::SetMaxSupportedSpirv(Rendering::ShaderCompileService::SpirvTarget::Spirv_1_5);
+
+    std::size_t grabKeys = 0;
+    {
+        ScopedCookOnlyRuntime cookOnly;
+        for (const char* name : {"ClearCoat", "Glass"})
+        {
+            const fs::path materialPath = project.Path() / "Assets/Materials" / (std::string(name) + ".material");
+            MaterialAsset asset(GUID::Generate(), materialPath);
+            ASSERT_TRUE(asset.Load()) << materialPath;
+            const Engine::Renderer::MaterialCompileSpec spec = Engine::Renderer::DeriveCompileSpec(asset.GetDocument());
+            MaterialDocument runtimeDocument{};
+            runtimeDocument.surfaceShader = spec.surfaceShaderPath;
+            runtimeDocument.lightingModel = spec.lightingModel;
+            runtimeDocument.vertexModifier = spec.vertexModifierPath;
+            runtimeDocument.customVertexShader = spec.customVertexShader;
+            runtimeDocument.keywords = spec.userKeywords;
+            if (spec.alphaTest)
+                runtimeDocument.alphaMode = MaterialAlphaMode::Mask;
+
+            const auto keys = CookedRuntimeColorKeys(asset.GetDocument());
+            ASSERT_FALSE(keys.empty()) << name;
+            for (const auto& key : keys)
+            {
+                grabKeys += Rendering::HasKeyword(key.materialKeywords, Rendering::MaterialKeyword::SceneColorGrab);
+                const Engine::Renderer::MaterialShaderPackageBuilder builder(runtimeDocument, materialPath, name,
+                                                                             context);
+                const Rendering::MaterialBuildResult served =
+                    builder.Build(Rendering::ShaderSourceKind::SpirV, key.materialKeywords, key.vertexFlags);
+                EXPECT_TRUE(served.success)
+                    << name << " keywords 0x" << std::hex << static_cast<uint64_t>(key.materialKeywords)
+                    << " layout 0x" << static_cast<uint32_t>(key.vertexFlags) << std::dec
+                    << " was not cooked: " << (served.errors.empty() ? std::string{} : served.errors.front());
+            }
+        }
+    }
+    Rendering::ShaderCompileService::SetMaxSupportedSpirv(previousTarget);
+    EXPECT_GT(grabKeys, 0u) << "the glass asks for no scene-colour grab variant, so the test checks none";
 }
 
 TEST(MaterialVariantCookIntegration, CommittedGraphSamplesCookValidatedWebPackages)

@@ -213,9 +213,9 @@ TEST(JobCounterTest, ReuseAcrossWaves)
 
 // Every ECS wave and parallel query forks on a fresh stack counter. Its tagged
 // queue is recycled whole, so after warmup a fork on a fresh counter
-// allocates nothing. The allocation counter sees operator new only: it catches
-// the queue object itself, while moodycamel takes its blocks and its producer
-// from std::malloc, which it does not see.
+// allocates nothing. The allocation counter sees the queue object and, through
+// JobSystem::QueueAllocationTraits, the queue's blocks, producer and block
+// index, so a fork that constructs or grows a queue reads nonzero.
 TEST(JobCounterTest, ForkOnAFreshCounterAllocatesNothingAfterWarmup)
 {
     constexpr int kWarmup = 1000;

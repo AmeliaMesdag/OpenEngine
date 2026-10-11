@@ -1,5 +1,6 @@
 #pragma once
 
+#include "JobSystem/ConcurrentQueue.h"
 #include "JobSystem/JobCounter.h"
 #include "JobSystem/JobSystemStatistics.h"
 #include "JobSystem/ParallelForOptions.h"
@@ -20,29 +21,6 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
-
-// Lock-free MPMC queue (the vcpkg concurrentqueue port). Some versions of the
-// header trigger MSVC /analyze diagnostics C6326 (constant-vs-constant
-// comparison) and C6011, which are benign for this use; they are suppressed
-// around the include only, so the module's own code keeps every warning.
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 6326 6011)
-#endif
-
-#if __has_include(<concurrentqueue/moodycamel/concurrentqueue.h>)
-#include <concurrentqueue/moodycamel/concurrentqueue.h>
-#elif __has_include(<concurrentqueue/concurrentqueue.h>)
-#include <concurrentqueue/concurrentqueue.h>
-#elif __has_include(<concurrentqueue.h>)
-#include <concurrentqueue.h>
-#else
-#error "moodycamel concurrentqueue headers not found - ensure vcpkg concurrentqueue package is installed"
-#endif
-
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
 
 namespace JobSystem
 {
@@ -840,7 +818,7 @@ class WorkStealingThreadPool
     struct Worker
     {
         std::thread Thread;
-        moodycamel::ConcurrentQueue<UniquePtr<TaskBase>> LocalQueue;
+        ConcurrentQueue<UniquePtr<TaskBase>> LocalQueue;
         moodycamel::ProducerToken ProducerToken;
         moodycamel::ConsumerToken LocalConsumerToken;
         // Fair-scan tokens for the two global lanes. moodycamel's tokenless
@@ -876,7 +854,7 @@ class WorkStealingThreadPool
     // threads that are not workers of this pool. Workers consume it through
     // their GlobalConsumerToken (see the token's declaration for why); the
     // drain, which runs on any thread, consumes it tokenless.
-    moodycamel::ConcurrentQueue<UniquePtr<TaskBase>> m_GlobalQueue;
+    ConcurrentQueue<UniquePtr<TaskBase>> m_GlobalQueue;
 
     // The Background lane: the same queue type and discipline as
     // m_GlobalQueue (allocating tokenless enqueue, an allocation failure
@@ -885,7 +863,7 @@ class WorkStealingThreadPool
     // priority, so one Background flood could starve another Background
     // producer the same way). Consumed last in every scan, and every poll is
     // gated on m_BackgroundQueued, so an empty lane never costs a queue touch.
-    moodycamel::ConcurrentQueue<UniquePtr<TaskBase>> m_BackgroundQueue;
+    ConcurrentQueue<UniquePtr<TaskBase>> m_BackgroundQueue;
 
     // Synchronization
     std::atomic<bool> shutdown_requested{false};
@@ -1010,7 +988,7 @@ class WorkStealingThreadPool
     // Accepts only exclusively owned TaskData (the registry drain's
     // use_count() == 1 guarantee, see DrainPendingCleanupLocked).
     static void RecycleTaskData(SharedPtr<TaskHandle::TaskData> data);
-    static moodycamel::ConcurrentQueue<SharedPtr<TaskHandle::TaskData>>& TaskDataFreelist();
+    static ConcurrentQueue<SharedPtr<TaskHandle::TaskData>>& TaskDataFreelist();
 
     // Process-wide task id source; ids are never reused across pools.
     static std::atomic<TaskId> m_NextTaskId;
@@ -1098,7 +1076,7 @@ class WorkStealingThreadPool
     // The global lane for `priority`: m_GlobalQueue or m_BackgroundQueue.
     // Worker-local queues are not lanes: they carry graph tasks published on
     // workers, always Normal.
-    moodycamel::ConcurrentQueue<UniquePtr<TaskBase>>& PriorityLane(JobPriority priority);
+    ConcurrentQueue<UniquePtr<TaskBase>>& PriorityLane(JobPriority priority);
     // Push into the priority's lane (allocating tokenless enqueue). It fails
     // only when an allocation fails, and a silently dropped task can be a
     // caller-barrier release, so a failure aborts loudly.

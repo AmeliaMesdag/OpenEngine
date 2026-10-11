@@ -1950,6 +1950,12 @@ bool ScriptManager::IsAsyncHotReloadInProgress() const
     {
         auto stats = completedFuture.get();
         const bool cancelled = IsCancellation(stats.result);
+        if (!cancelled)
+        {
+            std::lock_guard<std::mutex> lock(m_CurrentAsyncFutureMutex);
+            m_LastAsyncHotReloadError =
+                stats.success ? String{} : (stats.errorMessage.empty() ? String("the C# compile failed") : stats.errorMessage);
+        }
         Logger::Log::Info("🎯 Async hot-reload completed: {}",
                           stats.success ? "SUCCESS" : (cancelled ? "CANCELLED" : "FAILED"));
         if (!stats.success)
@@ -1979,6 +1985,12 @@ void ScriptManager::SetCurrentAsyncFuture(std::future<HotReloadPipeline::Pipelin
     // The replaced future is destroyed after the lock is released.
     std::lock_guard<std::mutex> lock(m_CurrentAsyncFutureMutex);
     std::swap(m_CurrentAsyncFuture, future);
+}
+
+String ScriptManager::GetLastAsyncHotReloadError() const
+{
+    std::lock_guard<std::mutex> lock(m_CurrentAsyncFutureMutex);
+    return m_LastAsyncHotReloadError;
 }
 
 float ScriptManager::GetAsyncHotReloadProgress() const

@@ -837,7 +837,7 @@ TEST(RenderPipelineCompilerFleet, AllRepoBlueprintsCompileWithoutErrors)
     namespace fs = std::filesystem;
     const fs::path root = GE_RENDERER_REPO_ROOT;
     const std::vector<fs::path> roots = {
-        root / "Assets",
+        root / "Engine" / "Assets",
         root / "Tests" / "Projects",
         root / "Tests" / "EditorHarness",
         root / "Tools" / "Web",
@@ -1332,7 +1332,7 @@ TEST(RenderPipelineCompiler, InputGatesWarnUnlessAnInputIsGatedOnASettingsGate)
 TEST(RenderPipelineCompiler, ForwardPlusCloudPassesMatchCookedShaderSource)
 {
     const auto path = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
-                      "Assets/RenderPipelines/ForwardPlus.rendergraph";
+                      "Engine/Assets/RenderPipelines/ForwardPlus.rendergraph";
     std::ifstream stream(path);
     ASSERT_TRUE(stream.is_open()) << path;
     const auto document = nlohmann::json::parse(stream);

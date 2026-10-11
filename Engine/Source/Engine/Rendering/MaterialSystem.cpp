@@ -1095,6 +1095,11 @@ Material* MaterialSystem::RegisterMaterialFromDocument(
     const auto tReg = Clock::now();
     Material* mat = m_RuntimeMaterialRegistry.Register(guid, resolved);
     const double regMs = msElapsed(tReg);
+    // Register() flips double-sidedness in place without touching a property,
+    // yet it is content to the tables derived from the registry (DDGI weights an
+    // emitter's power by it), so the edit moves the registry stamp.
+    if (mat && previousMat && mat->IsDoubleSided() != previousDoubleSided)
+        mat->MarkDirty();
 
     bool materialAssetPathChanged = false;
     // The surface's declared texture slots, read once per registration: the Parallax keyword and

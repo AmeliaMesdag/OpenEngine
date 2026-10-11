@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PlayMode/PlayModeEntryGate.h"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -51,7 +53,8 @@ class PlayModeManager
         bool selected = true;
     };
 
-    PlayModeManager();
+    // `scriptBuildProbe` is what the entry gate reads the script build from; tests pass their own.
+    explicit PlayModeManager(PlayModeEntryGate::BuildProbe scriptBuildProbe = &ReadScriptBuildSnapshot);
     ~PlayModeManager();
 
     PlayModeManager(const PlayModeManager&) = delete;
@@ -61,6 +64,10 @@ class PlayModeManager
     void SetSceneEditor(SceneEditorController* sceneEditor);
     void SetUndoRedo(UndoRedoService* undoRedo);
     void SetChangeNotifications(EditorChangeNotifications* notifications);
+    // Holds EnterPlayMode while scripts build and refuses it after a failed build; Tick advances
+    // it. The "Entering Play Mode" dialog presents it.
+    PlayModeEntryGate& GetEntryGate() { return m_EntryGate; }
+    const PlayModeEntryGate& GetEntryGate() const { return m_EntryGate; }
 
     PlayModeState GetState() const { return m_State; }
     bool IsPlayingOrPaused() const { return m_State == PlayModeState::Play || m_State == PlayModeState::Paused; }
@@ -73,6 +80,7 @@ class PlayModeManager
 
     // Explicit entrypoints
     void EnterPlayMode();
+    // In edit mode, drops an entry the gate holds for the script build.
     void ExitPlayMode();
 
     // Change review (valid when state == ChangeReview)
@@ -85,7 +93,8 @@ class PlayModeManager
     // (i.e., not present in the pre-play snapshot). Only meaningful while playing/paused.
     bool IsRuntimeEntity(std::uint32_t packedEntityId) const;
 
-    // Per-frame tick while playing (best-effort; no-op while paused/editing).
+    // Per frame: advances the entry gate, and ticks the game while playing (best-effort; the game
+    // does not tick while paused or editing).
     void Tick(float deltaSeconds);
 
     void SetOnStateChanged(std::function<void(PlayModeState)> cb) { m_OnStateChanged = std::move(cb); }
@@ -132,6 +141,7 @@ class PlayModeManager
     SceneEditorController* m_SceneEditor = nullptr; // not owned
     UndoRedoService* m_UndoRedo = nullptr; // not owned
     EditorChangeNotifications* m_Notifications = nullptr; // not owned
+    PlayModeEntryGate m_EntryGate;
 
     std::optional<Snapshot> m_EnteredSnapshot;
     std::unordered_set<std::uint32_t> m_PrePlayEntityIds; // packed entity ids present before play

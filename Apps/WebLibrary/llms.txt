@@ -1,8 +1,8 @@
-# @openengine/web
+# @game-crafters-guild/openengine-web
 
 > A WebGPU engine on a web page: import it as an ES module, create an engine on a canvas, load glTF models, orbit a camera, light the scene with a physical sun and sky, and read or write any entity's components. Every object is a handle on an engine entity; every property reads and writes the engine directly.
 
-> Early access (alpha): the API changes between releases. Install with `npm install @openengine/web@alpha`.
+> Early access (alpha): the API changes between releases. Install with `npm install @game-crafters-guild/openengine-web@alpha`.
 
 Write pages as one HTML file with a `<canvas>` and a `<script type="module">`. Use only the calls below; there are no `Mesh`, `Material`, `Object3D` or `WebGLRenderer` classes.
 
@@ -25,7 +25,7 @@ Write pages as one HTML file with a `<canvas>` and a `<script type="module">`. U
 ## Example
 
 ```js
-import { Engine, OrbitControls, Light } from '@openengine/web';
+import { Engine, OrbitControls, Light } from '@game-crafters-guild/openengine-web';
 const canvas = document.querySelector('canvas');
 if (!canvas) throw new Error('The page needs a <canvas> element.');
 const engine = await Engine.create({ canvas });
