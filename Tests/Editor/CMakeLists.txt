@@ -407,6 +407,13 @@ set(EDITOR_TEST_SOURCES
 	# (SystemWaveTrace's frame layout + nlohmann).
 	SystemWaveTraceReportTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/DebugServer/SystemWaveTraceReport.cpp
+	# get_frame_phases' reply and the phase history it reads: which frames are listed, the phase
+	# a slow frame's excess names, spike spacing, the ECS join. Leaf TUs (the ring, the
+	# SystemWaveTrace frame layout + nlohmann).
+	FramePhaseReportTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/DebugServer/FramePhaseReport.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Diagnostics/FramePhaseHistory.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Diagnostics/FramePhaseRecorder.cpp
 	# Where synthesized pointer input enters the engine. Injection that calls
 	# UIManager directly reaches the UI alone, leaving the editor InputSystem and
 	# the play-pointer remap — the whole runtime-input leg gameplay reads — unfed
@@ -1361,8 +1368,11 @@ add_executable(ProjectPickerJobTests
 	ProjectCatalogServiceTests.cpp
 	ProjectAcquisitionTests.cpp
 	ProjectStartupSceneTests.cpp
+	NewProjectLocationTests.cpp
+	ProjectCatalogTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectCatalogService.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectCatalog.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/NewProjectLocation.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectAcquisition.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectStartupScene.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/SubprocessStream.cpp

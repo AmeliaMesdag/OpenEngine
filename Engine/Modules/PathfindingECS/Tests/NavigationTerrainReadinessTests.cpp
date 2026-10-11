@@ -124,6 +124,7 @@ protected:
         Components::WorldTransform transform{};
         transform.matrix[12] = x;
         transform.matrix[14] = z;
+        transform.Version = 1u; // resolved, as TransformHierarchySystem leaves it
         return transform;
     }
 
@@ -279,10 +280,10 @@ TEST_F(NavigationTerrainReadinessTest, PendingTerrainHandleIsNotAnEmptyWorld)
     ExpectPending(grid);
 }
 
-TEST_F(NavigationTerrainReadinessTest, MissingTerrainWorldTransformDefers)
+TEST_F(NavigationTerrainReadinessTest, UnresolvedTerrainWorldTransformDefers)
 {
     auto terrain = MakeTerrain(true, 4.0f);
-    world->RemoveComponentImmediate<Components::WorldTransform>(terrain);
+    world->GetComponentForWrite<Components::WorldTransform>(terrain)->Version = 0u;
     auto grid = MakeGrid();
     navigation.Update(*world, kDt);
     ExpectPending(grid);
@@ -292,6 +293,27 @@ TEST_F(NavigationTerrainReadinessTest, MissingTerrainWorldTransformDefers)
     const auto farTerrain = MakeTerrain(false, 0.0f, 1000.0f);
     world->GetComponentForWrite<Components::WorldTransform>(farTerrain)->matrix[12] =
         std::numeric_limits<float32>::quiet_NaN();
+    navigation.Update(*world, kDt);
+    ExpectPending(grid);
+}
+
+// A heightfield collider the hierarchy has not resolved yet (Version 0) places no
+// footprint: even a stale pose far from the grid does not show it disjoint, so
+// the grid waits for its body like any other overlapping collider.
+TEST_F(NavigationTerrainReadinessTest, UnresolvedHeightfieldColliderIsNotShownDisjoint)
+{
+    const auto collider = world->CreateEntity();
+    Components::Transform transform{};
+    transform.matrix[12] = -4.0f;
+    transform.matrix[14] = -4.0f;
+    world->AddComponentImmediate(collider, transform);
+    world->GetComponentForWrite<Components::WorldTransform>(collider)->matrix[12] = 1000.0f;
+    Components::HeightFieldColliderShape shape{};
+    shape.sizeX = shape.sizeZ = 16.0f;
+    shape.heightScale = 1.0f;
+    world->AddComponentImmediate(collider, shape);
+    world->AddComponentImmediate(collider, Components::PhysicsBody{});
+    const auto grid = MakeGrid();
     navigation.Update(*world, kDt);
     ExpectPending(grid);
 }
@@ -561,7 +583,7 @@ TEST_F(NavigationTerrainReadinessTest, TiledTerrainWaitsForItsResidentTileCollid
     terrain.TiledTerrainHandle = handle.Index;
     terrain.TiledTerrainGeneration = handle.Generation;
     world->AddComponentImmediate(entity, Components::Transform{});
-    world->AddComponentImmediate(entity, Components::WorldTransform{});
+    world->AddComponentImmediate(entity, Placed(0.0f, 0.0f));
     world->AddComponentImmediate(entity, terrain);
 
     // A grid over the resident tile.

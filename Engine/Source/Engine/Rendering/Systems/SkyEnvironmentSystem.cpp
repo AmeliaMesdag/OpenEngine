@@ -886,8 +886,10 @@ void SkyEnvironmentSystem::SyncSunLight(ECS::World& world, Components::SkyEnviro
 
     const Components::WorldTransform* worldXf =
         world.GetComponent<Components::WorldTransform>(lightEntity);
-    if (!worldXf)
-        return; // Ensured by TransformHierarchySystem (runs earlier); pick it up next frame.
+    // Resolved by TransformHierarchySystem (runs earlier); a light created after
+    // it this tick (Version 0 beside its Transform) is picked up next frame.
+    if (!worldXf || (worldXf->Version == 0u && world.HasComponent<Components::Transform>(lightEntity)))
+        return;
 
     float lightSunDir[3];
     ReadLightSunDir(*worldXf, lightSunDir);

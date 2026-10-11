@@ -6,6 +6,7 @@
 #include "Components/Audio/AudioListener.h"
 #include "Components/Rendering/Camera.h"
 #include "Components/Rendering/Light.h"
+#include "Components/Rendering/LightPhotometry.h"
 #include "Components/Rendering/Particles.h"
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Components/Rendering/SkyEnvironment.h"
@@ -261,6 +262,16 @@ std::vector<ECS::ComponentTypeId> ComponentTypeIdsForPreset(ComponentPreset p)
         return {ECS::GetComponentTypeId<Components::VideoTextureComponent>()};
     }
     return {};
+}
+
+Components::Light MakeDefaultDirectionalLight()
+{
+    Components::Light light{};
+    light.Type = Components::LightType::Directional;
+    light.Intensity = Components::kClearNoonSunIlluminanceLux;
+    light.IntensityUnit = Components::LightUnit::Lux;
+    light.CastsShadows = true;
+    return light;
 }
 
 const std::vector<ComponentPresetEntry>& ComponentPresetCatalog()

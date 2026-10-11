@@ -14,6 +14,7 @@ Welcome to the Game Engine documentation! This directory contains comprehensive 
 ### Using the editor
 - **[Your first project](first-project.html)** - Create or open a project, save a scene, export a game you can run
 - **[Game builds and Steam publishing](GamePublishing.html)** - Prepare, verify and upload releases; Steam Deck builds and deployment
+- **[Running the Player headless](running-headless.html)** - No window, graphics device or audio: dedicated servers, simulations, exit codes
 - **[Editor Keyboard Shortcuts](EditorKeyboardShortcuts.md)** - Gizmo tools, camera navigation, tab management
 - **[Smart Folders](SmartFolders.md)** - Saved asset queries in the project browser
 - **[HDR Post-Processing](HDR_POST_PROCESSING_USER_GUIDE.md)** - Tonemapping, bloom and volume settings

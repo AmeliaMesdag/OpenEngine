@@ -48,12 +48,12 @@ endif()
 if(BUILD_TESTING)
     find_package(GTest CONFIG REQUIRED)
     add_executable(VolumetricFogGpuTests Tests/VolumetricFogGpuTests.cpp)
-    # GameEngineRendering links Logger and FileSystem PRIVATE, so an executable
+    # GameEngineRendering links Logger, Memory and FileSystem, so an executable
     # that calls into them needs their objects named here, as the standalone
     # rendering tests do. FileSystemObjects is an INTERFACE carrier: link it.
     target_link_libraries(VolumetricFogGpuTests PRIVATE GameEngineRendering
         FileSystemObjects GTest::gtest_main)
-    target_sources(VolumetricFogGpuTests PRIVATE $<TARGET_OBJECTS:Logger>
+    target_sources(VolumetricFogGpuTests PRIVATE $<TARGET_OBJECTS:Logger> $<TARGET_OBJECTS:Memory>
         ${CMAKE_SOURCE_DIR}/Engine/Source/ThirdParty/stb_image_impl.cpp)
     target_compile_definitions(VolumetricFogGpuTests PRIVATE GE_HAVE_STB)
     target_compile_features(VolumetricFogGpuTests PRIVATE cxx_std_20)

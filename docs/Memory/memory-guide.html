@@ -1,0 +1,154 @@
+<meta charset="utf-8">
+<title>Memory Guide</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-light: #1e2230; --border: #2a2f3d;
+    --text: #d7dae2; --muted: #8b91a3; --accent: #5cc8ff;
+    --danger: #ff6b6b; --bad: #ff6b6b; --ok: #57d99a; --good: #57d99a; --warn: #ffc857;
+  }
+  body { background: var(--bg); color: var(--text); font: 15px/1.6 "Segoe UI", system-ui, sans-serif; margin: 0; padding: 2rem clamp(1rem, 6vw, 5rem); }
+  h1 { font-size: 1.9rem; margin: 0 0 0.2rem; }
+  h2 { font-size: 1.35rem; margin-top: 3rem; border-top: 1px solid var(--border); padding-top: 1.6rem; color: var(--accent); }
+  h3 { font-size: 1.05rem; margin-top: 1.6rem; }
+  .lede { color: var(--muted); margin: 0 0 2rem; letter-spacing: 0.04em; }
+  code { background: var(--panel-light); border-radius: 4px; padding: 0.1em 0.4em; font-size: 0.9em; }
+  pre { background: var(--panel-light); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1.1rem; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.92rem; }
+  th { text-align: left; background: var(--panel-light); padding: 0.5rem 0.7rem; border-bottom: 2px solid var(--border); }
+  td { padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(92, 200, 255, 0.04); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 1rem 1.3rem; margin: 1.2rem 0; }
+  .panel.ok { border-left-color: var(--ok); }
+  .panel.warn { border-left-color: var(--warn); }
+  footer { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+  ul li { margin-bottom: 0.35rem; }
+</style>
+
+<h1>Memory Guide</h1>
+<p class="lede">GUIDE · Engine/Modules/Memory</p>
+
+<div class="panel">
+<strong>Who this is for:</strong> engine and game-module developers who hold memory the general heap does not see (device buffers, pools, caches) and want it to show in the engine's memory statistics, or who allocate many short-lived objects together and want to free them all at once. The headers are under <code>Engine/Modules/Memory/Include/Memory/</code>; a game module reaches them by linking <code>Engine</code>. This guide grows with the Memory module; it covers <code>TrackedBytes</code>, the stats snapshot and <code>Arena</code> today.
+</div>
+
+<h2>1 · TrackedBytes: a named byte count</h2>
+
+<p><code>Memory::TrackedBytes</code> is a byte count with a name and a residency that the stats registry reports. It counts exactly what its owner reports to it, nothing more: the engine does not measure anything on its behalf. Report every growth with <code>Add</code> and every release with <code>Subtract</code>, as deltas.</p>
+
+<pre><code>#include "Memory/TrackedBytes.h"
+
+namespace
+{
+// One per owner, usually a static beside the code that holds the bytes.
+GameEngine::Memory::TrackedBytes s_CacheBytes{"MyGame.PathCache", GameEngine::Memory::Residency::Cpu};
+}
+
+void PathCache::Grow(std::size_t newCapacity)
+{
+    const std::size_t oldBytes = m_Nodes.capacity() * sizeof(Node);
+    m_Nodes.reserve(newCapacity);
+    s_CacheBytes.Add(m_Nodes.capacity() * sizeof(Node) - oldBytes);
+}
+
+PathCache::~PathCache()
+{
+    s_CacheBytes.Subtract(m_Nodes.capacity() * sizeof(Node));
+}</code></pre>
+
+<table>
+<tr><th>Part</th><th>What it does</th></tr>
+<tr><td><code>TrackedBytes(name, residency)</code></td><td>Registers the count under <code>name</code> for the object's whole life; the destructor unregisters it. Constructing it is the registration: there is no separate call.</td></tr>
+<tr><td><code>Residency::Cpu</code> / <code>Residency::Gpu</code></td><td>Where the bytes live: process memory, or device memory and host-visible buffers the device reads.</td></tr>
+<tr><td><code>Add(bytes)</code></td><td>Adds to the count. A relaxed atomic: any thread, no lock, no allocation.</td></tr>
+<tr><td><code>Subtract(bytes)</code></td><td>Subtracts at most the current count, so a release reported larger than what was added leaves 0, never a wrapped count. Same cost as <code>Add</code>.</td></tr>
+</table>
+
+<h3>Names</h3>
+<ul>
+<li>Use <code>Area.What</code>, for example <code>Animation.RetargetGPUData</code>. The name is copied at construction, so a temporary string is fine.</li>
+<li><strong>At most 47 characters.</strong> A longer name is truncated to 47; a build with asserts (Debug, DebugFast) prints the name and stops at an assert asking you to shorten it.</li>
+<li>Names are not required to be unique. Two objects with the same name are two entries in a snapshot; one static per owner, shared by all its instances, gives one entry with their total.</li>
+</ul>
+
+<div class="panel warn">
+<strong>Lifetime:</strong> a <code>TrackedBytes</code> cannot be copied or moved, because the registry holds it for its whole life. Keep one per owner, as a static or as a member of an object that does not move. An owner destroyed without reporting its release leaves its bytes in the count: subtract what you hold in your destructor.
+</div>
+
+<h2>2 · Reading the stats snapshot</h2>
+
+<pre><code>#include "Memory/StatsSnapshot.h"
+
+for (const GameEngine::Memory::StatsEntry&amp; entry : GameEngine::Memory::SnapshotStats())
+    std::printf("%s %s %llu\n", entry.Name.c_str(),
+                entry.Residency == GameEngine::Memory::Residency::Gpu ? "gpu" : "cpu",
+                static_cast&lt;unsigned long long&gt;(entry.Bytes));</code></pre>
+
+<ul>
+<li><code>SnapshotStats()</code> copies every <code>TrackedBytes</code> and every <code>Arena</code> alive at the call, newest first, as <code>StatsEntry { Name, Kind, Residency, Bytes, ReservedBytes, HighWaterBytes, Blocks }</code>.</li>
+<li><code>Kind</code> says which registered it. For a <code>TrackedBytes</code>, <code>Bytes</code> is its count and the other three are 0. For an <code>Arena</code>, <code>Bytes</code> is the bytes in use, <code>ReservedBytes</code> the bytes of its blocks, <code>HighWaterBytes</code> the most it has had in use, and <code>Blocks</code> how many blocks it holds; an arena updates them when it acquires a block and at <code>Rewind</code> and <code>Reset</code>, so between those they show the value as of the last one.</li>
+<li>It takes the registry's mutex and allocates the copy: call it from tools, tests and debug views, not from a per-frame path.</li>
+<li>Each count is read once, without stopping its owner, so a count another thread is changing reads as its value just before or just after that change.</li>
+</ul>
+
+
+<h2>3 · Arena: allocate together, free together</h2>
+
+<p><code>Memory::Arena</code> hands out memory by moving a cursor forward through blocks it owns, and takes it all back at once: <code>Reset</code> empties it, <code>Rewind</code> returns to a marker. There is no per-allocation free. Use it for data that lives exactly as long as something else does: one frame, one job, one level load. A pointer it returns stays valid until the <code>Rewind</code> or <code>Reset</code> that covers it, or the arena's destruction; blocks are chained, never moved.</p>
+
+<pre><code>#include "Memory/Arena.h"
+
+class PathfindingSystem
+{
+    GameEngine::Memory::Arena m_Frame{"MyGame.PathfindingFrame"};
+
+    void Update()
+    {
+        m_Frame.Reset();                                                  // last frame's data is gone
+        std::span&lt;Node&gt; nodes = m_Frame.AllocateArray&lt;Node&gt;(nodeCount);  // zeroed
+        Request* request = m_Frame.New&lt;Request&gt;(goal);                    // ~Request runs at the next Reset
+        std::pmr::vector&lt;Node*&gt; open{&amp;m_Frame.Resource()};                // a standard container on the arena
+        ...
+    }
+};</code></pre>
+
+<table>
+<tr><th>Part</th><th>What it does</th></tr>
+<tr><td><code>Arena(name, firstBlockBytes = 64 KiB)</code></td><td>Registers the arena in the stats snapshot under <code>name</code> (copied; at most 47 characters; not empty). Acquires nothing until the first allocation.</td></tr>
+<tr><td><code>Allocate(bytes, alignment)</code></td><td>Raw memory, aligned to any power of two (default <code>alignof(std::max_align_t)</code>). Never null: a block that cannot be acquired throws <code>std::bad_alloc</code>.</td></tr>
+<tr><td><code>New&lt;T&gt;(args...)</code></td><td>Constructs a <code>T</code>. If <code>T</code> has a destructor that does something, it is recorded and run by <code>Rewind</code> or <code>Reset</code>, newest first. The constructor and the destructor may themselves allocate from the same arena.</td></tr>
+<tr><td><code>AllocateArray&lt;T&gt;(n)</code></td><td><code>n</code> value-initialised elements (zeroes for numbers). Trivially destructible <code>T</code> only.</td></tr>
+<tr><td><code>AllocateArrayForOverwrite&lt;T&gt;(n)</code></td><td><code>n</code> elements left indeterminate, for an array you fill completely before reading it. Trivially destructible <code>T</code> only.</td></tr>
+<tr><td><code>CopyArray&lt;T&gt;(span)</code></td><td>A copy of the span in the arena.</td></tr>
+<tr><td><code>GetMarker()</code> / <code>Rewind(marker)</code></td><td>Remember a position, and go back to it: the destructors recorded after the marker run, newest first, and the memory after it is reused. Every block is kept. A marker is valid until a <code>Rewind</code> to an earlier position or a <code>Reset</code>.</td></tr>
+<tr><td><code>Reset()</code></td><td>Runs every recorded destructor, newest first, and empties the arena.</td></tr>
+<tr><td><code>Resource()</code></td><td>A <code>std::pmr::memory_resource</code> for standard containers: they allocate from the arena, and their frees do nothing (the memory returns at <code>Rewind</code> or <code>Reset</code>). Declare the container after the arena, so it is destroyed first.</td></tr>
+<tr><td><code>BytesUsed()</code> / <code>BytesReserved()</code></td><td>Bytes handed out since the last <code>Reset</code> (alignment padding included), and bytes in the blocks it holds.</td></tr>
+</table>
+
+<h3>Growth: a steady frame allocates nothing</h3>
+<ul>
+<li>A request that does not fit the current block takes the next block it holds, else a new block twice the size of the last (at most 4 MiB per step, or the request's size if larger).</li>
+<li>At <code>Reset</code>, an arena holding several blocks replaces them with one block as large as the most it had in use. From then on, a frame of the same size fits that one block, and neither the frame nor its <code>Reset</code> touches the general heap. Pick the first block size near a typical frame to skip the first frame's growth.</li>
+<li><code>Rewind</code> never frees or merges blocks.</li>
+</ul>
+
+<h3>Rules</h3>
+<ol>
+<li><strong>One user at a time.</strong> An arena is not thread-safe. Any thread may use it, but uses must be ordered: a system's member arena used by whichever worker runs the system each frame is fine, because the frame orders them. Two threads inside one arena at the same moment stop at an assert in Debug and DebugFast ("two threads used this Arena at once"). Give each thread its own arena, or order the uses with a join or a lock. Any thread may read memory it was handed.</li>
+<li><strong>Nothing outlives its Reset.</strong> A pointer, span or container element from before a <code>Reset</code> (or a <code>Rewind</code> past it) points at memory the arena reuses. Debug and DebugFast fill new allocations with <code>0xCD</code> and taken-back memory with <code>0xDD</code>, so a stale read shows as those bytes; under AddressSanitizer it is reported where it happens.</li>
+<li><strong>Destructors and hot reload.</strong> An arena that still holds an object whose destructor is your module's code keeps that module's old code loaded when the module reloads, and the editor log names the arena. A system's member arena needs nothing from you: its destructors run when the replaced system is destroyed at the next schedule build. An arena held anywhere else stops holding the old code once you reset or destroy it, and the old code is then released at a later reload that nothing else holds it for. A module that registers a game system keeps its old code loaded until the editor restarts, whatever its arenas hold.</li>
+<li><strong>Not copyable, not movable.</strong> Keep an arena where it does not move: a member of an object that does not move, or a static.</li>
+</ol>
+
+<div class="panel ok">
+<strong>Cost:</strong> an allocation is an align, an add and a compare on the current block. Statistics are written only when a block is acquired and at <code>Rewind</code> and <code>Reset</code>. The Debug and DebugFast checks (the one-user word and the fills) cost a few instructions per allocation and a pass over the bytes taken back.
+</div>
+
+<h2>Changelog</h2>
+<ul>
+<li><strong>v1.1 · 2026-10-11:</strong> <code>Arena</code> (section 3: allocation, markers, growth and coalescing, the one-user rule, stale pointers, destructors across hot reload); the snapshot's <code>Kind</code>, <code>ReservedBytes</code>, <code>HighWaterBytes</code> and <code>Blocks</code>.</li>
+<li><strong>v1.0 · 2026-10-11:</strong> first version: <code>TrackedBytes</code> (what it counts, registration, names and their 47-character limit, lifetime) and <code>SnapshotStats</code>.</li>
+</ul>
+
+<footer>v1.1 · 2026-10-11 · sources: TrackedBytes.h / StatsSnapshot.h / StatsKind.h / Residency.h / StatsRecord.h / Arena.h in Engine/Modules/Memory/Include/Memory, Engine/Modules/Memory/Tests/TrackedBytesTests, ArenaTests, ArenaUseTests, ArenaImagePinTests</footer>

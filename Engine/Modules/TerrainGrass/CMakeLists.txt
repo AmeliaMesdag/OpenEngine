@@ -145,10 +145,10 @@ if(BUILD_TESTING)
             GTest::gtest_main
         )
         # OBJECT->OBJECT object files are not spliced transitively on the VS
-        # generator: splice Logger in directly (the CBT and Rendering suites do the
-        # same) and provide the stb_image impl GameEngineRendering pulls in but
-        # does not export.
-        target_sources(TerrainGrassStatsTests PRIVATE $<TARGET_OBJECTS:Logger>)
+        # generator: splice Logger and Memory in directly (the CBT and Rendering
+        # suites do the same) and provide the stb_image impl GameEngineRendering
+        # pulls in but does not export.
+        target_sources(TerrainGrassStatsTests PRIVATE $<TARGET_OBJECTS:Logger> $<TARGET_OBJECTS:Memory>)
         target_sources(TerrainGrassStatsTests PRIVATE
             ${CMAKE_SOURCE_DIR}/Engine/Source/ThirdParty/stb_image_impl.cpp)
         target_compile_definitions(TerrainGrassStatsTests PRIVATE GE_HAVE_STB)

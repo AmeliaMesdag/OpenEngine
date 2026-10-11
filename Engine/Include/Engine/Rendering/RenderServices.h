@@ -1477,6 +1477,7 @@ class RenderServices
         uint32_t PendingMaterialLoad = 0;  // material GUID set but not registered yet
         uint32_t PendingPipeline = 0;      // material pipeline still compiling
         uint32_t PendingSentinelIndex = 0; // mesh/material GPU index still the ~0u sentinel
+        uint32_t PendingUnresolvedTransform = 0; // WorldTransform not resolved yet (Version 0)
         // Scene-composition counts (the S0 residual-attribution assertion:
         // "residual ~= CLEANUP" holds only for particle/volume/ocean-free
         // compositions — bench post-processing asserts these are zero before

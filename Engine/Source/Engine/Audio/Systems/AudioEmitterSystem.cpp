@@ -149,9 +149,16 @@ void AudioEmitterSystem::Update(ECS::World& world, float32 /*deltaTime*/)
             StopEmitterVoice(*m_Audio, it->second);
     }
 
-    auto q = world.Query<ECS::Read<AudioEmitter>, ECS::Optional<WorldTransform>>();
-    q.Each([&](ECS::EntityHandle e, const AudioEmitter& emitter, const WorldTransform* wt)
+    auto q = world.Query<ECS::Read<AudioEmitter>, ECS::Optional<WorldTransform>,
+                         ECS::Optional<Components::Transform>>();
+    q.Each([&](ECS::EntityHandle e, const AudioEmitter& emitter, const WorldTransform* wt,
+               const Components::Transform* local)
            {
+               // A pose the hierarchy has not resolved yet (Version 0 beside a
+               // Transform) would start the voice at the origin; the emitter
+               // starts on the frame its pose resolves.
+               if (wt && local && wt->Version == 0u)
+                   return;
                auto& rt = m_Impl->emitters[e];
 
                const GUID guid = emitter.clipGuid.ToGuid(); // null GUID when unset

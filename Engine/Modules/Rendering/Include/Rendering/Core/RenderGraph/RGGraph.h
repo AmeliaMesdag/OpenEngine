@@ -10,7 +10,7 @@
 // barrier generation, and the submission plan — all over flat dense-id arrays.
 // Physical realization and command recording live in RGFrame/RGRecord.
 
-#include "Rendering/Core/RenderGraph/RGArena.h"
+#include "Memory/Arena.h"
 #include "Rendering/Core/RenderGraph/RGBarrier.h"
 #include "Rendering/Core/RenderGraph/RGTypes.h"
 
@@ -322,7 +322,7 @@ class RGGraph
     RGQueue PassQueue(RGPassId p) const { return m_Passes[p].Desc.Queue; }
     int32_t PassPhase(RGPassId p) const { return m_Passes[p].Desc.Phase; }
 
-    RGArena& Arena() { return m_Arena; }
+    Memory::Arena& Arena() { return m_Arena; }
 
   private:
     struct RGPassRec
@@ -469,7 +469,7 @@ class RGGraph
     // when callers build names dynamically).
     const char* CopyName(const char* name);
 
-    RGArena m_Arena;
+    Memory::Arena m_Arena;
 };
 
 } // namespace GameEngine::Rendering::RenderGraph

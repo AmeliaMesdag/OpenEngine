@@ -560,7 +560,7 @@ int main()
         rs->Views().SetViewCamera(viewId, camId);
 
         // Run fixed-step simulation + extraction.
-        // Ensure WorldTransform exists for renderables even on frames where we don't step.
+        // Resolve WorldTransform for renderables even on frames where we don't step.
         xfSystem.Update(world, 0.0f);
         physicsInit.Update(world, 0.0f);
 

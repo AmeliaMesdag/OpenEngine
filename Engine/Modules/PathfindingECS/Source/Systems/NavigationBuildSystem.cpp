@@ -304,12 +304,11 @@ void NavigationBuildSystem::Update(ECS::World& world, float32 /*deltaTime*/)
                 // GridMap latches its origin at creation and exposes no origin
                 // setter. Wait for the placed transform before creating this
                 // binding, including after a world/service reset.
-                // TransformHierarchySystem adds WorldTransform to every
-                // Transform-bearing entity, so a placed grid whose WorldTransform
-                // has not appeared yet must wait rather than default to (0,0,0).
-                // A grid with no Transform at all has no placed position, and
-                // (0,0,0) is its correct origin.
-                if (localTransform && !wt)
+                // A placed grid whose WorldTransform TransformHierarchySystem has
+                // not resolved yet (Version 0) must wait rather than default to
+                // (0,0,0). A grid with no Transform at all has no placed
+                // position, and (0,0,0) is its correct origin.
+                if (localTransform && (!wt || wt->Version == 0u))
                     return;
 
                 Pathfinding::GridSettings settings;

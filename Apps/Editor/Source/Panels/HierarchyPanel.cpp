@@ -20,7 +20,6 @@
 #include "Components/PolyhavenPlaceholder.h"
 #include "Components/Rendering/Camera.h"
 #include "Components/Rendering/Light.h"
-#include "Components/Rendering/LightPhotometry.h"
 #include "Components/Rendering/LensFlareSource.h"
 #include "Components/Rendering/MeshRenderer.h"
 #include "Components/Rendering/Ocean.h"
@@ -64,6 +63,7 @@
 #include "EditorContext.h"
 #include "EditorContextMenu/UIContextMenu.h"
 #include "InspectorRegistry.h"
+#include "Inspectors/ComponentPresets.h"
 #include "Inspectors/InspectorComponentRowHelpers.h"
 #include "Sky/SkyEnvironmentCreation.h"
 #include "Engine/Rendering/MeshGPURegistry.h"
@@ -3791,8 +3791,7 @@ bool HierarchyPanel::HandleCommand(std::uint32_t cmd)
             // so they stay Unitless).
             if (light.Type == Components::LightType::Directional)
             {
-                light.Intensity = Components::kClearNoonSunIlluminanceLux;
-                light.IntensityUnit = Components::LightUnit::Lux;
+                light = Editor::MakeDefaultDirectionalLight();
             }
             else if (light.Type == Components::LightType::Point)
             {

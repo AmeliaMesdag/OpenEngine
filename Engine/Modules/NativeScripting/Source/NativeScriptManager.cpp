@@ -18,6 +18,7 @@
 #include "PluginAPI/EnginePlugin.h"             // registration hold + abort purge (C12)
 
 #include <algorithm>
+#include <iterator>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -183,6 +184,7 @@ void NativeScriptManager::Shutdown()
     m_WatchSubscription.reset(); // RAII unsubscribe
     m_PendingChange.store(false, std::memory_order_relaxed);
     m_RebuildRequested.store(false, std::memory_order_relaxed);
+    m_DeferredEditorModules.clear();
     m_WatchDirectory.clear();
 
     // The completion task of a build still in flight will never run, so a thread in
@@ -248,6 +250,19 @@ void NativeScriptManager::Tick()
     // the main thread). Cheap when empty.
     ProcessMainThreadTasks();
 
+    // The editor-only modules a pass held back build as soon as its shipped modules are applied,
+    // unless a rebuild is requested or a source change settles: that pass goes first (KickBuild
+    // collects the held modules again), or play would wait out every editor-only compile.
+    if (!m_DeferredEditorModules.empty() && !m_BuildInFlight.load(std::memory_order_relaxed) &&
+        !m_RebuildRequested.load(std::memory_order_relaxed) && !m_PendingChange.load(std::memory_order_relaxed))
+    {
+        std::vector<StaleModule> editorModules = std::move(m_DeferredEditorModules);
+        m_DeferredEditorModules.clear();
+        const bool initialPass = m_DeferredEditorModulesInitialPass;
+        m_DeferredEditorModulesInitialPass = false;
+        DispatchBuildBatch(std::move(editorModules), initialPass);
+    }
+
     // Settle debounce: coalesce a burst of saves into one rebuild request.
     if (m_PendingChange.load(std::memory_order_relaxed))
     {
@@ -279,8 +294,8 @@ void NativeScriptManager::Tick()
 bool NativeScriptManager::IsModuleBuildPendingLocked() const
 {
     // A requested build's stale set is unknown until its kick, so a request counts;
-    // a dispatched build counts only while it holds a shipped module (one completion
-    // task applies the whole batch, so a mixed batch is waited out in full).
+    // a dispatched build counts only while it holds a shipped module (KickBuild never
+    // batches editor-only modules with shipped ones: they wait in m_DeferredEditorModules).
     return m_PendingChange.load(std::memory_order_relaxed) ||
            m_RebuildRequested.load(std::memory_order_relaxed) ||
            (m_BuildInFlight.load(std::memory_order_relaxed) && !m_ShippedModulesBuilding.empty());
@@ -1024,6 +1039,8 @@ void NativeScriptManager::SetBuildConfig(const NativeBuildConfig& config)
 void NativeScriptManager::SetPackageModuleConfigs(std::vector<NativeBuildConfig> configs)
 {
     m_PackageConfigs = std::move(configs);
+    m_DeferredEditorModules.clear();
+    m_DeferredEditorModulesInitialPass = false;
     // Editor-kind modules (they link the EditorSDK) are excluded from the
     // superseded-image unload: their live editor UI/factories are not covered
     // by the quiesce ledger. Accumulated, not reset — a module once loaded as
@@ -1099,8 +1116,8 @@ bool NativeScriptManager::AreModulesPending() const
     if (!m_ModuleLoadingSupported)
         return false;
     return m_PendingChange.load(std::memory_order_relaxed) || m_RebuildRequested.load(std::memory_order_relaxed) ||
-           m_BuildInFlight.load(std::memory_order_relaxed) || m_InitialPackageOutcomesPending != 0 ||
-           HasDeferredHotReloadPending();
+           m_BuildInFlight.load(std::memory_order_relaxed) || !m_DeferredEditorModules.empty() ||
+           m_InitialPackageOutcomesPending != 0 || HasDeferredHotReloadPending();
 }
 
 bool NativeScriptManager::AreShippedModuleBuildsPending() const
@@ -1160,19 +1177,16 @@ void NativeScriptManager::KickBuild()
     // the cached build once. The cached/no-op paths below DON'T stamp the throttle, so a genuine
     // edit right after a cached open kicks immediately. Up-to-date modules load directly (main
     // thread, no cmake); stale ones are batched onto one worker.
-    struct StaleModule
-    {
-        NativeBuildConfig Config;
-        std::string FullDigest;
-        std::string AbiDigest;
-        bool IsPackageModule = false;
-    };
     std::vector<StaleModule> staleModules;
 
     // Whether THIS pass is the first for the current package config set — it
     // owns the InitialPackageModulePassComplete transition (later passes are
-    // edit-driven rebuilds and must not touch the signal).
-    const bool initialPackagePass = m_InitialPackageOutcomesPending == kInitialPassNotRun;
+    // edit-driven rebuilds and must not touch the signal). A pass that replaces
+    // the first pass's held editor-only batch takes that ownership over.
+    const bool initialPackagePass =
+        m_InitialPackageOutcomesPending == kInitialPassNotRun || m_DeferredEditorModulesInitialPass;
+    m_DeferredEditorModules.clear();
+    m_DeferredEditorModulesInitialPass = false;
     std::size_t configIndex = 0;
 
     for (const NativeBuildConfig& config : configs)
@@ -1231,7 +1245,8 @@ void NativeScriptManager::KickBuild()
         // Fully up to date: source set + engine ABI unchanged and the previously-built DLL is
         // present -> load it directly, skip cmake entirely.
         NativeBuildResult cached;
-        if (cache && cache->Digest == fullDigest && LoadCachedDll(cache->DllPath, config.ModuleName, cached))
+        if (cache && !fullDigest.empty() && cache->Digest == fullDigest &&
+            LoadCachedDll(cache->DllPath, config.ModuleName, cached))
         {
             Logger::Log::Info("[NativeScripting] module '{}' up to date — loaded cached DLL (no rebuild)",
                               config.ModuleName);
@@ -1275,7 +1290,7 @@ void NativeScriptManager::KickBuild()
             if (m_OnAfterReload)
                 m_OnAfterReload();
         }
-        staleModules.push_back(StaleModule{config, fullDigest, abiDigest, isPackageModule});
+        staleModules.push_back(StaleModule{config, fullDigest, abiDigest, isPackageModule, configIndex - 1});
     }
 
     // The initial pass owes the signal a count: package modules that loaded
@@ -1298,8 +1313,36 @@ void NativeScriptManager::KickBuild()
         return;
     }
 
+    // Build order: the project's own module first, then runtime package modules, then editor-only
+    // package modules; stable, so package modules keep their dependency order within a group.
+    // Play mode loads the project module and the runtime packages, never an editor-only module,
+    // so while both kinds are stale the editor-only ones wait for a second batch and the play
+    // gate (AreShippedModuleBuildsPending) waits for the first alone.
+    auto buildPriority = [this](const StaleModule& module) {
+        if (!module.IsPackageModule)
+            return 0;
+        return m_EditorModuleIds.count(module.Config.ModuleName) == 0 ? 1 : 2;
+    };
+    std::stable_sort(staleModules.begin(), staleModules.end(),
+                     [&buildPriority](const StaleModule& a, const StaleModule& b)
+                     { return buildPriority(a) < buildPriority(b); });
+    const auto firstEditorModule =
+        std::find_if(staleModules.begin(), staleModules.end(),
+                     [&buildPriority](const StaleModule& module) { return buildPriority(module) == 2; });
+    if (firstEditorModule != staleModules.begin() && firstEditorModule != staleModules.end())
+    {
+        m_DeferredEditorModules.assign(std::make_move_iterator(firstEditorModule),
+                                       std::make_move_iterator(staleModules.end()));
+        m_DeferredEditorModulesInitialPass = initialPackagePass;
+        staleModules.erase(firstEditorModule, staleModules.end());
+    }
+    DispatchBuildBatch(std::move(staleModules), initialPackagePass);
+}
+
+void NativeScriptManager::DispatchBuildBatch(std::vector<StaleModule> staleModules, bool initialPackagePass)
+{
     // Dispatch the batch as one build job; loads + registration land back on the main thread
-    // (registries are main-thread-only) in module order. Shutdown waits on m_BuildTask.
+    // (registries are main-thread-only) in load order. Shutdown waits on m_BuildTask.
     m_BuildInFlight.store(true, std::memory_order_relaxed);
     m_ShippedModulesBuilding.clear();
     for (const StaleModule& stale : staleModules)
@@ -1322,6 +1365,7 @@ void NativeScriptManager::KickBuild()
             std::string FullDigest;
             std::string AbiDigest;
             bool IsPackageModule = false;
+            std::size_t LoadOrder = 0;
         };
         std::vector<ModuleOutcome> outcomes;
         outcomes.reserve(staleModules.size());
@@ -1338,6 +1382,7 @@ void NativeScriptManager::KickBuild()
             outcome.FullDigest = stale.FullDigest;
             outcome.AbiDigest = stale.AbiDigest;
             outcome.IsPackageModule = stale.IsPackageModule;
+            outcome.LoadOrder = stale.LoadOrder;
             try
             {
                 outcome.Dll = BuildOnly(stale.Config, outcome.Result);
@@ -1367,6 +1412,8 @@ void NativeScriptManager::KickBuild()
             m_LastBuildCompleteTime = std::chrono::steady_clock::now();
             m_BuildInFlight.store(false, std::memory_order_relaxed);
             m_ShippedModulesBuilding.clear();
+            std::stable_sort(outcomes.begin(), outcomes.end(),
+                             [](const ModuleOutcome& a, const ModuleOutcome& b) { return a.LoadOrder < b.LoadOrder; });
 
             for (ModuleOutcome& outcome : outcomes)
             {
@@ -1457,16 +1504,23 @@ void NativeScriptManager::ProcessMainThreadTasks()
 void NativeScriptManager::ComputeDigests(const NativeBuildConfig& config, std::string& outFull,
                                          std::string& outAbi) const
 {
-    // ABI inputs first — config + the engine import-lib (size+mtime, which any relink bumps) +
+    // ABI inputs first — config + the engine binary's link stamp (which every relink changes) +
     // compile-definitions. The hash after just these IS the ABI digest: a cached DLL whose ABI
     // digest still matches was built against the same engine, so it is safe to optimistic-load.
-    std::uint64_t hash = HashEngineAbiInputs(config);
-    outAbi = ToHexDigest(hash);
+    // An engine that cannot be identified leaves both digests empty, which matches no record.
+    const std::optional<std::uint64_t> hash = HashEngineAbiInputs(config);
+    if (!hash)
+    {
+        outAbi.clear();
+        outFull.clear();
+        return;
+    }
+    outAbi = ToHexDigest(*hash);
 
     // Continue the SAME running hash over the watched sources -> the full digest, which
     // additionally differs on any source edit/add/remove. Keeping the ABI inputs as the
     // prefix is what makes the ABI digest a snapshot of the full digest mid-stream.
-    outFull = ToHexDigest(HashWatchedNativeSources(config.SourceDir, config.PackageRootDir, hash));
+    outFull = ToHexDigest(HashWatchedNativeSources(config.SourceDir, config.PackageRootDir, *hash));
 }
 
 bool NativeScriptManager::TryLoadPrebuiltPackageModule(const NativeBuildConfig& config,

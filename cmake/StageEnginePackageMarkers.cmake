@@ -1,11 +1,11 @@
 # Write engine_abi markers for staged prebuilt engine-package modules. Runs
-# POST_BUILD on the host app AFTER its SDK and Packages staging and, on macOS,
-# the signing of its SDK libraries: the digest hashes the STAGED SDK import
-# libs' identity (path + size + mtime), which signing changes, so it must be
-# computed against their final staged state — the exact inputs the
-# NativeScriptManager loader recomputes at project open. A stale/mismatched
-# marker makes the loader fall back to a source build loudly; it can never
-# cause a wrong load.
+# POST_BUILD on the host app AFTER its SDK and Packages staging: the digest
+# folds the link stamps of the SDK's Engine and EditorSDK binaries (never their
+# paths or timestamps), the exact inputs the NativeScriptManager loader
+# recomputes at project open. A mismatched marker makes the loader fall back to
+# a source build loudly. The marker identifies the engine link the module was
+# built against, so it cannot catch a prebuilt that was itself built against a
+# different engine and stamped against this one.
 #
 # Args: -DSTAMP_TOOL= -DSDK_DIR= -DPACKAGES_DIR= -DMODULES_FILE=
 # MODULES_FILE lines: <pkg-relative prebuilt subdir>|<editor|runtime>|<defines,comma-separated>

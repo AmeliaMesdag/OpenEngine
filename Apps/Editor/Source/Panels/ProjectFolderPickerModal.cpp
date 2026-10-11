@@ -20,6 +20,7 @@
 #include "Core/Application.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Editor/EditorPaths.h"
+#include "Projects/NewProjectLocation.h"
 #include "UI/Interaction/ContextMenuManipulator.h"
 #include "Core/Engine.h"
 #include "Input/KeyCodes.h"
@@ -937,7 +938,11 @@ void ProjectFolderPickerModal::BuildTree()
         row->AddChild(std::move(field));
         form.AddChild(std::move(row));
     };
-    addField(*newProjectForm, "PROJECT NAME", m_NewProjectNameField);
+    // The fields share one row; the error, when shown, takes its own row below them inside the
+    // band, so it keeps the band's padding and never sits against the footer.
+    auto newProjectFields = std::make_unique<UIElement>();
+    newProjectFields->AddClass("project-picker-form-fields");
+    addField(*newProjectFields, "PROJECT NAME", m_NewProjectNameField);
     // Ids let the debug-server automation (set_text_field / click_element)
     // target the creation form.
     m_NewProjectNameField->SetId("new-project-name-field");
@@ -969,15 +974,16 @@ void ProjectFolderPickerModal::BuildTree()
     }
     locationRow->AddChild(std::move(locationLabel));
     locationRow->AddChild(std::move(locationControls));
-    newProjectForm->AddChild(std::move(locationRow));
-    newProjectView->AddChild(std::move(newProjectForm));
+    newProjectFields->AddChild(std::move(locationRow));
+    newProjectForm->AddChild(std::move(newProjectFields));
 
     auto newProjectError = std::make_unique<Label>();
     m_NewProjectErrorLabel = newProjectError.get();
     newProjectError->SetText("");
     newProjectError->SetId("new-project-error");
     newProjectError->AddClass("project-picker-error");
-    newProjectView->AddChild(std::move(newProjectError));
+    newProjectForm->AddChild(std::move(newProjectError));
+    newProjectView->AddChild(std::move(newProjectForm));
 
     auto importProjectView = std::make_unique<UIElement>();
     m_ImportProjectView = importProjectView.get();
@@ -2276,23 +2282,9 @@ void ProjectFolderPickerModal::ShowNewProjectView()
         if (m_NewProjectNameField)
             m_NewProjectNameField->SetValue(DefaultNewProjectName());
 
-        std::filesystem::path initialLocation;
-        Editor::SettingsStore prefs = Editor::OpenEditorPreferences();
-        std::string err;
-        (void)prefs.Load(&err);
-        std::string lastBrowsedDirectory;
-        if (prefs.TryGetString("lastBrowsedDirectory", lastBrowsedDirectory) &&
-            !lastBrowsedDirectory.empty())
-        {
-            std::error_code ec;
-            const std::filesystem::path candidate(lastBrowsedDirectory);
-            if (std::filesystem::is_directory(candidate, ec))
-                initialLocation = candidate;
-        }
-        if (initialLocation.empty())
-            initialLocation = ResolveHomePath();
         if (m_NewProjectLocationField)
-            m_NewProjectLocationField->SetValue(initialLocation.generic_string());
+            m_NewProjectLocationField->SetValue(
+                Editor::LoadNewProjectLocation(ResolveHomePath()).generic_string());
     }
 
     UpdateNewProjectTabView();
@@ -2400,7 +2392,7 @@ void ProjectFolderPickerModal::OnCreateProjectClicked()
         entry = &m_Community.Catalog.Entries[m_SelectedCommunity];
         if (entry->Source.Type == Editor::ProjectSourceType::Unsupported)
         {
-            setError("This project's source type is not supported by this build.");
+            setError(entry->Source.RefusalReason);
             return;
         }
         if (entry->Source.Type == Editor::ProjectSourceType::Git &&
@@ -2468,6 +2460,7 @@ void ProjectFolderPickerModal::OnCreateProjectClicked()
         setError("Another project is still being created.");
         return;
     }
+    Editor::SaveNewProjectLocation(parent);
     m_AcquireInFlight = true;
     UpdateCreateProjectEnabled();
     ShowLoading();

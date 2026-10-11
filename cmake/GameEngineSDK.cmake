@@ -459,10 +459,22 @@ function(ge_stage_engine_sdk host_target sdk_output_dir)
     # Editor-kind package modules link, plus the staged editor headers. The
     # import lib itself is picked up by the lib/$<CONFIG> glob-stage below;
     # include-editor is staged further down.
+    # enginebinary / editorbinary name the shared libraries whose link stamps are
+    # the engine-ABI digest's identity inputs. On Windows the running config's DLLs
+    # sit beside the host executable, the SDK's parent; elsewhere the linker file
+    # in lib/<config> is the shared library itself.
+    if(WIN32)
+        set(_ge_sdk_engine_binary "../$<TARGET_FILE_NAME:Engine>")
+        set(_ge_sdk_editor_binary "../$<TARGET_FILE_NAME:EditorSDK>")
+    else()
+        set(_ge_sdk_engine_binary "lib/$<CONFIG>/$<TARGET_FILE_NAME:Engine>")
+        set(_ge_sdk_editor_binary "lib/$<CONFIG>/$<TARGET_FILE_NAME:EditorSDK>")
+    endif()
     set(_ge_sdk_editor_lines "")
     if(TARGET EditorSDK)
         set(_ge_sdk_editor_lines
 "editorimportlib=lib/$<CONFIG>/$<TARGET_LINKER_FILE_NAME:EditorSDK>
+editorbinary=${_ge_sdk_editor_binary}
 editorincludes=include-editor
 ")
     endif()
@@ -474,6 +486,7 @@ editorincludes=include-editor
 config=$<CONFIG>
 includedir=include
 importlib=lib/$<CONFIG>/$<TARGET_LINKER_FILE_NAME:Engine>
+enginebinary=${_ge_sdk_engine_binary}
 sdkentry=nativescripting/UserModuleEntry.cpp
 scannerdll=nativescripting/ComponentScanner/ComponentScanner.dll
 defs=$<TARGET_PROPERTY:Engine,INTERFACE_COMPILE_DEFINITIONS>

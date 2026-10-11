@@ -43,7 +43,7 @@ and when the derived value is valid.
 ## TransformHierarchySystem Responsibilities
 
 - Run once per frame after local transform writers.
-- Ensure every entity with `Transform` also has `WorldTransform`.
+- Write `WorldTransform`, which every entity with a `Transform` holds from the moment it gains the `Transform` (`Transform` requires it, so no pass adds it later).
 - Resolve every entity **without a `Parent` component** on the flat parallel pass: `WorldTransform = Transform` for changed chunks only, spread across the job system. This holds whether or not hierarchies exist elsewhere in the world, so adding one parented entity never slows the rest of the world down.
 - Keep a cached direct entity-index lookup and parent-to-child topology for the **hierarchy members**: the entities that have a `Parent` component and the roots above them. Rebuild it only after a `Parent` edit or an ECS structural change.
 - On ordinary transform edits:

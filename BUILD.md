@@ -16,7 +16,7 @@ How to build the editor from a fresh clone on **Windows** (primary), **macOS** a
 - [Disk footprint](#disk-footprint)
 - [Tests](#tests)
 - [Standalone CLI (gameenginecli)](#standalone-cli-gameenginecli)
-- [AddressSanitizer](#addresssanitizer)
+- [Sanitizers](#sanitizers)
 - [Build options](#build-options)
 - [Version](#version)
 - [vcpkg manifest features](#vcpkg-manifest-features)
@@ -183,7 +183,7 @@ Choosing one:
 - Visual Studio, Xcode and Ninja Multi-Config trees list DebugFast first, so the IDE opens on it and `cmake --build --preset <preset>` builds it. Pass `--config Debug`, `--config Release` or another configuration to build that one instead.
 - A build that names neither a preset nor `--config` (`cmake --build build/<preset>`) builds Debug in a Visual Studio tree: CMake picks Debug there, not the project.
 - Single-configuration trees (Ninja: Linux, `macos-arm64-ninja`, `macos-x64-ninja`) fix the configuration at configure time: DebugFast unless `-DCMAKE_BUILD_TYPE=Debug`, `Release` or another one is passed.
-- `vs2026-x64-local-asan` builds Debug, the configuration AddressSanitizer instruments. `wasm-debug` builds Debug, `wasm-release` Release and the `steamdeck` presets RelWithDebInfo.
+- `vs2026-x64-local-asan`, `macos-arm64-local-asan` and `macos-arm64-local-tsan` build Debug, the configuration the sanitizers instrument. `wasm-debug` builds Debug, `wasm-release` Release and the `steamdeck` presets RelWithDebInfo.
 
 `GE_VK_VALIDATION=1` forces the Vulkan validation layers on in any configuration, `GE_VK_NO_VALIDATION=1` forces them off, and `GE_VK_VALIDATION_VERBOSE=1` turns on the verbose messenger.
 
@@ -255,14 +255,25 @@ build\vs2026-x64-local\bin\DebugFast\gameenginecli.exe get_log --count 50 --min-
 
 Usage, argument shapes and exit codes: [docs/MCP_SETUP.md](docs/MCP_SETUP.md).
 
-## AddressSanitizer
+## Sanitizers
 
-For memory bugs, a separate tree with `/fsanitize=address` on the **Debug** configuration; tests are on in this preset and the ASan runtime DLLs are staged beside the executables:
+Each sanitizer instruments the **Debug** configuration in a tree of its own, with tests on. AddressSanitizer (memory bugs) on Windows, with the ASan runtime DLLs staged beside the executables:
 
 ```bat
 cmake --preset vs2026-x64-local-asan
 cmake --build --preset vs2026-x64-local-asan --config Debug --target <Target> -j 12
 ```
+
+AddressSanitizer and ThreadSanitizer (data races) on macOS (Apple Silicon); the two cannot share a tree:
+
+```bash
+cmake --preset macos-arm64-local-asan
+cmake --build --preset macos-arm64-local-asan --target <Target>
+cmake --preset macos-arm64-local-tsan
+cmake --build --preset macos-arm64-local-tsan --target <Target>
+```
+
+Run the test executables from `build/<preset>/bin/Debug/Tests/` as usual; a sanitizer report goes to stderr and fails the run.
 
 ## Build options
 
@@ -276,6 +287,7 @@ cmake --build --preset vs2026-x64-local-asan --config Debug --target <Target> -j
 | `ENABLE_SCRIPTING` | ON | CoreCLR hosting and C# integration |
 | `PLAYER_MOVIE_RECORDER` | OFF | `--write-movie` capture and encode in the Player |
 | `ENABLE_ASAN` | OFF | AddressSanitizer (Debug configuration) |
+| `ENABLE_TSAN` | OFF | ThreadSanitizer (Debug configuration; clang or gcc, not with `ENABLE_ASAN`) |
 | `RENDERING_ENABLE_GPU_CULLING` | OFF | GPU culling examples and tests |
 
 Example: `cmake --preset vs2026-x64-local -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON`. `cmake --fresh` resets cached variables, so pass your `-D` options again.

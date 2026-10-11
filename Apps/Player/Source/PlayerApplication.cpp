@@ -122,8 +122,8 @@ PlayerApplication::PlayerApplication(const ApplicationConfig& config, const Game
                                      bool tickManagedSystems,
 #if GE_PLAYER_MOVIE_RECORDER
                                      std::optional<Video::VideoWriterOptions> movieOptions,
-                                     uint64_t movieFrameLimit,
 #endif
+                                     uint64_t quitAfterFrames,
                                      bool allowRuntimeHdrToggle,
                                      std::string screenshotPath)
     : Application(config)
@@ -134,9 +134,10 @@ PlayerApplication::PlayerApplication(const ApplicationConfig& config, const Game
                                     : Rendering::HdrOutputMode::Auto)
     , m_RuntimeHdrBitDepth(gameConfig.hdrSwapchainBitDepth)
     , m_AllowRuntimeHdrToggle(allowRuntimeHdrToggle)
+    , m_QuitAfterFrames(quitAfterFrames)
 #if GE_PLAYER_MOVIE_RECORDER
     , m_MovieOptions(std::move(movieOptions))
-    , m_MovieFrameLimit(movieFrameLimit)
+    , m_MovieFrameLimit(quitAfterFrames)
 #endif
     , m_ScreenshotPath(std::move(screenshotPath))
 {
@@ -409,8 +410,12 @@ bool PlayerApplication::Initialize()
 
     // Register built-in primitive meshes/materials (must happen after editor source
     // is mounted so the material compiler can find shader adapters).
-    if (auto* rs = m_Host->GetRenderDeviceContext()->GetRenderServices())
-        Engine::Renderer::PrimitiveGenerator::RegisterAll(*rs);
+    // Headless: no render context, so nothing to register.
+    if (auto* renderCtx = m_Host->GetRenderDeviceContext())
+    {
+        if (auto* rs = renderCtx->GetRenderServices())
+            Engine::Renderer::PrimitiveGenerator::RegisterAll(*rs);
+    }
 
     // Register the plugin scene schemas before any scene loads (EngineCore
     // registers the built-in ones at initialization), and the terrain modules'
@@ -644,6 +649,16 @@ void PlayerApplication::Update(float64 deltaTime)
         RequestExit();
 
     PollRuntimeDisplayControls();
+
+    // --quit-after: this is the last frame when it is frame number m_QuitAfterFrames.
+    // A movie capture ends on its written frames instead (PollMovieFrames).
+#if GE_PLAYER_MOVIE_RECORDER
+    const bool movieOwnsQuit = m_MovieOptions.has_value();
+#else
+    const bool movieOwnsQuit = false;
+#endif
+    if (m_QuitAfterFrames > 0 && !movieOwnsQuit && GetFrameCount() + 1 >= m_QuitAfterFrames)
+        RequestExit();
 
     // Engine::Update() is called by the base Application loop and drives the
     // rendering loop (ECS systems) automatically via SetRenderingLoopAutoDrive(true).

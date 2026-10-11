@@ -293,6 +293,7 @@ file(GENERATE
     CONTENT
 "cmake=${CMAKE_COMMAND}
 importlib=$<TARGET_LINKER_FILE:Engine>
+enginebinary=$<TARGET_FILE:Engine>
 config=$<CONFIG>
 sdkinc=${_c10_sdk_inc}
 sdkentry=${_c10_sdk_entry}

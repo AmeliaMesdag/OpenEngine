@@ -40,6 +40,7 @@
 #include "DebugServer/GpuToolingHandlers.h"
 #include "DebugServer/GroundQueryDebugHandlers.h"
 #include "DebugServer/JobSystemDebugHandlers.h"
+#include "DebugServer/NavigationDebugHandlers.h"
 #include "DebugServer/MarkupDebugHandlers.h"
 #include "DebugServer/PerformDropRequest.h"
 #include "DebugServer/SkyDebugHandlers.h"
@@ -55,6 +56,7 @@
 #include "DebugServer/SceneHierarchyReport.h"
 #include "DebugServer/SchemaComponentApply.h"
 #include "DebugServer/RenderDocCapture.h"
+#include "DebugServer/FramePhaseDebugHandlers.h"
 #include "DebugServer/RenderGraphResourceFilter.h"
 #include "DebugServer/ScreenshotCaptureWait.h"
 #include "DebugServer/TerrainDebugHandlers.h"
@@ -3131,6 +3133,12 @@ void RegisterDebugHandlers(EditorDebugServer& server,
 
     // 4h. the engine job system: what every pool thread runs, lane and channel backlogs
     RegisterJobSystemDebugHandlers(server);
+
+    // 4i. the editor's per-frame phase history: which phase each recent frame spent its time in
+    RegisterFramePhaseDebugHandlers(server, app.GetFramePhaseHistory(), app);
+
+    // 4j. navigation: what the path solve budget solved, queued and left waiting
+    RegisterNavigationDebugHandlers(server);
 
     // 5. query_ecs
     server.RegisterHandler("query_ecs", [](const EditorDebugServer::RequestContext& ctx) -> json

@@ -97,7 +97,6 @@
 #include "Components/Name.h"
 #include "Components/Rendering/Camera.h"
 #include "Components/Rendering/Light.h"
-#include "Components/Rendering/LightPhotometry.h"
 #include "Components/Rendering/MeshGPUData.h"
 #include "Components/Rendering/MeshRenderer.h"
 #include "Components/Rendering/SkinnedMeshRenderer.h"
@@ -1628,11 +1627,6 @@ class AddPresetComponentsCommand final : public Editor::IEditorCommand
             m_World->RemoveComponentImmediate<Components::CharacterController>(m_Entity);
             NotifyComponentChanged(m_Notifications, m_World, m_Entity, ECS::GetComponentTypeId<Components::CharacterController>());
         }
-        if (m_AddedPhysicsCollider)
-        {
-            m_World->RemoveComponentImmediate<Components::PhysicsCollider>(m_Entity);
-            NotifyComponentChanged(m_Notifications, m_World, m_Entity, ECS::GetComponentTypeId<Components::PhysicsCollider>());
-        }
         if (m_AddedBoxShape)
         {
             m_World->RemoveComponentImmediate<Components::BoxColliderShape>(m_Entity);
@@ -1647,6 +1641,12 @@ class AddPresetComponentsCommand final : public Editor::IEditorCommand
         {
             m_World->RemoveComponentImmediate<Components::PlaneColliderShape>(m_Entity);
             NotifyComponentChanged(m_Notifications, m_World, m_Entity, ECS::GetComponentTypeId<Components::PlaneColliderShape>());
+        }
+        // After the shapes: a collider shape requires the collider.
+        if (m_AddedPhysicsCollider)
+        {
+            m_World->RemoveComponentImmediate<Components::PhysicsCollider>(m_Entity);
+            NotifyComponentChanged(m_Notifications, m_World, m_Entity, ECS::GetComponentTypeId<Components::PhysicsCollider>());
         }
         if (m_AddedAudioEmitter)
         {
@@ -1777,14 +1777,8 @@ class AddPresetComponentsCommand final : public Editor::IEditorCommand
             m_AddedCamera = addIfMissing(ECS::TypeTag<Components::Camera>{}, Components::Camera{});
             break;
         case ComponentPreset::Light:
-        {
-            Components::Light l{};
-            l.Type = Components::LightType::Directional;
-            l.Intensity = Components::kClearNoonSunIlluminanceLux;
-            l.IntensityUnit = Components::LightUnit::Lux;   // physical units by default
-            m_AddedLight = addIfMissing(ECS::TypeTag<Components::Light>{}, l);
+            m_AddedLight = addIfMissing(ECS::TypeTag<Components::Light>{}, Editor::MakeDefaultDirectionalLight());
             break;
-        }
         case ComponentPreset::SkyEnvironment:
             m_AddedSkyEnvironment = addIfMissing(ECS::TypeTag<Components::SkyEnvironment>{}, Components::SkyEnvironment{});
             break;

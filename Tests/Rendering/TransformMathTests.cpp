@@ -550,6 +550,50 @@ TEST(TransformMathTests, Hierarchy_CachedTopologyPropagatesCollapsedDirtySubtree
     EXPECT_EQ(hierarchy.GetTopologyBuildCount(), 3u);
 }
 
+// A Transform brings its WorldTransform at creation (Version 0: not resolved
+// yet). The first resolve marks it resolved even when the pose is identity, so
+// a consumer waiting for a placed pose never waits forever; a still frame
+// after that leaves the Version alone. Covers both the flat and the hierarchy
+// path.
+TEST(TransformMathTests, Hierarchy_FirstResolveMarksEveryPoseResolved)
+{
+    ECS::World world(nullptr);
+    ECS::Entity root = world.Create(Transform{});
+    ECS::Entity parent = world.Create(Transform{});
+    ECS::Entity child = world.Create(Transform{});
+    child.Set(Parent{parent.GetHandle()});
+    world.ProcessCommands();
+    for (ECS::Entity* entity : {&root, &parent, &child})
+    {
+        const auto* worldTransform = world.GetComponent<WorldTransform>(entity->GetHandle());
+        ASSERT_NE(worldTransform, nullptr) << "a Transform entity is created without its WorldTransform";
+        EXPECT_EQ(worldTransform->Version, 0u);
+    }
+
+    Engine::Renderer::TransformHierarchySystem hierarchy;
+    hierarchy.Update(world, 0.0f);
+    hierarchy.Update(world, 0.0f);
+
+    for (ECS::Entity* entity : {&root, &parent, &child})
+        EXPECT_EQ(world.GetComponent<WorldTransform>(entity->GetHandle())->Version, 1u)
+            << "an identity pose stayed unresolved, or a still frame bumped it again";
+}
+
+// A required component stays while its requirer does: removing an entity's
+// WorldTransform while its Transform stays is refused, so the entity never
+// leaves the hierarchy's and extraction's queries for good.
+TEST(TransformMathTests, RemovingWorldTransformWhileTransformStaysIsRefused)
+{
+    ECS::World world(nullptr);
+    ECS::Entity entity = world.Create(Transform{});
+    world.RemoveComponentImmediate<WorldTransform>(entity.GetHandle());
+    EXPECT_NE(world.GetComponent<WorldTransform>(entity.GetHandle()), nullptr);
+    world.RemoveComponentImmediate<Transform>(entity.GetHandle());
+    world.RemoveComponentImmediate<WorldTransform>(entity.GetHandle());
+    EXPECT_EQ(world.GetComponent<WorldTransform>(entity.GetHandle()), nullptr)
+        << "with the Transform gone, nothing requires the WorldTransform";
+}
+
 // Entities without a Parent resolve on the flat pass even when a hierarchy
 // exists elsewhere in the world: one parented pair must not send a thousand
 // unrelated roots down the hierarchy walk.

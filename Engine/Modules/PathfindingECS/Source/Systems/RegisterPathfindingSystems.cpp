@@ -12,10 +12,10 @@ void AddPathfindingSystemsToSchedule(ECS::SystemScheduleBuilder& schedule)
 {
     // NavigationBuildSystem consumes finished products, not merely the existence
     // of the physics world object:
-    //   - TransformHierarchy produces the WorldTransform a grid uses as its
-    //     origin. A freshly loaded entity has no WorldTransform until
-    //     TransformHierarchy adds it, and a grid latches its origin on the frame
-    //     it initializes.
+    //   - TransformHierarchy resolves the WorldTransform a grid uses as its
+    //     origin. A freshly loaded entity's WorldTransform holds no pose until
+    //     TransformHierarchy resolves it (Version 0), and a grid latches its
+    //     origin on the frame it initializes.
     //   - PhysicsWriteback terminates the physics pipeline. Bodies exist from
     //     PhysicsInit onward, but ordering after the whole pipeline is what
     //     keeps the bake's Jolt queries off PhysicsStep's wave — the step is the

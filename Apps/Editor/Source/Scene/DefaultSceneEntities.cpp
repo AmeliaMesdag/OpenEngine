@@ -1,9 +1,10 @@
 #include "Scene/DefaultSceneEntities.h"
 
+#include "Inspectors/ComponentPresets.h"
+
 #include "Components/Name.h"
 #include "Components/Rendering/Camera.h"
 #include "Components/Rendering/Light.h"
-#include "Components/Rendering/LightPhotometry.h"
 #include "Components/Rendering/MeshRenderer.h"
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Components/Rendering/SkyEnvironment.h"
@@ -85,12 +86,7 @@ void SeedDefaultSceneEntities(ECS::World& world, Engine::Renderer::RenderService
                                                 kDefaultDirectionalLightEulerZDeg);
         e.Set(Transform::FromTRS(Mathematics::Vector3{0.0f, 3.0f, 0.0f}, rot, Mathematics::Vector3{1.0f, 1.0f, 1.0f}));
 
-        Light light{};
-        light.Type = LightType::Directional;
-        light.Intensity = kClearNoonSunIlluminanceLux;
-        light.IntensityUnit = LightUnit::Lux; // physical units by default
-        light.CastsShadows = true;
-        e.Set(light);
+        e.Set(MakeDefaultDirectionalLight());
 
         SetName(e, "Directional Light");
         directionalLightHandle = e.GetHandle();
@@ -105,7 +101,13 @@ void SeedDefaultSceneEntities(ECS::World& world, Engine::Renderer::RenderService
     {
         ECS::Entity e = world.Create();
         e.Set(Transform::FromTRS(Mathematics::Vector3{}, Mathematics::Quaternion{}, Mathematics::Vector3{1.0f, 1.0f, 1.0f}));
-        SkyEnvironment sky{}; // defaults: noon, auto sun/moon
+        // Mid-morning at 40 degrees north puts the sun about 42 degrees up in the
+        // south-east, over the default camera's shoulder, so a new scene shows
+        // sunlit vertical faces and shadows that fall away from the camera. The
+        // component defaults (noon on the equator at the equinox) put it overhead.
+        SkyEnvironment sky{};
+        sky.TimeOfDayHours = kNewSceneTimeOfDayHours;
+        sky.Latitude = kNewSceneLatitudeDeg;
         sky.SunLight = directionalLightHandle;
         e.Set(sky);
         SetName(e, "Sky Environment");

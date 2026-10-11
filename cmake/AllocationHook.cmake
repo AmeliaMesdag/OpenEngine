@@ -17,6 +17,8 @@
 # GoogleTest target directly. The pass runs once, deferred to the end of the top-level
 # directory, so it sees executables from every subdirectory without each one opting in.
 
+include(${CMAKE_CURRENT_LIST_DIR}/BuildsystemTargets.cmake)
+
 set(GE_ALLOCATION_HOOK_SOURCE "${CMAKE_SOURCE_DIR}/Engine/Modules/Memory/Source/AllocationHook.cpp")
 set(GE_PRODUCTION_ALLOCATION_HOOK_SOURCE "${CMAKE_SOURCE_DIR}/Engine/Modules/Memory/Source/ProductionAllocationHook.cpp")
 set(GE_ALLOCATION_COUNTER_SOURCE "${CMAKE_SOURCE_DIR}/Engine/Modules/Memory/Source/AllocationCounter.cpp")
@@ -44,16 +46,6 @@ function(ge_add_production_allocation_hook target_name)
     _ge_allocation_hook_compile_alone(${target_name})
 endfunction()
 
-function(_ge_collect_buildsystem_targets directory out_var)
-    get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
-    get_property(_subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
-    foreach(_subdirectory IN LISTS _subdirectories)
-        _ge_collect_buildsystem_targets("${_subdirectory}" _nested)
-        list(APPEND _targets ${_nested})
-    endforeach()
-    set(${out_var} ${_targets} PARENT_SCOPE)
-endfunction()
-
 function(_ge_is_test_executable target_name out_var)
     set(${out_var} FALSE PARENT_SCOPE)
     get_target_property(_type ${target_name} TYPE)
@@ -68,7 +60,7 @@ function(_ge_is_test_executable target_name out_var)
 endfunction()
 
 function(ge_add_allocation_hook_to_test_executables)
-    _ge_collect_buildsystem_targets("${CMAKE_SOURCE_DIR}" _targets)
+    ge_collect_buildsystem_targets("${CMAKE_SOURCE_DIR}" _targets)
     set(_count 0)
     foreach(_target IN LISTS _targets)
         _ge_is_test_executable(${_target} _is_test)

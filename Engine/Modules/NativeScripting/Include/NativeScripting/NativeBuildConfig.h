@@ -53,14 +53,18 @@ struct NativeBuildConfig
     std::vector<std::filesystem::path> IncludeDirs;
     std::filesystem::path              EngineImportLib;
     std::vector<std::string>           CompileDefinitions;
+    // The Engine shared library the import lib above stands for: its link stamp is the
+    // engine identity the ABI digest folds (HashEngineAbiInputs).
+    std::filesystem::path              EngineBinary;
 
     // EditorSDK interface (native Editor-kind package modules only): the
-    // EditorSDK import lib + the staged editor headers. Both empty for
-    // Runtime modules and in Player layouts (the editor stages the EditorSDK;
-    // nothing else does). When set, the generated project links the lib, the
-    // include dirs join the compile, and the identity folds into the ABI
-    // digest so an editor-surface relink invalidates cached module DLLs.
+    // EditorSDK import lib, its shared library + the staged editor headers. All
+    // empty for Runtime modules and in Player layouts (the editor stages the
+    // EditorSDK; nothing else does). When set, the generated project links the
+    // lib, the include dirs join the compile, and the binary's link stamp folds
+    // into the ABI digest so an editor-surface relink invalidates cached module DLLs.
     std::filesystem::path              EditorImportLib;
+    std::filesystem::path              EditorBinary;
     std::vector<std::filesystem::path> EditorIncludeDirs;
 
     // Root of the staged engine SDK the interface above lives under. When set, the

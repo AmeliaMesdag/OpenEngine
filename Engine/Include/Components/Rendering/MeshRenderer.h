@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Components/AssetRef.h"
+#include "Components/Rendering/MeshGPUData.h"
+#include "ECS/RequiredComponents.h"
 #include "Types/StringId.h"
 #include "Types/Types.h"
 #include <string_view>
@@ -124,3 +126,12 @@ inline StringId HashMeshName(std::string_view name)
 
 } // namespace Components
 } // namespace GameEngine
+
+// A MeshRenderer holds its GPUScene index bridge from creation (unassigned until
+// render extraction assigns a slot), so extraction never adds it with an
+// archetype move per entity.
+template <>
+struct GameEngine::ECS::Detail::RequiredComponents<GameEngine::Components::MeshRenderer>
+{
+    using type = TypeList<GameEngine::Components::MeshGPUData>;
+};

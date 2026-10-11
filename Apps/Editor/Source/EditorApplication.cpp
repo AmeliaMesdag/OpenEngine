@@ -5741,6 +5741,7 @@ void EditorApplication::WireNativeScriptingForProject(const std::filesystem::pat
                 // ABI digest (they never link it) — keep their digests
                 // editor-independent and Player-identical.
                 pkgCfg.EditorImportLib.clear();
+                pkgCfg.EditorBinary.clear();
                 pkgCfg.EditorIncludeDirs.clear();
             }
             GameEngine::NativeScripting::AppendPackageDefines(pkgCfg, module.Defines);
@@ -5756,6 +5757,7 @@ void EditorApplication::WireNativeScriptingForProject(const std::filesystem::pat
     // and their ABI digest must stay editor-independent (BuildPipeline
     // recomputes it without any editor interface).
     cfg.EditorImportLib.clear();
+    cfg.EditorBinary.clear();
     cfg.EditorIncludeDirs.clear();
     GameEngine::NativeScripting::AppendPackageDefines(cfg, m_Packages->GetPackageDefines());
     nativeScripts->SetBuildConfig(cfg);
@@ -6335,6 +6337,21 @@ void EditorApplication::Update(float64 deltaTime)
     // Heartbeat for the hang watchdog: reaching here each frame means the
     // message pump (PollEvents, immediately before Update) is being serviced.
     Editor::MainThreadHangWatchdog::NotifyAlive();
+
+    EditorWindowContext* mainWindow = m_Windows.empty() ? nullptr : m_Windows[0].get();
+    m_FramePhaseRecorder.RecordPreviousFrame({
+        .FrameCount = GetFrameCount(),
+        .DeltaSeconds = GetDeltaTime(),
+        .FixedFrameRate = IsFixedFrameRateEnabled(),
+        .Phases = GetLastFramePhaseTimings(),
+        .AppUpdate = m_LastAppUpdateSubPhases,
+        .SceneView = m_LastSceneViewPerf,
+        .RenderPreloopMs = m_LastRenderPreloopMs,
+        .MainFrame = mainWindow ? mainWindow->RenderGraphStream.Frame.get() : nullptr,
+        .MainDevice = mainWindow && mainWindow->renderCtx ? mainWindow->renderCtx->GetDevice() : nullptr,
+        .Services = EngineCore::GetInstance().GetRenderServices(),
+        .Jobs = &EngineCore::GetInstance().GetJobSystem(),
+    });
 
     SyncWorldPathForProjectPicker();
 
@@ -7957,7 +7974,7 @@ void EditorApplication::Render()
 
     // Best-effort per-frame perf breakdown for the primary Scene View window.
     bool capturedScenePerf = false;
-    FramePerfBreakdown scenePerf{};
+    Editor::SceneViewFrameTimings scenePerf{};
     auto MsBetween = [](const auto& a, const auto& b) -> double
     {
         return std::chrono::duration<double, std::milli>(b - a).count();
@@ -8115,6 +8132,7 @@ void EditorApplication::Render()
             scenePerf.variantCompileMs = frameResult.variantCompileMs;
             scenePerf.prewarmMs       = frameResult.prewarmMs;
             scenePerf.presentMs       = frameResult.presentMs;
+            scenePerf.frameIndex      = GetFrameCount();
             // Include Application-level phase timings so the MCP debug handler
             // can report the full frame cost (not just the rendering phases).
             const auto& phases = GetLastFramePhaseTimings();

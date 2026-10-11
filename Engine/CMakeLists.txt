@@ -223,7 +223,6 @@ set(ENGINE_HEADERS
     Include/Assets/AsyncRegistryTasks.h
     Include/Core/CommandLine.h
 
-    Include/Memory/MemoryManager.h
     Include/Platform/Platform.h
     # Core Job System headers moved to JobSystem library
     Include/Jobs/HotReloadTasks.h
@@ -538,6 +537,11 @@ else()
     add_library(Engine SHARED ${ENGINE_SOURCES} ${ENGINE_HEADERS})
     target_compile_definitions(Engine PRIVATE GAMEENGINE_BUILD_DLL)
     ge_add_production_allocation_hook(Engine)
+    # The engine-ABI digest folds this binary's link stamp (ReadBinaryLinkStamp); an
+    # ELF link writes one only when asked.
+    if(UNIX AND NOT APPLE)
+        target_link_options(Engine PRIVATE -Wl,--build-id=sha1)
+    endif()
 endif()
 # DO NOT enable WINDOWS_EXPORT_ALL_SYMBOLS — see the GenerateEngineExportsDef
 # block further down for why we generate Engine.dll's .def file ourselves.
@@ -778,14 +782,15 @@ if(APPLE)
         "-framework VideoToolbox"
     )
 else()
-    find_package(FFMPEG COMPONENTS AVCODEC AVFORMAT AVUTIL SWSCALE QUIET)
-    if(FFMPEG_FOUND)
+    include(${CMAKE_SOURCE_DIR}/cmake/FFmpeg.cmake)
+    ge_find_ffmpeg()
+    if(GE_FFMPEG_FOUND)
         target_sources(Engine PRIVATE
             Source/Engine/Video/VideoPlayerFFmpeg.cpp
             Source/Engine/Video/VideoWriterFFmpeg.cpp
         )
-        target_include_directories(Engine PRIVATE ${FFMPEG_INCLUDE_DIRS})
-        target_link_libraries(Engine PRIVATE ${FFMPEG_LIBRARIES})
+        target_include_directories(Engine PRIVATE ${GE_FFMPEG_INCLUDE_DIR})
+        target_link_libraries(Engine PRIVATE ${GE_FFMPEG_LIBRARIES})
         target_compile_definitions(Engine PRIVATE GE_HAVE_FFMPEG=1)
     else()
         message(STATUS "FFmpeg not found — video playback and recording disabled (null backends)")
@@ -1416,7 +1421,7 @@ if(ENABLE_SCRIPTING)
 			        if(_GE_MIMALLOC_OVERRIDE_LIB)
 			          target_link_libraries(GameEngine.Native PRIVATE ${_GE_MIMALLOC_OVERRIDE_LIB})
 			        else()
-			          target_sources(GameEngine.Native PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Source/Memory/MimallocOverrides.cpp)
+			          target_sources(GameEngine.Native PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Modules/Memory/Source/MimallocOverrides.cpp)
 			        endif()
 			      else()
 			        message(STATUS "GameEngine.Native: mimalloc target is not a shared library; disabling mimalloc (falling back to system allocator)")
@@ -3416,12 +3421,12 @@ endif()
 
 	    # Closed-loop writer tests inspect the container with ffmpeg directly,
 	    # so they link it in addition to the Engine (whose linkage is PRIVATE).
-	    if(FFMPEG_FOUND)
+	    if(GE_FFMPEG_FOUND)
 	        add_executable(VideoWriterFFmpegTests
 	            Tests/VideoWriterFFmpegTests.cpp
 	        )
-	        target_link_libraries(VideoWriterFFmpegTests PRIVATE Engine GTest::gtest GTest::gtest_main ${FFMPEG_LIBRARIES})
-	        target_include_directories(VideoWriterFFmpegTests PRIVATE ${FFMPEG_INCLUDE_DIRS})
+	        target_link_libraries(VideoWriterFFmpegTests PRIVATE Engine GTest::gtest GTest::gtest_main ${GE_FFMPEG_LIBRARIES})
+	        target_include_directories(VideoWriterFFmpegTests PRIVATE ${GE_FFMPEG_INCLUDE_DIR})
 	        set_target_properties(VideoWriterFFmpegTests PROPERTIES
 	            CXX_STANDARD 20
 	            CXX_STANDARD_REQUIRED ON

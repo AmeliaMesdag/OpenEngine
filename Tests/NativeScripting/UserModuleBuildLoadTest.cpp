@@ -84,6 +84,7 @@ ns::NativeBuildConfig MakeBaseConfig(const std::map<std::string, std::string>& k
     config.CMakeExe = kv.at("cmake");
     config.Config = kv.at("config");
     config.EngineImportLib = kv.at("importlib");
+    config.EngineBinary = kv.at("enginebinary");
     config.SdkEntrySource = kv.at("sdkentry");
     config.ModuleName = "UserScripts";
     for (const auto& d : SplitList(kv.at("includes"), ';'))

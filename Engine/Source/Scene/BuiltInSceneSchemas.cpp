@@ -573,8 +573,10 @@ bool TransformSchema::AddDefault(ECS::World& world, ECS::EntityHandle entity, st
 
 bool TransformSchema::Remove(ECS::World& world, ECS::EntityHandle entity) const
 {
-    world.RemoveComponentImmediate<Components::Transform>(entity);
-    return true;
+    // Refused (and logged) while a component that requires a Transform stays.
+    if (!world.HasComponent<Components::Transform>(entity))
+        return true;
+    return world.RemoveComponentByTypeIdImmediate(entity, ECS::GetComponentTypeId<Components::Transform>());
 }
 
 void MeshRendererSchema::Serialize(const ECS::World& world, ECS::EntityHandle entity, [[maybe_unused]] const SceneSaveContext& ctx, std::vector<std::string>& outLines) const
@@ -1647,8 +1649,10 @@ bool PhysicsColliderSchema::AddDefault(ECS::World& world, ECS::EntityHandle enti
 
 bool PhysicsColliderSchema::Remove(ECS::World& world, ECS::EntityHandle entity) const
 {
-    world.RemoveComponentImmediate<Components::PhysicsCollider>(entity);
-    return true;
+    // Refused (and logged) while a collider shape that requires it stays.
+    if (!world.HasComponent<Components::PhysicsCollider>(entity))
+        return true;
+    return world.RemoveComponentByTypeIdImmediate(entity, ECS::GetComponentTypeId<Components::PhysicsCollider>());
 }
 
 void PhysicsColliderOwnerSchema::Serialize(const ECS::World& world, ECS::EntityHandle entity, [[maybe_unused]] const SceneSaveContext& ctx, std::vector<std::string>& outLines) const

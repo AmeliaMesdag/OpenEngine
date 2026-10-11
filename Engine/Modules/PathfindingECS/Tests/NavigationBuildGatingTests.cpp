@@ -73,6 +73,7 @@ protected:
         wt.matrix[12] = x;
         wt.matrix[13] = y;
         wt.matrix[14] = z;
+        wt.Version = 1u; // resolved, as TransformHierarchySystem leaves it
         return wt;
     }
 
@@ -88,11 +89,12 @@ protected:
 
 } // namespace
 
-// B2. A scene-loaded grid entity carries Transform immediately but does not get
-// WorldTransform until TransformHierarchySystem adds it. Initializing before
-// then reads no origin and latches (0,0,0) permanently — Initialized never
-// clears and GridMap exposes no origin setter. The build must wait instead.
-TEST_F(NavigationBuildGatingTest, GridWithTransformButNoWorldTransformDefersInitialization)
+// B2. A scene-loaded grid entity carries Transform and an unresolved
+// WorldTransform (Version 0) until TransformHierarchySystem resolves it.
+// Initializing before then reads no origin and latches (0,0,0) permanently —
+// Initialized never clears and GridMap exposes no origin setter. The build
+// must wait instead.
+TEST_F(NavigationBuildGatingTest, GridWithUnresolvedWorldTransformDefersInitialization)
 {
     auto entity = world->Create();
     entity.Set(MakeGrid());
@@ -104,12 +106,12 @@ TEST_F(NavigationBuildGatingTest, GridWithTransformButNoWorldTransformDefersInit
     const auto* grid = entity.Get<Components::NavigationGrid>();
     ASSERT_NE(grid, nullptr);
     EXPECT_FALSE(grid->Initialized)
-        << "grid initialized before WorldTransform existed; its origin would latch at (0,0,0)";
+        << "grid initialized before its WorldTransform was resolved; its origin would latch at (0,0,0)";
 }
 
-// ...and once WorldTransform appears, the grid initializes at the placed
+// ...and once WorldTransform is resolved, the grid initializes at the placed
 // position rather than the world origin.
-TEST_F(NavigationBuildGatingTest, GridInitializesAtPlacedOriginOnceWorldTransformExists)
+TEST_F(NavigationBuildGatingTest, GridInitializesAtPlacedOriginOnceWorldTransformIsResolved)
 {
     constexpr float32 kPlacedX = 25.0f;
     constexpr float32 kPlacedY = 3.0f;

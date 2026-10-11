@@ -134,7 +134,9 @@ file(GENERATE
     CONTENT
 "cmake=${CMAKE_COMMAND}
 importlib=$<TARGET_LINKER_FILE:Engine>
+enginebinary=$<TARGET_FILE:Engine>
 editorimportlib=$<TARGET_LINKER_FILE:EditorSDK>
+editorbinary=$<TARGET_FILE:EditorSDK>
 config=$<CONFIG>
 sdkentry=${CMAKE_SOURCE_DIR}/Engine/Modules/NativeScripting/GameSDK/Source/UserModuleEntry.cpp
 sdkinc=${CMAKE_SOURCE_DIR}/Engine/Modules/NativeScripting/GameSDK/Include

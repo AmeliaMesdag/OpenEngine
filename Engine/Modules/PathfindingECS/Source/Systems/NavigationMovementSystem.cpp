@@ -248,6 +248,9 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
                 if (!isNavMeshAgent)
                     return;
 
+                // The crowd steers toward the destination. PathDirty stays set:
+                // it is the request NavigationPathfindingSystem serves, and one
+                // the solve budget deferred is still queued.
                 // Create crowd agent for navmesh agents that need one
                 if (state.CrowdAgentHandle < 0 && state.HasDestination)
                 {
@@ -268,7 +271,6 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
                     {
                         crowd.SetAgentTarget(state.CrowdAgentHandle,
                                              state.DestinationX, state.DestinationY, state.DestinationZ);
-                        state.PathDirty = false;
                     }
                     return;
                 }
@@ -278,7 +280,6 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
                 {
                     crowd.SetAgentTarget(state.CrowdAgentHandle,
                                          state.DestinationX, state.DestinationY, state.DestinationZ);
-                    state.PathDirty = false;
                 }
 
                 // Remove crowd agent when destination is cleared
@@ -331,6 +332,11 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
             if (status != Pathfinding::PathStatus::Complete &&
                 status != Pathfinding::PathStatus::Partial)
             {
+                // No path to follow (queued for a solve, Failed): the agent
+                // stands, so it reports no velocity.
+                state.VelocityX = 0.0f;
+                state.VelocityY = 0.0f;
+                state.VelocityZ = 0.0f;
                 if (status == Pathfinding::PathStatus::Failed)
                     ReserveStandingCell(agent, state, *navWorld, wt.matrix[12], wt.matrix[14],
                                         m_AccumulatedTime);

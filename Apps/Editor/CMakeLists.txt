@@ -7,6 +7,8 @@ set(EDITOR_SOURCES
     Source/EditorApplication.cpp
     Source/DeviceLossSurfacer.cpp
     Source/Diagnostics/MainThreadHangWatchdog.cpp
+    Source/Diagnostics/FramePhaseHistory.cpp
+    Source/Diagnostics/FramePhaseRecorder.cpp
     Source/EditorTreeTitleIconVars.cpp
     Source/Settings/RenderPipelineSettings.cpp
     Source/Editor/Assets/AssetRelativePath.cpp
@@ -101,6 +103,7 @@ set(EDITOR_SOURCES
     Source/Panels/ProjectFolderPickerModal.cpp
     Source/Projects/ProjectCatalog.cpp
     Source/Projects/ProjectCatalogService.cpp
+    Source/Projects/NewProjectLocation.cpp
     Source/Projects/ProjectAcquisition.cpp
     Source/Projects/ProjectStartupScene.cpp
     Source/Projects/SubprocessStream.cpp
@@ -542,7 +545,10 @@ set(EDITOR_SOURCES
 	Source/DebugServer/GroundQueryDebugHandlers.cpp
 	Source/DebugServer/JobSystemDebugHandlers.cpp
 	Source/DebugServer/JobSystemReport.cpp
+	Source/DebugServer/NavigationDebugHandlers.cpp
 	Source/DebugServer/SystemWaveTraceReport.cpp
+	Source/DebugServer/FramePhaseDebugHandlers.cpp
+	Source/DebugServer/FramePhaseReport.cpp
 	Source/DebugServer/MarkupDebugHandlers.cpp
 	Source/DebugServer/SkyDebugHandlers.cpp
 	Source/DebugServer/ThumbnailDebugHandlers.cpp
@@ -584,7 +590,10 @@ set(EDITOR_HEADERS
 	Source/DebugServer/GroundQueryDebugHandlers.h
 	Source/DebugServer/JobSystemDebugHandlers.h
 	Source/DebugServer/JobSystemReport.h
+	Source/DebugServer/NavigationDebugHandlers.h
 	Source/DebugServer/SystemWaveTraceReport.h
+	Source/DebugServer/FramePhaseDebugHandlers.h
+	Source/DebugServer/FramePhaseReport.h
 	Source/DebugServer/SkyDebugHandlers.h
 	Source/DebugServer/ParallaxDebugHandlers.h
 	Source/DebugServer/ParallaxStepsViewRequest.h
@@ -1489,6 +1498,11 @@ add_library(EditorSDK SHARED ${EDITOR_SDK_SOURCES})
 # replayed here (see the note above about registry statics).
 target_sources(EditorSDK PRIVATE $<TARGET_OBJECTS:VCSIntegration>)
 ge_add_production_allocation_hook(EditorSDK)
+# The engine-ABI digest of Editor-kind modules folds this binary's link stamp
+# (ReadBinaryLinkStamp); an ELF link writes one only when asked.
+if(UNIX AND NOT APPLE)
+	target_link_options(EditorSDK PRIVATE -Wl,--build-id=sha1)
+endif()
 target_include_directories(EditorSDK PUBLIC
 	${CMAKE_CURRENT_SOURCE_DIR}/Include
 	${CMAKE_SOURCE_DIR}/Engine/Modules/VCSIntegration/Include
@@ -1761,7 +1775,7 @@ if(ENABLE_MIMALLOC)
 					target_link_libraries(Editor PRIVATE ${_GE_MIMALLOC_OVERRIDE_LIB})
 				else()
 					# Fallback: use our own global operator new/delete overrides.
-					target_sources(Editor PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Source/Memory/MimallocOverrides.cpp)
+					target_sources(Editor PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Modules/Memory/Source/MimallocOverrides.cpp)
 				endif()
 				target_compile_definitions(Editor PRIVATE GE_ENABLE_MIMALLOC=1)
 			else()

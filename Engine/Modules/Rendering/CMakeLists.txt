@@ -890,6 +890,8 @@ add_library(GameEngineRendering OBJECT
 	target_link_libraries(GameEngineRendering PUBLIC Types)
 	# Mathematics: canonical GLM-backed math module exposing "Mathematics/..." headers
 	target_link_libraries(GameEngineRendering PUBLIC Mathematics)
+	# Memory: the render graph's frame arena (RGGraph.h holds a Memory::Arena).
+	target_link_libraries(GameEngineRendering PUBLIC Memory)
 	# FileSystem: publishing a shader package or a dumped source goes through
 	# the one implementation that knows which hosts can safely rename a file.
 	# PRIVATE — Engine.dll splices FileSystem in itself; test executables that
@@ -1608,16 +1610,18 @@ macro(rendering_test_shader_paths TARGET)
     target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Tests)
 endmacro()
 
-# Helper: splice Logger's object files into a GameEngineRendering consumer.
+# Helper: splice Logger's and Memory's object files into a GameEngineRendering consumer.
 #
 # Tests link the GameEngineRendering OBJECT library directly (not via the Engine
-# target). Logger is itself an OBJECT library that GameEngineRendering links
-# PUBLIC, and OBJECT->OBJECT object files are not spliced transitively to a
-# downstream consumer on the VS generator, so Logger::Log::* comes up unresolved.
-# Splice Logger's .obj files in directly, the same way the Engine target does
-# (Engine/CMakeLists.txt).
+# target). Logger and Memory are themselves OBJECT libraries that GameEngineRendering
+# links PUBLIC, and OBJECT->OBJECT object files are not spliced transitively to a
+# downstream consumer, so Logger::Log::* and the Memory::Arena paths come up
+# unresolved. Splice their .obj files in directly, the same way the Engine target
+# does (Engine/CMakeLists.txt). Memory's interface definition also compiles the
+# consumer's own allocation-counter copy (cmake/AllocationHook.cmake) empty, so the
+# spliced counter is the executable's one.
 function(rendering_test_link_logger target)
-	target_sources(${target} PRIVATE $<TARGET_OBJECTS:Logger>)
+	target_sources(${target} PRIVATE $<TARGET_OBJECTS:Logger> $<TARGET_OBJECTS:Memory>)
 endfunction()
 
 # Helper: supply the OBJECT-library object files plus the stb_image impl that
@@ -1792,7 +1796,6 @@ if(GTest_FOUND OR TARGET GTest::gtest)
     # production disconnect). Pure-algorithm tests (cull/schedule/barriers) need no
     # device. Add RenderGraph sources/tests here as the module grows.
     add_executable(RenderGraphTests
-        Tests/RenderGraph/RGArenaTests.cpp
         Tests/RenderGraph/RGGraphTests.cpp
         Tests/RenderGraph/RGScheduleTests.cpp
         Tests/RenderGraph/RGPoolTests.cpp

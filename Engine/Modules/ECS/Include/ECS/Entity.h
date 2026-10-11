@@ -1276,7 +1276,7 @@ private:
 
     // Unified add-or-set body behind typed AddComponentImpl<T>, type-erased
     // SetComponentBytesImmediate, and (via the component handlers) deferred
-    // ADD_COMPONENT/ADD_REQUIRED_COMPONENT/SET_COMPONENT playback. The fast
+    // ADD_COMPONENT/SET_COMPONENT playback. The fast
     // path is a data-only SET; the structural branch is an ADD — that
     // classification happens only here.
     // Components are trivially copyable (Component concept), so the raw byte
@@ -1288,7 +1288,9 @@ private:
     // Shared removal behind C++ operations and runtime blob removal. The tri-state
     // result lets C++ operations invalidate queries even when the component is
     // absent, while blob removal reports absence without a structural change.
-    enum class RemoveComponentResult { Removed, ComponentAbsent, InvalidEntity };
+    // RequiredByAnother: the entity holds a component that requires this one
+    // (RequiredComponents.h); remove that one first. Logged with both names.
+    enum class RemoveComponentResult { Removed, ComponentAbsent, InvalidEntity, RequiredByAnother };
     RemoveComponentResult RemoveComponentInternal(EntityHandle entity, ComponentTypeId typeId);
 
     // ----------------------------------------------------------------
@@ -1341,7 +1343,44 @@ private:
 
     // Archetype graph edge resolution: given a source archetype and a component to add/remove,
     // return the target archetype, creating it if needed. Caches the edge for O(1) future lookups.
+    // The add edge's target holds typeId and everything it requires
+    // (RequiredComponents.h), so a structural add is one move.
     Archetype* GetOrCreateArchetypeForAdd(Archetype* source, ComponentTypeId typeId);
+
+    // Adds to `signature` every component its members require, transitively,
+    // and registers the sizes of the types it adds. Caller holds worldMutex
+    // exclusively.
+    void AddRequiredClosure(ComponentSignature& signature);
+
+    // A column a requirement added to an archetype beyond the components a
+    // creation call supplies, with the value it starts with.
+    struct RequiredColumn
+    {
+        uint32_t Offset = 0;
+        std::vector<std::uint8_t> Default;
+    };
+
+    // The columns of `archetype` outside `supplied`, each with its required
+    // type's default value. Resolved once per creation call or batch.
+    void ResolveRequiredColumns(Archetype& archetype, const ComponentSignature& supplied,
+                                std::vector<RequiredColumn>& out) const;
+
+    // Writes each column's default value for the entity at `loc`.
+    static void WriteRequiredColumns(Archetype& archetype, EntityLocation loc,
+                                     std::span<const RequiredColumn> columns);
+
+    // The structural add's requirement steps: write each column that `target`
+    // holds and `from` lacks, other than `added` (the type the caller
+    // supplies), with its default; then, once every column holds its value,
+    // signal each as an add (hooks, dirty feed, lifecycle event) like the
+    // supplied type.
+    void WriteRequiredDefaultsAfterAdd(EntityHandle entity, const ComponentSignature& from,
+                                       Archetype& target, ComponentTypeId added);
+    void SignalRequiredAdds(EntityHandle entity, const ComponentSignature& from,
+                            const ComponentSignature& to, ComponentTypeId added);
+
+    // A component of `signature` that requires `typeId` directly, or 0.
+    static ComponentTypeId FindRequirerOf(const ComponentSignature& signature, ComponentTypeId typeId);
     Archetype* GetOrCreateArchetypeForRemove(Archetype* source, ComponentTypeId typeId);
     // The same resolution for the entity-activity pair, which moves as one:
     // `disable` adds both tags, otherwise both are removed. Caches on the

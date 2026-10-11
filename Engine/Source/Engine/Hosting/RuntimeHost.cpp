@@ -141,6 +141,12 @@ RuntimeHost::~RuntimeHost() = default;
 
 bool RuntimeHost::InitWindow()
 {
+    if (m_Application.GetConfig().Headless)
+    {
+        Logger::Log::Info("Runtime: headless, no window");
+        return true;
+    }
+
     // GLFW init lifecycle (including the macOS COCOA_CHDIR_RESOURCES /
     // COCOA_MENUBAR hints) is handled inside Platform::Window. See
     // Engine/Modules/Platform/Source/Window.cpp.
@@ -218,6 +224,23 @@ void RuntimeHost::FollowFramebufferSize(int width, int height)
 
 bool RuntimeHost::InitRendering()
 {
+    // Headless: no render device. The engine's schedule still runs every frame, with no
+    // render services, so physics, pathfinding and script systems tick. Terrain height,
+    // ocean buoyancy and the skeleton binding of scene-loaded skinned meshes come from
+    // render-side work and are absent.
+    if (m_Application.GetConfig().Headless)
+    {
+        auto& engine = EngineCore::GetInstance();
+        if (!engine.EnableRenderingLoop(nullptr))
+        {
+            Logger::Log::Error("Runtime: Failed to enable the engine's system schedule");
+            return false;
+        }
+        engine.SetRenderingLoopAutoDrive(true);
+        Logger::Log::Info("Runtime: headless, no render device");
+        return true;
+    }
+
     Rendering::DeviceDesc desc{};
     desc.preferredAPI = Rendering::GraphicsAPI::Auto;
     desc.enableSwapchain = true;
@@ -313,6 +336,9 @@ bool RuntimeHost::InitRendering()
 
 Engine::Renderer::PipelineResolveFailure RuntimeHost::LoadRenderPipeline()
 {
+    // Headless: nothing renders, so there is no pipeline to resolve.
+    if (m_Application.GetConfig().Headless)
+        return Engine::Renderer::PipelineResolveFailure::None;
     auto* rs = m_RenderCtx->GetRenderServices();
     if (!rs)
         return Engine::Renderer::PipelineResolveFailure::LoadFailed;

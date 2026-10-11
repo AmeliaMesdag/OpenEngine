@@ -58,7 +58,6 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
-// ThreadLocalScratchResource.h removed: PMR scratch allocator no longer used in this file
 
 #include <cmath>
 #include <vector>

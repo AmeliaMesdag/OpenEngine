@@ -174,7 +174,7 @@ Source/
 | System | Phase | Order | Dependencies | Purpose |
 |--------|-------|-------|-------------|---------|
 | **NavigationBuildSystem** | Early | 10 | -- | Creates GridMap/DetourNavMap from source components, bakes heights |
-| **NavigationPathfindingSystem** | Early | 20 | NavigationBuildSystem | Harvests async results, submits new path requests for dirty agents |
+| **NavigationPathfindingSystem** | Early | 20 | NavigationBuildSystem | Harvests async results, queues every request (HasDestination + PathDirty, or the replan timer's ReplanRequested) and solves the oldest `MaxPathSolvesPerFrame` (default 64) each frame; the rest wait in order, a PathDirty request as Pending with its path released, a timer refresh still walking its current path. `GetStatistics()` reports the queue (the editor's `get_navigation_stats`) |
 | **NavigationMovementSystem** | Early | 30 | NavigationPathfindingSystem | Steers agents along paths, manages reservations, reads crowd positions |
 | **NavigationDebugSystem** | Render | 5 | NavigationMovementSystem | Populates NavDebugData with lines/triangles for editor consumption |
 
@@ -182,7 +182,8 @@ Source/
 
 ```
 1. Entity has NavigationGrid --> NavigationBuildSystem creates GridMap, stores handle
-2. Entity has NavigationAgent + HasDestination=true --> NavigationPathfindingSystem computes path
+2. Entity has NavigationAgent + HasDestination=true + PathDirty (or ReplanRequested) --> NavigationPathfindingSystem queues it and computes the path
+   within ceil(backlog / MaxPathSolvesPerFrame) frames, oldest request first
 3. Path stored in PathBuffer, handle + cached waypoints written to NavigationAgent
 4. NavigationMovementSystem steers agent toward waypoints, reserves grid cells
 5. NavigationDebugSystem generates visualization --> NavDebugData --> Editor gizmos

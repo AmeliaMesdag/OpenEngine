@@ -1134,8 +1134,7 @@
    partially scrolled card row is cut by that line. */
 .project-picker-modal #new-project-form {
 	display: flex;
-	flex-direction: row;
-	gap: 12px;
+	flex-direction: column;
 	flex-shrink: 0;
 	background-color: var(--pp_color_surface_content);
 	border-width: 1px 0px 0px 0px;
@@ -1143,6 +1142,12 @@
 	margin-top: 0px;
 	padding-top: 16px;
 	padding-bottom: 16px;
+}
+
+.project-picker-modal .project-picker-form-fields {
+	display: flex;
+	flex-direction: row;
+	gap: 12px;
 }
 
 .project-picker-modal .project-picker-field-row {
@@ -1209,6 +1214,8 @@
 	color: var(--pp_color_text_error);
 	font-size: 12px;
 	margin-top: 10px;
+	/* A refusal quotes a URL or path, one unbroken token that would otherwise run past the panel. */
+	overflow-wrap: break-word;
 }
 
 .project-picker-modal #import-error {

@@ -92,6 +92,7 @@ if(BUILD_TESTING)
         FileSystemObjects
         AssetCore
         Logger
+        Memory
         GTest::gtest
         GTest::gtest_main
     )
@@ -121,6 +122,7 @@ if(BUILD_TESTING)
         FileSystemObjects
         AssetCore
         Logger
+        Memory
         GTest::gtest
         GTest::gtest_main
     )

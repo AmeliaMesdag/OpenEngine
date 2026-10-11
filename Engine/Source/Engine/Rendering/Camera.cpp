@@ -89,13 +89,16 @@ std::optional<Camera> FindActiveCamera(ECS::World& world)
             0, 0, 0, 1
         };
 
-        if (world.HasComponent<Components::WorldTransform>(e))
+        // A WorldTransform the hierarchy has not resolved yet (Version 0 beside
+        // a Transform) holds no pose; the camera's own Transform does.
+        const auto* worldXf = world.GetComponent<Components::WorldTransform>(e);
+        const bool hasLocal = world.HasComponent<Components::Transform>(e);
+        if (worldXf && (worldXf->Version != 0u || !hasLocal))
         {
-            if (auto* xf = world.GetComponent<Components::WorldTransform>(e))
-                for (int i = 0; i < 16; ++i)
-                    matrix[i] = xf->matrix[i];
+            for (int i = 0; i < 16; ++i)
+                matrix[i] = worldXf->matrix[i];
         }
-        else if (world.HasComponent<Components::Transform>(e))
+        else if (hasLocal)
         {
             if (auto* xf = world.GetComponent<Components::Transform>(e))
                 for (int i = 0; i < 16; ++i)

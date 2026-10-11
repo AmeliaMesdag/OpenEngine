@@ -536,7 +536,7 @@ flowchart LR
 
 <h2 id="the-render-graph">The Render Graph</h2>
 <p>The render graph is <b>immediate-mode</b>: the whole frame graph is declared fresh each frame
-into a bump arena (<code>RGArena</code>), compiled in one sweep, executed, and reset. There is no
+into a bump arena (the graph's <code>Memory::Arena</code>), compiled in one sweep, executed, and reset. There is no
 retained pass state, no enable/disable/invalidate, no incremental compile — a pass that should not
 run this frame is not declared. Core: <code>Engine/Modules/Rendering/{Include/Rendering/Core,Source/Core}/RenderGraph/</code>.</p>
 <ul>

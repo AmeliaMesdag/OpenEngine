@@ -6,6 +6,8 @@
 #include "Core/WindowInputRouter.h"
 #include "Core/WindowUiBootstrap.h"
 #include "DeviceLossSurfacer.h"
+#include "Diagnostics/EditorFrameTimings.h"
+#include "Diagnostics/FramePhaseRecorder.h"
 #include "EditorContext.h"
 #include "Platform/ContextMenu.h"
 #include "Platform/Window.h"
@@ -295,6 +297,8 @@ class EditorApplication : public Application
     // RenderGraph declaration path (spine, pipeline outputs, submit stamps) must use
     // the MAIN RS — the controllers were constructed on it.
     Engine::Renderer::RenderServices* MainRenderServices() const;
+    // The newest frames' phase timings (get_frame_phases).
+    const Editor::FramePhaseHistory& GetFramePhaseHistory() const { return m_FramePhaseRecorder.GetHistory(); }
     // Framebuffer size callback (used by ColorPickerWindow and main window). Public so utilities can wire it.
     void OnFramebufferResized(EditorWindowContext* ctx, int width, int height);
     void OnFilesDropped(EditorWindowContext* ctx, const std::vector<std::filesystem::path>& paths);
@@ -309,27 +313,6 @@ class EditorApplication : public Application
 
     // Helper for debug/profiling hotkeys (F2): format a perf line similar to the SceneView overlay.
     std::string BuildPerfDumpLine() const;
-    struct FramePerfBreakdown
-    {
-        double pollMs = 0.0;
-        double inputMs = 0.0;
-        double appUpdateMs = 0.0;
-        double engineUpdateMs = 0.0;
-        double beginFrameMs = 0.0;
-        double worldViewsMs = 0.0;     // RecordWindowWorldViews (entity / scene rendering record)
-        double thumbnailsMs = 0.0;
-        double uiRecordMs = 0.0;
-        double terminalPassesMs = 0.0; // BuildWindowTerminalPasses + debug callbacks
-        double rgCompileMs = 0.0;
-        double rgExecuteMs = 0.0;
-        // First-use SPIR-V variant compile time. Front-loaded by
-        // RenderServices::PrewarmActiveVariants before rg->Compile so it no
-        // longer inflates rgExecuteMs; reported here so the spike is still
-        // visible in render_stats.
-        double variantCompileMs = 0.0;
-        double prewarmMs = 0.0;
-        double presentMs = 0.0;
-    };
 
     // Shared editor context (services, assets root)
     std::unique_ptr<EditorContext> m_EditorContext;
@@ -588,24 +571,19 @@ class EditorApplication : public Application
     EditorWindowContext* m_DispatchingWindow = nullptr;
 
     // Last measured perf breakdown for the primary Scene View window (best-effort).
-    FramePerfBreakdown m_LastSceneViewPerf{};
+    Editor::SceneViewFrameTimings m_LastSceneViewPerf{};
 
     // Sub-phase breakdown of AppUpdateMs (diagnostic for --bench-rg-csv captures).
-    // Sums roughly equal the outer AppUpdateMs minus small untimed fillers.
-    struct AppUpdateSubPhases
-    {
-        double preUiMs = 0.0;         // startup + modals + polls + base Update + ECS ProcessCommands + SceneEditor + flushes + pre-UI deferred
-        double debugPanelsMs = 0.0;   // CollectEditorDebugMetrics + PanelManager->UpdatePanels (log flush + debug panels)
-        double uiWindowsMs = 0.0;     // UI UpdateAllWindows loop (per-window UIManager::Update)
-        double tailMs = 0.0;          // post-UI deferred actions + TickPlayFullscreenFocus + input routing + hotkeys
-    };
-    AppUpdateSubPhases m_LastAppUpdateSubPhases{};
+    Editor::AppUpdateSubPhaseTimings m_LastAppUpdateSubPhases{};
 
     // Time spent in EditorApplication::Render() before the per-window
     // render loop begins (cross-window DnD, tear-off, OS-drag overlays).
     // Surfaced in get_render_stats so the gap between Application::RenderMs
     // and the per-window sub-phase total can be attributed.
     double m_LastRenderPreloopMs = 0.0;
+
+    // Records each frame's phase timings at the top of the next Update (get_frame_phases).
+    Editor::FramePhaseRecorder m_FramePhaseRecorder;
 
     // Cross-window drag-drop / tear-off / dock-preview policy and state live
     // in the controller; window/GPU creation stays here (UndockToFloatingWindow).

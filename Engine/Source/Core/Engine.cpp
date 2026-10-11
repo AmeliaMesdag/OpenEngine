@@ -31,6 +31,7 @@
 #include "Assets/TextureAsset.h"
 #include "Assets/RenderPipelineAsset.h"
 
+#include "Memory/ImagePins.h"
 #include "NativeScripting/NativeScriptManager.h"
 #include "UI/ModuleOwnedHandlers.h"
 
@@ -314,6 +315,22 @@ bool InitializeAudio(Audio::AudioSystem& audio)
         Logger::Log::Warning("AudioSystem init threw: {}", e.what());
         return false;
     }
+}
+
+// The image-pin answer for the arenas that still hold a destructor in [base, base + size):
+// "N arena(s) holding destructors: <names>", or empty when none does.
+std::string DescribeArenaImagePins(uint64 base, uint64 size)
+{
+    const std::vector<std::string> arenas = Memory::Detail::DescribeArenasPinningImage(base, size);
+    if (arenas.empty())
+        return {};
+    std::string pins = std::to_string(arenas.size()) + " arena(s) holding destructors:";
+    for (std::size_t index = 0; index < arenas.size(); ++index)
+    {
+        pins += index == 0 ? " " : ", ";
+        pins += arenas[index];
+    }
+    return pins;
 }
 
 } // namespace
@@ -649,6 +666,15 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
                     pins += ", ";
                 pins += std::to_string(hooks) + " ECS component hook(s)";
             }
+            // Arenas holding a destructor from the image run it at their owner's Reset or
+            // destruction; until then the code must stay mapped.
+            const std::string arenas = DescribeArenaImagePins(base, size);
+            if (!arenas.empty())
+            {
+                if (!pins.empty())
+                    pins += ", ";
+                pins += arenas;
+            }
             return pins;
         };
         observer.ImageUnmapping = [](uint64 base, uint64 size) {
@@ -823,11 +849,18 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
     Scene::RegisterBuiltInSceneSchemas();
 
     // Initialize engine-owned audio system asynchronously (no downstream deps during startup).
+    // A headless host opens no audio device: the engine runs as it does when the device
+    // fails to open, with no AudioSystem and no audio systems in the schedule.
     tPhase = std::chrono::high_resolution_clock::now();
     m_StartupChannel = MakeUnique<JobSystem::JobChannel>(
         *m_JobSystem, JobSystem::JobChannelDesc{.Name = "Engine startup", .MaxRunning = 2});
-    m_AudioSystem = MakeUnique<Audio::AudioSystem>(*m_AssetManager);
+    if (config.Headless)
     {
+        Logger::Log::Info("[Startup] AudioSystem: none (headless)");
+    }
+    else
+    {
+        m_AudioSystem = MakeUnique<Audio::AudioSystem>(*m_AssetManager);
         // Opening the device waits on the OS, so it is a startup-channel job. Where the
         // joining thread cannot block (Platform::SupportsTransientThreads: the browser
         // main thread), GetAudioSystem() runs it inline on first use instead.
@@ -840,8 +873,8 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
         {
             m_AudioInitDeferred = true;
         }
+        Logger::Log::Info("[Startup] AudioSystem: launched async ({:.1f}ms to dispatch)", MsSince(tPhase));
     }
-    Logger::Log::Info("[Startup] AudioSystem: launched async ({:.1f}ms to dispatch)", MsSince(tPhase));
 
     // If engine-managed rendering loop is enabled, ensure world exists
     if (m_RenderingLoopEnabled)
@@ -1361,7 +1394,15 @@ bool EngineCore::EnableRenderingLoop(Engine::Renderer::RenderServices* renderSer
         // Initialize world services and register module pipeline node types.
         InitializeWorldServices();
         ApplyTerrainBakeCacheLocation();
-        if (auto* nodeTypes = renderServices->Spine().GetPipelineNodeRegistry())
+        // A headless host passes no render services: there are no pipeline node types
+        // to register, and every scheduled system skips its render work, including the
+        // render-side systems that also produce terrain height and ocean buoyancy.
+        if (!renderServices)
+        {
+            Logger::Log::Info("EnableRenderingLoop: no render services (headless); the schedule "
+                              "runs without render work");
+        }
+        else if (auto* nodeTypes = renderServices->Spine().GetPipelineNodeRegistry())
         {
             TerrainECS::RegisterTerrainPipelineNodes(*nodeTypes);
             CBTTerrainECS::RegisterCBTPipelineNodes(*nodeTypes);
@@ -1398,7 +1439,7 @@ bool EngineCore::EnableRenderingLoop(Engine::Renderer::RenderServices* renderSer
         schedule.Add<Video::VideoTextureSystem>(
             "VideoTexture", ECS::SystemPhase::Extraction, 8,
             {"RenderExtraction", "TerrainExtraction"},
-            renderServices->GetDevice(), renderServices);
+            renderServices ? renderServices->GetDevice() : nullptr, renderServices);
         SplineECS::AddSplineSystemsToSchedule(schedule);
         PathfindingECS::AddPathfindingSystemsToSchedule(schedule);
         // Associate contributions with their plugin so reload reconciliation

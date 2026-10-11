@@ -246,6 +246,139 @@ TEST_F(ExtractionFastPathTest, SpawnEscalatesViaStructuralVersion)
     ASSERT_TRUE(h.PrimeToFastPath());
 }
 
+// Transform requires WorldTransform and MeshRenderer requires MeshGPUData: a
+// spawned renderable holds both from its creation, so the tick that first
+// draws it moves no archetype (no lazy add from the hierarchy or extraction).
+TEST_F(ExtractionFastPathTest, SpawnHoldsItsDerivedComponentsBeforeTheFirstTick)
+{
+    ExtractionHarness h;
+    ASSERT_TRUE(h.Initialize(m_Device.get(), true));
+    h.SpawnRenderable(0.0f, 0.0f, 0.0f);
+    ASSERT_TRUE(h.PrimeToFastPath());
+
+    MeshRenderer mr{};
+    mr.meshGpuHandleId = static_cast<uint64>(h.meshHandle);
+    mr.renderLayerMask = 0x1u;
+    mr.materialAssetGuid.Set(h.materialGuid);
+    constexpr size_t kSpawned = 256;
+    const std::vector<EntityHandle> batch =
+        h.world->CreateBatchHandle(kSpawned, MakeTransformAt(1.0f, 2.0f, 3.0f), mr);
+    const ECS::Entity single = h.SpawnRenderable(4.0f, 0.0f, 0.0f);
+
+    for (const EntityHandle entity : batch)
+    {
+        ASSERT_NE(h.world->GetComponent<WorldTransform>(entity), nullptr);
+        const auto* mg = h.world->GetComponent<MeshGPUData>(entity);
+        ASSERT_NE(mg, nullptr);
+        EXPECT_EQ(mg->instanceIndex, 0xFFFFFFFFu) << "a new MeshGPUData starts unassigned";
+    }
+    ASSERT_NE(h.world->GetComponent<WorldTransform>(single.GetHandle()), nullptr);
+    ASSERT_NE(h.world->GetComponent<MeshGPUData>(single.GetHandle()), nullptr);
+
+    const std::size_t structuralBefore = h.world->GetStructuralChangeVersion();
+    h.StepFrame();
+    EXPECT_EQ(h.world->GetStructuralChangeVersion(), structuralBefore)
+        << "the tick after the spawn moved archetypes";
+    for (const EntityHandle entity : batch)
+        EXPECT_NE(h.world->GetComponent<MeshGPUData>(entity)->instanceIndex, 0xFFFFFFFFu);
+    EXPECT_NE(h.world->GetComponent<MeshGPUData>(single.GetHandle())->instanceIndex, 0xFFFFFFFFu);
+}
+
+// A renderable created after the hierarchy ran this tick (an OnPostSimulation
+// spawn) has an unresolved WorldTransform (Version 0). Extraction does not draw
+// it at the origin: it gets no slot this frame, and on the next frame it
+// appears at its placed pose with no motion from anywhere else.
+TEST_F(ExtractionFastPathTest, RenderableSpawnedAfterTheHierarchyWaitsForItsPose)
+{
+    ExtractionHarness h;
+    ASSERT_TRUE(h.Initialize(m_Device.get(), true));
+    h.SpawnRenderable(0.0f, 0.0f, 0.0f);
+    ASSERT_TRUE(h.PrimeToFastPath());
+
+    h.world->ProcessCommands();
+    h.hierarchy.Update(*h.world, kDt);
+    MeshRenderer mr{};
+    mr.meshGpuHandleId = static_cast<uint64>(h.meshHandle);
+    mr.renderLayerMask = 0x1u;
+    mr.materialAssetGuid.Set(h.materialGuid);
+    const EntityHandle late = h.world->CreateHandle(MakeTransformAt(50.0f, 0.0f, 0.0f), mr);
+    h.extraction->Update(*h.world, kDt);
+    h.world->SwapComponentDirtyFeed();
+    EXPECT_EQ(h.world->GetComponent<MeshGPUData>(late)->instanceIndex, 0xFFFFFFFFu)
+        << "an unresolved pose was given a slot (drawn at the origin)";
+
+    h.StepFrame();
+    const uint32 slot = h.world->GetComponent<MeshGPUData>(late)->instanceIndex;
+    ASSERT_NE(slot, 0xFFFFFFFFu) << "the renderable never appeared once its pose resolved";
+    const GPUInstance& row = h.rs.GetGPUScene()->GetInstances()[slot];
+    EXPECT_FLOAT_EQ(row.transform.Data()[12], 50.0f);
+    EXPECT_EQ(std::memcmp(row.prevTransform.Data(), row.transform.Data(), sizeof(float) * 16), 0)
+        << "the first drawn frame carries motion from a pose it never had";
+}
+
+namespace
+{
+// One full-lane submission: the GPUScene slot and the view it draws into.
+struct SubmissionSlot
+{
+    uint32 InstanceIndex = 0;
+    uint32 ViewId = 0;
+    bool operator==(const SubmissionSlot&) const = default;
+};
+
+// The full lane's submissions after 2000 renderables spawn into a world primed
+// to the fast path with 3000, with `pool` as the world's job system. 5000
+// records split into prepare chunks either way (four of 1250 run inline with
+// no pool, five of 1000 on a four-worker pool), so both runs go through the
+// apply's splice across chunk boundaries.
+std::vector<SubmissionSlot> FullLaneSubmissionsAfterSpawn(Rendering::IDevice* device,
+                                                          JobSystem::WorkStealingThreadPool* pool)
+{
+    ExtractionHarness h;
+    if (!h.Initialize(device, true, pool))
+        return {};
+    MeshRenderer mr{};
+    mr.meshGpuHandleId = static_cast<uint64>(h.meshHandle);
+    mr.renderLayerMask = 0x1u;
+    mr.materialAssetGuid.Set(h.materialGuid);
+    h.world->CreateBatchHandle(3000, MakeTransformAt(0.0f, 0.0f, 0.0f), mr);
+    if (!h.PrimeToFastPath())
+        return {};
+    h.world->CreateBatchHandle(2000, MakeTransformAt(1.0f, 0.0f, 0.0f), mr);
+    h.StepFrame();
+
+    std::vector<SubmissionSlot> slots;
+    for (const WorldSubmissionRecord& sub : h.extraction->GetSubmissionsForTest())
+        slots.push_back(SubmissionSlot{sub.instanceIndex, sub.viewId});
+    return slots;
+}
+
+void ExpectStrictlyIncreasingSlots(const std::vector<SubmissionSlot>& slots, const char* run)
+{
+    for (size_t i = 1; i < slots.size(); ++i)
+        ASSERT_LT(slots[i - 1].InstanceIndex, slots[i].InstanceIndex)
+            << run << ": submission " << i << " breaks slot order after a spawn";
+}
+} // namespace
+
+// The full lane's submissions leave in record order, a new instance's in place
+// beside its neighbours': after a spawn into a primed world each instance is
+// emitted once, in slot order, and a pooled prepare emits exactly what a serial
+// one does.
+TEST_F(ExtractionFastPathTest, FullLaneEmitsTheSameRecordOrderPooledAndSerial)
+{
+    const std::vector<SubmissionSlot> serial = FullLaneSubmissionsAfterSpawn(m_Device.get(), nullptr);
+    JobSystem::WorkStealingThreadPool pool(4);
+    const std::vector<SubmissionSlot> pooled = FullLaneSubmissionsAfterSpawn(m_Device.get(), &pool);
+
+    ASSERT_EQ(serial.size(), 5000u);
+    ASSERT_EQ(pooled.size(), 5000u);
+    ExpectStrictlyIncreasingSlots(serial, "serial");
+    ExpectStrictlyIncreasingSlots(pooled, "pooled");
+    for (size_t i = 0; i < serial.size(); ++i)
+        ASSERT_EQ(serial[i], pooled[i]) << "submission " << i << " differs between the serial and pooled prepare";
+}
+
 TEST_F(ExtractionFastPathTest, DespawnEscalatesAndDropsSubmissions)
 {
     ExtractionHarness h;

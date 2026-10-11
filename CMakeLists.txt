@@ -559,6 +559,9 @@ endif()
 # GE_DEBUG_INSTRUMENTATION. Also refuses ENABLE_MIMALLOC where the hook is compiled.
 include(cmake/AllocationHook.cmake)
 
+# Refuses a target that links Engine and also a module Engine already contains.
+include(cmake/EngineModuleDuplicationCheck.cmake)
+
 # Verify dependencies are working
 verify_dependencies()
 
@@ -981,6 +984,20 @@ if(ENABLE_ASAN)
 
 	# Expose a compile-time define so code/tests can relax perf thresholds under ASan.
 	add_compile_definitions($<$<CONFIG:Debug>:GE_ENABLE_ASAN=1>)
+endif()
+
+# ThreadSanitizer toggle (Debug config, clang and gcc only)
+option(ENABLE_TSAN "Enable ThreadSanitizer (applies to Debug config)" OFF)
+if(ENABLE_TSAN)
+	if(ENABLE_ASAN)
+		message(FATAL_ERROR "ENABLE_TSAN and ENABLE_ASAN cannot both be ON: the two sanitizers do not link together. Configure a separate tree for each (macos-arm64-local-asan, macos-arm64-local-tsan), or turn one off in this tree with -DENABLE_ASAN=OFF or -DENABLE_TSAN=OFF (or reconfigure with cmake --fresh).")
+	endif()
+	if(MSVC)
+		message(FATAL_ERROR "ENABLE_TSAN needs clang or gcc: MSVC has no ThreadSanitizer. Use a macOS or Linux tree.")
+	endif()
+	message(STATUS "ThreadSanitizer: ENABLED")
+	add_compile_options("$<$<CONFIG:Debug>:-fsanitize=thread;-fno-omit-frame-pointer>")
+	add_link_options("$<$<CONFIG:Debug>:-fsanitize=thread>")
 endif()
 
 # Clang-Tidy integration (runs during CMake builds if available)

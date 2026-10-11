@@ -317,4 +317,36 @@ TEST_F(NavigationRequestReplacementTest, OutstandingRequestCannotReachActualScen
     m_System.Update(*m_World, kDt);
     EXPECT_TRUE(Untouched(ECS::Entity(m_World.get(), replacement), true));
 }
+
+TEST_F(NavigationRequestReplacementTest, AsyncTimerRefreshKeepsItsPathUntilTheSolveLands)
+{
+    auto actor = Actor(*m_World, true);
+    m_System.Update(*m_World, kDt); // synchronous solve: no job system yet
+    auto* state = actor.GetForWrite<Components::NavigationAgentState>();
+    ASSERT_EQ(state->Status, static_cast<uint8>(Pathfinding::PathStatus::Complete));
+    const Pathfinding::PathHandle oldPath{state->PathIndex, state->PathGeneration};
+    const auto& buffer = NavigationService::Get().GetPathBuffer();
+    ASSERT_GT(buffer.GetPointCount(oldPath), 0u);
+    actor.GetForWrite<Components::NavigationAgent>()->ReplanInterval = 100.0f;
+    state->ReplanTimer = 0.0f;
+    m_World->ProcessCommands();
+
+    HeldWorker worker(NavigationService::Get());
+    m_System.Update(*m_World, kDt);
+    state = actor.GetForWrite<Components::NavigationAgentState>();
+    ASSERT_TRUE(NavigationService::Get().HasActivePathJobs()) << "the refresh must be in flight";
+    EXPECT_TRUE(state->ReplanRequested);
+    EXPECT_EQ(state->Status, static_cast<uint8>(Pathfinding::PathStatus::Complete));
+    EXPECT_GT(buffer.GetPointCount(oldPath), 0u) << "the refresh keeps its path while in flight";
+    m_System.Update(*m_World, kDt); // still in flight: nothing changes
+    EXPECT_GT(buffer.GetPointCount(oldPath), 0u);
+
+    worker.Finish();
+    m_System.Update(*m_World, kDt);
+    state = actor.GetForWrite<Components::NavigationAgentState>();
+    EXPECT_FALSE(state->ReplanRequested);
+    EXPECT_EQ(state->Status, static_cast<uint8>(Pathfinding::PathStatus::Complete));
+    EXPECT_NE(state->PathGeneration, 0u);
+    EXPECT_EQ(buffer.GetPointCount(oldPath), 0u) << "the kept path must be freed when the async solve lands";
+}
 } // namespace

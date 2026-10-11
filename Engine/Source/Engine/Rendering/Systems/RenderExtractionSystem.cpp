@@ -230,16 +230,16 @@ using namespace ::GameEngine::Rendering;
 // public header. All members retain capacity across frames.
 struct RenderExtractionParallelState
 {
-    enum class Op : uint8_t { Drop, Skip, Update, Add, NeedsComponent };
+    enum class Op : uint8_t { Drop, Skip, Update, Add };
 
     // One per record, index-aligned with m_Records: chunk c owns the slots in
     // its range exclusively, so prepare never shares a write target.
     struct Prepared
     {
         Op op = Op::Drop;
-        Components::MeshGPUData* meshGpu = nullptr; // null only for NeedsComponent
+        Components::MeshGPUData* meshGpu = nullptr;
         ECS::EntityHandle entity{};
-        GPUInstance payload{};                       // valid for Update/Add/NeedsComponent
+        GPUInstance payload{};                       // valid for Update/Add
         MeshGPUHandle meshHandle{};
         const Material* material = nullptr;
         uint32 flags = 0u;
@@ -252,10 +252,9 @@ struct RenderExtractionParallelState
         // Update only: a payload input other than the transform changed, so the
         // apply moves the slot's continuity stamp along with the row.
         bool continuityBreak = false;
-        // MeshGPUEntry::uploadSeq the payload was built against; the apply
-        // writes it into the Last* caches for NeedsComponent (no MeshGPUData
-        // existed in prepare).
-        uint64 meshUploadSequence = 0u;
+        // Skip/Update: how many submissions prepare emitted into its chunk's
+        // list, which the apply splices back in record order.
+        uint32 subCount = 0u;
     };
 
     // Per-chunk accumulators merged in the serial apply (conc-F1): a racing ++
@@ -342,8 +341,7 @@ bool IsShadowProximityKeyingEnabled()
     return s_Enabled;
 }
 
-// The Last* cache write, isolated so prepare (Update/Add, meshGpu already
-// present), apply (NeedsComponent, component added there) and the fast
+// The Last* cache write, isolated so prepare (Update/Add) and the fast
 // path's always-refresh subset stay identical.
 // Field-based (not record-based) because the fast path has no record — it
 // writes the same caches from fresh component reads.
@@ -552,6 +550,7 @@ void PrepareRecord(const WorldRenderableRecord& rec,
 {
     using Op = RenderExtractionParallelState::Op;
     out.op = Op::Drop;
+    out.subCount = 0u;
 
     // Membership digest term — accumulated for EVERY record BEFORE the readiness
     // gates below (so streaming/recompiling assets don't thrash probe rebakes).
@@ -614,10 +613,15 @@ void PrepareRecord(const WorldRenderableRecord& rec,
         return;
     }
 
-    Components::MeshGPUData* meshGpu = rec.meshGpu; // null => first-frame (NeedsComponent, D2)
+    // MeshRenderer requires MeshGPUData (MeshRenderer.h), so every record
+    // carries one from the entity's creation.
+    Components::MeshGPUData* meshGpu = rec.meshGpu;
+    assert(meshGpu && "A MeshRenderer entity without MeshGPUData: the requirement in MeshRenderer.h was bypassed");
+    if (!meshGpu)
+        return;
     // A reset may leave a derived component without a backing row. Re-enter
     // the existing Add path before reading either its layer or transform.
-    if (meshGpu && meshGpu->instanceIndex != 0xFFFFFFFFu &&
+    if (meshGpu->instanceIndex != 0xFFFFFFFFu &&
         meshGpu->instanceIndex >= scene.GetInstances().size())
         meshGpu->instanceIndex = 0xFFFFFFFFu;
 
@@ -662,7 +666,6 @@ void PrepareRecord(const WorldRenderableRecord& rec,
     // history exactly. The upload sequence is what sees an in-place mesh
     // reload: the handle and the mesh row survive it, the geometry does not.
     const bool nonTransformInputsUnchanged =
-        meshGpu != nullptr &&
         meshGpu->instanceIndex != 0xFFFFFFFFu &&
         meshGpu->meshIndex == mshIdx &&
         meshGpu->materialIndex == matIdx &&
@@ -690,7 +693,7 @@ void PrepareRecord(const WorldRenderableRecord& rec,
     // Version-contract tripwire. The read of GPUScene here happens during the
     // parallel phase; it is safe because no thread WRITES GPUScene in prepare
     // (§2.3). The warn-once guard is atomic so concurrent chunks can't tear it.
-    if (instanceUnchanged && meshGpu &&
+    if (instanceUnchanged &&
         std::memcmp(scene.GetInstances()[meshGpu->instanceIndex].transform.Data(),
                     rec.worldTransform.matrix, sizeof(rec.worldTransform.matrix)) != 0)
     {
@@ -714,15 +717,16 @@ void PrepareRecord(const WorldRenderableRecord& rec,
     out.renderLayerMask = rec.meshRenderer.renderLayerMask;
     out.skinPaletteOffset = paletteOffsets.Current;
     out.prevSkinPaletteOffset = paletteOffsets.Previous;
-    out.meshUploadSequence = meshEntry->uploadSeq;
 
     if (instanceUnchanged)
     {
         ++cr.diag.skippedCount;
         out.op = Op::Skip;
         out.stableInstanceIndex = meshGpu->instanceIndex;
+        const std::size_t emittedBefore = cr.subs.size();
         EmitSubmissions(cr.subs, matchingViews, meshHandle, material,
                         meshGpu->instanceIndex, flags, rec.meshRenderer.renderLayerMask);
+        out.subCount = static_cast<uint32>(cr.subs.size() - emittedBefore);
         return;
     }
 
@@ -735,7 +739,7 @@ void PrepareRecord(const WorldRenderableRecord& rec,
     const float boundsCenter[3] = {rec.bounds.Box.center.x, rec.bounds.Box.center.y,
                                    rec.bounds.Box.center.z};
     const float* prevMatrix = nullptr;
-    if (meshGpu != nullptr && meshGpu->instanceIndex != 0xFFFFFFFFu &&
+    if (meshGpu->instanceIndex != 0xFFFFFFFFu &&
         meshGpu->LastSectorX == secX && meshGpu->LastSectorY == secY &&
         meshGpu->LastSectorZ == secZ)
         prevMatrix = scene.GetInstances()[meshGpu->instanceIndex].transform.Data();
@@ -746,13 +750,6 @@ void PrepareRecord(const WorldRenderableRecord& rec,
                             rec.meshRenderer.renderLayerMask);
     const bool prevDiffers = PayloadPrevDiffers(out.payload);
 
-    if (meshGpu == nullptr)
-    {
-        // First-frame: prepare must NOT AddComponent (structural change forbidden
-        // mid-iteration). Defer AddComponent + AddInstance + emission to apply.
-        out.op = Op::NeedsComponent;
-        return;
-    }
     if (meshGpu->instanceIndex == 0xFFFFFFFFu)
     {
         // Component present but no GPUScene slot yet: defer AddInstance + emission
@@ -773,8 +770,10 @@ void PrepareRecord(const WorldRenderableRecord& rec,
     WriteLastCaches(*meshGpu, mshIdx, matIdx, meshEntry->uploadSeq, rec.worldTransform.Version,
                     flags, skinPaletteOffset, rec.lodBias, rec.runtimeId, boundsCenter,
                     boundsRadius, secX, secY, secZ, prevDiffers);
+    const std::size_t emittedBefore = cr.subs.size();
     EmitSubmissions(cr.subs, matchingViews, meshHandle, material,
                     meshGpu->instanceIndex, flags, rec.meshRenderer.renderLayerMask);
+    out.subCount = static_cast<uint32>(cr.subs.size() - emittedBefore);
 }
 
 // A2.1 parallel PROCESS: fork the pure per-record prepare over m_Records index
@@ -997,9 +996,34 @@ void ProcessRecordsParallel(
         pendingSentinelIndex += cr.diag.pendingSentinelIndex;
     }
 
+    // Submissions leave in record order, each record's in place: a new
+    // instance's (emitted here, once AddInstance gave it a slot) beside its
+    // neighbours' (emitted in prepare), so a spawn frame emits the same order
+    // a still frame replays. That order is the slot order wherever slots were
+    // handed out in record order, which keeps the compat lists' per-frame sort
+    // (CpuDrawStreamBuilder::EmitLists) cheap after a spawn, and it is the
+    // order sorted transparency breaks depth ties on (SortedTransparentRuns).
+    // Prepare filled chunk c's list with records [c * chunkSize, ...) in
+    // order, so a chunk's cursor ends exactly at the end of its list.
+    std::size_t spliceChunk = 0;
+    std::size_t spliceCursor = 0;
     for (std::size_t i = 0; i < recCount; ++i)
     {
         auto& prep = state.prepared[i];
+        if (const std::size_t chunk = i / chunkSize; chunk != spliceChunk)
+        {
+            assert(spliceCursor == state.chunks[spliceChunk].subs.size() &&
+                   "the apply's splice left submissions of a prepare chunk unread");
+            spliceChunk = chunk;
+            spliceCursor = 0;
+        }
+        if (prep.subCount != 0u)
+        {
+            const auto& chunkSubs = state.chunks[spliceChunk].subs;
+            const auto first = chunkSubs.begin() + static_cast<std::ptrdiff_t>(spliceCursor);
+            submissions.insert(submissions.end(), first, first + prep.subCount);
+            spliceCursor += prep.subCount;
+        }
         switch (prep.op)
         {
         case Op::Drop:
@@ -1031,38 +1055,10 @@ void ProcessRecordsParallel(
             EmitSubmissions(submissions, matchingViews, prep.meshHandle, prep.material,
                             prep.meshGpu->instanceIndex, prep.flags, prep.renderLayerMask);
             break;
-        case Op::NeedsComponent:
-        {
-            const auto& rec = records[i];
-            Components::MeshGPUData init{};
-            world.AddComponentImmediate<Components::MeshGPUData>(rec.entity, init);
-            auto* mg = world.GetComponentForWrite<Components::MeshGPUData>(rec.entity);
-            if (!mg)
-                break;
-            mg->instanceIndex = scene.AddInstance(prep.payload);
-            const float boundsCenter[3] = {rec.bounds.Box.center.x, rec.bounds.Box.center.y,
-                                           rec.bounds.Box.center.z};
-            WriteLastCaches(*mg, prep.payload.meshIndex, prep.payload.materialIndex,
-                            prep.meshUploadSequence, rec.worldTransform.Version, prep.flags,
-                            prep.payload.skinPaletteOffset, rec.lodBias, rec.runtimeId,
-                            boundsCenter, rec.hasBounds ? rec.bounds.Box.Radius() : -1.0f,
-                            rec.hasSectorCoord ? rec.sectorCoord.x : 0,
-                            rec.hasSectorCoord ? rec.sectorCoord.y : 0,
-                            rec.hasSectorCoord ? rec.sectorCoord.z : 0,
-                            /*prevDiffers*/ false); // first frame: prev := current
-            EmitSubmissions(submissions, matchingViews, prep.meshHandle, prep.material,
-                            mg->instanceIndex, prep.flags, prep.renderLayerMask);
-            break;
-        }
         }
     }
-
-    // Append the chunk-local Update/Skip emissions in chunk order (== record
-    // order). Submission order is immaterial to draw order (re-established by
-    // WorldDrawBuilder's total-order sort, CONC-F16) — chosen only for
-    // determinism.
-    for (const auto& cr : state.chunks)
-        submissions.insert(submissions.end(), cr.subs.begin(), cr.subs.end());
+    assert((recCount == 0 || spliceCursor == state.chunks[spliceChunk].subs.size()) &&
+           "the apply's splice left submissions of the last prepare chunk unread");
 
     applyMs = elapsed(applyStart, PrepClock::now());
 }
@@ -1715,9 +1711,9 @@ bool RenderExtractionSystem::EvaluateFastPathPreconditions(ECS::World& world, ui
     if (world.GetComponentDirtyFeed().Overflowed())
         reasons |= kEscalationFeedOverflow;
 
-    // E4 — structural version vs the sample taken at the END of the last
-    // full pass (see the prime block in Update for the TLAS asymmetry note).
-    if (world.GetStructuralChangeVersion() != m_FullPassStructuralVersion)
+    // E4 — structural version vs the one the last full pass entered with.
+    m_FrameStructuralVersion = world.GetStructuralChangeVersion();
+    if (m_FrameStructuralVersion != m_FullPassStructuralVersion)
         reasons |= kEscalationStructuralChange;
 
     // E5 — Changed<> probes over the four record columns extraction reads
@@ -2537,6 +2533,7 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
             auto& records = m_Records;
             auto& submissions = m_Submissions;
 
+            uint32_t pendingUnresolvedTransform = 0;
             const auto gatherStart = ExtractionClock::now();
             world.Query<
                      GameEngine::ECS::Read<GameEngine::Components::WorldTransform>,
@@ -2548,7 +2545,8 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                      GameEngine::ECS::Optional<GameEngine::Components::AnimatorRef>,
                      GameEngine::ECS::Optional<GameEngine::Components::LODGroup>,
                      GameEngine::ECS::Optional<GameEngine::Components::MeshGPUData>,
-                     GameEngine::ECS::Optional<GameEngine::Components::GIEmitter>>()
+                     GameEngine::ECS::Optional<GameEngine::Components::GIEmitter>,
+                     GameEngine::ECS::Optional<GameEngine::Components::Transform>>()
                 .Each([&](GameEngine::ECS::EntityHandle e,
                           const GameEngine::Components::WorldTransform& xf,
                           const GameEngine::Components::MeshRenderer& mr,
@@ -2559,7 +2557,8 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                           const GameEngine::Components::AnimatorRef* anim,
                           const GameEngine::Components::LODGroup* lodGroup,
                           GameEngine::Components::MeshGPUData* meshGpu,
-                          const GameEngine::Components::GIEmitter* giEmitter)
+                          const GameEngine::Components::GIEmitter* giEmitter,
+                          const GameEngine::Components::Transform* local)
                       {
                           // HLOD residency suppression: a member whose cluster is
                           // proxy-active (or an inactive proxy entity) has had its
@@ -2571,6 +2570,16 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                           // + undo keep working off the still-live entity.
                           if (meshGpu && meshGpu->hlodEvicted)
                               return;
+                          // Version 0: the hierarchy has not resolved this
+                          // renderable yet (created after it ran this tick).
+                          // Preparing it now would draw it at the origin and
+                          // give its next frame a motion vector from there;
+                          // the pending count (E8) brings it in next frame.
+                          if (local && xf.Version == 0u)
+                          {
+                              ++pendingUnresolvedTransform;
+                              return;
+                          }
                           WorldRenderableRecord rec{};
                           rec.entity = e;
                           rec.worldTransform = xf;
@@ -2692,16 +2701,18 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                 m_LastPendingMaterialLoad = pendingMaterialLoad;
                 m_LastPendingPipeline = skipNoPipeline;
                 m_LastPendingSentinelIndex = pendingSentinelIndex;
+                m_LastPendingUnresolvedTransform = pendingUnresolvedTransform;
                 m_LastPendingTransient = skipNoMeshEntry + pendingMaterialLoad +
-                                         skipNoPipeline + pendingSentinelIndex;
+                                         skipNoPipeline + pendingSentinelIndex +
+                                         pendingUnresolvedTransform;
                 m_LastMaterialDigest = m_FrameMaterialDigest;
                 m_LastViewFingerprint = m_FrameViewFingerprints.All;
                 m_LastPersistentViewFingerprint = m_FrameViewFingerprints.Persistent;
-                // E4 compare value sampled at full-lane END, post-apply — NOT
-                // at entry: this lane's apply creates MeshGPUData
-                // components and would trip its own gate, buying a wasted
-                // second full frame after every creation burst (api-perf F7).
-                m_FullPassStructuralVersion = world.GetStructuralChangeVersion();
+                // E4 compare value: the version this frame entered with. The
+                // full lane makes no structural change (MeshGPUData exists from
+                // the entity's creation), so a structural change made beside it
+                // this frame still escalates the next one.
+                m_FullPassStructuralVersion = m_FrameStructuralVersion;
                 m_CachesPrimed = true;
                 m_CachesWorldId = worldId;
             }
@@ -2841,6 +2852,7 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
         stats.PendingMaterialLoad = m_LastPendingMaterialLoad;
         stats.PendingPipeline = m_LastPendingPipeline;
         stats.PendingSentinelIndex = m_LastPendingSentinelIndex;
+        stats.PendingUnresolvedTransform = m_LastPendingUnresolvedTransform;
         const Particles::ParticleExtractionStats particles = m_Particles.Stats();
         stats.ParticleEmitterCount = particles.EmitterCount;
         stats.LiveParticles = particles.LiveParticles;

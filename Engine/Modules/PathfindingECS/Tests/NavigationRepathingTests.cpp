@@ -268,16 +268,18 @@ TEST_F(NavigationRepathingTest, NoReplanWhenIntervalIsZero)
 }
 
 // ---------------------------------------------------------------------------
-// Budget limiting: only MaxReplansPerFrame agents replan per frame
+// Timer replans share the solve budget: every expired timer marks its agent,
+// and only MaxPathSolvesPerFrame of them are solved in one Update
 // ---------------------------------------------------------------------------
 
-TEST_F(NavigationRepathingTest, ReplanBudgetLimitsPerFrame)
+TEST_F(NavigationRepathingTest, TimerReplansShareTheSolveBudget)
 {
     auto gridEntity = CreateGrid(32, 32);
     auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
 
     // Create 20 agents all with the same short replan interval
     constexpr uint32 kAgentCount = 20;
+    constexpr uint32 kBudget = 4;
     std::vector<ECS::Entity> agents;
     for (uint32 i = 0; i < kAgentCount; ++i)
     {
@@ -288,52 +290,41 @@ TEST_F(NavigationRepathingTest, ReplanBudgetLimitsPerFrame)
         agents.push_back(e);
     }
 
-    // Run initial pathfinding
     NavigationPathfindingSystem pathSystem;
-    pathSystem.MaxReplansPerFrame = 4; // strict budget
+    pathSystem.MaxPathSolvesPerFrame = kAgentCount;
     pathSystem.Update(*m_World, kDt);
     m_World->ProcessCommands();
 
-    // Clear all PathDirty flags
+    // Expire every timer at once
     for (auto& e : agents)
     {
         auto* s = e.GetForWrite<Components::NavigationAgentState>();
         ASSERT_NE(s, nullptr);
-        s->PathDirty = false;
-        s->ReplanTimer = 0.0f; // force all timers to expire on next update
+        ASSERT_FALSE(s->PathDirty);
+        s->ReplanTimer = 0.0f;
     }
     m_World->ProcessCommands();
 
-    // Run one pathfinding update - should only mark MaxReplansPerFrame agents
-    NavigationMovementSystem moveSystem;
-    moveSystem.Update(*m_World, kDt);
+    pathSystem.MaxPathSolvesPerFrame = kBudget;
     pathSystem.Update(*m_World, kDt);
     m_World->ProcessCommands();
 
-    uint32 dirtyCount = 0;
+    // Every timer marked its agent; the budget solved four and queued the
+    // rest, which keep the path they are walking.
+    uint32 queuedCount = 0;
     for (auto& e : agents)
     {
         auto* s = e.Get<Components::NavigationAgentState>();
-        if (s && s->PathDirty)
-            ++dirtyCount;
+        EXPECT_FALSE(s->PathDirty);
+        if (!s->ReplanRequested)
+            continue;
+        ++queuedCount;
+        EXPECT_EQ(static_cast<Pathfinding::PathStatus>(s->Status), Pathfinding::PathStatus::Complete);
+        EXPECT_NE(s->PathIndex, 0u);
     }
-
-    // The budget system marks up to MaxReplansPerFrame agents as dirty,
-    // then those get processed in the same Update call (Step 2).
-    // After processing, PathDirty is cleared. So we check that the system
-    // didn't process more than the budget in a single frame by verifying
-    // that some agents still have expired timers (they got deferred).
-    uint32 unexpiredTimerCount = 0;
-    for (auto& e : agents)
-    {
-        auto* s = e.Get<Components::NavigationAgentState>();
-        if (s && s->ReplanTimer <= 0.0f && !s->PathDirty)
-            ++unexpiredTimerCount;
-    }
-
-    // At least some agents should have been deferred (not all 20 could replan in one frame)
-    EXPECT_GT(unexpiredTimerCount, 0u)
-        << "Some agents should have been deferred by the replan budget";
+    EXPECT_EQ(queuedCount, kAgentCount - kBudget);
+    EXPECT_EQ(pathSystem.GetStatistics().Solved, kBudget);
+    EXPECT_EQ(pathSystem.GetStatistics().Backlog, kAgentCount - kBudget);
 }
 
 // ---------------------------------------------------------------------------

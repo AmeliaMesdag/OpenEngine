@@ -246,10 +246,6 @@ struct Command
         ADD_COMPONENT,
         REMOVE_COMPONENT,
         SET_COMPONENT,
-        // A required component (Detail::RequiredComponents): added with this value only
-        // when the entity lacks it at the flush, so it never replaces a value the entity
-        // has, including one queued earlier in the same flush.
-        ADD_REQUIRED_COMPONENT,
         // World::SetEntityEnabledImmediate at flush: the same single move as an
         // immediate switch, so a queued switch keeps the derived tag exactly
         // where an immediate one would (see SetEntityEnabledImmediate).
@@ -270,14 +266,6 @@ struct Command
         cmd.entity = entity;
         cmd.componentType = GetComponentTypeId<T>();
         cmd.componentData.Assign(&component, sizeof(T));
-        return cmd;
-    }
-
-    template <Component T>
-    static Command addRequiredComponent(EntityHandle entity, const T& component)
-    {
-        Command cmd = addComponent(entity, component);
-        cmd.type = ADD_REQUIRED_COMPONENT;
         return cmd;
     }
 };

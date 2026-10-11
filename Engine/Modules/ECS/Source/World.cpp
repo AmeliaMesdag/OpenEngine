@@ -785,8 +785,10 @@ Archetype* World::GetOrCreateArchetypeForAdd(Archetype* source, ComponentTypeId 
     if (Archetype* cached = source->GetAddEdge(typeId))
         return cached;
 
-    ComponentSignature newSig = source->GetSignature();
-    newSig.Add(typeId);
+    ComponentSignature direct = source->GetSignature();
+    direct.Add(typeId);
+    ComponentSignature newSig = direct;
+    AddRequiredClosure(newSig);
     Archetype* target = GetOrCreateArchetype(newSig);
 
     // No-op (source already had typeId, e.g. Add when present): don't cache a
@@ -797,10 +799,133 @@ Archetype* World::GetOrCreateArchetypeForAdd(Archetype* source, ComponentTypeId 
     if (target != source)
     {
         source->SetAddEdge(typeId, target);
-        target->SetRemoveEdge(typeId, source);
+        // Removing typeId from target leads back to source only when the add
+        // brought no requirement with it.
+        if (newSig == direct)
+            target->SetRemoveEdge(typeId, source);
     }
 
     return target;
+}
+
+void World::AddRequiredClosure(ComponentSignature& signature)
+{
+    const auto requiresAny = [](ComponentTypeId id)
+    {
+        const ComponentRegistry::ComponentInfo* info = ComponentRegistry::GetComponentInfo(id);
+        return info && !info->Required.empty();
+    };
+    const auto& members = signature.GetComponents();
+    if (std::none_of(members.begin(), members.end(), requiresAny))
+        return;
+
+    std::vector<ComponentTypeId> pending = members;
+    while (!pending.empty())
+    {
+        const ComponentTypeId id = pending.back();
+        pending.pop_back();
+        const ComponentRegistry::ComponentInfo* info = ComponentRegistry::GetComponentInfo(id);
+        if (!info)
+            continue;
+        for (const ComponentTypeId required : info->Required)
+        {
+            if (signature.Contains(required))
+                continue;
+            const ComponentRegistry::ComponentInfo* requiredInfo = ComponentRegistry::GetComponentInfo(required);
+            assert(requiredInfo && !requiredInfo->RequirementDefault.empty() &&
+                   "A required component registers with its requirer (ComponentRegistry::RegisterRequirement)");
+            if (!requiredInfo)
+                continue;
+            signature.Add(required);
+            componentSizes.try_emplace(required, requiredInfo->Size);
+            pending.push_back(required);
+        }
+    }
+}
+
+void World::ResolveRequiredColumns(Archetype& archetype, const ComponentSignature& supplied,
+                                   std::vector<RequiredColumn>& out) const
+{
+    out.clear();
+    if (!archetype.HasTable() || archetype.GetSignature() == supplied)
+        return;
+    const ColumnLayout& layout = archetype.GetTable().GetLayout();
+    for (const ColumnDesc& column : layout.Columns)
+    {
+        if (supplied.Contains(column.TypeId))
+            continue;
+        const ComponentRegistry::ComponentInfo* info = ComponentRegistry::GetComponentInfo(column.TypeId);
+        assert(info && info->RequirementDefault.size() == column.Size &&
+               "An archetype column the caller did not supply must be a requirement with a recorded default");
+        if (!info || info->RequirementDefault.size() != column.Size)
+            continue;
+        out.push_back(RequiredColumn{column.Offset, info->RequirementDefault});
+    }
+}
+
+void World::WriteRequiredColumns(Archetype& archetype, EntityLocation loc,
+                                 std::span<const RequiredColumn> columns)
+{
+    if (columns.empty())
+        return;
+    std::byte* memory = archetype.GetTable().GetChunks()[loc.ChunkIndex].GetMemory();
+    for (const RequiredColumn& column : columns)
+    {
+        std::memcpy(memory + column.Offset + static_cast<std::size_t>(loc.IndexInChunk) * column.Default.size(),
+                    column.Default.data(), column.Default.size());
+    }
+}
+
+void World::WriteRequiredDefaultsAfterAdd(EntityHandle entity, const ComponentSignature& from,
+                                          Archetype& target, ComponentTypeId added)
+{
+    const EntityMetadata& metadata = entityMetadata[entity.index];
+    for (const ComponentTypeId id : target.GetSignature().GetComponents())
+    {
+        if (id == added || from.Contains(id))
+            continue;
+        const ComponentRegistry::ComponentInfo* info = ComponentRegistry::GetComponentInfo(id);
+        if (!info || info->RequirementDefault.empty())
+            continue;
+        target.SetComponentRawAt(metadata.chunkIndex, metadata.indexInChunk, id,
+                                 info->RequirementDefault.data(), info->RequirementDefault.size());
+    }
+}
+
+void World::SignalRequiredAdds(EntityHandle entity, const ComponentSignature& from,
+                               const ComponentSignature& to, ComponentTypeId added)
+{
+    for (const ComponentTypeId id : to.GetComponents())
+    {
+        if (id == added || from.Contains(id))
+            continue;
+        if (m_AddHookSignature.Contains(id) || m_SetHookSignature.Contains(id))
+        {
+            // Looked up per hook: a hook may create entities and move this
+            // entity's metadata.
+            const EntityMetadata& metadata = entityMetadata[entity.index];
+            if (void* ptr = metadata.archetype->GetComponentRawAt(metadata.chunkIndex, metadata.indexInChunk, id))
+            {
+                if (m_AddHookSignature.Contains(id))
+                    InvokeAddHook(id, entity, ptr);
+                if (m_SetHookSignature.Contains(id))
+                    InvokeSetHook(id, entity, ptr);
+            }
+        }
+        EmitComponentDirty(id, entity);
+        RecordComponentAdded(id, entity);
+    }
+}
+
+ComponentTypeId World::FindRequirerOf(const ComponentSignature& signature, ComponentTypeId typeId)
+{
+    for (const ComponentTypeId held : signature.GetComponents())
+    {
+        const ComponentRegistry::ComponentInfo* info = ComponentRegistry::GetComponentInfo(held);
+        if (info && std::find(info->Required.begin(), info->Required.end(), typeId) != info->Required.end())
+            return held;
+    }
+    return 0;
 }
 
 Archetype* World::GetOrCreateArchetypeForRemove(Archetype* source, ComponentTypeId typeId)
@@ -820,7 +945,13 @@ Archetype* World::GetOrCreateArchetypeForRemove(Archetype* source, ComponentType
     if (target != source)
     {
         source->SetRemoveEdge(typeId, target);
-        target->SetAddEdge(typeId, source);
+        // Adding typeId back leads to source only when source already holds
+        // everything typeId requires.
+        ComponentSignature readded = newSig;
+        readded.Add(typeId);
+        AddRequiredClosure(readded);
+        if (readded == source->GetSignature())
+            target->SetAddEdge(typeId, source);
     }
 
     return target;
@@ -1196,10 +1327,6 @@ void World::ProcessCommands()
                 break;
             }
 
-            case Command::ADD_REQUIRED_COMPONENT:
-                if (HasComponent(cmd.entity, cmd.componentType))
-                    break;
-                [[fallthrough]];
             case Command::ADD_COMPONENT:
             {
                 auto* handler = ComponentRegistry::GetHandler(cmd.componentType);
@@ -1399,7 +1526,7 @@ bool World::AddOrSetComponentBytesInternal(EntityHandle entity,
 {
     // Caller must hold worldMutex exclusively. Single body behind typed
     // AddComponentImpl<T>, type-erased SetComponentBytesImmediate, and (via
-    // the component handlers) deferred ADD_COMPONENT/ADD_REQUIRED_COMPONENT/SET_COMPONENT
+    // the component handlers) deferred ADD_COMPONENT/SET_COMPONENT
     // playback.
     if (!IsValid(entity))
         return false;
@@ -1449,6 +1576,7 @@ bool World::AddOrSetComponentBytesInternal(EntityHandle entity,
     {
         ComponentSignature newSignature;
         newSignature.Add(typeId);
+        AddRequiredClosure(newSignature);
         target = GetOrCreateArchetype(newSignature);
     }
 
@@ -1466,12 +1594,20 @@ bool World::AddOrSetComponentBytesInternal(EntityHandle entity,
         }
     }
 
+    static const ComponentSignature kNoComponents;
+    const ComponentSignature& from = current ? current->GetSignature() : kNoComponents;
+    WriteRequiredDefaultsAfterAdd(entity, from, *target, typeId);
     target->SetComponentRawAt(metadata.chunkIndex, metadata.indexInChunk, typeId, data, sizeBytes);
+
+    // Requirements signal before the type that required them, every column
+    // already holding its value.
+    SignalRequiredAdds(entity, from, target->GetSignature(), typeId);
 
     // Invoke OnAdd and OnSet hooks
     if (m_AddHookSignature.Contains(typeId) || m_SetHookSignature.Contains(typeId))
     {
-        void* ptr = target->GetComponentRawAt(metadata.chunkIndex, metadata.indexInChunk, typeId);
+        const EntityMetadata& location = entityMetadata[entity.index];
+        void* ptr = location.archetype->GetComponentRawAt(location.chunkIndex, location.indexInChunk, typeId);
         if (ptr)
         {
             if (m_AddHookSignature.Contains(typeId))
@@ -1533,6 +1669,19 @@ World::RemoveComponentResult World::RemoveComponentInternal(EntityHandle entity,
 
     if (!current->GetSignature().Contains(typeId))
         return RemoveComponentResult::ComponentAbsent;
+
+    // A requirement holds for as long as its requirer does: nothing puts a
+    // removed requirement back, and every consumer of the requirer relies on it.
+    if (const ComponentTypeId requirer = FindRequirerOf(current->GetSignature(), typeId); requirer != 0)
+    {
+        const ComponentRegistry::ComponentInfo* removedInfo = ComponentRegistry::GetComponentInfo(typeId);
+        const ComponentRegistry::ComponentInfo* requirerInfo = ComponentRegistry::GetComponentInfo(requirer);
+        Logger::Log::Error("[ECS] Cannot remove {} from entity {}: its {} requires it. Remove {} first.",
+                           removedInfo ? removedInfo->Name : std::to_string(typeId), entity.id,
+                           requirerInfo ? requirerInfo->Name : std::to_string(requirer),
+                           requirerInfo ? requirerInfo->Name : std::to_string(requirer));
+        return RemoveComponentResult::RequiredByAnother;
+    }
 
     // Invoke OnRemove hook for the specific component being removed —
     // before the data is destroyed (live T&).
@@ -2621,13 +2770,18 @@ EntityHandle World::CreateFromBundleHandle(const ComponentBundle& bundle)
         componentSizes.try_emplace(typeId, bundle.GetComponentSize(typeId));
     }
 
-    Archetype* archetype = GetOrCreateArchetype(signature);
+    ComponentSignature withRequired = signature;
+    AddRequiredClosure(withRequired);
+    Archetype* archetype = GetOrCreateArchetype(withRequired);
 
     EntityHandle entity = CreateEntityUnsafe();
     auto& metadata = entityMetadata[entity.index];
     metadata.archetype = archetype;
     EntityLocation loc = archetype->AddEntityUnsafe(entity);
     metadata.SetLocation(loc);
+    std::vector<RequiredColumn> required;
+    ResolveRequiredColumns(*archetype, signature, required);
+    WriteRequiredColumns(*archetype, loc, required);
 
     // Set all components from bundle via type-erased raw write.
     for (ComponentTypeId typeId : signature.GetComponents())
@@ -2644,7 +2798,7 @@ EntityHandle World::CreateFromBundleHandle(const ComponentBundle& bundle)
     }
 
     // Lifecycle events (§6.1): bundle creation bypasses the unified add body.
-    RecordAddedForSignature(signature, entity);
+    RecordAddedForSignature(archetype->GetSignature(), entity);
 
     structuralChangeVersion.fetch_add(1, std::memory_order_relaxed);
     return entity;
@@ -2660,7 +2814,9 @@ EntityHandle World::CreateFromSignatureHandle(const ComponentSignature& signatur
 {
     CheckRemovalReentry();
     std::unique_lock lock(worldMutex);
-    Archetype* archetype = GetOrCreateArchetype(signature);
+    ComponentSignature withRequired = signature;
+    AddRequiredClosure(withRequired);
+    Archetype* archetype = GetOrCreateArchetype(withRequired);
 
     EntityHandle entity = CreateEntityUnsafe();
     auto& metadata = entityMetadata[entity.index];
@@ -2668,9 +2824,13 @@ EntityHandle World::CreateFromSignatureHandle(const ComponentSignature& signatur
     EntityLocation loc = archetype->AddEntityUnsafe(entity);
     metadata.SetLocation(loc);
 
+    std::vector<RequiredColumn> required;
+    ResolveRequiredColumns(*archetype, signature, required);
+    WriteRequiredColumns(*archetype, loc, required);
+
     // Lifecycle events (§6.1 C3): signature-create makes query-visible
     // entities without writing data — Added still fires per subscribed type.
-    RecordAddedForSignature(signature, entity);
+    RecordAddedForSignature(archetype->GetSignature(), entity);
 
     structuralChangeVersion.fetch_add(1, std::memory_order_relaxed);
     return entity;
@@ -2688,9 +2848,13 @@ std::vector<EntityHandle> World::CreateBatchFromBundle(size_t count, const Compo
         componentSizes.try_emplace(typeId, bundle.GetComponentSize(typeId));
     }
 
-    Archetype* archetype = GetOrCreateArchetype(signature);
+    ComponentSignature withRequired = signature;
+    AddRequiredClosure(withRequired);
+    Archetype* archetype = GetOrCreateArchetype(withRequired);
 
     archetype->Reserve(archetype->GetEntityCount() + count);
+    std::vector<RequiredColumn> required;
+    ResolveRequiredColumns(*archetype, signature, required);
 
     std::vector<EntityHandle> entities;
     entities.reserve(count);
@@ -2702,6 +2866,7 @@ std::vector<EntityHandle> World::CreateBatchFromBundle(size_t count, const Compo
         metadata.archetype = archetype;
         EntityLocation loc = archetype->AddEntityUnsafe(entity);
         metadata.SetLocation(loc);
+        WriteRequiredColumns(*archetype, loc, required);
         entities.push_back(entity);
     }
 
@@ -2724,7 +2889,7 @@ std::vector<EntityHandle> World::CreateBatchFromBundle(size_t count, const Compo
 
     // Lifecycle events (§6.1 C3): batch-bundle is a separate body from
     // CreateFromBundleHandle — recorded per batch, per subscribed type.
-    RecordAddedForSignatureBatch(signature, entities.data(), entities.size());
+    RecordAddedForSignatureBatch(archetype->GetSignature(), entities.data(), entities.size());
 
     structuralChangeVersion.fetch_add(1, std::memory_order_relaxed);
     return entities;

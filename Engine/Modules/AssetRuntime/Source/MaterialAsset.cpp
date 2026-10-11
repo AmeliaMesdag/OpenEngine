@@ -323,7 +323,7 @@ static bool ParseJsonMaterial(const std::string& text, MaterialDocument& outDoc,
         // AO — in the inspector, matching a freshly-created material. Runs after
         // ParseProperties so the fill only ever plugs gaps and every authored value
         // wins; that ordering is what lets DefaultOpacity see the authored baseColor
-        // instead of the factory white. A foreign lighting model is left untouched
+        // instead of the factory colour. A foreign lighting model is left untouched
         // entirely — the fill's own unlit/shadow-only skips serve the inspector, which
         // seeds a document whose lighting model the user is in the act of changing.
         if (outDoc.lightingModel == "StandardPBR")
@@ -435,6 +435,9 @@ static bool ParseUnityMaterial(const std::string& text,
             doc.materialName = name;
     }
 
+    // A Unity material that names no colour keeps its shader's default, white: the new-material
+    // base colour (0.8) is not what the source showed.
+    doc.properties["baseColor"] = std::vector<float>{1.0f, 1.0f, 1.0f, 1.0f};
     std::vector<float> baseColor;
     if (TryFindColor(text, "_BaseColor", baseColor) ||
         TryFindColor(text, "_BaseMapColor", baseColor) ||

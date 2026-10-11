@@ -493,7 +493,7 @@ void ProjectAcquisition::RunWorker(const std::shared_ptr<SharedState>& state,
     }
 
     case ProjectSourceType::Unsupported:
-        fail("This project's source type is not supported by this build.");
+        fail(request.Entry.Source.RefusalReason);
         return;
     }
 

@@ -54,6 +54,7 @@ if(BUILD_TESTING)
         Tests/NavSystemIntegrationTests.cpp
         Tests/NavigationComprehensiveTests.cpp
         Tests/NavigationRepathingTests.cpp
+        Tests/NavigationSolveBudgetTests.cpp
         Tests/NavigationRequestReplacementTests.cpp
         Tests/NavigationInitialOccupancyTests.cpp
         Tests/NavigationOccupiedStartTests.cpp

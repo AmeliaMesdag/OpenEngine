@@ -140,6 +140,7 @@ TEST(SkySunPath, AFollowedLightReadsItsHourOnTheSkysPath)
     harness.World.AddComponentImmediate(lightEntity, lightTransform);
     Components::WorldTransform lightWorld{};
     std::copy(std::begin(lightTransform.matrix), std::end(lightTransform.matrix), std::begin(lightWorld.matrix));
+    lightWorld.Version = 1u; // resolved, as TransformHierarchySystem leaves it
     harness.World.AddComponentImmediate(lightEntity, lightWorld);
 
     const ECS::EntityHandle skyEntity = harness.World.CreateEntity();

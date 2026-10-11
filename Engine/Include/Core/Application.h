@@ -210,6 +210,12 @@ struct ApplicationConfig {
     // whose project storage mounts asynchronously during boot sets this past
     // the frame that mount lands on; desktop storage is ready from frame 1.
     uint32_t StartupSceneOpenFrame = 1;
+    // No window, render device, audio device or input device: the main loop pumps
+    // no window events and polls no gamepad, the engine opens no audio device, and
+    // a fixed frame rate (SetFixedFrameRate) holds each frame to wall-clock time
+    // instead of running as fast as the CPU allows. For dedicated servers and
+    // simulation runs; the host brings up no window or device of its own either.
+    bool Headless = false;
 };
 
 /**
@@ -304,7 +310,9 @@ public:
      * @brief Force the main loop to advance by a fixed delta each rendered frame.
      *
      * This is intended for offline/movie rendering where simulation time should
-     * match the output video frame rate instead of wall-clock performance.
+     * match the output video frame rate instead of wall-clock performance. A
+     * headless application (ApplicationConfig::Headless) also waits out each
+     * frame, so its fixed steps run in real time.
      */
     void SetFixedFrameRate(double fps);
     void ClearFixedFrameRate();

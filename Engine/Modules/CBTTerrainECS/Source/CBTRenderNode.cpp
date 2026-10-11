@@ -199,7 +199,7 @@ void CBTRenderNode::DeclareForView(Pipeline::ViewDeclare& d)
     // drop the retired views from every ring element this frame — before the quarantine frees the
     // image. No-op when nothing retired since last frame.
     if (auto* terrainFeature = rs.GetFeature<TerrainECS::TerrainRenderFeature>())
-        feature.ConsumeTerrainRetire(terrainFeature->GetTerrainTextureRetireGeneration());
+        feature.ConsumeTerrainRetire(*terrainFeature);
 
     // C7 planet observability (GE_CBT_PLANET_DEBUG): the falsifiable "planet is active"
     // signal for a runtime verify. The seed/re-seed already logs GE_CBT.Planet with the

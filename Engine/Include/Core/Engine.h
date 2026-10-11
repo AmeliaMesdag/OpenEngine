@@ -309,7 +309,11 @@ class EngineCore
      */
     static EngineCore& GetInstance();
 
-    /// Enable the engine-owned rendering loop and its shared system schedule.
+    /// Enable the engine-owned rendering loop and its shared system schedule. A null
+    /// `renderServices` (a headless host) runs the schedule with no render work: every
+    /// system skips what needs a device. Data only a render-side system produces is then
+    /// missing: terrain height (no terrain collider), ocean buoyancy, and the skeleton
+    /// binding of scene-loaded skinned meshes.
     bool EnableRenderingLoop(Engine::Renderer::RenderServices* renderServices);
     void DisableRenderingLoop();
     // Non-owning access to the RenderServices instance currently driving the engine-managed rendering loop (if enabled).

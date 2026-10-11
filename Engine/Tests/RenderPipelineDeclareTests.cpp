@@ -10015,6 +10015,60 @@ TEST(RenderPipelineDeclareTests, CompatGrassPrepassHeadDeclaresOnlyWhatItsVertex
     f.Down();
 }
 
+// A terrain handle index is recycled between terrains of both kinds: a tiled terrain's unified set
+// counts toward the unified/atlas VRAM total, a non-tiled terrain's own heightmap does not. Replacing
+// one with the other must leave the total at zero once both retired sets have drained, not freed twice
+// (#2525: the log read `live 17592186044399 MiB` after a 4 km terrain was resized to 128 m).
+TEST(RenderPipelineDeclareTests, TerrainVramTotalDrainsToZeroAcrossARecycledHandleIndex)
+{
+    TerrainFixture f;
+    if (!f.Up())
+        GTEST_SKIP() << "No Vulkan device available";
+    {
+        auto& terrain = f.Rs->EnsureFeature<TerrainECS::TerrainRenderFeature>();
+        EXPECT_TRUE(terrain.Initialize(f.Device.get()));
+        EXPECT_TRUE(terrain.EnsureUnifiedTiledTextures(TerrainECS::TerrainHandle{2u, 1u}, 64u, 64u));
+        EXPECT_GT(terrain.GetUnifiedTextureLiveBytes(), 0u);
+        terrain.ReleaseTerrainResources(TerrainECS::TerrainHandle{2u, 1u});
+
+        const uint32 dim = 33;
+        const std::vector<float32> heights(static_cast<size_t>(dim) * dim, 0.25f);
+        terrain.UploadHeightmap(TerrainECS::TerrainHandle{2u, 2u}, heights.data(), dim, dim);
+        terrain.ReleaseTerrainResources(TerrainECS::TerrainHandle{2u, 2u});
+
+        // Past the frames-in-flight quarantine, so both retired sets are freed.
+        for (uint32 frame = 1; frame <= 16u; ++frame)
+            terrain.TryCleanupStaleViews(frame, *f.Rs);
+        EXPECT_EQ(terrain.GetUnifiedTextureLiveBytes(), 0u)
+            << "the non-tiled heightmap was freed with the byte size of the tiled set it replaced";
+    }
+    f.Down();
+}
+
+// The GPU height bake writes the atlas height texture through a storage view the entry owns. Releasing the
+// terrain retires that view with its image, so a terrain deleted for good leaves no view alive for the
+// session.
+TEST(RenderPipelineDeclareTests, TerrainReleaseRetiresTheAtlasHeightStorageView)
+{
+    TerrainFixture f;
+    if (!f.Up())
+        GTEST_SKIP() << "No Vulkan device available";
+    {
+        TerrainECS::SetGpuHeightBakeEnabledForTests(1);
+        auto& terrain = f.Rs->EnsureFeature<TerrainECS::TerrainRenderFeature>();
+        EXPECT_TRUE(terrain.Initialize(f.Device.get()));
+        const TerrainECS::TerrainHandle h{4u, 1u};
+        terrain.EnsureAtlasHeightTexture(h, 64u);
+        EXPECT_TRUE(terrain.GetAtlasHeightStorageView(h).IsValid())
+            << "with the GPU bake on, the atlas height texture carries a storage view";
+        terrain.ReleaseTerrainResources(h);
+        EXPECT_FALSE(terrain.GetAtlasHeightStorageView(h).IsValid())
+            << "the released atlas height texture's storage view stayed on the entry";
+        TerrainECS::SetGpuHeightBakeEnabledForTests(-1);
+    }
+    f.Down();
+}
+
 // The frame spine reads CBTRenderFeature::WritesDynamicDepth before the CBT node declares, so a change
 // that only the node acts on (here a terrain retire, which re-provisions the height source and restarts
 // the tree) must already read as dynamic depth before that declare, or the depth-derived readers keep
@@ -10070,6 +10124,87 @@ TEST(RenderPipelineDeclareTests, CbtTerrainAtRestReportsARetireBeforeItsNextDecl
         terrain.ReleaseTerrainResources(TerrainECS::TerrainHandle{3u, 1u});
         EXPECT_TRUE(cbt.WritesDynamicDepth())
             << "a retire the CBT node has not consumed yet read as unchanged depth";
+    }
+    f.Down();
+}
+
+namespace
+{
+// One CBT frame of ActivateCbtTerrain's terrain through `instance` on the window's frame stream, waited
+// to completion. Returns the tree's live bisector count after the frame.
+uint32 RenderCbtTreeFrame(TerrainFixture& f, RenderPipelineInstance& instance, ViewId v,
+                          TerrainECS::TerrainRenderFeature& terrain, RenderGraph::RGFrame& frame, uint32 frameIndex)
+{
+    UploadCbtTerrainParams(terrain, frameIndex);
+    frame.BeginFrame(frameIndex);
+    const RenderGraph::RGTexture color = frame.ImportPersistentTexture("CbtTree.Color", ColorTargetDesc());
+    const RenderGraph::RGTexture depth = frame.ImportPersistentTexture("CbtTree.Depth", DepthTargetDesc());
+    f.Rs->BeginWorldDrawFrame();
+    f.Rs->BuildWorldBatchKeys();
+    const std::vector<ViewTargetsRG> targets = {ViewTargetsRG{v, color, depth, {}}};
+    const std::vector<Rendering::ViewDesc> views(f.Rs->Views().GetViews().begin(), f.Rs->Views().GetViews().end());
+    instance.Declare(frame, targets, views);
+    frame.MarkOutput(color);
+    frame.Execute();
+    auto& cbt = f.Rs->EnsureFeature<CBTTerrainECS::CBTRenderFeature>();
+    cbt.OnFrameSubmittedRG(frame, frame.SubmissionToken());
+    f.Device->WaitForIdle();
+    return cbt.GetInstance().ReadTessellationStats().LiveCount;
+}
+} // namespace
+
+// The tree tessellates the drawn terrain only, so only that terrain's retire restarts it from its roots
+// (#2621): deleting or re-provisioning another terrain leaves the drawn terrain's settled tree as it is.
+TEST(RenderPipelineDeclareTests, CbtTreeRestartsOnlyWhenTheTerrainItDrawsIsRetired)
+{
+    TerrainFixture f;
+    if (!f.Up())
+        GTEST_SKIP() << "No Vulkan device available";
+    {
+        auto& terrain = f.Rs->EnsureFeature<TerrainECS::TerrainRenderFeature>();
+        const ViewId v = f.AddView("CbtTreeView", 1u);
+        if (!ActivateCbtTerrain(f, terrain))
+        {
+            f.Down();
+            GTEST_SKIP() << "staged shader sources or CBT kernels unavailable";
+        }
+        // The screen-space metric the editor runs, so the settled tree is adaptive and a restart (a
+        // uniform re-seed to CBTTreeSeed::kRestartSeedDepth) cannot land on the same leaf count.
+        auto& cbt = f.Rs->EnsureFeature<CBTTerrainECS::CBTRenderFeature>();
+        CBTTerrain::CBTClassifyDesc screenSpace{};
+        screenSpace.Mode = CBTTerrain::kClassifyScreenSpace;
+        screenSpace.TargetDepth = 18u;
+        cbt.SetActive(true, screenSpace, 8.0f, Components::kNoTerrainSeaLevel,
+                      CBTTerrainECS::CBTRenderFeature::DomainConfig{}, 0u);
+        const RenderPipelineBlueprint bp = CompileTestBlueprint(f, R"json({
+          "schemaVersion": 2, "pipelineName": "CbtTreeTest",
+          "passes": [ { "id": "Terrain", "type": "CBTRender" } ]
+        })json", "cbt_tree.rendergraph");
+        RenderPipelineInstance instance(*f.Rs, f.Registry);
+        instance.SetBlueprint(bp);
+
+        // EXPECT (not ASSERT) from here: an early return would skip f.Down(). Past the restart window
+        // (CBTTreeSeed::kRestartSettleFrames) and at rest, so a restart fires in the frame it is noted.
+        FramePools pools(f.Device.get());
+        RenderGraph::RGFrame frame(f.Device.get(), &pools.Persistent, &pools.Transient, &pools.Ring);
+        uint32 frameIndex = 0;
+        uint32 settled = 0;
+        bool atRest = false;
+        for (; frameIndex < 120u && !atRest; ++frameIndex)
+        {
+            settled = RenderCbtTreeFrame(f, instance, v, terrain, frame, frameIndex);
+            atRest = frameIndex > CBTTerrainECS::CBTTreeSeed::kRestartSettleFrames && !cbt.WritesDynamicDepth();
+        }
+        EXPECT_TRUE(atRest) << "the still terrain never came to rest";
+        EXPECT_GT(settled, 2u) << "the settled tree never refined past its roots";
+
+        terrain.ReleaseTerrainResources(TerrainECS::TerrainHandle{5u, 1u}); // not the drawn {3, 1}
+        EXPECT_EQ(RenderCbtTreeFrame(f, instance, v, terrain, frame, frameIndex++), settled)
+            << "another terrain's retire restarted the drawn terrain's tree";
+
+        terrain.ReleaseTerrainResources(TerrainECS::TerrainHandle{3u, 1u});
+        EXPECT_NE(RenderCbtTreeFrame(f, instance, v, terrain, frame, frameIndex++), settled)
+            << "the drawn terrain's retire left the tree it grew on that terrain";
     }
     f.Down();
 }

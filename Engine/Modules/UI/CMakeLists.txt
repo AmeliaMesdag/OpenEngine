@@ -262,8 +262,11 @@ option(UI_BUILD_EXAMPLES "Build UI module examples" ON)
 if(UI_BUILD_EXAMPLES AND BUILD_EXAMPLES)
     find_package(glfw3 QUIET)
 
+    # Both demos link Engine alone: UI, GameEngineRendering, FileWatcher and AssetRuntime are
+    # already inside it (cmake/EngineModuleDuplicationCheck.cmake), and it exports the GE_*
+    # hot-reload entry points.
     add_executable(UIWindowDemo ${CMAKE_CURRENT_SOURCE_DIR}/Examples/UIWindowDemo.cpp)
-    target_link_libraries(UIWindowDemo PRIVATE UI Engine GameEngineRendering FileWatcher)
+    target_link_libraries(UIWindowDemo PRIVATE Engine)
     if(glfw3_FOUND)
         target_link_libraries(UIWindowDemo PRIVATE glfw)
         target_compile_definitions(UIWindowDemo PRIVATE HAS_GLFW=1)
@@ -290,11 +293,8 @@ if(UI_BUILD_EXAMPLES AND BUILD_EXAMPLES)
     endif()
 
     # SearchDialog visual demo
-    add_executable(UISearchDialogDemo
-        ${CMAKE_CURRENT_SOURCE_DIR}/Examples/UISearchDialogDemo.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UITestsHotReloadStubs.cpp
-    )
-    target_link_libraries(UISearchDialogDemo PRIVATE UI AssetRuntime Engine GameEngineRendering)
+    add_executable(UISearchDialogDemo ${CMAKE_CURRENT_SOURCE_DIR}/Examples/UISearchDialogDemo.cpp)
+    target_link_libraries(UISearchDialogDemo PRIVATE Engine)
     if(glfw3_FOUND)
         target_link_libraries(UISearchDialogDemo PRIVATE glfw)
         target_compile_definitions(UISearchDialogDemo PRIVATE HAS_GLFW=1)
@@ -351,9 +351,9 @@ if(BUILD_TESTING)
     # OBJECT modules already spliced into Engine.dll; linking them here as
     # well would give the exe a second copy of every module's file-scope state
     # (UIManager singletons, texture registries — issue #356, same disease as
-    # #340). Module headers propagate via Engine's re-exported INTERFACE, and
-    # Engine.dll exports the GE_* hot-reload dispatcher, so the local
-    # UITestsHotReloadStubs.cpp compile is not needed either. GameEngine.Native
+    # #340; cmake/EngineModuleDuplicationCheck.cmake refuses it). Module headers
+    # propagate via Engine's re-exported INTERFACE, and Engine.dll exports the
+    # GE_* hot-reload dispatcher, so no local stubs are needed. GameEngine.Native
     # imports the same Engine.dll, so linking it adds an import, not a second
     # copy of any engine module.
     #

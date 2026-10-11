@@ -84,14 +84,11 @@ public:
         float lodBias = 0.0f;       // LODGroup.Bias (log2 coverage scale for ge_SelectLOD)
 
         // Cached GPUScene-index component pointer, captured cache-coherently by
-        // the gather query. Non-null after the entity's first extraction. Reading
-        // this in the parallel prepare pass avoids the per-entity shared_lock in
-        // World::GetComponent; it is only ever WRITTEN back on the serial apply
-        // thread. Null means the entity has no MeshGPUData yet (first frame /
-        // freshly spawned) — the serial apply adds it. The pointer is stable for
-        // the frame: extraction's only structural change is adding MeshGPUData to
-        // entities that lack it, which relocates only other lacking entities, not
-        // the has-component entities whose pointers are cached here.
+        // the gather query; never null (MeshRenderer requires MeshGPUData).
+        // Reading it in the parallel prepare pass avoids the per-entity
+        // shared_lock in World::GetComponent; it is only ever WRITTEN back on
+        // the serial apply thread. The pointer is stable for the frame:
+        // extraction makes no structural change.
         GameEngine::Components::MeshGPUData* meshGpu = nullptr;
     };
 
@@ -190,7 +187,8 @@ private:
     ECS::ChangeGate m_ProbeGateLocalBounds;
     ECS::ChangeGate m_ProbeGateSectorCoord;
     ECS::ChangeGate m_ProbeGateLodGroup;
-    std::size_t m_FullPassStructuralVersion = 0;  // E4 — sampled at full-lane END (post-apply)
+    std::size_t m_FullPassStructuralVersion = 0;  // E4 — the entry version of the last full pass
+    std::size_t m_FrameStructuralVersion = 0;     // E4 — this frame's entry version
     std::atomic<bool> m_MeshReloadPending{false}; // E6
     // Unsubscribes on destruction; safe even if the registry died first.
     ScopedSubscription m_MeshReloadSubscription;
@@ -219,6 +217,7 @@ private:
     uint32 m_LastPendingMaterialLoad = 0;
     uint32 m_LastPendingPipeline = 0;
     uint32 m_LastPendingSentinelIndex = 0;
+    uint32 m_LastPendingUnresolvedTransform = 0;
     bool m_CachesPrimed = false;                  // E11
     uint64 m_CachesWorldId = 0;
     uint64 m_CachedMeshDigest = 0;                // mesh-only digest term (ocean re-added per frame)

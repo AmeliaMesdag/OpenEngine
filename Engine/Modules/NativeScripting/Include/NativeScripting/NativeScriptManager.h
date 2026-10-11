@@ -359,7 +359,23 @@ private:
     // user DLL's component registrars, which mutate the shared registries). KickBuild
     // (main thread, from Tick) gates on the source-digest staleness check, then either
     // loads the cached DLL directly or dispatches BuildOnly to the JobSystem.
+    // A module a build pass found out of date, with the digests its build record will carry.
+    struct StaleModule
+    {
+        NativeBuildConfig Config;
+        std::string FullDigest;
+        std::string AbiDigest;
+        bool IsPackageModule = false;
+        // Position in ModuleConfigs(): built modules load in this order (package modules in
+        // dependency order, then the project module), whatever order they were built in.
+        std::size_t LoadOrder = 0;
+    };
+
     void KickBuild();
+    // Builds `staleModules` in the given order as one job and loads them, in LoadOrder, in one
+    // completion task on the main thread. `initialPackagePass`: the batch counts toward
+    // InitialPackageModulePassComplete.
+    void DispatchBuildBatch(std::vector<StaleModule> staleModules, bool initialPackagePass);
     void SetBuildStage(const char* stage);
     std::filesystem::path BuildOnly(const NativeBuildConfig& config, NativeBuildResult& result);
     // moduleId = the owning module (NativeBuildConfig::ModuleName); stamps every registration the
@@ -466,6 +482,12 @@ private:
     // inside WaitForModuleBuilds, which Shutdown waits out before the manager can
     // be destroyed; m_ShutDown whether Shutdown ran since the last Initialize.
     // m_DeferredBuildLoads is written under it too.
+    // Editor-only modules of the last pass, held while the pass's shipped modules build so play
+    // mode, which loads only shipped modules, waits for those alone; Tick dispatches them when
+    // that batch completes. Main thread only.
+    std::vector<StaleModule> m_DeferredEditorModules;
+    bool m_DeferredEditorModulesInitialPass = false;
+
     // The worker writes it as a build moves through modules and stages; CurrentBuildProgress reads it.
     mutable std::mutex m_ProgressMutex;
     BuildProgress m_Progress;
