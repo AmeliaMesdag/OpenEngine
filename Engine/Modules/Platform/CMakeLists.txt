@@ -128,6 +128,18 @@ endif()
 	    # OpenScriptWithProject, and for DwmSetWindowAttribute used by
 	    # the theme helpers. dxgi: per-monitor HDR luminance via IDXGIOutput6::GetDesc1.
 	    target_link_libraries(Platform PRIVATE Shlwapi Dwmapi dwrite ole32 uuid User32 dxgi)
+
+	    # WebView2: the loader the SDK ships is where CreateCoreWebView2EnvironmentWithOptions
+	    # lives, and linking its imported target is also what puts <WebView2.h> on the include
+	    # path — the header whose presence WebView_Win32.cpp compiles its implementation
+	    # against. The port is declared for Windows in vcpkg.json; a tree built without it
+	    # keeps the stub that reports the view unavailable.
+	    find_package(unofficial-webview2 CONFIG QUIET)
+	    if (TARGET unofficial::webview2::webview2)
+	        target_link_libraries(Platform PRIVATE unofficial::webview2::webview2)
+	    else()
+	        message(STATUS "WebView2 SDK not found: the Windows web view compiles as a reporting stub")
+	    endif()
  endif()
 
 if (APPLE)

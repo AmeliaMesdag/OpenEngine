@@ -79,6 +79,10 @@
       "platform": "windows | linux | osx"
     },
     {
+      "name": "webview2",
+      "platform": "windows"
+    },
+    {
       "name": "mimalloc",
       "platform": "!wasm32"
     },
