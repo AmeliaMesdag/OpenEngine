@@ -613,7 +613,7 @@ void TransformTranslateGizmo::Render(GizmoRenderContext& context)
     // Handles are a control surface, not a place in the world: occluding them
     // against the geometry they move only makes them harder to grab. Covers
     // every draw below, plane quads included — those are drag targets too.
-    GizmoDepthModeScope depthScope(context, GizmoDepthMode::AlwaysOnTop);
+    GizmoDepthModeScope depthScope(context, GizmoDepthMode::Handle);
 
     // Draw planar handles (XY, YZ, ZX) first on the base gizmo triangle
     // layer, then the axis cylinders/arrows on a higher layer so that the
@@ -1188,7 +1188,7 @@ void TransformRotateGizmo::Render(GizmoRenderContext& context)
     // Manipulation, not description — the rings are grab targets, and the drag
     // feedback (angle arc, start/end lines, snap guides) is only readable at
     // full strength.
-    GizmoDepthModeScope depthScope(context, GizmoDepthMode::AlwaysOnTop);
+    GizmoDepthModeScope depthScope(context, GizmoDepthMode::Handle);
 
     const Vector3 center = m_Pivot;
 
@@ -2000,7 +2000,7 @@ void TransformScaleGizmo::Render(GizmoRenderContext& context)
 {
     // Manipulation, not description — the axis boxes and the centre cube are
     // grab targets.
-    GizmoDepthModeScope depthScope(context, GizmoDepthMode::AlwaysOnTop);
+    GizmoDepthModeScope depthScope(context, GizmoDepthMode::Handle);
 
     // Compute axis length - use constant screen size if enabled
     float axisLength = m_AxisLength;

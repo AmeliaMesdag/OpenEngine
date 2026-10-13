@@ -640,7 +640,7 @@ void GPUCullingPipeline::ScheduleHzbCullPass(RenderGraph::RGFrame& frame,
             }
         },
         [pipeline, sampler, instances, visibility, prevVisible, stats, hzb, cdBuf = cd.Buffer,
-         cdOff = cd.Offset, pc, instanceBytes, visBytes, prevVisibleBytes, statsBytes, isPhaseB,
+         cdOff = cd.Offset, pc, instanceBytes, visBytes, prevVisibleBytes, isPhaseB,
          instanceCount = sliceInstanceCount](RenderGraph::RGContext& ctx)
         {
             DescriptorSetDesc setDesc{};
@@ -1279,7 +1279,7 @@ RenderGraph::RGBuffer GPUCullingPipeline::ImportRuntimeVisible(RenderGraph::RGFr
                       static_cast<int32_t>(PassPhase::kEarlySetup),
                       [&](RenderGraph::RGPassBuilder& p)
                       { p.Write(rvRG, RenderGraph::RGBufferWrite::CopyDst); },
-                      [rvRG, cap](RenderGraph::RGContext& ctx)
+                      [rvRG](RenderGraph::RGContext& ctx)
                       { ctx.Cmd->FillBuffer(ctx.GetBuffer(rvRG), 0, cap * sizeof(uint32_t), 1u); });
     }
     return m_FrameRuntimeVisRG;
@@ -1467,7 +1467,7 @@ void GPUCullingPipeline::ScheduleRuntimeVisibilityAggregate(RenderGraph::RGFrame
                       // barrier in the exec handles fill-before-dispatch.
                       p.Write(rvRG, RenderGraph::RGBufferWrite::CopyDst);
                   },
-                  [pipeline, anyRG, rvRG, instances = sceneRG.Instances, cap, flagsBytesU, instBytes,
+                  [pipeline, anyRG, rvRG, instances = sceneRG.Instances, flagsBytesU, instBytes,
                    instanceCount](RenderGraph::RGContext& ctx)
                   {
                       BufferHandle rv = ctx.GetBuffer(rvRG);

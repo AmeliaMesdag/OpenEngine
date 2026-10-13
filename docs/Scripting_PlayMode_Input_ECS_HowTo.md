@@ -64,6 +64,8 @@ namespace GameScripts
 
 ## Input in C# (GameEngine.Input.ABI)
 
+Polling keys, buttons and the mouse, the mouse delta and pointer lock, from C++ and C#: [The input system](input/input-system.mdx).
+
 ### Key rule: Editor-owned focus gating
 The Editor enables gameplay input only when:
 - **Play Mode is active**, and

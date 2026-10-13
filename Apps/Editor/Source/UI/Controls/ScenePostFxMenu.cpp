@@ -80,7 +80,7 @@ uint32_t PerEffectFlags(bool prefOn, bool masterOn)
 
 std::vector<ContextMenuManipulator::Item> BuildScenePostFxMenuItems(
     SceneViewController* controller, SceneViewToolbar* toolbar,
-    std::function<void()> onAutoExposureToggled)
+    std::function<void()> onExposureModeChanged)
 {
     if (!controller)
         return {};
@@ -112,21 +112,23 @@ std::vector<ContextMenuManipulator::Item> BuildScenePostFxMenuItems(
                                  toolbar->UpdatePostProcessButtonState();
                          }});
 
-    // Auto exposure meters the camera-less Scene View regardless of post-process volumes,
-    // so it always appears and is independent of the master post-processing toggle.
+    // The Scene View's exposure applies to the camera-less view regardless of post-process
+    // volumes, so its modes always appear and are independent of the master toggle.
     items.push_back({.Separator = true});
-    items.push_back({.Path = "Auto Exposure",
-                     .IconPath = EditorIcons::kPostFx,
-                     .Flags = checkedFlag(settings.GetPostFxAutoExposureEnabled()),
-                     .OnActivate =
-                         [onAutoExposureToggled = std::move(onAutoExposureToggled)]
-                         {
-                             auto& s = Editor::SceneViewSettings::Get();
-                             s.SetPostFxAutoExposureEnabled(!s.GetPostFxAutoExposureEnabled(),
-                                                            /*fromUserToggle=*/true);
-                             if (onAutoExposureToggled)
-                                 onAutoExposureToggled();
-                         }});
+    for (const SceneViewExposureMode mode :
+         {SceneViewExposureMode::Auto, SceneViewExposureMode::SceneLight, SceneViewExposureMode::Fixed})
+    {
+        items.push_back({.Path = std::string("Exposure: ") + SceneViewExposureModeLabel(mode),
+                         .IconPath = EditorIcons::kPostFx,
+                         .Flags = checkedFlag(settings.GetExposureMode() == mode) | MenuItemFlag_Radio,
+                         .OnActivate =
+                             [mode, onExposureModeChanged]
+                             {
+                                 Editor::SceneViewSettings::Get().SetExposureMode(mode, /*fromUserSwitch=*/true);
+                                 if (onExposureModeChanged)
+                                     onExposureModeChanged();
+                             }});
+    }
 
     const bool anySceneEffect = bloomInScene || colorFilterInScene || casInScene || crtInScene;
     if (anySceneEffect)

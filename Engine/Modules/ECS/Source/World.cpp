@@ -402,7 +402,7 @@ void World::InvokeRemoveHooksForEntity(Archetype* archetype, EntityLocation loc,
         {
             try
             {
-                hookIt->second.Invoke(entity, ptr, hookIt->second.UserData);
+                hookIt->second.Invoke(*this, entity, ptr, hookIt->second.UserData);
             }
             catch (const std::exception& e)
             {
@@ -453,7 +453,7 @@ void World::InvokeAllRemoveHooks()
                 {
                     try
                     {
-                        hookIt->second.Invoke(handles[i], bytePtr + i * hookIt->second.ComponentSize,
+                        hookIt->second.Invoke(*this, handles[i], bytePtr + i * hookIt->second.ComponentSize,
                                               hookIt->second.UserData);
                     }
                     catch (const std::exception& e)
@@ -1184,7 +1184,7 @@ void World::InvokeActivityRemoveHooks(EntityHandle entity, Archetype* archetype,
         return;
     void* ptr = archetype->GetComponentRawAt(metadata.chunkIndex, metadata.indexInChunk, typeId);
     if (ptr)
-        hookIt->second.Invoke(entity, ptr, hookIt->second.UserData);
+        hookIt->second.Invoke(*this, entity, ptr, hookIt->second.UserData);
 }
 
 const std::vector<Archetype::CopyStep>& Archetype::GetOrBakeMovePlan(Archetype* target)
@@ -1691,7 +1691,7 @@ World::RemoveComponentResult World::RemoveComponentInternal(EntityHandle entity,
         void* ptr = current->GetComponentRawAt(metadata.chunkIndex, metadata.indexInChunk, typeId);
         if (ptr)
         {
-            hookIt->second.Invoke(entity, ptr, hookIt->second.UserData);
+            hookIt->second.Invoke(*this, entity, ptr, hookIt->second.UserData);
         }
     }
 

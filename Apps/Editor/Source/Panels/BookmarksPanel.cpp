@@ -756,7 +756,7 @@ void BookmarksPanel::SetupDragAndDrop(UIElement* row, UIElement* /*dragHandle*/,
     
     // Drag from whole row (except remove button): mouse down arms drag and captures panel (same as TreeView).
     // Panel receives mouse move when it has capture; drag starts in panel's kEventMouseMove handler.
-    row->RegisterEventHandler(kEventMouseDown, [this, row, index](UIEvent& e)
+    row->RegisterEventHandler(kEventMouseDown, [this, index](UIEvent& e)
     {
         if (e.Button != 0)
             return;

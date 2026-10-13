@@ -194,9 +194,9 @@
     <h2>Getting started</h2>
     <div class="grid">
       <div class="card">
-        <strong>Your first project <span class="pill new">HTML</span></strong>
+        <strong>Your first project <span class="pill new">MDX</span></strong>
         <p>Create or open a project, save a scene, and export a game you can run.</p>
-        <p class="link"><a href="first-project.html">Open first-project.html</a></p>
+        <p class="link"><a href="getting-started/first-project.mdx">Open getting-started/first-project.mdx</a></p>
       </div>
       <div class="card">
         <strong>Game builds and Steam publishing <span class="pill new">HTML</span></strong>
@@ -204,9 +204,24 @@
         <p class="link"><a href="GamePublishing.html">Open GamePublishing.html</a></p>
       </div>
       <div class="card">
-        <strong>Running the Player headless <span class="pill new">HTML</span></strong>
+        <strong>Running the Player headless <span class="pill new">MDX</span></strong>
         <p>Run a project with no window, graphics device or audio: dedicated servers, simulations, exit codes and restarting under a service manager.</p>
-        <p class="link"><a href="running-headless.html">Open running-headless.html</a></p>
+        <p class="link"><a href="getting-started/running-headless.mdx">Open getting-started/running-headless.mdx</a></p>
+      </div>
+      <div class="card">
+        <strong>Navigation Surface <span class="pill new">HTML</span></strong>
+        <p>Where agents can walk: add a surface, set the agent, bake from the terrain, colliders and meshes, read the status, and find a path from C++.</p>
+        <p class="link"><a href="navigation-surface.html">Open navigation-surface.html</a></p>
+      </div>
+      <div class="card">
+        <strong>The input system <span class="pill new">MDX</span></strong>
+        <p>How a game reads keys, the mouse and its delta, and pointer lock for mouse look, and how the editor and the Player deliver input.</p>
+        <p class="link"><a href="input/input-system.mdx">Open input/input-system.mdx</a></p>
+      </div>
+      <div class="card">
+        <strong>AI Assistant <span class="pill new">HTML</span></strong>
+        <p>The editor's AI Assistant panel: pick a provider, hold a conversation, let the assistant act in the editor, and its settings.</p>
+        <p class="link"><a href="editor/ai-assistant.mdx">Open editor/ai-assistant.mdx</a></p>
       </div>
     </div>
 
@@ -217,7 +232,7 @@
       <div class="card">
         <strong>Humanoid retargeting <span class="pill new">HTML</span></strong>
         <p>Play a clip authored on one humanoid skeleton on another: assets, import, auto-bootstrap, and what runs each frame.</p>
-        <p class="link"><a href="Animation/HumanoidRetargeting.html">Open HumanoidRetargeting.html</a></p>
+        <p class="link"><a href="animation/humanoid-retargeting.mdx">Open humanoid-retargeting.mdx</a></p>
       </div>
     </div>
 
@@ -228,13 +243,13 @@
       <div class="card">
         <strong>Editor UI Component Library <span class="pill new">HTML</span></strong>
         <p>Single-page catalog of controls, tokens, classes, and authoring patterns.</p>
-        <p class="link"><a href="Editor/UI_COMPONENT_LIBRARY.html">Open UI_COMPONENT_LIBRARY.html</a></p>
+        <p class="link"><a href="editor/ui-component-library.mdx">Open editor/ui-component-library.mdx</a></p>
       </div>
       <div class="card">
         <strong>Guidelines</strong>
         <p>UI authoring rules live beside the component catalog.</p>
         <p class="link">
-          <a href="Editor/UI_GUIDELINES.md">UI_GUIDELINES.md</a>
+          <a href="contributing/editor-ui-guidelines.mdx">contributing/editor-ui-guidelines.mdx</a>
         </p>
       </div>
       <div class="card">
@@ -250,7 +265,7 @@
       <div class="card">
         <strong>Timeline API Manual <span class="pill new">HTML</span></strong>
         <p>Engine evaluator, <code>.timeline</code> JSON, editor panel API, and timeline bar UI controls.</p>
-        <p class="link"><a href="Editor/Timeline-API-Manual.html">Open Timeline-API-Manual.html</a></p>
+        <p class="link"><a href="editor/timeline-api-manual.mdx">Open editor/timeline-api-manual.mdx</a></p>
       </div>
     </div>
 
@@ -275,7 +290,8 @@
       <div class="card">
         <strong>AI &amp; MCP</strong>
         <p class="link">
-          <a href="MCP_SETUP.md">MCP Setup</a>
+          <a href="getting-started/mcp-setup.mdx">MCP Setup</a> &middot;
+          <a href="editor/ai-assistant.mdx">AI Assistant panel</a>
         </p>
       </div>
     </div>
@@ -283,9 +299,9 @@
     <div class="panel warn" style="margin-top: 28px;">
       <h2>For maintainers · Updating the UI library</h2>
       <p>
-        <code>docs/Editor/UI_COMPONENT_LIBRARY.html</code> is the canonical component catalog;
+        <code>docs/editor/ui-component-library.mdx</code> is the canonical component catalog;
         edit it directly for new components, tokens, or rules. Authoring rules stay in
-        <code>docs/Editor/UI_GUIDELINES.md</code>.
+        <code>docs/contributing/editor-ui-guidelines.mdx</code>.
       </p>
     </div>
 
@@ -295,7 +311,7 @@
       </p>
       <p class="muted" style="margin-top:8px;">
         Local preview: open this file from disk in a browser.
-        Optional GitHub Pages copy: <code>https://&lt;owner&gt;.github.io/&lt;repo&gt;/Editor/UI_COMPONENT_LIBRARY.html</code>
+        Optional GitHub Pages copy: <code>https://&lt;owner&gt;.github.io/&lt;repo&gt;/editor/ui-component-library.mdx</code>
       </p>
       <p class="muted" style="margin-top:8px;">2026-05-18</p>
     </div>

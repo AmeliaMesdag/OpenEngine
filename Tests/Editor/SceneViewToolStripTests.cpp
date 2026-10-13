@@ -301,7 +301,9 @@ TEST(SceneViewToolStrip, TheSplineEntryMenuListsTheSplineSettingsInOrder)
         if (next < expected.size() && item.Path == expected[next])
             ++next;
         if (item.Path == "Spline Color...")
+        {
             EXPECT_NE(item.Flags & MenuItemFlag_Disabled, 0u) << "a color row needs a picker";
+        }
     }
     EXPECT_EQ(next, expected.size()) << "first missing or out of order: "
                                      << (next < expected.size() ? expected[next] : std::string());

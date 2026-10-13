@@ -78,7 +78,7 @@ TEST_F(MainThreadSwapCancel, CancelEndsTheWaitForTheMainThread)
 
     JobSystem::WorkStealingThreadPool pool(1);
     auto cancellation = std::make_shared<HotReloadCancellation>();
-    auto swap = pool.Submit(std::make_unique<MainThreadSwapTask>(&pool, "GameEngine.Scripts.dll", nullptr,
+    auto swap = pool.Submit(std::make_unique<MainThreadSwapTask>(&pool, "GameEngine.Scripts.dll",
                                                                  std::make_shared<PreloadSync>(), nullptr, cancellation));
     ASSERT_TRUE(swap.IsValid());
 

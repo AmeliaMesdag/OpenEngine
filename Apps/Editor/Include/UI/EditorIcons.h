@@ -48,6 +48,10 @@ namespace GameEngine::EditorIcons
     inline constexpr const char* kTree = "editor:Icons/SettingsTrees.png";
     inline constexpr const char* kPulse = "editor:Icons/pulse.png";
     inline constexpr const char* kMarkup = "editor:Icons/markup.svg";
+    // A mark-up's shapes, the same glyphs the Mark-ups panel shows beside each row.
+    inline constexpr const char* kMarkupBox = "editor:Icons/cube.svg";
+    inline constexpr const char* kMarkupSphere = "editor:Icons/markup-sphere.svg";
+    inline constexpr const char* kMarkupRegion = "editor:Icons/markup-region.svg";
     inline constexpr const char* kActivity = "editor:Icons/activity.svg";
     inline constexpr const char* kSpline = "editor:Icons/GizmoSpline.png";
     inline constexpr const char* kNavGrid = "editor:Icons/grid.png";

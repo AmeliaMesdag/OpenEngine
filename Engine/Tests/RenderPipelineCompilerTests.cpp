@@ -832,7 +832,7 @@ TEST(RenderPipelineCompiler, PassesFeedingTheDepthPrepassAreDeclaredAheadOfIt)
 TEST(RenderPipelineCompilerFleet, AllRepoBlueprintsCompileWithoutErrors)
 {
 #ifndef GE_RENDERER_REPO_ROOT
-    GTEST_SKIP() << "GE_RENDERER_REPO_ROOT not defined";
+    FAIL() << "GE_RENDERER_REPO_ROOT must name the shipped blueprint source tree";
 #else
     namespace fs = std::filesystem;
     const fs::path root = GE_RENDERER_REPO_ROOT;
@@ -855,8 +855,9 @@ TEST(RenderPipelineCompilerFleet, AllRepoBlueprintsCompileWithoutErrors)
     for (const auto& r : roots)
     {
         std::error_code ec;
-        if (!fs::exists(r, ec))
-            continue;
+        ASSERT_TRUE(fs::is_directory(r, ec))
+            << "Missing or unreadable shipped folder: " << r.generic_string()
+            << " (" << ec.message() << ")";
         for (auto it = fs::recursive_directory_iterator(r, ec);
              it != fs::recursive_directory_iterator(); it.increment(ec))
         {

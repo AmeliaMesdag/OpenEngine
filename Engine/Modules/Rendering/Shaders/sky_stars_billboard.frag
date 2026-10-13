@@ -1,8 +1,10 @@
 #version 450
 
+#include "Includes/star_sparkle.glsl"
+
 layout(location = 0) in vec2 vQuadPos;
 layout(location = 1) flat in float vBrightness;
-layout(location = 2) flat in float vTwinkle;
+layout(location = 2) flat in float vTwinklePhase;
 layout(location = 3) flat in float vRotAngle;
 layout(location = 4) flat in float vSizeScale;
 layout(location = 5) flat in float vColorTemp;
@@ -34,36 +36,30 @@ layout(set = 0, binding = 1) uniform SkyUBO
 
 void main()
 {
+    // Taken before the discard, in uniform control flow, for the filtered sparkle below.
+    vec2 quadDx = dFdx(vQuadPos);
+    vec2 quadDy = dFdy(vQuadPos);
     float r = length(vQuadPos);
     if (r > 1.0)
         discard;
 
     float starRadiusFrac = clamp(uSky.starSizeShape.y, 0.001, 2.0) * vSizeScale;
-    float diamondRadiusFrac = clamp(uSky.starSizeShape.z, 0.001, 2.0) * vSizeScale;
-    float maxExtent = max(starRadiusFrac, diamondRadiusFrac);
-    float radialFrac = starRadiusFrac / maxExtent;
-    float diamondFrac = diamondRadiusFrac / maxExtent;
+    float pointRadiusFrac = clamp(uSky.starSizeShape.z, 0.001, 2.0) * vSizeScale;
+    float maxExtent = max(starRadiusFrac, pointRadiusFrac);
+    float pointFrac = pointRadiusFrac / maxExtent;
 
-    float diamondAmount = clamp(uSky.starSizeShape.w, 0.0, 1.0);
+    float pointAmount = clamp(uSky.starSizeShape.w, 0.0, 1.0);
     float glowFalloff = clamp(uSky.starTwinkleParams.w, 0.5, 16.0);
     float coreSize = clamp(uSky.starSizeRange.z, 0.0, 0.6);
-
-    float normR = clamp(r / radialFrac, 0.0, 1.0);
-    float adjR = (normR <= coreSize) ? 0.0
-                 : (normR - coreSize) / (1.0 - coreSize);
-    float radial = pow(1.0 - adjR, glowFalloff);
 
     float cs = cos(vRotAngle);
     float sn = sin(vRotAngle);
     vec2 rotPos = vec2(cs * vQuadPos.x - sn * vQuadPos.y,
                        sn * vQuadPos.x + cs * vQuadPos.y);
-    float diamondMetric = abs(rotPos.x) + abs(rotPos.y);
-    float normD = clamp(diamondMetric / diamondFrac, 0.0, 1.0);
-    float adjD = (normD <= coreSize) ? 0.0
-                 : (normD - coreSize) / (1.0 - coreSize);
-    float diamond = pow(1.0 - adjD, glowFalloff);
-
-    float shape = max(radial, diamond * diamondAmount);
+    mat2 toStar = mat2(cs, sn, -sn, cs) * (1.0 / pointFrac);
+    float shape = GE_StarSparkleFiltered(rotPos / pointFrac, toStar * quadDx, toStar * quadDy,
+                                         starRadiusFrac / pointRadiusFrac, pointAmount, coreSize,
+                                         glowFalloff);
 
     float starBrightnessSetting = clamp(uSky.starDensityHorizon.w, 0.0, 5.0);
 
@@ -71,7 +67,22 @@ void main()
     vec3 coolTint = vec3(0.7, 0.85, 1.0);
     vec3 starColor = mix(warmTint, coolTint, vColorTemp);
 
-    float intensity = vBrightness * vTwinkle * starBrightnessSetting * shape;
+    // The twinkle brightens the star's glow, not the sparkle: a clipped sparkle whose brightness
+    // twinkled reads as a core growing and shrinking. The star's mean light is a diamond star's
+    // times the mean of its twinkle range (Twinkle Intensity to starTwinkleAmp.y, clamped as the
+    // range always was); the sparkle carries a steady (1 - kGlowShare) of it and the glow the
+    // rest, scaled by the twinkle's phase over its mean, so the mean is unchanged.
+    // starTwinkleAmp.w and .z scale each term to a diamond star's light
+    // (ComputeStarSparkleEnergy).
+    const float kTwinklePhaseMean = 0.4244; // mean of ((1 + sin)/2)^1.5 over a period
+    const float kGlowShare = 0.5;
+    float twinkleFloor = clamp(uSky.starTwinkleAmp.x, 0.0, 2.0);
+    float twinklePeak = clamp(uSky.starTwinkleAmp.y, twinkleFloor, 4.0);
+    float meanTwinkle = mix(twinkleFloor, twinklePeak, kTwinklePhaseMean);
+    float glow = GE_StarGlowFiltered(rotPos / pointFrac, toStar * quadDx, toStar * quadDy);
+    float sparkleLight = (1.0 - kGlowShare) * uSky.starTwinkleAmp.w * shape;
+    float glowLight = kGlowShare * (vTwinklePhase / kTwinklePhaseMean) * uSky.starTwinkleAmp.z * glow;
+    float intensity = vBrightness * starBrightnessSetting * meanTwinkle * (sparkleLight + glowLight);
 
     oColor = vec4(starColor * intensity, 0.0);
 }

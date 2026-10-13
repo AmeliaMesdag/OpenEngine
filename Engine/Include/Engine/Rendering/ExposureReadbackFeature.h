@@ -15,7 +15,7 @@ namespace GameEngine::Engine::Renderer
 // view, on the RGReadbackRing completion contract (token-gated via the generic
 // IRenderFeature::OnFrameSubmittedRG fan-out, like CSM's SDSM readback). Off by
 // default: a consumer opts a view in (the editor Scene View, to seed Fixed
-// EV100 from the metered exposure when auto exposure is toggled off) and
+// EV100 from the metered exposure when it switches from Auto to Fixed) and
 // AutoExposureNode declares the copy only for enabled views, so uninterested
 // views pay nothing.
 class ExposureReadbackFeature : public IRenderFeature

@@ -121,6 +121,17 @@ struct ActionEvent
 
 using ActionCallback = std::function<void(ActionEvent&)>;
 
+// Where the game's pointer lock stands (InputSystem::GetPointerLockState).
+enum class PointerLockState
+{
+    // The game does not ask for the lock.
+    Unlocked,
+    // The game asks and the host has not granted it.
+    Pending,
+    // The host holds the pointer locked for the game.
+    Locked,
+};
+
 // Where a sink sits in a window's input chain.
 //
 // A Gameplay sink runs ahead of the rest of the chain (editor focus navigation
@@ -176,6 +187,12 @@ class IRawInputSink
     /// The window gained or lost focus. Like a move, never consumed: focus is
     /// state every stage keeps its own view of.
     virtual void OnWindowFocus(bool focused) = 0;
+    /// The host's grant of the game's pointer lock: whether it holds the
+    /// pointer locked for this sink now. The host (the Player, the editor)
+    /// reports it every frame; a repeat of the current grant changes nothing.
+    /// It reaches a game only as InputSystem::GetPointerLockState, so a game
+    /// cannot report a lock the platform does not hold.
+    virtual void OnPointerLock(bool locked) = 0;
     /// A wheel or trackpad scroll.
     /// @param delta Scroll delta in platform wheel units, horizontal in x.
     /// @param mods  Platform modifier mask (kModShortcutMask bits) as held when
@@ -220,9 +237,10 @@ class InputSystem : public IRawInputSink
     // switches game input off. Leaves the pointer and focus states alone.
     void ResetState();
 
-    // Clear all action registrations, context stack, and listeners. Called
-    // when the runtime input session ends (e.g. play mode exit) to prevent
-    // stale callbacks from accumulating across sessions.
+    // Clear all action registrations, context stack, and listeners, and withdraw
+    // a pointer lock request. Called when the runtime input session ends (e.g.
+    // play mode exit) to prevent stale callbacks from accumulating across
+    // sessions and the next session from starting with the pointer locked.
     void ClearRegistrations();
 
     // A suspended Gameplay sink claims nothing: a paused game acts on no input,
@@ -262,6 +280,34 @@ class InputSystem : public IRawInputSink
     // the window: a window behind another still receives moves and the wheel
     // for a pointer that merely crosses it.
     bool IsWindowFocused() const;
+    // How far the pointer moved over the last frame: the moves delivered before
+    // the latest Update(). Only movement between two positions inside the window
+    // counts, so a pointer arriving from outside adds nothing, and a change of
+    // the pointer lock starts the count again, so the cursor the platform moves
+    // when the lock begins or ends adds nothing either.
+    // Units: unlocked, the space of GetMousePosition(). While the pointer is
+    // locked the delta keeps counting however far the mouse travels (the
+    // position runs on without bound), in the window's cursor units, the same
+    // in the editor and the Player and untouched by the editor's UI scale: raw,
+    // unaccelerated device counts where the platform offers raw motion (Windows,
+    // X11), otherwise the window's cursor pixels.
+    Mathematics::Vector2 GetMouseDelta() const;
+
+    // Pointer lock: the game asks for the platform cursor to be hidden and held
+    // by the window, so the mouse steers the game instead of a cursor. The host
+    // grants it while it can: the Player while its window has focus, the editor
+    // while play runs in the Game View, until Escape hands the pointer back to
+    // the editor and a click on the Game View returns it. While it is locked,
+    // the pointer's moves, presses and wheel reach only gameplay. The request
+    // stands until UnlockPointer or the session ends.
+    void LockPointer();
+    void UnlockPointer();
+    // Unlocked while the game does not ask; Pending while it asks and the host
+    // has not granted (the editor's play paused or the Game View not active or
+    // unfocused, the pointer handed back with Escape, the Player's window
+    // unfocused, the browser build always), for instance to say "click to
+    // fly"; Locked while the host holds the pointer for it.
+    PointerLockState GetPointerLockState() const;
     // Where the most recent accepted up-to-down transition happened, in the same
     // space as GetMousePosition(). Movement, a duplicate down, the release and
     // Update() all retain it; only another accepted press replaces it, and
@@ -334,6 +380,10 @@ class InputSystem : public IRawInputSink
     bool OnGamepadButton(int gamepadIndex, int button, bool down) override;
 
   private:
+    // The host's grant, reached through IRawInputSink only: it is the host's
+    // report, not part of the game-facing surface.
+    void OnPointerLock(bool locked) override;
+
     class Impl;
     std::unique_ptr<Impl> m_Impl;
 };

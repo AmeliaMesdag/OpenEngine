@@ -620,8 +620,8 @@ using GameEngine::Mathematics::Cross3;
 using GameEngine::Mathematics::Normalize3;
 
 SceneViewController::SceneViewController(Engine::Renderer::RenderServices* renderServices, ECS::World& world)
-    : m_RenderServices(renderServices), m_World(&world),
-      m_MeasureSceneGizmo(world), m_SplineSceneGizmo(world)
+    : m_RenderServices(renderServices), m_MeasureSceneGizmo(world),
+      m_SplineSceneGizmo(world), m_World(&world)
 {
     using namespace Editor::SceneTools;
 
@@ -881,7 +881,7 @@ void SceneViewController::SetChangeNotifications(Editor::EditorChangeNotificatio
 
     const ECS::ComponentTypeId transformType = ECS::GetComponentTypeId<Components::Transform>();
     m_ChangeSub = m_ChangeNotifications->SubscribeComponentChanged(
-        [this, transformType](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
+        [this](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
         {
             if (!m_TransformTool)
             {
@@ -4098,7 +4098,8 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
         const bool colorFilterOn = svSettings.GetPostFxColorFilterEnabled();
         const bool casOn = svSettings.GetPostFxCasEnabled();
         const bool crtOn = svSettings.GetPostFxCrtEnabled();
-        const bool autoExposureOn = svSettings.GetPostFxAutoExposureEnabled();
+        const Editor::SceneViewExposureMode exposureMode = svSettings.GetExposureMode();
+        const bool autoExposureOn = exposureMode == Editor::SceneViewExposureMode::Auto;
         const bool useAdaptationDelay =
             svSettings.GetPostFxAutoExposureUseAdaptationDelay();
 
@@ -4119,10 +4120,26 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
             if (autoExposureOn &&
                 m_ExposureReadback->TryResolveAdaptedExposure(m_ViewId, adaptedScale))
             {
-                Editor::SceneViewSettings::Get().SetLastMeteredExposureEv(
+                Editor::SceneViewSettings::Get().SetLastShownExposureEv(
                     Rendering::LinearExposureToEv(adaptedScale) +
                     svSettings.GetPostFxExposureCompensation());
             }
+        }
+
+        // Scene Light: the EV100 derived from the shaded directional lights and sky, held until either
+        // changes. Until the first derivation lands it shows the fallback. The derived EV
+        // is also the Fixed handoff seed: Fixed re-applies the same compensation.
+        float sceneLightEv = Editor::SceneLightFallbackEv100();
+        if (exposureMode == Editor::SceneViewExposureMode::SceneLight)
+        {
+            const Editor::SceneLightUpdate update =
+                m_SceneLightExposure.Update(rs->GetWorldLights(GetWorld().GetWorldId()),
+                                            Editor::ReadSceneLightEnvironment(*rs));
+            if (update != Editor::SceneLightUpdate::NotYet)
+                sceneLightEv = m_SceneLightExposure.GetEv100();
+            if (update == Editor::SceneLightUpdate::Rederived)
+                Editor::SceneViewSettings::Get().SetSceneLightExposureEv(sceneLightEv);
+            Editor::SceneViewSettings::Get().SetLastShownExposureEv(sceneLightEv);
         }
 
         // Auto-metering tune: engages the override when the adaptation clamps or the
@@ -4201,19 +4218,21 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
                      .ContrastAdaptiveSharpening = casOn,
                      .Crt = crtOn},
                     offTonemapMode, pp);
-                // Auto Exposure off: pin the Scene View to the user's fixed EV100 instead of
-                // leaving a metered/stale scale. This override is authoritative for the view, so
-                // exposure is set here rather than via the clobbered camera path. Compensation
-                // trims the pinned EV exactly as the camera-sensor resolve does
+                // Fixed and Scene Light: pin the Scene View to the fixed or the derived EV100
+                // instead of leaving a metered/stale scale. This override is authoritative for
+                // the view, so exposure is set here rather than via the clobbered camera path.
+                // Compensation trims the pinned EV exactly as the camera-sensor resolve does
                 // (ResolveExposureScale: a +/- stop multiplier in every mode). Stack the
                 // Scene View's relative knob with the blended volume adjustment so
                 // ExposureAdjustmentEffect remains effective while the meter is off.
                 if (!autoExposureOn)
                 {
+                    const float pinnedEv = exposureMode == Editor::SceneViewExposureMode::Fixed
+                                               ? svSettings.GetPostFxFixedExposureEv()
+                                               : sceneLightEv;
                     pp.AutoExposureActive = false;
                     pp.Exposure = Rendering::ResolveExposureScale(
-                        Components::ExposureMode::Manual, 1.0f,
-                        svSettings.GetPostFxFixedExposureEv(),
+                        Components::ExposureMode::Manual, 1.0f, pinnedEv,
                         svSettings.GetPostFxExposureCompensation() +
                             pp.ExposureCompensationEv);
                 }

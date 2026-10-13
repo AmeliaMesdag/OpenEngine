@@ -1,9 +1,9 @@
 #include "PathfindingECS/Systems/NavigationMovementSystem.h"
 #include "PathfindingECS/NavigationService.h"
-#include "PathfindingECS/NavigationGridRuntime.h"
+#include "PathfindingECS/NavigationSurfaceRuntime.h"
 #include "PathfindingECS/Components/NavigationAgent.h"
 #include "PathfindingECS/Components/NavigationAgentState.h"
-#include "PathfindingECS/Components/NavigationGrid.h"
+#include "PathfindingECS/Components/NavigationSurface.h"
 #include "PathfindingECS/Systems/NavigationWorldHooks.h"
 #include "Components/Transform.h"
 #include "Components/TransformDirtyFeed.h"
@@ -228,7 +228,7 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
         crowd.Update(deltaTime);
     }
 
-    // Dynamic-obstacle application lives in NavigationBuildSystem: dynamic-blocked
+    // Dynamic-obstacle application lives in NavigationSurfaceSystem: dynamic-blocked
     // is an unsynchronized GridMap field read by in-flight path jobs, so its
     // writes must sit behind that system's job-free gate. This system only reads
     // map content (Raycast / IsCellBlocked) and takes the reservation lock.
@@ -551,10 +551,10 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
         });
 
     // Clear expired reservations on all grid maps using the current accumulated time
-    world.Query<ECS::Read<Components::NavigationGrid>>().Each(
-        [&](ECS::EntityHandle /*e*/, const Components::NavigationGrid& source)
+    world.Query<ECS::Read<Components::NavigationSurface>>().Each(
+        [&](ECS::EntityHandle /*e*/, const Components::NavigationSurface& source)
         {
-            auto* gridMap = ResolveNavigationGridMap(world, source);
+            auto* gridMap = ResolveNavigationSurfaceGrid(world, source);
             if (gridMap)
             {
                 gridMap->ClearExpiredReservations(m_AccumulatedTime);

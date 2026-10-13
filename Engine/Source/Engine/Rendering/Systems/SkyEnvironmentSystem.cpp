@@ -37,18 +37,19 @@ constexpr float kDefaultMoonAngularRadiusRad = 0.026f;
 
 // Physically anchor the sky's solar irradiance to the scene's directional sun. A light's
 // unitless intensity already equals its illuminance / kReferenceWhiteNits (the 203-nit anchor), so
-// the sky's top-of-atmosphere solar irradiance is that same number scaled by kSkyIrradianceScale
-// (the scattering source term is attenuated by the transmittance LUT before it reaches the ground).
-// The sky then TRACKS the sun on the SAME scene-linear scale as sun-lit surfaces: brighten the
-// directional light and the dome + baked IBL brighten coherently with it. The directional light's
-// illuminance is the GROUND value; the atmosphere source term wants the TOA irradiance, which is the
-// ground value lifted by 1/transmittance, so kSkyIrradianceScale ~= 1.33. That 1.33 is 1/0.75, a
-// REAL-EARTH clear-sky zenith transmittance with ozone and aerosol — it is not this engine's
-// atmosphere, which has no ozone (FillDefaultAtmosphere) and transmits ~0.90 at the zenith for a
-// lift of 1.11, so the dome sits about a quarter stop above the surfaces it lights.
-// Grey-card-verified: a sun-lit 18% card and a sky-lit card agree on the 203 scale, and the lit
-// sky sits at a plausible sub-sun level.
-constexpr float kSkyIrradianceScale = 1.33f;
+// the sky's top-of-atmosphere solar irradiance is that same number scaled by
+// SkySourceIlluminanceScale (the scattering source term is attenuated by the transmittance LUT
+// before it reaches the ground). The sky then TRACKS the sun on the SAME scene-linear scale as
+// sun-lit surfaces: brighten the directional light and the dome + baked IBL brighten coherently
+// with it. The directional light's illuminance is the GROUND value of an overhead sun; the
+// atmosphere's source term wants the top-of-atmosphere irradiance, the ground value over the zenith
+// transmittance of the atmosphere the LUTs bake (about 1.15 for the shipped Earth atmosphere), so
+// the sky's sun delivers the light's own illuminance through an overhead sky.
+float SkyIrradianceScale()
+{
+    static const float scale = Rendering::SkySourceIlluminanceScale(ScatteringAtmosphere());
+    return scale;
+}
 // Returned when nothing in the scene is a sun: no usable link and no emitting directional light.
 constexpr float kNoSceneSunSentinel = -1.0f;
 // A colour whose luminance is at or below this carries no hue (a black night key, a sun far below
@@ -541,7 +542,9 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
         0.2f);
     settings.starDensity = comp.StarDensity;
     settings.starBrightness = comp.StarBrightness;
-    settings.starSize = comp.StarSize;
+    // The inspector's range. Past it the shader clamps the points' radius before the core's, and
+    // the core-to-points ratio the star's energy gains assume (kStarSparkleCoreRadius) drifts.
+    settings.starSize = std::clamp(comp.StarSize, 0.1f, 3.0f);
     settings.starDiamondShape = comp.StarDiamondShape;
     settings.starCoreSize = comp.StarCoreSize;
     settings.starGlowFalloff = comp.StarGlowFalloff;
@@ -596,7 +599,7 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
         m_DrivenNoonReferenceLux = Components::SkySunDrive::NoonReferenceLux(comp);
     if (sunUnitless > 0.0f)
     {
-        settings.primarySunIntensity = sunUnitless * kSkyIrradianceScale;
+        settings.primarySunIntensity = sunUnitless * SkyIrradianceScale();
         m_WarnedNoSceneSun = false;
     }
     else if (comp.Mode == Components::SkyMode::Physical && !m_WarnedNoSceneSun)
@@ -641,7 +644,7 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
             Components::LightIntensityToUnitless(Components::kClearNoonSunIlluminanceLux *
                                                      Components::SkySunDrive::MoonlightRatio(comp),
                                                  Components::LightUnit::Lux) *
-            kSkyIrradianceScale;
+            SkyIrradianceScale();
         Rendering::ApplySimpleLightingToSkySettings(state, config, sunTint, moonSourceUnitless, settings);
         settings.scatteringSunDir[0] = state.sunDirWS[0];
         settings.scatteringSunDir[1] = state.sunDirWS[1];

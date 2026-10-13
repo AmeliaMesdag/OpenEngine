@@ -1192,7 +1192,6 @@ int32 CoreCLRHost::AcceptPackage(const GE_PackageEntry* entries,
     if (!entries || entryCount == 0 || !outDomain)
         return -2;
     using accept_pkg_fn = int32 (CORECLR_DELEGATE_CALLTYPE*)(const GE_PackageEntry*, uint32, uint32, uint64*);
-    using accept_pkg_packed_fn = long long (CORECLR_DELEGATE_CALLTYPE*)(const GE_PackageEntry*, uint32, uint32);
 
     // In Debug, prefer the packed variant to avoid out-params across UCO.
 #ifdef _DEBUG
@@ -1212,6 +1211,7 @@ int32 CoreCLRHost::AcceptPackage(const GE_PackageEntry* entries,
     // 2) Fallback: AcceptPackage_Packed with struct pointer
     if (void* tmpPacked = GetCoreBridgeExport(GE_HOST_STR("AcceptPackage_Packed")))
     {
+        using accept_pkg_packed_fn = long long (CORECLR_DELEGATE_CALLTYPE*)(const GE_PackageEntry*, uint32, uint32);
         auto fnPacked = reinterpret_cast<accept_pkg_packed_fn>(tmpPacked);
         long long packed = fnPacked(entries, entryCount, flags);
         int16 rc16 = (int16)((packed >> 48) & 0xFFFF);

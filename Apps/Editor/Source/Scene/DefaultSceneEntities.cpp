@@ -167,8 +167,8 @@ void SeedDefaultSceneEntities(ECS::World& world, Engine::Renderer::RenderService
     {
         const GUID sphereGuid = Engine::Renderer::PrimitiveGenerator::SphereGuid();
         const GUID reflectionMatGuid = Engine::Renderer::PrimitiveGenerator::ReflectionProbeTestMaterialGuid();
-        SpawnDynamicSphere(world, rs, sphereGuid, matGuid, Mathematics::Vector3{-1.25f, 1.0f, 0.0f}, "Sphere");
-        SpawnDynamicSphere(world, rs, sphereGuid, reflectionMatGuid, Mathematics::Vector3{1.25f, 1.0f, 0.0f}, "Mirror Sphere");
+        SpawnDynamicSphere(world, rs, sphereGuid, matGuid, Mathematics::Vector3{-1.25f, SphereColliderShape{}.radius, 0.0f}, "Sphere");
+        SpawnDynamicSphere(world, rs, sphereGuid, reflectionMatGuid, Mathematics::Vector3{1.25f, SphereColliderShape{}.radius, 0.0f}, "Mirror Sphere");
     }
 
     world.ProcessCommands();

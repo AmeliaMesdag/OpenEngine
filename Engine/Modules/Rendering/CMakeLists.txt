@@ -223,29 +223,8 @@ endif()
 # SHADER COMPILATION AND MANAGEMENT
 # ============================================================================
 
-# Find glslc (Vulkan shader compiler)
-# Prefer vcpkg-provided shaderc tools when available, but still work with a
-# system Vulkan SDK install.
-set(_GLSLC_HINT_DIRS ${Vulkan_INCLUDE_DIRS}/../bin)
-if(VCPKG_DIR AND VCPKG_ARCH)
-    list(APPEND _GLSLC_HINT_DIRS
-        "${VCPKG_DIR}/installed/${VCPKG_ARCH}/tools"
-        "${VCPKG_DIR}/installed/${VCPKG_ARCH}/tools/shaderc")
-endif()
-if(EMSCRIPTEN)
-    # SPIR-V authoring (glslc + ShaderReflect packaging) is a desktop/editor
-    # concern; the wasm runtime consumes prebuilt shader packages, and the
-    # WebGPU WGSL pipeline arrives with the browser-renderer slice.
-    set(GLSLC_EXECUTABLE "")
-else()
-    find_program(GLSLC_EXECUTABLE glslc HINTS ${_GLSLC_HINT_DIRS})
-endif()
-
-if(GLSLC_EXECUTABLE)
-    message(STATUS "✅ Found glslc: ${GLSLC_EXECUTABLE}")
-elseif(NOT EMSCRIPTEN)
-    message(WARNING "⚠️ glslc not found - shader compilation will be skipped; install Vulkan SDK or ensure vcpkg shaderc is available")
-endif()
+# GLSLC_EXECUTABLE, the Vulkan shader compiler, is found at the top level
+# (cmake/GlslcCompiler.cmake) so every engine directory sees the same one.
 
 # Function to copy shaders to build directory
 function(copy_shaders_to_build)
@@ -807,6 +786,7 @@ set(RENDERING_CORE_SOURCES
     Source/Sky/AtmosphereTransmittance.cpp
     Source/Sky/SkyRenderer.cpp
     Source/Sky/SolarPath.cpp
+    Source/Sky/StarSparkleEnergy.cpp
 )
 
 # Platform-specific sources
@@ -1018,7 +998,7 @@ find_package(nlohmann_json CONFIG QUIET)
         endif()
 	        # vcpkg-installed spirv_reflect.h defaults to including "./include/spirv/unified1/spirv.h",
 	        # which does not resolve in standard package layouts. Prefer the system SPIR-V headers.
-	        target_compile_definitions(GameEngineRendering PUBLIC SPIRV_REFLECT_USE_SYSTEM_SPIRV_H=1)
+	        target_compile_definitions(GameEngineRendering PRIVATE SPIRV_REFLECT_USE_SYSTEM_SPIRV_H=1)
         target_compile_definitions(GameEngineRendering PUBLIC RENDERING_ENABLE_SPIRV_REFLECTION=1)
         message(STATUS "SPIR-V reflection enabled and linked")
     else()
@@ -1082,8 +1062,6 @@ else()
     # We already require glfw3 via find_package above
     target_link_libraries(GameEngineRendering PUBLIC glfw)
 endif()
-# Propagate HAS_GLFW define to dependents that may use conditional compilation
-target_compile_definitions(GameEngineRendering PUBLIC HAS_GLFW=1)
 
 # Mirror the Engine-level profiling switch so RenderGraph can strip per-pass
 # timestamp queries in shipping builds. Options are defined in Engine's top
@@ -1103,7 +1081,7 @@ if(RENDERING_HAS_VULKAN)
     # Link VMA (Vulkan Memory Allocator) interface target from vcpkg
     if(VMA_FOUND)
         target_link_libraries(GameEngineRendering PUBLIC GPUOpen::VulkanMemoryAllocator)
-        target_compile_definitions(GameEngineRendering PUBLIC RENDERING_HAS_VMA=1)
+        target_compile_definitions(GameEngineRendering PRIVATE RENDERING_HAS_VMA=1)
         # Only add materials sources if nlohmann_json is available (guard against missing dep)
         if(nlohmann_json_FOUND)
             target_sources(GameEngineRendering PRIVATE Source/Materials/ShaderReflection.cpp)
@@ -1129,12 +1107,12 @@ add_dependencies(GameEngineRendering CompileShaders)
 if(RENDERING_HAS_DIRECTX12)
     target_sources(GameEngineRendering PRIVATE ${RENDERING_DIRECTX12_SOURCES})
     target_link_libraries(GameEngineRendering PUBLIC d3d12 dxgi dxguid)
-    target_compile_definitions(GameEngineRendering PUBLIC RENDERING_HAS_DIRECTX12=1)
+    target_compile_definitions(GameEngineRendering PRIVATE RENDERING_HAS_DIRECTX12=1)
 endif()
 
 if(RENDERING_HAS_WEBGPU)
     target_sources(GameEngineRendering PRIVATE ${RENDERING_WEBGPU_SOURCES})
-    target_compile_definitions(GameEngineRendering PUBLIC RENDERING_HAS_WEBGPU=1)
+    target_compile_definitions(GameEngineRendering PRIVATE RENDERING_HAS_WEBGPU=1)
     if(EMSCRIPTEN)
         # emdawnwebgpu supplies webgpu.h at compile and the Dawn JS bindings
         # at link; the port flag must reach every TU that includes webgpu.h
@@ -1160,7 +1138,7 @@ endif()
 
 if(RENDERING_HAS_METAL)
     target_sources(GameEngineRendering PRIVATE ${RENDERING_METAL_SOURCES})
-    target_compile_definitions(GameEngineRendering PUBLIC RENDERING_HAS_METAL=1)
+    target_compile_definitions(GameEngineRendering PRIVATE RENDERING_HAS_METAL=1)
 
     # Vendored metal-cpp headers (no vcpkg port exists). SYSTEM silences the
     # vendor headers under -Wall -Wextra.
@@ -1754,6 +1732,17 @@ if(GTest_FOUND OR TARGET GTest::gtest)
     )
     add_test(NAME RenderingSolarPathTests COMMAND RenderingSolarPathTests)
 
+    # The star sparkle's energy gain (Rendering/Sky/StarSparkleEnergy.h): pure CPU maths.
+    add_executable(RenderingStarSparkleEnergyTests Tests/StarSparkleEnergyTests.cpp)
+    set_target_properties(RenderingStarSparkleEnergyTests PROPERTIES FOLDER "Rendering/Tests")
+    target_link_libraries(RenderingStarSparkleEnergyTests PRIVATE
+        GameEngineRendering
+        FileSystemObjects
+        GTest::gtest
+        GTest::gtest_main
+    )
+    add_test(NAME RenderingStarSparkleEnergyTests COMMAND RenderingStarSparkleEnergyTests)
+
     add_executable(RenderingTextureFormatTablesTests Tests/TextureFormatTablesTests.cpp)
     set_target_properties(RenderingTextureFormatTablesTests PROPERTIES FOLDER "Rendering/Tests")
     target_link_libraries(RenderingTextureFormatTablesTests PRIVATE
@@ -2103,8 +2092,13 @@ if(GTest_FOUND OR TARGET GTest::gtest)
     # with the right format supplied, so the run proves the parameter beats the
     # ambient read (and the control arm pins the ambient coupling it severs).
     # Loud SKIP when the agent cannot diverge the two formats. Needs staged
-    # shaderpkgs for the encode pass.
-    add_executable(RenderingWindowTargetPresentedFormatTests Tests/WindowTargetPresentedFormatTests.cpp)
+    # shaderpkgs for the encode pass. The same hidden-window harness drives the
+    # SUBOPTIMAL-acquire frames (GE_VK_FORCE_ACQUIRE_SUBOPTIMAL): rendered and
+    # presented, the swapchain recreated after the present.
+    add_executable(RenderingWindowTargetPresentedFormatTests
+        Tests/WindowTargetPresentedFormatTests.cpp
+        Tests/SwapchainSuboptimalAcquireTests.cpp
+    )
     set_target_properties(RenderingWindowTargetPresentedFormatTests PROPERTIES FOLDER "Rendering/Tests")
     target_link_libraries(RenderingWindowTargetPresentedFormatTests PRIVATE
         GameEngineRendering

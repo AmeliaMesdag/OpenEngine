@@ -111,6 +111,9 @@ struct BuildStep
 ///  7. hooks: PreAssetCopy    — receives mutable AssetManifest& (baking hooks go here)
 ///  8. CopyAssets             — copies files listed in manifest
 ///  9. CopyEngineShaders      — engine shaders (not GUID-tracked)
+///     9a. CookMaterialVariants — MaterialVariantCook's packages for every material of the project and
+///     its enabled packages and for the engine's built-in ones into the content root's
+///     `.Cache/Shaders`, the read-only shader cache the packaged game probes first
 /// 10. hooks: PostAssetCopy
 /// 11. CopyRuntimeDependencies — Player.exe, DLLs, managed assemblies
 ///     11b. native user scripts; 11c. package code (native modules + C# assemblies)
@@ -229,6 +232,7 @@ private:
     AssetManifest CollectAssets(const BuildSettings& s);
     bool CopyAssets(const std::filesystem::path& stagingDir, const AssetManifest& manifest);
     bool CopyEngineShaders(const std::filesystem::path& stagingDir);
+    bool CookMaterialVariants(const std::filesystem::path& contentRoot, const BuildSettings& s);
     bool CopyThirdPartyNotices(const std::filesystem::path& contentRoot, const BuildSettings& s);
     bool CopyRuntimeDependencies(const std::filesystem::path& stagingDir, const BuildSettings& s);
     bool WriteGameConfig(const std::filesystem::path& stagingDir, const BuildSettings& s);

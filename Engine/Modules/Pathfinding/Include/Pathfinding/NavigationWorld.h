@@ -39,6 +39,10 @@ public:
     NavMapHandle AddGridMap(const GridSettings& settings);
     NavMapHandle AddDetourNavMap();
     void RemoveMap(NavMapHandle handle);
+    // Replaces the grid `handle` names with `grid`, keeping the handle, so whatever is bound to the
+    // grid stays bound across a re-bake. Null, leaving the old grid in place, when `handle` names no
+    // grid.
+    GridMap* ReplaceGridMap(NavMapHandle handle, std::unique_ptr<GridMap> grid);
 
     GridMap* GetGridMap(NavMapHandle handle);
     DetourNavMap* GetDetourNavMap(NavMapHandle handle);

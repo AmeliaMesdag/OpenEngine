@@ -374,6 +374,11 @@ struct DeviceDesc
     bool enableDescriptorValidation = true;
     // When true, the device will create and manage a presentation swapchain if supported by the active backend.
     bool enableSwapchain = true;
+    // Seed the backend pipeline cache from the user's on-disk cache at creation and
+    // write it back at destruction. Off by default: the cost is a read and a write of a
+    // machine-global file that reaches tens of MB, which only an application's
+    // long-lived device earns; a device that lives for a test keeps its cache in memory.
+    bool persistPipelineCache = false;
     std::string applicationName = "GameEngine Application";
     uint32_t applicationVersion = 1;
     // Policy & features

@@ -4,8 +4,9 @@
 #include "PathfindingECS/NavigationService.h"
 #include "PathfindingECS/Components/NavigationAgent.h"
 #include "PathfindingECS/Components/NavigationAgentState.h"
-#include "PathfindingECS/Components/NavigationGrid.h"
-#include "PathfindingECS/Systems/NavigationBuildSystem.h"
+#include "PathfindingECS/Components/NavigationSurface.h"
+#include "NavigationTestSurfaces.h"
+#include "PathfindingECS/Systems/NavigationSurfaceSystem.h"
 #include "PathfindingECS/Systems/NavigationMovementSystem.h"
 #include "PathfindingECS/Systems/NavigationPathfindingSystem.h"
 #include "Components/Transform.h"
@@ -63,20 +64,8 @@ protected:
 
     Pathfinding::NavMapHandle CreateGrid(uint32 width, uint32 depth)
     {
-        auto entity = m_World->Create();
-        Components::NavigationGrid grid{};
-        grid.GridType = Pathfinding::GridType::Square;
-        grid.CellSize = 1.0f;
-        grid.Width = width;
-        grid.Depth = depth;
-        entity.Set(grid);
-        m_World->ProcessCommands();
-
-        NavigationBuildSystem buildSystem;
-        buildSystem.Update(*m_World, kDt);
-        m_World->ProcessCommands();
-        const auto* built = entity.Get<Components::NavigationGrid>();
-        return {built->NavMapIndex, built->NavMapGeneration};
+        auto entity = Testing::CreateFlatGridSurface(*m_World, width, depth, 1.0f);
+        return Testing::SurfaceMap(*m_World, entity);
     }
 
     ECS::Entity CreateAgent(Pathfinding::NavMapHandle map, float32 startX, float32 startZ, float32 destX,
@@ -132,25 +121,23 @@ protected:
         return agents;
     }
 
-    // A built 20 m x 20 m navmesh plane centred on the origin, with the
-    // crowd initialized on it as NavigationBuildSystem does for a baked mesh.
-    // An invalid handle when the Detour backend is compiled out.
+    // A 20 m x 20 m mesh surface baked over level ground centred on the origin, with the crowd
+    // NavigationSurfaceSystem initializes on the first baked mesh. An invalid handle when the
+    // Detour backend is compiled out.
     Pathfinding::NavMapHandle CreateCrowdPlane()
     {
-        auto& navigation = NavigationService::Get();
-        const auto map = navigation.AddDetourNavMap();
-        const float32 vertices[] = {-10.0f, 0.0f, -10.0f, 10.0f, 0.0f, -10.0f, 10.0f, 0.0f, 10.0f, -10.0f, 0.0f, 10.0f};
-        const uint32 indices[] = {0, 3, 1, 1, 3, 2};
-        Pathfinding::DetourNavMap::InputGeometry geometry;
-        geometry.Vertices = vertices;
-        geometry.VertexCount = 4;
-        geometry.Indices = indices;
-        geometry.TriangleCount = 2;
-        auto* detour = navigation.GetDetourNavMap(map);
-        if (!detour || !detour->Build(Pathfinding::NavMeshSettings{}, geometry) ||
-            !navigation.GetCrowdManager().Initialize(*detour, 8))
+        Testing::CreateGroundPlane(*m_World, 10.0f);
+        auto entity = m_World->Create();
+        Components::NavigationSurface surface{};
+        surface.FitBounds = false;
+        surface.Center = {0.0f, 0.0f, 0.0f};
+        surface.Extent = {10.0f, 1.0f, 10.0f};
+        entity.Set(surface);
+        m_World->ProcessCommands();
+        Testing::BakeSurfaces(*m_World);
+        if (!NavigationService::Get().GetCrowdManager().IsInitialized())
             return {};
-        return map;
+        return Testing::SurfaceMap(*m_World, entity);
     }
 
     void Step(NavigationPathfindingSystem& pathSystem)

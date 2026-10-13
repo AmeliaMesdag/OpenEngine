@@ -1047,8 +1047,9 @@ void RenderServices::OnDeviceRebuilt()
     //     ImageBasedLightingFeature (env cubes + BRDF LUT, re-armed for re-bake),
     //     SkyRenderFeature (atmosphere LUTs), RetargetRenderFeature (retarget SSBOs),
     //     LensFlareRenderFeature (mapped instance rings + atlas sampler),
-    //     ExposureReadbackFeature (mapped readback rings). Features holding only
-    //     RG-transient resources inherit the default no-op.
+    //     ExposureReadbackFeature and IrradianceReadbackFeature (mapped readback
+    //     rings). Features holding only RG-transient resources inherit the default
+    //     no-op.
     //
     //     Module-owned features: CBTTerrain's CBTRenderFeature now overrides this — it
     //     forgets its dead kernel pipelines + instance buffers and re-arms its lazy

@@ -580,6 +580,11 @@
 	background-image: url("editor:Icons/ocean.svg");
 }
 
+/* Scene hierarchy: mark-up */
+.entity-icon.hierarchy-entity-markup {
+	background-image: url("editor:Icons/markup.svg");
+}
+
 /* Scene hierarchy: post-process volume */
 .entity-icon.hierarchy-entity-post-process-volume {
 	background-image: url("editor:Icons/color-filter.svg");

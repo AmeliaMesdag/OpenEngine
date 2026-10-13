@@ -25,7 +25,7 @@ constexpr std::size_t kBlockAlignment = kFalseSharingSeparation;
 std::byte* AcquireBlockMemory(std::size_t bytes)
 {
     auto* data = static_cast<std::byte*>(::operator new(bytes, std::align_val_t{kBlockAlignment}));
-#if defined(GE_ARENA_ASAN)
+#if defined(GE_MEMORY_ASAN)
     ASAN_POISON_MEMORY_REGION(data, bytes);
 #endif
     return data;
@@ -33,27 +33,10 @@ std::byte* AcquireBlockMemory(std::size_t bytes)
 
 void ReleaseBlockMemory(std::byte* data, [[maybe_unused]] std::size_t bytes)
 {
-#if defined(GE_ARENA_ASAN)
+#if defined(GE_MEMORY_ASAN)
     ASAN_UNPOISON_MEMORY_REGION(data, bytes);
 #endif
     ::operator delete(data, std::align_val_t{kBlockAlignment});
-}
-
-/// Marks `[begin, begin + bytes)` as rewound: filled with 0xDD where instrumentation is on,
-/// and poisoned under AddressSanitizer, so a read through a pointer that outlived its Rewind
-/// or Reset shows. The range holds alignment padding that was never handed out and is still
-/// poisoned, so it is unpoisoned before the fill.
-void RetireRange([[maybe_unused]] std::byte* begin, [[maybe_unused]] std::size_t bytes)
-{
-#if defined(GE_ARENA_ASAN)
-    ASAN_UNPOISON_MEMORY_REGION(begin, bytes);
-#endif
-#if GE_DEBUG_INSTRUMENTATION
-    std::memset(begin, 0xDD, bytes);
-#endif
-#if defined(GE_ARENA_ASAN)
-    ASAN_POISON_MEMORY_REGION(begin, bytes);
-#endif
 }
 
 std::size_t RoundUpToBlockAlignment(std::size_t bytes)
@@ -78,6 +61,13 @@ Arena::Arena(std::string_view statsName, std::size_t firstBlockBytes)
 {
     assert(!statsName.empty() && "an Arena needs a stats name; name it after its owner, as 'Area.What'");
     Detail::RegisterStats(m_Record, statsName, StatsKind::Arena, Residency::Cpu);
+}
+
+Arena::Arena(Detail::ScratchArenaTag, std::string_view statsName, std::uint64_t threadId)
+    : m_FirstBlockBytes(kArenaFirstBlockBytes)
+{
+    m_Record.ThreadId = threadId;
+    Detail::RegisterStats(m_Record, statsName, StatsKind::Scratch, Residency::Cpu);
 }
 
 Arena::~Arena()
@@ -218,23 +208,21 @@ void Arena::ClearDestructorBoundsIfNoneRecorded()
     // Only after the destructors have run: cleared earlier, an unload decision taken on
     // another thread could unmap code a destructor is still executing. Both stores release,
     // and the query acquires both, so a query that sees either cleared bound also sees the
-    // destructors as having run.
-    if (!m_Destructors.empty())
+    // destructors as having run. The owner is the only writer and stores `DestructorLow` last,
+    // so a zero `DestructorLow` means both bounds are already clear and nothing is stored: a
+    // Rewind or Reset that follows no recorded destructor pays no store-release.
+    if (!m_Destructors.empty() || m_Record.DestructorLow.load(std::memory_order_relaxed) == 0)
         return;
     m_Record.DestructorHigh.store(0, std::memory_order_release);
     m_Record.DestructorLow.store(0, std::memory_order_release);
 }
 
-Arena::Marker Arena::GetMarker() const
+void Arena::Rewind(Marker marker)
 {
-    Marker marker;
-    marker.Block = static_cast<std::uint32_t>(m_Current);
-    marker.DestructorCount = static_cast<std::uint32_t>(m_Destructors.size());
-    marker.Offset = m_Blocks.empty() ? 0 : m_Cursor - reinterpret_cast<std::uintptr_t>(m_Blocks[m_Current].Data);
-    return marker;
+    RewindPublishing(marker, true);
 }
 
-void Arena::Rewind(Marker marker)
+void Arena::RewindPublishing(Marker marker, bool publishStats)
 {
     assert(marker.DestructorCount <= m_Destructors.size() &&
            "Rewind to a marker taken before a later Rewind or Reset; take the marker again");
@@ -264,10 +252,16 @@ void Arena::Rewind(Marker marker)
         m_Limit = reinterpret_cast<std::uintptr_t>(target.Data) + target.Capacity;
     }
     ClearDestructorBoundsIfNoneRecorded();
-    PublishStats();
+    if (publishStats)
+        PublishStats();
 }
 
 void Arena::Reset()
+{
+    ResetPublishing(true);
+}
+
+void Arena::ResetPublishing(bool publishStats)
 {
     RunDestructorsAbove(0);
 
@@ -300,8 +294,30 @@ void Arena::Reset()
     m_UsedBeforeCurrent = 0;
     ClearDestructorBoundsIfNoneRecorded();
     // Published before the peak is cleared, so the high water takes this Reset's peak.
-    PublishStats();
+    if (publishStats)
+        PublishStats();
     m_PeakSinceReset = 0;
+}
+
+std::size_t Arena::PeakBytesSinceReset() const
+{
+    return std::max(m_PeakSinceReset, BytesUsed());
+}
+
+void Arena::ReleaseBlocks(std::size_t firstBlockBytes)
+{
+    const UseScope use(*this);
+    assert(BytesUsed() == 0 && m_Destructors.empty() && "ReleaseBlocks on an arena in use; Reset it first");
+    for (const Block& block : m_Blocks)
+        ReleaseBlockMemory(block.Data, block.Capacity);
+    m_Blocks.clear();
+    m_Current = 0;
+    m_Cursor = 1;
+    m_Limit = 0;
+    m_UsedBeforeCurrent = 0;
+    m_PeakSinceReset = 0;
+    m_FirstBlockBytes = RoundUpToBlockAlignment(firstBlockBytes);
+    PublishStats();
 }
 
 std::size_t Arena::BytesUsed() const

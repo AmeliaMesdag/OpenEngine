@@ -2,9 +2,16 @@
 
 #include "Scene/DefaultSceneEntities.h"
 
+#include "Components/Name.h"
+#include "Components/Rendering/LocalBounds.h"
+#include "Components/Rendering/MeshRenderer.h"
 #include "Components/Rendering/ReflectionProbe.h"
 #include "Components/Rendering/SkyEnvironment.h"
 #include "Components/Rendering/SkySunPath.h"
+#include "Components/Transform.h"
+#include "Engine/Rendering/RenderServices.h"
+#include "PhysicsECS/Components/PlaneColliderShape.h"
+
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
 
@@ -51,4 +58,34 @@ TEST(DefaultSceneEntities, ANewScenesSunStandsOffTheZenithInTheSouthEast)
             EXPECT_LT(sun.AzimuthDegrees, 180.0f) << "east of south";
         });
     EXPECT_EQ(skies, 1);
+}
+
+TEST(DefaultSceneEntities, SeededPrimitiveBottomsRestOnThePlane)
+{
+    Engine::Renderer::RenderServices renderServices;
+    ECS::World world;
+    Editor::SeedDefaultSceneEntities(world, &renderServices);
+
+    int planes = 0;
+    float planeHeight = 0.0f;
+    world.Query<ECS::Read<Components::PlaneColliderShape>, ECS::Read<Components::Transform>>().Each(
+        [&](ECS::EntityHandle, const Components::PlaneColliderShape&, const Components::Transform& transform)
+        {
+            ++planes;
+            planeHeight = transform.GetPosition().y;
+        });
+    ASSERT_EQ(planes, 1);
+
+    int primitives = 0;
+    world.Query<ECS::Read<Components::MeshRenderer>, ECS::Read<Components::LocalBounds>,
+                ECS::Read<Components::Transform>, ECS::Read<Components::Name>>().Each(
+        [&](ECS::EntityHandle, const Components::MeshRenderer&, const Components::LocalBounds& bounds,
+            const Components::Transform& transform, const Components::Name& name)
+        {
+            ++primitives;
+            const float bottom = transform.GetPosition().y +
+                (bounds.Box.center.y - bounds.Box.halfExtents.y) * transform.GetScale().y;
+            EXPECT_FLOAT_EQ(bottom, planeHeight) << name.value;
+        });
+    EXPECT_EQ(primitives, 3) << "the plane and both spheres must be seeded";
 }

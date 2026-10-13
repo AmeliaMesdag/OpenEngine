@@ -13,6 +13,7 @@
 #include "Markups/MarkupsPanelRows.h"
 
 #include "Components/Markup/Markup.h"
+#include "Components/Name.h"
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Transform.h"
 #include "ECS/ECSTemplates.h"
@@ -38,12 +39,14 @@
 #include "UndoRedo/UndoRedoService.h"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <cmath>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 using namespace GameEngine;
@@ -127,6 +130,13 @@ class MarkupRegionInspectorTest : public ::testing::Test
         const ECS::EntityHandle entity = BeginMarkup(placement.Local);
         Editor::AddRegionParts(World, entity, placement.World.matrix, knots, Spline::SplineType::Linear, 8.0f);
         return entity;
+    }
+
+    // The title of a region the Mark-up tool draws over `knots`, or the refusal it answers.
+    std::string DrawRegion(const std::vector<Vector2>& knots)
+    {
+        const nlohmann::json result = Editor::PlaceRegion(*m_Bridge, World, nullptr, &Notifications, knots);
+        return result.contains("markup") ? result["markup"].value("title", std::string()) : result.dump();
     }
 
     // A box `size` meters across standing at `center`.
@@ -283,7 +293,9 @@ TEST_F(MarkupRegionInspectorTest, AnOutlineChangedUnderTheOpenBlockRebuildsItOnc
     for (Slider* slider : FindAll<Slider>(*section))
     {
         if (slider->HasClass("markup-region-height"))
+        {
             EXPECT_FLOAT_EQ(slider->GetValue(), 30.0f) << "the slider did not follow the height";
+        }
     }
 
     Editor::RewriteRegionOutline(World, forest, std::vector<Vector2>{{0, 0}, {80, 0}, {40, 60}}, std::nullopt);
@@ -523,6 +535,26 @@ TEST_F(MarkupRegionInspectorTest, ARegionWhoseOutlineArrivesOpenIsClosedAgain)
     written.kind = Editor::EditorChangeNotifications::ChangeKind::Commit;
     Notifications.NotifyComponentChanged(written);
     EXPECT_TRUE(OutlineOf(forest).Closed) << "a region written open stayed open";
+}
+
+// Each region the Mark-up tool draws is titled "Region <n>" with the first number no mark-up's title
+// has, so a deleted region's number is the next one drawn.
+TEST_F(MarkupRegionInspectorTest, EachDrawnRegionTakesTheFirstFreeRegionNumber)
+{
+    EXPECT_EQ(DrawRegion(kForest), "Region 1");
+    EXPECT_EQ(DrawRegion(kForest), "Region 2");
+    EXPECT_EQ(DrawRegion(kForest), "Region 3");
+
+    ECS::EntityHandle second{};
+    World.Query<ECS::Read<Components::Markup>, ECS::Read<Components::Name>>().Each(
+        [&second](ECS::EntityHandle entity, const Components::Markup&, const Components::Name& name) {
+            if (name.View() == "Region 2")
+                second = entity;
+        });
+    ASSERT_TRUE(second.IsValid()) << "no mark-up is titled Region 2";
+    World.DestroyEntityImmediate(second);
+    EXPECT_EQ(DrawRegion(kForest), "Region 2") << "the deleted region's number was not taken again";
+    EXPECT_EQ(DrawRegion(kForest), "Region 4");
 }
 
 // A recorded lasso, a 200 m circle drawn at the spline brush's 1 m spacing with a hand's wobble,

@@ -51,6 +51,25 @@ TEST_F(AStarSolverTest, SimpleStraightLinePath)
     }
 }
 
+// A grid fitted to a large terrain is hundreds of thousands of cells; a path that detours around a
+// long wall expands most of them. The solve finds it however many cells that takes.
+TEST_F(AStarSolverTest, LongDetourOnALargeGridIsFound)
+{
+    constexpr uint32 kSide = 512;
+    GridMap grid(MakeAStarSettings(kSide, kSide));
+    // A wall across the grid with its only gap at the far end.
+    for (uint32 x = 0; x + 1 < kSide; ++x)
+        grid.SetCellBlocked(x, kSide / 2, true);
+
+    std::vector<uint32> path;
+    const uint32 start = grid.CellIndex(0, kSide / 2 - 4);
+    const uint32 end = grid.CellIndex(0, kSide / 2 + 4);
+    ASSERT_TRUE(m_Solver.Solve(grid, start, end, 0, 0.0f, 0, path));
+    EXPECT_EQ(path.front(), start);
+    EXPECT_EQ(path.back(), end);
+    EXPECT_GT(path.size(), 2u * (kSide - 2)) << "the path goes around the wall's far end";
+}
+
 TEST_F(AStarSolverTest, PathAroundWall)
 {
     GridMap grid(MakeAStarSettings(10, 10));

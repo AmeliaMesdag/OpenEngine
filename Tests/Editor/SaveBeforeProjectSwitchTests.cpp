@@ -91,7 +91,7 @@ TEST_F(SaveBeforeProjectSwitchTests, DontSaveSwitchesAndTheStartupSceneDoesNotAs
     EXPECT_EQ(switches, 1);
     EXPECT_TRUE(changesDiscarded);
 
-    // The project names no scene, so its open is a new empty scene in place of the discarded one.
+    // The project names no scene, so its open is a new default scene in place of the discarded one.
     m_Controller.OpenProjectStartupScene(project, changesDiscarded);
     m_Controller.Update(nullptr);
     EXPECT_TRUE(m_Controller.GetActiveModalKind().empty()) << "the discarded scene was asked about twice";

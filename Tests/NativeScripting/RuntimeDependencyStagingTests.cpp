@@ -16,6 +16,10 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 using GameEngine::BuildPipeline;
 using GameEngine::EngineRuntimeDependencySet;
@@ -108,9 +112,13 @@ TEST(RuntimeDependencyStaging, ShipsEveryRequiredEntryAndExcludesJunk)
 
     std::error_code ec;
     for (const RuntimeDependency& dep : EngineRuntimeDependencySet())
+    {
         if (dep.Required)
+        {
             EXPECT_TRUE(fs::exists(dirs.Dest / FirstCandidateFileName(dep), ec))
                 << "required entry not staged: " << dep.Name;
+        }
+    }
     for (const char* junk : {"gtest.dll", "benchmark.dll", "SPIRV-Tools-shared.dll", "pkgconf-7.dll",
                              "GameEngine.Editor.Managed.dll", "harfbuzz-subset.dll", "brotlienc.dll"})
         EXPECT_FALSE(fs::exists(dirs.Dest / junk, ec)) << "junk must not ship: " << junk;
@@ -483,12 +491,23 @@ TEST(RuntimeDependencyStaging, ReleaseOnlyPortsStageThroughTrailingReleaseBin)
 }
 
 // The packaged engine runtime is the one the player links (#2290): a DebugFast editor whose SDK
-// also stages lib/Release builds a Release player against lib/Release, so Engine.dll and
-// GameEngine.Native.dll ship from there, not from beside the editor (a different
+// also stages lib/Release builds a Release player against lib/Release, so the engine and
+// native shim ship from there, not from beside the editor (a different
 // GE_DEBUG_INSTRUMENTATION, which the engine refuses at start). A player that links the editor's
 // own configuration ships the editor's own runtime.
 namespace
 {
+#if defined(_WIN32)
+constexpr const char* kEngineRuntimeFile = "Engine.dll";
+constexpr const char* kNativeRuntimeFile = "GameEngine.Native.dll";
+#elif defined(__APPLE__)
+constexpr const char* kEngineRuntimeFile = "libEngine.dylib";
+constexpr const char* kNativeRuntimeFile = "libGameEngine.Native.dylib";
+#else
+constexpr const char* kEngineRuntimeFile = "libEngine.so";
+constexpr const char* kNativeRuntimeFile = "libGameEngine.Native.so";
+#endif
+
 struct LinkedRuntimeFixture
 {
     StagingDirs Dirs{"ge_rds_link_config_runtime"};
@@ -498,8 +517,11 @@ struct LinkedRuntimeFixture
     LinkedRuntimeFixture()
     {
         Dirs.PopulateAllRequired(EngineRuntimeDependencySet());
-        WriteFile(Dirs.Source / "Engine.dll", "editor-debugfast-engine");
-        WriteFile(Dirs.Source / "GameEngine.Native.dll", "editor-debugfast-native");
+        // Replace the generic placeholders with this platform's runtime names.
+        fs::remove(Dirs.Source / "Engine.dll");
+        fs::remove(Dirs.Source / "GameEngine.Native.dll");
+        WriteFile(Dirs.Source / kEngineRuntimeFile, "editor-debugfast-engine");
+        WriteFile(Dirs.Source / kNativeRuntimeFile, "editor-debugfast-native");
         Settings.runtimeDepsPath = Dirs.Source;
         Settings.editorSDKPath = Dirs.Root / "SDK";
         Settings.buildConfiguration = "Release";
@@ -511,8 +533,8 @@ struct LinkedRuntimeFixture
 
     void StageReleaseRuntime()
     {
-        WriteFile(Release / "Engine.dll", "sdk-release-engine");
-        WriteFile(Release / "GameEngine.Native.dll", "sdk-release-native");
+        WriteFile(Release / kEngineRuntimeFile, "sdk-release-engine");
+        WriteFile(Release / kNativeRuntimeFile, "sdk-release-native");
     }
 };
 } // namespace
@@ -529,8 +551,8 @@ TEST(RuntimeDependencyStaging, ThePackagedEngineIsTheRuntimeOfTheConfigurationTh
     ASSERT_TRUE(StageCuratedDependencySet({release.Dir, dirs.Source}, dirs.Dest, EngineRuntimeDependencySet(),
                                           dirs.Errors))
         << (dirs.Errors.empty() ? "" : dirs.Errors.front());
-    EXPECT_EQ(ReadFile(dirs.Dest / "Engine.dll"), "sdk-release-engine");
-    EXPECT_EQ(ReadFile(dirs.Dest / "GameEngine.Native.dll"), "sdk-release-native");
+    EXPECT_EQ(ReadFile(dirs.Dest / kEngineRuntimeFile), "sdk-release-engine");
+    EXPECT_EQ(ReadFile(dirs.Dest / kNativeRuntimeFile), "sdk-release-native");
 
     const BuildPipeline::PackagedEngineRuntime own =
         BuildPipeline::ResolvePackagedEngineRuntime(fixture.Settings, "DebugFast", "DebugFast", "");
@@ -540,7 +562,7 @@ TEST(RuntimeDependencyStaging, ThePackagedEngineIsTheRuntimeOfTheConfigurationTh
     ASSERT_TRUE(StageCuratedDependencySet({own.Dir, dirs.Source}, dirs.Dest, EngineRuntimeDependencySet(),
                                           dirs.Errors))
         << (dirs.Errors.empty() ? "" : dirs.Errors.front());
-    EXPECT_EQ(ReadFile(dirs.Dest / "Engine.dll"), "editor-debugfast-engine");
+    EXPECT_EQ(ReadFile(dirs.Dest / kEngineRuntimeFile), "editor-debugfast-engine");
 }
 
 // A linked configuration whose runtime the SDK does not stage is refused by name, never replaced by
@@ -595,3 +617,57 @@ TEST(RuntimeDependencyStaging, AnUnresolvedEngineRuntimeStagesNothing)
     EXPECT_EQ(BuildPipeline::EngineRuntimeSearchDirs(fixture.Release, {}, fixture.Dirs.Source),
               (std::vector<fs::path>{fixture.Release, fixture.Dirs.Source}));
 }
+
+#if defined(_WIN32)
+namespace
+{
+// The DLL names in a loaded image's import directory: the ones the loader resolves before the
+// image runs. Delay-loaded DLLs sit in a separate directory and are not listed.
+std::vector<std::string> LoadTimeImports(HMODULE module)
+{
+    const auto* base = reinterpret_cast<const unsigned char*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    const IMAGE_DATA_DIRECTORY& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    std::vector<std::string> names;
+    for (const auto* entry = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + directory.VirtualAddress);
+         entry->Name != 0; ++entry)
+        names.emplace_back(reinterpret_cast<const char*>(base + entry->Name));
+    return names;
+}
+} // namespace
+
+// An exported game starts only if every DLL Engine.dll imports at load time ships beside it or is
+// part of Windows; anything else stops the Player with STATUS_DLL_NOT_FOUND before it logs a line,
+// on any machine that lacks the DLL. A dependency only some features use is delay-loaded instead.
+TEST(RuntimeDependencyStaging, EveryLoadTimeImportOfTheEngineShipsOrIsPartOfWindows)
+{
+    const HMODULE engine = GetModuleHandleW(L"Engine.dll");
+    ASSERT_NE(engine, nullptr);
+    wchar_t enginePath[MAX_PATH] = {};
+    ASSERT_NE(GetModuleFileNameW(engine, enginePath, MAX_PATH), 0u);
+    wchar_t systemDir[MAX_PATH] = {};
+    ASSERT_NE(GetSystemDirectoryW(systemDir, MAX_PATH), 0u);
+
+    // Stage from the directory this Engine.dll was loaded from, as an export stages from the engine
+    // runtime it links. Required entries a test directory lacks (the managed shim) are not the
+    // question here, so the result is not asserted.
+    StagingDirs dirs("ge_rds_imports");
+    StageCuratedDependencySet({fs::path(enginePath).parent_path()}, dirs.Dest, EngineRuntimeDependencySet(),
+                              dirs.Errors);
+
+    const std::vector<std::string> imports = LoadTimeImports(engine);
+    ASSERT_FALSE(imports.empty());
+    std::error_code ec;
+    for (const std::string& name : imports)
+    {
+        if (name.starts_with("api-ms-") || name.starts_with("ext-ms-"))
+            continue; // API sets resolve inside Windows; no file carries the name
+        const bool ships = fs::exists(dirs.Dest / name, ec);
+        const bool partOfWindows = fs::exists(fs::path(systemDir) / name, ec);
+        EXPECT_TRUE(ships || partOfWindows)
+            << name << " is imported by Engine.dll at load time but neither ships with an exported game nor "
+            << "is part of Windows: add it to the curated set in RuntimeDependencyStaging.cpp, or delay-load it.";
+    }
+}
+#endif // _WIN32

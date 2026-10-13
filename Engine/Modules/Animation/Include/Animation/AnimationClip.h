@@ -29,7 +29,7 @@ enum class AnimInterp
     CubicSpline
 };
 
-// Per-tangent-handle type. Auto=0 so memset-initialized keyframes default to Auto.
+// Per-tangent-handle type. Auto=0 so a value-initialized keyframe defaults to Auto.
 enum class AnimTangentType : uint8
 {
     Auto,      // smooth Catmull-Rom slope, anti-overshoot
@@ -62,7 +62,7 @@ struct AnimKeyframe
     float32 outTangent[4];
     float32 inWeight[4];
     float32 outWeight[4];
-    // Per-component tangent types; Auto=0 so memset-initialized keyframes get Auto by default.
+    // Per-component tangent types; Auto=0 so a value-initialized keyframe gets Auto by default.
     AnimTangentType inTangentType[4];
     AnimTangentType outTangentType[4];
     // Bitmask: bit i set means component i has independent in/out tangents (broken tangent).

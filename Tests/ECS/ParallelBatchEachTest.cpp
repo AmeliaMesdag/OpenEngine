@@ -51,7 +51,7 @@ TEST(ParallelBatchEachTest, ProducesSameMutationAsBatchEach) {
     wPar.CreateBatchHandle<Position, Velocity>(N, Position{1, 2, 3}, Velocity{4, 5, 6});
 
     wSeq.Query<Write<Position>, Read<Velocity>>().BatchEach(
-        [dt](Position* pos, const Velocity* vel, std::size_t count) {
+        [](Position* pos, const Velocity* vel, std::size_t count) {
             for (std::size_t i = 0; i < count; ++i) {
                 pos[i].x += vel[i].x * dt;
                 pos[i].y += vel[i].y * dt;
@@ -60,7 +60,7 @@ TEST(ParallelBatchEachTest, ProducesSameMutationAsBatchEach) {
         });
 
     wPar.Query<Write<Position>, Read<Velocity>>().ParallelBatchEach(
-        [dt](Position* pos, const Velocity* vel, std::size_t count) {
+        [](Position* pos, const Velocity* vel, std::size_t count) {
             for (std::size_t i = 0; i < count; ++i) {
                 pos[i].x += vel[i].x * dt;
                 pos[i].y += vel[i].y * dt;

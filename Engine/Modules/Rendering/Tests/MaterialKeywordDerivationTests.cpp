@@ -238,7 +238,7 @@ TEST(MaterialKeywordDerivation, SurfaceWithoutAHeightSlotIsRefusedNamingTheSurfa
 TEST(MaterialKeywordDerivation, HexTilingWithAHeightMapIsRefused)
 {
     const TextureSlotResolution slots = ShippedSurfaceSlots("standard_pbr.glsl");
-    for (const GameEngine::MaterialValue hexOn :
+    for (const GameEngine::MaterialValue& hexOn :
          {GameEngine::MaterialValue{1.0f}, GameEngine::MaterialValue{true}, GameEngine::MaterialValue{int32_t{1}}})
     {
         auto doc = HeightMappedDocument();

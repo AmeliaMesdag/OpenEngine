@@ -91,7 +91,8 @@ TEST(SkyMoonlight, TheDefaultReproducesTodaysNight)
     EXPECT_NEAR(Components::kDefaultMoonlightIlluminanceLux, 5.158f, 0.001f);
 
     const float clearSun =
-        Components::LightIntensityToUnitless(Components::kClearNoonSunIlluminanceLux, Components::LightUnit::Lux) * 1.33f;
+        Components::LightIntensityToUnitless(Components::kClearNoonSunIlluminanceLux, Components::LightUnit::Lux) *
+        Rendering::SkySourceIlluminanceScale(Rendering::ScatteringAtmosphere());
     EXPECT_EQ(rig.Settings().primarySunIntensity, clearSun * config.moonIntensityScale);
 }
 

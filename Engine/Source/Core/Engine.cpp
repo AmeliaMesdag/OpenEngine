@@ -701,13 +701,13 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
     Rendering::Utils::SetShaderPathResolver(&ResolveEngineShaderPath);
     Rendering::SetShaderPackageRebuildAction(&ShaderPackageRebuildAction);
     {
-        std::filesystem::path shaderCacheRoot = resolvedWorkspaceRoot / ".Cache" / "Shaders";
-        // Runtimes without a compiler read the current bundled packages for
-        // every project. A persisted project cache can contain older variants
-        // or metadata and must not shadow that authoritative bundle.
+        // The cooked cache a runtime ships is probed before the workspace's own, so a persisted
+        // workspace cache never shadows it; a program it lacks compiles into the workspace.
+        ShaderCacheRoots shaderCacheRoots;
         if (const auto bundleCache = PathUtils::GetBundledShaderCacheRoot(); !bundleCache.empty())
-            shaderCacheRoot = bundleCache;
-        ShaderProgramAsset::SetShaderCacheRoot(shaderCacheRoot);
+            shaderCacheRoots.ReadOnly.push_back(bundleCache);
+        shaderCacheRoots.Writable = resolvedWorkspaceRoot / ".Cache" / "Shaders";
+        ShaderProgramAsset::SetShaderCacheRoots(std::move(shaderCacheRoots));
     }
 
     // Initialize script manager (only when scripting is enabled at build time).

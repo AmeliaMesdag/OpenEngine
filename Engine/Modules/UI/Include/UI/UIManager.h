@@ -29,6 +29,7 @@
 #include "Rendering/Geometry/ShapeBuilder.h"
 #include "Scheduler/Scheduler.h"
 #include "UI/ModifierKeyState.h"
+#include "UI/Internal/ElementIdIndex.h"
 #include "UI/ResolvedStyle.h"
 #include "UI/UICompatDrawRuns.h"
 #include "UI/SimpleSlotAllocator.h"
@@ -1439,6 +1440,8 @@ public:
     // owned-but-detached elements (inactive dock tabs) stay unfindable,
     // matching the old walk's semantics.
     std::unordered_map<uint64_t, UIElement*> m_ElementsByInstanceId;
+    friend class UIElement;
+    UI::ElementIdIndex m_ElementIdIndex;
 
     // Attach/detach settle queue: the top of each subtree whose root-reachability may
     // have moved since the last settle (UIManager_AttachEvents.cpp). Raw pointers, kept
@@ -1477,12 +1480,13 @@ public:
     // or re-homed element from the declared-transition registry.
     void UnregisterTransitioningElement(UIElement* el) { m_TransitioningElements.erase(el); }
 
-    // Called by ~UIElement / SetOwnerManager via forwarder: drop the id
-    // mapping when it still points at the departing element (a reparent to
-    // another manager inserts into that manager's own map). Takes the id
-    // because UIElement is only forward-declared here.
-    void UnregisterElementInstanceId(uint64_t instanceId, UIElement* el)
+    // Called by ~UIElement / SetOwnerManager via forwarder: drop the authored-id
+    // and instance-id mappings for the departing element. A reparent inserts
+    // the element into the new manager's indexes. Takes the instance id because
+    // UIElement is only forward-declared here.
+    void UnregisterElementLookups(uint64_t instanceId, UIElement* el)
     {
+        m_ElementIdIndex.Unregister(*el);
         auto it = m_ElementsByInstanceId.find(instanceId);
         if (it != m_ElementsByInstanceId.end() && it->second == el)
             m_ElementsByInstanceId.erase(it);

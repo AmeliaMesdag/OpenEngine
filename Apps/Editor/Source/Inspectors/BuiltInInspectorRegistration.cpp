@@ -28,6 +28,7 @@
 #include "Inspectors/LightInspector.h"
 #include "Inspectors/MaterialInspector.h"
 #include "Inspectors/MeasureInspector.h"
+#include "Inspectors/NavigationSurfaceInspector.h"
 #include "Inspectors/MeshRendererInspector.h"
 #include "Inspectors/ModelInspector.h"
 #include "Inspectors/NativeSourceInspector.h"
@@ -87,6 +88,7 @@ void RegisterBuiltInInspectors()
     RegisterParticleInspector();
     RegisterPostProcessVolumeInspector();
     RegisterWindVolumeInspector();
+    RegisterNavigationSurfaceInspector();
     RegisterBloomEffectInspector();
     RegisterChromaticAberrationEffectInspector();
     RegisterDepthOfFieldEffectInspector();

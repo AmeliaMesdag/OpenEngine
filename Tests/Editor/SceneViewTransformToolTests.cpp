@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -8,6 +9,7 @@
 #include "Core/Application.h"
 #include "Core/Engine.h"
 
+#include "SceneView/SceneViewGizmos.h"
 #include "SceneView/TransformTool.h"
 #include "SceneViewController.h"
 
@@ -46,6 +48,7 @@ using GameEngine::Editor::SceneTools::GetGizmoLineGroups;
 using GameEngine::Editor::SceneTools::GetGizmoTriangleGroups;
 using GameEngine::Editor::SceneTools::GizmoCollector;
 using GameEngine::Editor::SceneTools::GizmoDepthMode;
+using GameEngine::Editor::SceneTools::kGizmoDepthModeDrawOrder;
 using GameEngine::Editor::SceneTools::GizmoHit;
 using GameEngine::Editor::SceneTools::GizmoHitKind;
 using GameEngine::Editor::SceneTools::GizmoRenderContext;
@@ -1241,10 +1244,12 @@ TEST_F(SceneViewTransformToolTests, GizmoDragTranslateCoalescesToSingleUndoAndUn
     EXPECT_NEAR(posRedo.z, 0.0f, kPosEpsilon);
 }
 
-// Manipulation handles are drawn unoccluded. Every group a transform gizmo
-// emits must carry AlwaysOnTop: a single SceneDepth group is enough to leave
-// part of a handle dimmed to 30% alpha wherever geometry sits in front of it.
-TEST_F(SceneViewTransformToolTests, TransformHandlesRenderAlwaysOnTop)
+// Manipulation handles are drawn unoccluded and after every other gizmo. Every
+// group a transform gizmo emits must carry Handle: a SceneDepth group leaves
+// part of a handle dimmed wherever geometry sits in front of it, and an
+// AlwaysOnTop group is drawn before a transparent world overlay that then tints
+// it.
+TEST_F(SceneViewTransformToolTests, TransformHandlesRenderAsHandles)
 {
     World* world = GetWorld();
 
@@ -1292,7 +1297,7 @@ TEST_F(SceneViewTransformToolTests, TransformHandlesRenderAlwaysOnTop)
         // Either collection may legitimately be absent — the accessors return
         // null for an empty set, and the rotate rings are solid tubes, so that
         // gizmo emits triangles and no lines. What must hold is that the gizmo
-        // drew something and that everything it drew is always-on-top.
+        // drew something and that everything it drew is a handle.
         const auto* lineGroups = GetGizmoLineGroups(viewId);
         const auto* triGroups = GetGizmoTriangleGroups(viewId);
 
@@ -1302,7 +1307,7 @@ TEST_F(SceneViewTransformToolTests, TransformHandlesRenderAlwaysOnTop)
             for (const auto& group : *lineGroups)
             {
                 vertexCount += group.vertices.size();
-                EXPECT_EQ(group.depthMode, GizmoDepthMode::AlwaysOnTop)
+                EXPECT_EQ(group.depthMode, GizmoDepthMode::Handle)
                     << testCase.Name << " line group";
             }
         }
@@ -1311,7 +1316,7 @@ TEST_F(SceneViewTransformToolTests, TransformHandlesRenderAlwaysOnTop)
             for (const auto& group : *triGroups)
             {
                 vertexCount += group.vertices.size();
-                EXPECT_EQ(group.depthMode, GizmoDepthMode::AlwaysOnTop)
+                EXPECT_EQ(group.depthMode, GizmoDepthMode::Handle)
                     << testCase.Name << " triangle group";
             }
         }
@@ -1319,9 +1324,18 @@ TEST_F(SceneViewTransformToolTests, TransformHandlesRenderAlwaysOnTop)
 
         // The mode is sticky context state shared by every gizmo in the frame,
         // so the scope must restore it or the descriptive gizmos rendered after
-        // this one inherit always-on-top.
+        // this one inherit the handle mode.
         EXPECT_EQ(context.GetDepthMode(), GizmoDepthMode::SceneDepth) << testCase.Name;
     }
+}
+
+// The overlay pass draws the handles after every other depth mode, so a transparent world overlay
+// cannot tint them.
+TEST(SceneViewGizmoDrawOrder, HandlesDrawLast)
+{
+    ASSERT_FALSE(kGizmoDepthModeDrawOrder.empty());
+    EXPECT_EQ(kGizmoDepthModeDrawOrder.back(), GizmoDepthMode::Handle);
+    EXPECT_EQ(std::count(kGizmoDepthModeDrawOrder.begin(), kGizmoDepthModeDrawOrder.end(), GizmoDepthMode::Handle), 1);
 }
 
 // The opt-in must stay an opt-in: an unqualified draw still depth-tests, so a

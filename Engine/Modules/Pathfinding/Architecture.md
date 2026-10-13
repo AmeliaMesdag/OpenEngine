@@ -70,7 +70,7 @@ In-house grid-based navigation map. Supports both square (8-neighbor) and hex (6
 
 **Coordinate conversion**: `WorldToCell` / `CellToWorld` handle both square and hex layouts. Hex uses odd-r offset coordinates with flat-top orientation.
 
-**Baking**: `BakeHeights(heightQueryFn)` accepts a callback so the module doesn't depend on Physics. The callback is provided by the ECS layer using `PhysicsWorld::RayCast`.
+**Baking**: the grid holds what it is given. `NavigationSurfaceSystem` (PathfindingECS) bakes a grid surface by writing each cell's height and blocked flag from the terrain's heightfield and the static geometry (`NavigationGridBake.cpp`).
 
 #### A* Solver
 
@@ -83,15 +83,16 @@ Private, stateless class. All working memory is local to each `Solve()` call, so
 - Hex: 6 neighbors, hex distance heuristic
 - Step cost = `base_distance * cell_cost * (1 + kReservationPenalty)` if reserved
 - Terrain checks: slope angle vs MaxSlope, height difference vs MaxStepHeight
-- Iteration limit: `min(cellCount * 2, 65536)`
+- Expansion limit: `cellCount` (each cell is expanded at most once, so a path that exists is always found; an unreachable goal on a 1024 x 1024 grid costs about 210 ms in Release)
 
 #### DetourNavMap
 
 Wraps Recast (baking) and Detour (runtime queries) behind a Pimpl.
 
-- `Build(settings, geometry)` -- full Recast pipeline: heightfield, filtering, compact heightfield, erosion, regions, contours, poly mesh, detail mesh, dtNavMesh creation
+- `Initialize(settings, layout)` -- an empty tiled dtNavMesh: tiles of `kNavMeshTileCells` (64) cells, the agent and the one `CellSize` dial in `NavMeshSettings`; every other Recast parameter is derived from them
+- `BuildTile(settings, layout, x, z, geometry)` -- the Recast pipeline for one tile (heightfield, filtering, compact heightfield, erosion, regions, contours, poly mesh, detail mesh, Detour tile data); reads only its arguments, so it runs on job threads
+- `AddTile` / `RemoveTile` -- swap one tile in the mesh on the querying thread
 - `FindPath` -- `dtNavMeshQuery::findPath` + `findStraightPath`, results stored in PathBuffer
-- `Serialize` / `Deserialize` -- dtNavMesh tile data for asset caching
 - Debug mesh extraction for visualization
 
 All behind `#if GE_PATHFINDING_BACKEND_DETOUR`. When disabled, all methods return false/empty.
@@ -138,12 +139,11 @@ Include/PathfindingECS/
   NavigationService.h                Singleton service + NavDebugData struct
   Components/
     NavigationAgent.h                Agent config, path state, velocity, crowd handle
-    NavigationGrid.h                 Grid map ownership and bake config
-    NavigationMesh.h                 Navmesh ownership and build config
+    NavigationSurface.h              A walkable surface (Mesh or Grid), its bake settings and bake state
     NavigationObstacle.h             Dynamic obstacle marker
     NavigationDebugSettings.h        Debug visualization toggles
   Systems/
-    NavigationBuildSystem.h               Creates/bakes navigation maps
+    NavigationSurfaceSystem.h             Bakes navigation surfaces
     NavigationPathfindingSystem.h           Computes paths for agents
     NavigationMovementSystem.h              Steers agents along paths
     NavigationDebugSystem.h             Generates debug visualization data
@@ -151,8 +151,11 @@ Include/PathfindingECS/
 
 Source/
   NavigationService.cpp
+  NavigationSourceCollector.cpp      What a surface bakes: terrain lattice, static collider shapes, mesh renderers
+  NavigationMeshBake.cpp             One mesh bake: tile snapshots and their jobs
+  NavigationGridBake.cpp             One grid bake
   Systems/
-    NavigationBuildSystem.cpp
+    NavigationSurfaceSystem.cpp
     NavigationPathfindingSystem.cpp
     NavigationMovementSystem.cpp
     NavigationDebugSystem.cpp
@@ -164,8 +167,7 @@ Source/
 | Component | Purpose |
 |-----------|---------|
 | **NavigationAgent** | Speed, acceleration, radius, height, avoidance settings, nav map handle, destination, path handle, cached waypoints, velocity, crowd handle, agent ID |
-| **NavigationGrid** | Grid type, cell size, dimensions, slope/step limits, nav map handle, initialized/needs-rebake flags |
-| **NavigationMesh** | Recast build parameters, nav map handle, initialized/needs-rebuild flags |
+| **NavigationSurface** | Mode (Mesh or Grid), agent radius/height/slope/step, cell size, bounds (fitted or explicit), authored grid cells; runtime: nav map handle, bake state |
 | **NavigationObstacle** | Radius, height, enabled flag |
 | **NavigationDebugSettings** | ShowGrid, ShowNavMesh, ShowPaths, ShowAgentRadii, ShowCellCosts, ShowReservations, line thicknesses |
 
@@ -173,15 +175,15 @@ Source/
 
 | System | Phase | Order | Dependencies | Purpose |
 |--------|-------|-------|-------------|---------|
-| **NavigationBuildSystem** | Early | 10 | -- | Creates GridMap/DetourNavMap from source components, bakes heights |
-| **NavigationPathfindingSystem** | Early | 20 | NavigationBuildSystem | Harvests async results, queues every request (HasDestination + PathDirty, or the replan timer's ReplanRequested) and solves the oldest `MaxPathSolvesPerFrame` (default 64) each frame; the rest wait in order, a PathDirty request as Pending with its path released, a timer refresh still walking its current path. `GetStatistics()` reports the queue (the editor's `get_navigation_stats`) |
+| **NavigationSurfaceSystem** | Early | 10 | TransformHierarchy, PhysicsWriteback, TerrainModifiers (optional), TerrainExtraction (optional) | Bakes each NavigationSurface into a GridMap or a tiled DetourNavMap (tiles on the job system), publishes its bake state, stamps obstacles into grids |
+| **NavigationPathfindingSystem** | Early | 20 | NavigationSurfaceSystem | Harvests async results, queues every request (HasDestination + PathDirty, or the replan timer's ReplanRequested) and solves the oldest `MaxPathSolvesPerFrame` (default 64) each frame; the rest wait in order, a PathDirty request as Pending with its path released, a timer refresh still walking its current path. `GetStatistics()` reports the queue (the editor's `get_navigation_stats`) |
 | **NavigationMovementSystem** | Early | 30 | NavigationPathfindingSystem | Steers agents along paths, manages reservations, reads crowd positions |
 | **NavigationDebugSystem** | Render | 5 | NavigationMovementSystem | Populates NavDebugData with lines/triangles for editor consumption |
 
 ### Data Flow
 
 ```
-1. Entity has NavigationGrid --> NavigationBuildSystem creates GridMap, stores handle
+1. Entity has NavigationSurface --> NavigationSurfaceSystem bakes its map, stores the handle
 2. Entity has NavigationAgent + HasDestination=true + PathDirty (or ReplanRequested) --> NavigationPathfindingSystem queues it and computes the path
    within ceil(backlog / MaxPathSolvesPerFrame) frames, oldest request first
 3. Path stored in PathBuffer, handle + cached waypoints written to NavigationAgent
@@ -229,13 +231,8 @@ When disabled, `DetourNavMap` and `CrowdManager` compile as stubs returning fals
 
 ---
 
-## NavMesh Baking Pipeline
+## Surface Baking
 
-`SceneGeometryCollector` (in PathfindingECS) gathers CPU-side mesh vertex and index data from the ECS world. It queries all entities with `MeshRenderer` + `WorldTransform`, loads the referenced `ModelAsset`, and transforms each submesh's vertices into world space using `sourceNodeTransform * worldTransform` (column-major multiplication).
+`NavigationSurfaceSystem` bakes a surface when it first appears (a new component, a loaded scene, a world restored from bytes whose maps were released) and on `Navigation::RequestBake`. It needs no physics world. `NavigationSourceCollector` reads three CPU sources: the first planar terrain's heightfield through `TerrainECS::PlanarHeightQuery` (the array the terrain's collider is built from), the box, sphere, capsule and plane collider shapes of `Static` bodies as triangles, and each `MeshRenderer`'s own submesh (model assets, and primitives generated from their GUID) at its `WorldTransform`. Moving bodies and navigation agents are not baked.
 
-When an entity's `NavigationMesh` component has `NeedsRebuild` set, `NavigationBuildSystem` drives the pipeline:
-
-1. **Cache check** -- If the entity has an asset GUID, `NavCacheManager::LoadNavMeshCache` attempts to load a previously serialized navmesh. On hit, `DetourNavMap::Deserialize` restores it and baking is skipped.
-2. **Geometry collection** -- If the `NavMeshAsset` specifies explicit source geometry GUIDs, only those models are collected (via `CollectGeometryFromAssets`, model-space only). Otherwise, `CollectSceneGeometry` gathers all renderable geometry in the scene.
-3. **Bake** -- The collected vertices and indices are passed to `DetourNavMap::Build` along with `NavMeshSettings` from the component (cell size, agent radius, etc.).
-4. **Cache save** -- On successful build, the navmesh is serialized and stored via `NavCacheManager::SaveNavMeshCache` for future loads.
+A mesh bake cuts the bounds into 64-cell tiles. Each update snapshots up to `kTileSnapshotsPerUpdate` tiles' terrain lattice on the main thread and builds them as jobs that own their input; finished tiles replace the old ones as they land. A grid bake builds the whole grid in one update: a cell's ground is the highest of the terrain and the up-facing static triangles under its centre, and cells steeper than `MaxSlope` to a neighbour are blocked.

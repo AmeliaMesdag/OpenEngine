@@ -23,10 +23,11 @@ struct SlabStats
 SlabStats s_Stats;
 
 // Every release is a tokenless (implicit-producer) enqueue: each releasing
-// thread fills its own sub-queue, whose block index cannot grow on the
-// non-allocating try_enqueue. The default index (32 blocks of 32) would let
-// one thread hold only 1,024 slabs, a quarter of the cap; this one indexes
-// the whole cap, so a single releasing thread can fill the freelist.
+// thread fills its own sub-queue, built with its block index on the thread's
+// first release; the index never grows on try_enqueue. The default index (32
+// blocks of 32) would let one thread hold only 1,024 slabs, a quarter of the
+// cap; this one indexes the whole cap, so a single releasing thread can fill
+// the freelist.
 struct SlabFreelistTraits : QueueAllocationTraits
 {
     static const size_t IMPLICIT_INITIAL_INDEX_SIZE =
@@ -114,9 +115,10 @@ void ReleaseTaskSlab(void* slab) noexcept
 
     s_Stats.Live.fetch_sub(1, std::memory_order_relaxed);
 
-    // Non-allocating enqueue: bounded retention (see Freelist()), and safe
-    // from noexcept context — on a full freelist the slab goes back to the
-    // heap.
+    // Bounded retention (see Freelist()). A thread's first release builds its
+    // producer once (nothrow); every later one allocates nothing. Safe from
+    // noexcept context — on a full freelist, or a failed first build, the
+    // slab goes back to the heap.
     if (Freelist().try_enqueue(slab))
     {
         return;

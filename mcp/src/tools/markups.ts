@@ -12,7 +12,7 @@ import { proxyTool } from "./proxy.js";
  * markup_comment. Every write the port makes directly is stamped Agent, unless
  * `author: "User"` is passed for a scripted demonstration; an edit made through injected
  * input (send_key, click_element, perform_drop) counts as the user's. User guide:
- * docs/Editor/world-markups.html.
+ * docs/editor/world-markups.mdx.
  */
 
 function author() {

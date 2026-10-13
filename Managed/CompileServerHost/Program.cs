@@ -641,6 +641,17 @@ internal class Program
 				try { File.Delete(pidTempPath); } catch { }
 			}
 
+			// --parent-pid <pid>: the process that launched this host. The host exits when that
+			// process exits, so a stopped or crashed Editor never leaves a host holding its
+			// folder open. The launcher also binds the host to its lifetime on Windows (a
+			// kill-on-close job) and Linux (a parent-death signal); on macOS this watch is the
+			// only binding. The watch follows the process id alone: if the id is reused before
+			// the watch opens it, the watch follows the wrong process, and the idle timeout
+			// below is what bounds the orphan.
+			int parentPid = ParseParentProcessId(args);
+			if (parentPid > 0)
+				ExitWhenProcessExits(parentPid, logPath, pidPath);
+
 			// Optional idle timeout (seconds). Default: 120s. Set to 0 to disable.
 			int idleSeconds = 120;
 			try
@@ -669,6 +680,49 @@ internal class Program
 			Console.Error.WriteLine($"[CompileServerHost] Fatal: {ex}");
 			return -1;
 		}
+	}
+
+	private static int ParseParentProcessId(string[] args)
+	{
+		for (int i = 1; i + 1 < args.Length; i++)
+		{
+			if (string.Equals(args[i], "--parent-pid", StringComparison.Ordinal) && int.TryParse(args[i + 1], out int pid))
+				return pid;
+		}
+		return 0;
+	}
+
+	private static void ExitWhenProcessExits(int processId, string logPath, string pidPath)
+	{
+		System.Diagnostics.Process process;
+		try
+		{
+			process = System.Diagnostics.Process.GetProcessById(processId);
+		}
+		catch (ArgumentException)
+		{
+			ExitAfterParent(processId, logPath, pidPath); // exited before the watch started
+			return;
+		}
+		var watcher = new Thread(() => WaitThenExitAfterParent(process, processId, logPath, pidPath))
+		{
+			IsBackground = true,
+			Name = "ParentProcessWatch",
+		};
+		watcher.Start();
+	}
+
+	private static void WaitThenExitAfterParent(System.Diagnostics.Process process, int processId, string logPath, string pidPath)
+	{
+		process.WaitForExit();
+		ExitAfterParent(processId, logPath, pidPath);
+	}
+
+	private static void ExitAfterParent(int processId, string logPath, string pidPath)
+	{
+		try { File.AppendAllText(logPath, $"[{DateTime.Now:O}] Parent process {processId} exited -> exiting{Environment.NewLine}"); } catch { }
+		try { File.Delete(pidPath); } catch { }
+		Environment.Exit(0);
 	}
 
 	private static int RunNamedPipeServer(string pipeName, string logPath, string pidPath, int idleSeconds)

@@ -471,7 +471,7 @@ static TransformFields ReadTransformFields(const ECS::World& world, ECS::EntityH
     if (const auto* t = world.GetComponent<Components::Transform>(entity))
     {
         const auto p = t->GetPosition();
-        const auto& r = t->GetRotation().GetGLM();
+        const auto r = t->GetRotation().GetGLM();
         const auto s = t->GetScale();
         fields.Position = {p.x, p.y, p.z};
         fields.Rotation = {r.x, r.y, r.z, r.w};
@@ -5717,7 +5717,6 @@ class PostProcessVolumeSchema final : public ISceneComponentSchema
         outLines.push_back(std::string("PostProcessVolume.priority = ") + std::to_string(c->Priority));
         outLines.push_back(std::string("PostProcessVolume.postProcessMask = ") + std::to_string(c->PostProcessMask));
         outLines.push_back(std::string("PostProcessVolume.tonemap = ") + std::to_string(static_cast<int32_t>(c->Tonemap)));
-        outLines.push_back(std::string("PostProcessVolume.ditherMode = ") + std::to_string(c->DitherMode));
         outLines.push_back(std::string("PostProcessVolume.ictcpChromaCompression = ") +
                            FormatFloat(c->IctcpChromaCompression));
         outLines.push_back(std::string("PostProcessVolume.isGlobal = ") + (c->IsGlobal ? "true" : "false"));
@@ -5836,11 +5835,6 @@ class PostProcessVolumeSchema final : public ISceneComponentSchema
                 return false;
             }
             c.Tonemap = static_cast<Components::TonemapMode>(v);
-        }
-        else if (property == "dithermode")
-        {
-            if (!ParseI32(value, c.DitherMode, outError))
-                return false;
         }
         else if (property == "ictcpchromacompression")
         {
@@ -6664,6 +6658,7 @@ class HeightFogEffectSchema final : public ISceneComponentSchema
         outLines.push_back(std::string("HeightFogEffect.horizonHeightBlendEnd = ") + FormatFloat(c->HorizonHeightBlendEnd));
         outLines.push_back(std::string("HeightFogEffect.axisMode = ") + std::to_string(static_cast<int32>(c->AxisMode)));
         outLines.push_back(std::string("HeightFogEffect.customAxis = ") + FormatFloat3(c->CustomAxis[0], c->CustomAxis[1], c->CustomAxis[2]));
+        outLines.push_back(std::string("HeightFogEffect.colorMode = ") + std::to_string(static_cast<int32>(c->ColorMode)));
         outLines.push_back(std::string("HeightFogEffect.emissive = ") + FormatFloat3(c->Emissive[0], c->Emissive[1], c->Emissive[2]));
         outLines.push_back(std::string("HeightFogEffect.gradientMode = ") + std::to_string(static_cast<int32>(c->GradientMode)));
         outLines.push_back(std::string("HeightFogEffect.gradientStrength = ") + FormatFloat(c->GradientStrength));
@@ -6819,6 +6814,20 @@ class HeightFogEffectSchema final : public ISceneComponentSchema
             c.CustomAxis[0] = v.X;
             c.CustomAxis[1] = v.Y;
             c.CustomAxis[2] = v.Z;
+        }
+        else if (property == "colormode")
+        {
+            int32 v = static_cast<int32>(c.ColorMode);
+            if (!ParseI32(value, v, outError))
+                return false;
+            if (v != static_cast<int32>(Components::HeightFogColorMode::FixedColor) &&
+                v != static_cast<int32>(Components::HeightFogColorMode::SkyHorizon))
+            {
+                if (outError)
+                    *outError = "HeightFogEffect.colorMode must be 0 (fixed color) or 1 (sky horizon)";
+                return false;
+            }
+            c.ColorMode = static_cast<Components::HeightFogColorMode>(v);
         }
         else if (property == "emissive")
         {

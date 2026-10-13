@@ -200,7 +200,7 @@ void SceneEditorController::AttachToRoot(UIElement& root,
                                              // current scene is discarded — cancel was the way to keep it.
                                              m_PendingNewSceneNaming = false;
                                              CleanupBackupsForCleanClose();
-                                             m_Doc->NewSceneUntitled();
+                                             m_Doc->NewSceneUntitled(EngineCore::GetInstance().GetRenderServices());
                                              if (m_UndoRedo)
                                                  m_UndoRedo->Clear();
                                              if (m_Doc->SaveAs(path))
@@ -698,7 +698,7 @@ void SceneEditorController::Execute(const PendingAction& a)
         // The outgoing document closes cleanly here (any dirty state was
         // resolved by the prompt in Update), so its autosave staging is stale.
         CleanupBackupsForCleanClose();
-        m_Doc->NewSceneUntitled();
+        m_Doc->NewSceneUntitled(EngineCore::GetInstance().GetRenderServices());
         if (m_UndoRedo)
             m_UndoRedo->Clear();
         return;
@@ -1135,7 +1135,7 @@ void SceneEditorController::OpenProjectStartupScene(const std::filesystem::path&
     }
     else
     {
-        Logger::Log::Info("Editor: '{}' names no startup scene; opening an empty scene", projectRoot.string());
+        Logger::Log::Info("Editor: '{}' names no startup scene; opening a default scene", projectRoot.string());
         RequestNewScene();
     }
     if (queuesAction && m_Pending)

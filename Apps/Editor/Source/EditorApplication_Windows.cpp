@@ -24,6 +24,7 @@
 #include "Input/KeyCodes.h"
 #include "Panels/GameViewPanel.h"
 #include "Panels/InspectorPanel.h"
+#include "PlayMode/GameViewPointerLock.h"
 #include "Rendering/Core/Device.h"
 #include "Platform/Capabilities.h"
 #include "Platform/Display.h"
@@ -324,6 +325,7 @@ void EditorApplication::UndockToFloatingWindow(const std::string& panelId)
     DeviceDesc desc{};
     desc.preferredAPI = LoadPreferredGraphicsApi();
     desc.enableSwapchain = true;
+    desc.persistPipelineCache = true;
     desc.applicationName = GetConfig().Name;
     if (Engine::Renderer::ShouldEnableVkValidation())
     {
@@ -608,6 +610,7 @@ void EditorApplication::UndockToFloatingWindow(const std::string& panelId)
     };
     floatingInput.onKeyPre = [this, ctxRaw](int k, int a, int m) -> bool
     {
+        m_GameViewPointerLock->OnKey(k, a);
 #if GE_ENABLE_CPU_PROFILING
         if (k == Input::kKeyCode_F2 && a == Input::kKeyActionPress)
         {

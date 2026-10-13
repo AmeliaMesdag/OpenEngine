@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdio>
 
 namespace GameEngine::Memory::Detail
 {
@@ -14,11 +15,18 @@ namespace GameEngine::Memory::Detail
 class SerialUseCheck
 {
   public:
-    void Enter()
+    /// `allocator` is the type the report names ("Arena", "ObjectPool").
+    void Enter(const char* allocator)
     {
-        [[maybe_unused]] const bool wasBusy = m_Busy.exchange(true, std::memory_order_acquire);
-        assert(!wasBusy && "two threads used this Arena at once; an Arena is externally serialized: one user at a "
-                           "time (give each thread its own, or order the uses with a join or a lock)");
+        const bool wasBusy = m_Busy.exchange(true, std::memory_order_acquire);
+        if (wasBusy)
+        {
+            std::fprintf(stderr,
+                         "two threads used this %s at once; an %s is externally serialized: one user at a time "
+                         "(give each thread its own, or order the uses with a join or a lock)\n",
+                         allocator, allocator);
+            assert(false && "two threads used one externally serialized Memory allocator at once (named above)");
+        }
     }
 
     void Exit() { m_Busy.store(false, std::memory_order_release); }

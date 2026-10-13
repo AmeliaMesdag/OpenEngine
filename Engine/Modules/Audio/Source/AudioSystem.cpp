@@ -761,11 +761,12 @@ AudioClipHandle AudioSystem::ResolveClip(const GUID& guid)
                 {
                     slot.state = Impl::ClipState::Failed;
                     slot.error = "Asset is not an AudioAsset";
+                    const auto* existingAsset = existing.get();
                     Logger::Log::Warning("Audio: ResolveClip - Asset with GUID={} is not an AudioAsset (type={}, name={}, actual type={})", 
                         guid.ToString(), 
                         AssetTypeToString(existing->GetType()),
                         existing->GetName(),
-                        typeid(*existing.get()).name());
+                        typeid(*existingAsset).name());
                     return handle;
                 }
             }

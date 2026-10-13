@@ -161,17 +161,25 @@ void TransformHierarchySystem::Update(ECS::World& world, float32 /*deltaTime*/) 
 
     // Every entity with a Transform holds a WorldTransform from creation
     // (RequiredComponents<Transform>, Transform.h): no pass adds it here.
+    // A structural change rebuilds the topology only when it changed what the
+    // cache describes: a Parent column edit (placement of a new Parent-holder
+    // stamps it too) or a node that moved or died (removing a Parent moves the
+    // holder to another archetype). Spawning
+    // and destroying unparented entities leaves the cache and the flat gate
+    // alone, so the flat pass resolves only the chunks those changes stamped.
+    // The force-serial seam caches every entity and has no flat pass, so any
+    // structural change rebuilds it. With the change filter off
+    // (GE_ECS_CHANGE_FILTER=0) no Parent column gate reports a new
+    // Parent-holder, so any structural change rebuilds as well.
     const std::size_t currentStructuralVersion = world.GetStructuralChangeVersion();
     const uint64 entryVersion = world.GetGlobalSystemVersion();
-    const bool structuralChange =
-        !m_TopologyValid || m_TopologyStructuralVersion != currentStructuralVersion;
-    const bool parentChange =
-        !structuralChange && HasParentColumnChange(world, entryVersion);
-
-    const bool rebuilt = structuralChange || parentChange;
+    const bool structuralChange = m_TopologyValid && m_TopologyStructuralVersion != currentStructuralVersion;
+    const bool rebuilt = !m_TopologyValid || HasParentColumnChange(world, entryVersion) ||
+                         (structuralChange && (m_ForceSerial || !ECS::ChangeFilter::Enabled() ||
+                                             !IsTopologyCacheCurrent(world)));
+    m_TopologyStructuralVersion = currentStructuralVersion;
     if (rebuilt) {
         RebuildTopology(world);
-        m_TopologyStructuralVersion = world.GetStructuralChangeVersion();
         m_TopologyValid = true;
 
         // The rebuild snapshots all Parent and Transform values present at
@@ -290,6 +298,17 @@ void TransformHierarchySystem::ResolveFlatParallel(ECS::World& world, FlatScope 
         m_FlatGate.LastRunVersion = entryVersion;
         m_FlatGateValid = true;
     }
+}
+
+bool TransformHierarchySystem::IsTopologyCacheCurrent(ECS::World& world) const {
+    for (const Node& node : m_Nodes) {
+        if (!world.IsValid(node.entity))
+            return false;
+        if (world.GetComponent<Transform>(node.entity) != node.local ||
+            world.GetComponent<WorldTransform>(node.entity) != node.worldRead)
+            return false;
+    }
+    return true;
 }
 
 bool TransformHierarchySystem::HasParentColumnChange(ECS::World& world,

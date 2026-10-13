@@ -25,6 +25,10 @@ class VulkanPipelineCache
     {
         std::string CacheDirectory = "cache/pipelines/";
         std::string CacheFileName = "vulkan_pipeline_cache.bin";
+        // False (the default, as DeviceDesc::persistPipelineCache): the cache lives in
+        // memory only. Initialize neither creates the directory nor seeds the
+        // VkPipelineCache from the file, and Shutdown never writes it.
+        bool PersistToDisk = false;
         bool EnableCompression = true;
         bool EnableValidation = true;
         uint32_t MaxCacheSize = 64 * 1024 * 1024;
@@ -116,8 +120,9 @@ class VulkanPipelineCache
     bool CreateCacheDirectory();
     // Single-open read + validation of the on-disk cache file, returning the
     // decompressed VkPipelineCache payload. The cache file is machine-global
-    // (GetPlatformCacheDirectory) and written by every engine process, so a
-    // read can race another process's save: every size here is validated
+    // (GetPlatformCacheDirectory) and written by every process whose device
+    // persists its cache (the Editor, the Player), so a read can race another
+    // process's save: every size here is validated
     // before it reaches an allocation, and any inconsistency (torn write,
     // truncation, failed seek, checksum/size mismatch) yields nullopt — a
     // cold cache, never a throw out of device bring-up.

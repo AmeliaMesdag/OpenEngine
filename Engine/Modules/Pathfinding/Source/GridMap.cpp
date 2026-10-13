@@ -632,33 +632,9 @@ bool GridMap::Raycast(float32 startX, float32 /*startY*/, float32 startZ,
     return false;
 }
 
-void GridMap::BakeHeights(HeightQueryFn heightQuery)
-{
-    for (uint32 z = 0; z < m_Settings.Depth; ++z)
-    {
-        for (uint32 x = 0; x < m_Settings.Width; ++x)
-        {
-            float32 worldX = 0.0f, worldZ = 0.0f;
-            CellToWorld(x, z, worldX, worldZ);
-
-            float32 height = 0.0f;
-            if (heightQuery(worldX, worldZ, height))
-            {
-                m_Heights[CellIndex(x, z)] = height;
-            }
-        }
-    }
-    ++m_TopologyVersion;
-}
-
 const float32* GridMap::GetCostData() const
 {
     return m_Costs.data();
-}
-
-const float32* GridMap::GetHeightData() const
-{
-    return m_Heights.data();
 }
 
 const uint8* GridMap::GetBlockedData() const

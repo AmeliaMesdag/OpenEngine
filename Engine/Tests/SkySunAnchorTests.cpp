@@ -35,6 +35,8 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/SkyRenderFeature.h"
 #include "EngineLogCapture.h"
+#include "Rendering/Sky/AtmosphereTransmittance.h"
+#include "Rendering/Sky/SkyRenderer.h"
 #include "Rendering/Sky/SkySettings.h"
 #include "Scene/SceneIO.h"
 #include "SkySunAnchorHarness.h"
@@ -46,14 +48,14 @@ namespace
 {
 
 // A shipped clear-sky sun, and the value the tests below expect the sky to land on: the light's
-// illuminance on the 203 scale, lifted to the top of the atmosphere. The lift constant lives in
-// SkyEnvironmentSystem.cpp; mirroring it here is what makes a drift in either one visible.
+// illuminance on the 203 scale, lifted to the top of the atmosphere by the production lift (its
+// value is pinned on its own by TheSkysSunDeliversTheLightsIlluminanceThroughAnOverheadSky).
 constexpr float kShippedSunLux = 100000.0f;
-constexpr float kSkyIrradianceScale = 1.33f;
 
 float ExpectedAnchorForLux(float lux)
 {
-    return (lux / Components::kReferenceWhiteNits) * kSkyIrradianceScale;
+    return (lux / Components::kReferenceWhiteNits) *
+           Rendering::SkySourceIlluminanceScale(Rendering::ScatteringAtmosphere());
 }
 
 // The sky's brightness, in stops, relative to the scene's sun. 0 = the two agree.
@@ -90,6 +92,41 @@ TEST(SkySunAnchor, AnUnlinkedSkyTakesItsBrightnessFromTheScenesSun)
     const float expected = ExpectedAnchorForLux(kShippedSunLux);
     EXPECT_NEAR(anchor, expected, RelTolerance(expected))
         << "the sky is " << StopsFromSun(anchor, kShippedSunLux) << " stops off the scene's sun";
+}
+
+// The lift itself. The light's illuminance is the ground value of an overhead sun, so the sky's
+// source above the atmosphere is that value over the zenith transmittance of the atmosphere the
+// LUTs bake: then the sky's own sun delivers the light's illuminance through an overhead sky. The
+// zenith optical depth is evaluated here in closed form (each exponential density integrated to the
+// top of the shell, the ozone tent's area its half width), independently of the engine's
+// quadrature; the two agree to 0.2 %.
+TEST(SkySunAnchor, TheSkysSunDeliversTheLightsIlluminanceThroughAnOverheadSky)
+{
+    Rendering::AtmosphereParametersGPU atmo{};
+    Rendering::SkyRenderer::FillDefaultAtmosphere(atmo);
+    const double shell = static_cast<double>(atmo.atmosphereRadius) - atmo.planetRadius;
+    double zenithTransmittance[3];
+    for (int c = 0; c < 3; ++c)
+    {
+        const double tau =
+            atmo.betaRayleigh[c] * atmo.rayleighScaleHeight * (1.0 - std::exp(-shell / atmo.rayleighScaleHeight)) +
+            (atmo.betaMie[c] + atmo.mieAbsorption[c]) * atmo.mieScaleHeight *
+                (1.0 - std::exp(-shell / atmo.mieScaleHeight)) +
+            atmo.ozoneAbsorption[c] * atmo.ozoneHalfWidth;
+        zenithTransmittance[c] = std::exp(-tau);
+    }
+    const double luminance =
+        0.2126 * zenithTransmittance[0] + 0.7152 * zenithTransmittance[1] + 0.0722 * zenithTransmittance[2];
+    const float expected = static_cast<float>(kShippedSunLux / Components::kReferenceWhiteNits / luminance);
+
+    SkySunAnchorHarness harness;
+    harness.AddDirectional(kShippedSunLux, Components::LightUnit::Lux);
+    harness.AddDefaultSky();
+    const float anchor = harness.RunAndReadAnchor();
+    EXPECT_NEAR(anchor, expected, expected * 0.005f)
+        << "the sky's source is " << anchor / (kShippedSunLux / Components::kReferenceWhiteNits)
+        << " x the light; the zenith transmittance's luminance " << luminance << " asks for "
+        << 1.0 / luminance;
 }
 
 // The same statement as a property rather than a number: whatever the arithmetic, the sky may not
@@ -580,13 +617,13 @@ constexpr int64_t kFullNightUlpBound = 16;
 constexpr GoldenHour kDeliveredGoldens[] = {
     {12.0f, GoldenMatch::Day, {0x43F64E30u, 0x43F64E30u, 0x43F64E30u},
      {0x43F64E30u, 0x43F64E30u, 0x43F64E30u}, {0x3F800000u, 0x3F800000u, 0x3F800000u}},
-    {17.75f, GoldenMatch::Day, {0x438B61A3u, 0x4307B199u, 0x41B0F193u},
-     {0x438B61A3u, 0x4307B199u, 0x41B0F193u}, {0x3F10DE11u, 0x3E8D08DFu, 0x3D37E87Du}},
-    {18.15f, GoldenMatch::Twilight, {0x41013847u, 0x3E37C901u, 0x38C71840u},
-     {0x41012E70u, 0x3E36D393u, 0x374A2607u}, {}},
-    {18.5f, GoldenMatch::Twilight, {0x3C7FE244u, 0x3C3B89D6u, 0x3BA6B559u},
-     {0x390F2168u, 0x2FCBF804u, 0x1887FE43u}, {}},
-    {0.0f, GoldenMatch::FullNight, {0x3CC0C5B0u, 0x3CD11927u, 0x3CF41936u},
+    {17.75f, GoldenMatch::Day, {0x4344DB1Au, 0x42D03D06u, 0x41A8C9D9u},
+     {0x4344DB1Au, 0x42D03D06u, 0x41A8C9D9u}, {0x3ECC9AA7u, 0x3E586F44u, 0x3D2F6E96u}},
+    {18.15f, GoldenMatch::Twilight, {0x401F45B9u, 0x3D61D37Du, 0x38A999BDu},
+     {0x401F2BE4u, 0x3D5F0D86u, 0x36704D78u}, {}},
+    {18.5f, GoldenMatch::Twilight, {0x3C4B2840u, 0x3C1E80D9u, 0x3BA2515Fu},
+     {0x362615DFu, 0x2CEA5AF5u, 0x15984328u}, {}},
+    {0.0f, GoldenMatch::FullNight, {0x3CC0C5BCu, 0x3CD11934u, 0x3CF41945u},
      {0x00000000u, 0x00000000u, 0x00000000u}, {}},
 };
 
@@ -770,7 +807,8 @@ TEST(SkyLinkedSun, EndingTheDriveHandsTheLightBackWhite)
 // when it lights anything, and from the sky otherwise. With the moon hidden the driven sun is black
 // at its authored intensity, so a gate on the intensity alone hands the fog a black sun where it
 // used to fall back to the sky. Expected values are what the system produced before the night moved
-// into the colour, when the hidden moon zeroed the intensity instead.
+// into the colour, when the hidden moon zeroed the intensity instead; the hidden-moon fallback is the
+// sky's own source, so its value carries the sky's top-of-atmosphere lift (SkySourceIlluminanceScale).
 TEST(SkyLinkedSun, TheFogSunAtNightIsUnchanged)
 {
     struct NightFog
@@ -778,7 +816,7 @@ TEST(SkyLinkedSun, TheFogSunAtNightIsUnchanged)
         bool ShowMoon;
         float DeliveredLuminance; // luminance(fog colour) x fog intensity
     };
-    constexpr NightFog kNightFog[] = {{true, 0.0254095f}, {false, 0.0168973f}};
+    constexpr NightFog kNightFog[] = {{true, 0.0254095f}, {false, 0.0145869f}};
     constexpr float kRecordedPrecision = 1e-5f; // the values were recorded to six significant digits
 
     for (const NightFog& expected : kNightFog)

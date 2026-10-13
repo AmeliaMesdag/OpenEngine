@@ -5,6 +5,7 @@ project(Platform LANGUAGES CXX)
 set(PLATFORM_SOURCES
 	Source/Capabilities.cpp
 	Source/Platform.cpp
+	Source/Thread.cpp
 )
 
 # Desktop-only implementations: GLFW clipboard and gamepad mapping, OS shell
@@ -73,6 +74,9 @@ elseif (WIN32)
         Source/SystemFonts_Win32.cpp
         Source/SystemMetrics_Win32.cpp
 		Source/WebView_Win32.cpp
+		Source/Utf8ToWide_Win32.cpp
+		Source/WebViewState.cpp
+		Source/WebViewEnvironment_Win32.cpp
 	)
 elseif(APPLE)
 	list(APPEND PLATFORM_SOURCES
@@ -129,17 +133,14 @@ endif()
 	    # the theme helpers. dxgi: per-monitor HDR luminance via IDXGIOutput6::GetDesc1.
 	    target_link_libraries(Platform PRIVATE Shlwapi Dwmapi dwrite ole32 uuid User32 dxgi)
 
-	    # WebView2: the loader the SDK ships is where CreateCoreWebView2EnvironmentWithOptions
-	    # lives, and linking its imported target is also what puts <WebView2.h> on the include
-	    # path — the header whose presence WebView_Win32.cpp compiles its implementation
-	    # against. The port is declared for Windows in vcpkg.json; a tree built without it
-	    # keeps the stub that reports the view unavailable.
-	    find_package(unofficial-webview2 CONFIG QUIET)
-	    if (TARGET unofficial::webview2::webview2)
-	        target_link_libraries(Platform PRIVATE unofficial::webview2::webview2)
-	    else()
-	        message(STATUS "WebView2 SDK not found: the Windows web view compiles as a reporting stub")
+	    # WebView2: the loader's import library and <WebView2.h>, from the webview2 port vcpkg.json
+	    # declares for Windows. The Windows web view has no build without them.
+	    find_package(unofficial-webview2 CONFIG)
+	    if (NOT TARGET unofficial::webview2::webview2)
+	        message(FATAL_ERROR "The WebView2 SDK (vcpkg port 'webview2', declared in vcpkg.json) was not found. "
+	                            "Configure with the vcpkg toolchain file (CMAKE_TOOLCHAIN_FILE) so the port installs.")
 	    endif()
+	    target_link_libraries(Platform PRIVATE unofficial::webview2::webview2)
  endif()
 
 if (APPLE)
@@ -267,6 +268,7 @@ if(BUILD_TESTING)
 
     add_executable(PlatformCapabilitiesTests
         Tests/CapabilitiesTests.cpp
+        Tests/ThreadNameTests.cpp
     )
 
     target_link_libraries(PlatformCapabilitiesTests
@@ -323,6 +325,25 @@ if(BUILD_TESTING)
     ge_set_output_tests(PlatformEnvironmentTests)
     ge_stage_runtime_dependencies(PlatformEnvironmentTests)
     add_test(NAME PlatformEnvironmentTests COMMAND PlatformEnvironmentTests)
+
+    # The Windows web view's parts that need no window and no WebView2 runtime. The
+    # helpers under test live in Source/ beside the backend.
+    if (WIN32)
+        add_executable(PlatformWebViewTests
+            Tests/Utf8ToWideTests.cpp
+            Tests/WebViewStateTests.cpp
+        )
+        target_link_libraries(PlatformWebViewTests
+            PRIVATE
+                Engine
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_include_directories(PlatformWebViewTests PRIVATE Source)
+        ge_set_output_tests(PlatformWebViewTests)
+        ge_stage_runtime_dependencies(PlatformWebViewTests)
+        add_test(NAME PlatformWebViewTests COMMAND PlatformWebViewTests)
+    endif()
 
     # Dependency regression for the Win32 patch carried by cmake/ports/glfw3
     # (active-window ownership in modifier-release polling). It links the same

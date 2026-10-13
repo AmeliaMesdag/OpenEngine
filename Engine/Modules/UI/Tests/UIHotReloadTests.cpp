@@ -242,7 +242,10 @@ TEST_P(SharedStylesheetReloadTests, ManagersObserveOneCommitAndKeepCachedRulesAl
         ui->OnMouseMove(-100.0f, -100.0f);
     }
     ASSERT_TRUE(first.AttachStyleFromAsset(*style));
-    if (GetParam()) ASSERT_TRUE(second.AttachStyleFromAsset(*style));
+    if (GetParam())
+    {
+        ASSERT_TRUE(second.AttachStyleFromAsset(*style));
+    }
     first.Update(0.0f, true);
     second.Update(0.0f, true);
     auto* sample = first.GetRootElement()->FindById("sample");

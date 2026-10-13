@@ -82,6 +82,7 @@ class SceneThumbnailCapture;
 class PackageManagerController;
 class MovieRecorderController;
 class PlayModeManager;
+class GameViewPointerLock;
 class RecipeControllers;
 class UniversalSearchController;
 enum class PlayModeState : std::uint8_t;
@@ -341,6 +342,8 @@ class EditorApplication : public Application
     // play mode is active and a Game View tab is showing. Mouse position is
     // Game View local (viewport origin), not window client pixels.
     std::unique_ptr<Input::InputSystem> m_RuntimeInput;
+    // Grants the game's pointer lock request to the window showing the Game View.
+    std::unique_ptr<Editor::GameViewPointerLock> m_GameViewPointerLock;
     // Cached once per frame: play mode + Game View is the active tab of some
     // window. Session-scoped (context enable, stuck-key reset), not per-window.
     bool m_RuntimeInputActive = false;
@@ -381,8 +384,9 @@ class EditorApplication : public Application
     // finished (or can never produce providers), so VCS detection may run.
     bool m_VcsProvidersReadySignaled = false;
     bool m_PendingPostInit = false;
-    // GE_EDITOR_STARTUP_SCENE is opened from Update after the world path has
-    // settled — the same boot-open class the wasm last-project skip avoids.
+    // A non-empty workspace marks a pending boot open after the world path settles.
+    // It opens the project startup scene, or the GE_EDITOR_STARTUP_SCENE override
+    // held in m_DeferredStartupScene, and suppresses the interim untitled save prompt.
     std::filesystem::path m_DeferredStartupScene;
     std::filesystem::path m_DeferredStartupSceneWorkspace;
     bool m_PendingWindowShow = true;

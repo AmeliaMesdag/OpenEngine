@@ -50,10 +50,21 @@ public:
 
     /**
      * @brief A cooked shader cache the build ships alongside the runtime, or empty
-     * where there is none. A runtime with no shader compiler (the browser) reads
-     * this instead of a project's own cache and seeds new projects from it.
+     * where there is none: `.Cache/Shaders` in the content root of a desktop export
+     * (InstallContentRootFor: `Contents/Resources/.Cache/Shaders` in a macOS bundle,
+     * `<executable directory>/.Cache/Shaders` on Windows and Linux), `/.Cache/Shaders`
+     * in the browser's preload. The engine probes it, read-only, before the
+     * workspace's own cache.
      */
     static std::filesystem::path GetBundledShaderCacheRoot();
+
+    /**
+     * @brief The first regular file at @p relative under @p start or any of its
+     * ancestors, or empty. The walk runs to the filesystem root rather than a fixed
+     * depth: a staged executable sits at different depths inside a build tree on
+     * each platform (nine directories down inside a macOS bundle).
+     */
+    static std::filesystem::path FindFileUpward(std::filesystem::path start, const std::filesystem::path& relative);
 
     /**
      * @brief The staged asset root for an executable that lives in @p executableDirectory:

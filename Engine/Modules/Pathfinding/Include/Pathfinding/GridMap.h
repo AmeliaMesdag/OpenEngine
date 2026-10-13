@@ -4,7 +4,6 @@
 #include "Pathfinding/PathfindingTypes.h"
 
 #include <atomic>
-#include <functional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -78,13 +77,8 @@ public:
     uint32 GetNeighborCells(uint32 cellX, uint32 cellZ,
                             uint32* outCellX, uint32* outCellZ, uint32 maxNeighbors) const;
 
-    // Baking
-    using HeightQueryFn = std::function<bool(float32 x, float32 z, float32& outHeight)>;
-    void BakeHeights(HeightQueryFn heightQuery);
-
     // Debug data (raw arrays, size = Width * Depth)
     const float32* GetCostData() const;
-    const float32* GetHeightData() const;
     const uint8* GetBlockedData() const;
 
 private:

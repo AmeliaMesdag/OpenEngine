@@ -729,7 +729,7 @@ void SceneViewToolbar::WireControls()
         btn->AddManipulator(ContextMenuManipulator::Create(
             [this]() -> std::vector<ContextMenuManipulator::Item> {
                 return Editor::BuildScenePostFxMenuItems(m_Controller, this,
-                                                         m_OnPostFxAutoExposureToggled);
+                                                         m_OnExposureModeChanged);
             }));
     }
 

@@ -4,6 +4,7 @@
 #include "Editor/Settings/SceneViewSettings.h"
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Inspectors/InspectorDragHelpers.h"
+#include "UI/Controls/Dropdown.h"
 #include "UI/Controls/FloatField.h"
 #include "UI/Controls/Label.h"
 #include "UI/Controls/PopoverArrow.h"
@@ -14,8 +15,11 @@
 #include "UI/UIManager.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -129,8 +133,12 @@ constexpr const char* kAccelerationTooltip =
 
 constexpr const char* kExposureSectionTooltip =
     "Editor-only Scene View exposure override.";
-constexpr const char* kAutoExposureTooltip =
-    "Histogram metering with eye adaptation. Disable to use Fixed EV100.";
+constexpr const char* kExposureModeTooltip =
+    "Auto meters the image like the Game View. Scene Light holds a fixed exposure derived from the "
+    "scene's directional lights and sky, re-derived when either changes. Fixed holds the Fixed EV100 below.";
+constexpr const char* kSceneLightEvTooltip =
+    "The EV100 Scene Light derives from the light on a horizontal surface: every directional light at "
+    "its elevation plus the sky. Switch to Fixed to start from it.";
 constexpr const char* kAdaptationDelayTooltip =
     "Smooth exposure changes over time using the sensor's adaptation speeds. "
     "Disable to apply each newly metered exposure immediately.";
@@ -140,6 +148,18 @@ constexpr const char* kMaxEvTooltip =
     "Auto mode: darkest the metering may expose to (higher EV = more darkening in bright scenes).";
 constexpr const char* kCompensationTooltip =
     "+/- stops applied after auto metering (+ brightens).";
+constexpr std::array kExposureModes = {Editor::SceneViewExposureMode::Auto,
+                                       Editor::SceneViewExposureMode::SceneLight,
+                                       Editor::SceneViewExposureMode::Fixed};
+
+int ExposureModeIndex(Editor::SceneViewExposureMode mode)
+{
+    for (size_t i = 0; i < kExposureModes.size(); ++i)
+        if (kExposureModes[i] == mode)
+            return static_cast<int>(i);
+    return 0;
+}
+
 constexpr const char* kFixedEvTooltip =
     "Absolute photographic EV100. Sunny ~15, overcast ~12, interior ~7-9, night ~2-5.";
 } // namespace
@@ -213,33 +233,42 @@ SceneCameraSettingsPopup::SceneCameraSettingsPopup()
     AddSectionHeader(*panel, "Exposure", kExposureSectionTooltip);
     {
         auto row = std::make_unique<UIElement>();
-        row->SetId("SceneCameraAutoExposureRow");
+        row->SetId("SceneCameraExposureModeRow");
         row->AddClass("popover-row");
-        row->SetTooltip(kAutoExposureTooltip);
 
+        // On the label only: the open dropdown list sits inside this row, and a row tooltip would
+        // pop up over it.
         auto label = std::make_unique<Label>();
-        label->SetText("Auto Exposure");
+        label->SetText("Mode");
         label->AddClass("popover-row-label");
-        Label* labelPtr = label.get();
+        label->SetTooltip(kExposureModeTooltip);
         row->AddChild(std::move(label));
 
         auto control = std::make_unique<UIElement>();
         control->AddClass("popover-row-toggle");
 
-        auto autoExposure = std::make_unique<Toggle>();
-        autoExposure->SetId("SceneCameraAutoExposure");
-        autoExposure->SetOnValueChanged([this](const bool& enabled)
-                                        {
-                                            Editor::SceneViewSettings::Get().SetPostFxAutoExposureEnabled(
-                                                enabled, /*fromUserToggle=*/true);
-                                            // Full re-sync, not just visibility: switching auto off
-                                            // seeds Fixed EV100 from the metered exposure (AE-lock),
-                                            // so the fixed-EV slider must pick up the new value.
-                                            SyncFromSettings();
-                                        });
-        m_AutoExposureToggle = autoExposure.get();
-        InspectorDrag::SetupLabelDragToggle(labelPtr, m_AutoExposureToggle);
-        control->AddChild(std::move(autoExposure));
+        auto modes = std::make_unique<Dropdown>();
+        modes->SetId("SceneCameraExposureMode");
+        // Fill the value column so "Scene Light" fits on one line in the list.
+        modes->Overrides().Set(Style::FlexGrow, 1.0f);
+        std::vector<Dropdown::Option> options;
+        for (size_t i = 0; i < kExposureModes.size(); ++i)
+            options.push_back({std::to_string(i), Editor::SceneViewExposureModeLabel(kExposureModes[i])});
+        modes->SetOptions(options, ExposureModeIndex(Editor::SceneViewSettings::Get().GetExposureMode()));
+        modes->SetOnValueChanged([this](const std::string&)
+                                 {
+                                     const int index = m_ExposureModeDropdown->GetSelectedIndex();
+                                     if (index < 0 || index >= static_cast<int>(kExposureModes.size()))
+                                         return;
+                                     Editor::SceneViewSettings::Get().SetExposureMode(
+                                         kExposureModes[static_cast<size_t>(index)], /*fromUserSwitch=*/true);
+                                     // Full re-sync, not just visibility: switching to Fixed seeds
+                                     // Fixed EV100 from what the view showed (AE-lock), so the
+                                     // fixed-EV slider must pick up the new value.
+                                     SyncFromSettings();
+                                 });
+        m_ExposureModeDropdown = modes.get();
+        control->AddChild(std::move(modes));
         row->AddChild(std::move(control));
         panel->AddChild(std::move(row));
     }
@@ -282,6 +311,26 @@ SceneCameraSettingsPopup::SceneCameraSettingsPopup()
                                   SceneViewSettings::kExposureSliderStep,
                                   [](float v, bool commit) { SceneViewSettings::Get().SetPostFxAutoExposureMaxEv(v, commit); },
                                   SceneViewSettings::kDefaultAutoExposureMaxEv, kMaxEvTooltip);
+    {
+        auto row = std::make_unique<UIElement>();
+        row->SetId("SceneCameraSceneLightEvRow");
+        row->AddClass("popover-row");
+        row->SetTooltip(kSceneLightEvTooltip);
+
+        auto label = std::make_unique<Label>();
+        label->SetText("EV100");
+        label->AddClass("popover-row-label");
+        row->AddChild(std::move(label));
+
+        auto value = std::make_unique<Label>();
+        value->SetId("SceneCameraSceneLightEv");
+        value->AddClass("popover-row-toggle");
+        m_SceneLightEvLabel = value.get();
+        row->AddChild(std::move(value));
+
+        m_SceneLightEvRow = row.get();
+        panel->AddChild(std::move(row));
+    }
     m_ExposureEvRow = AddSliderRow(*panel, "SceneCameraFixedEv", "Fixed EV100",
                                    SceneViewSettings::kMinExposureEv, SceneViewSettings::kMaxExposureEv,
                                    SceneViewSettings::kExposureSliderStep,
@@ -498,8 +547,16 @@ void SceneCameraSettingsPopup::SyncFromSettings()
     sync(m_AutoMinEvRow, settings.GetPostFxAutoExposureMinEv());
     sync(m_AutoMaxEvRow, settings.GetPostFxAutoExposureMaxEv());
     sync(m_CompensationRow, settings.GetPostFxExposureCompensation());
-    if (m_AutoExposureToggle)
-        m_AutoExposureToggle->SetValueWithoutNotify(settings.GetPostFxAutoExposureEnabled());
+    if (m_ExposureModeDropdown)
+        m_ExposureModeDropdown->SetSelectedIndexWithoutNotify(ExposureModeIndex(settings.GetExposureMode()));
+    if (m_SceneLightEvLabel)
+    {
+        float derivedEv = 0.0f;
+        char text[64] = "—";
+        if (settings.TryGetSceneLightExposureEv(derivedEv))
+            std::snprintf(text, sizeof(text), "%.1f, derived from the directional lights and sky", derivedEv);
+        m_SceneLightEvLabel->SetText(text);
+    }
     if (m_UseAdaptationDelayToggle)
         m_UseAdaptationDelayToggle->SetValueWithoutNotify(
             settings.GetPostFxAutoExposureUseAdaptationDelay());
@@ -508,7 +565,10 @@ void SceneCameraSettingsPopup::SyncFromSettings()
 
 void SceneCameraSettingsPopup::UpdateExposureRowVisibility()
 {
-    const bool autoOn = Editor::SceneViewSettings::Get().GetPostFxAutoExposureEnabled();
+    const Editor::SceneViewExposureMode mode = Editor::SceneViewSettings::Get().GetExposureMode();
+    const bool autoOn = mode == Editor::SceneViewExposureMode::Auto;
+    const bool fixedOn = mode == Editor::SceneViewExposureMode::Fixed;
+    const bool sceneLightOn = mode == Editor::SceneViewExposureMode::SceneLight;
     auto setVisible = [](UIElement* el, bool visible)
     {
         if (el)
@@ -518,10 +578,11 @@ void SceneCameraSettingsPopup::UpdateExposureRowVisibility()
     setVisible(m_AdaptationDelayRow, autoOn);
     setVisible(m_AutoMinEvRow.row, autoOn);
     setVisible(m_AutoMaxEvRow.row, autoOn);
-    setVisible(m_ExposureEvRow.row, !autoOn);
-    setVisible(m_ExposureEvLegend, !autoOn);
-    // Compensation (row + ticks) stays visible in both modes: it trims the
-    // auto metering and the fixed EV pin alike.
+    setVisible(m_SceneLightEvRow, sceneLightOn);
+    setVisible(m_ExposureEvRow.row, fixedOn);
+    setVisible(m_ExposureEvLegend, fixedOn);
+    // Compensation (row + ticks) stays visible in every mode: it trims the
+    // metering, the derived EV and the fixed EV pin alike.
 }
 
 void SceneCameraSettingsPopup::ShowAt(float anchorCenterX, float anchorBottomY,

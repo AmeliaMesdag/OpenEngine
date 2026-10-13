@@ -189,8 +189,9 @@
 }
 
 /* An entry's kind at a glance, in the Activity tab and the Thread alike: a speech bubble for a
-   comment, a plus for created, a pencil for an edit, a square in the status's color (set per
-   entry) for a status change; every marker takes one 14 px slot, so the text column lines up. */
+   comment, a hollow circle for created, a pencil for an edit, a square in the status's color
+   (set per entry) for a status change; every marker takes one 14 px slot, so the text column
+   lines up. */
 .markup-entry-marker {
 	width: 14px;
 	height: 14px;
@@ -207,7 +208,7 @@
 }
 
 .markup-entry-marker.markup-entry-created {
-	background-image: url("editor:Icons/plus.png");
+	background-image: url("editor:Icons/created.svg");
 }
 
 .markup-entry-marker.markup-entry-edit {
@@ -468,15 +469,6 @@
 }
 
 .markup-inspector-entry-action-text {
-	white-space: normal;
-}
-
-/* "Created ... · changed ..." under the Tags row. */
-.markup-inspector-history {
-	margin-top: 4px;
-	margin-bottom: 6px;
-	color: var(--ui_color_text_dim);
-	font-size: 12px;
 	white-space: normal;
 }
 

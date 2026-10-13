@@ -32,12 +32,14 @@
 #include "Platform/Window.h"
 #include "Rendering/Common/Utils.h"
 #include "Rendering/Core/Device.h"
+#include "ScopedPlatformCacheRoot.h"
 #include "Scripting/ScriptsConfig.h"
 
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <system_error>
 #include <thread>
 
@@ -92,6 +94,10 @@ protected:
     {
         m_PreviousCwd = fs::current_path();
         m_Root = fs::temp_directory_path() / ("runtime-host-" + GUID::Generate().ToString());
+        // The host's device persists its pipeline cache (RuntimeHost opts in for the Player), so
+        // the platform cache root lives under m_Root for the test: the user's cache is neither
+        // read nor written, and the test's file goes with m_Root.
+        m_CacheRoot.emplace(m_Root / "cache-root");
         // A pipeline with no passes presents the host's own colour target; the empty scene gets
         // the host's default camera, so the frame has a view.
         WriteFile(m_Root / "Assets/RenderPipelines/HostTest.rendergraph",
@@ -139,6 +145,7 @@ protected:
         if (m_Application)
             m_Application->Shutdown();
         m_Application.reset();
+        m_CacheRoot.reset();
         std::error_code ec;
         fs::current_path(m_PreviousCwd, ec);
         fs::remove_all(m_Root, ec);
@@ -146,6 +153,7 @@ protected:
 
     fs::path m_PreviousCwd;
     fs::path m_Root;
+    std::optional<TestUtils::ScopedPlatformCacheRoot> m_CacheRoot;
     std::unique_ptr<HostTestApplication> m_Application;
     std::unique_ptr<RuntimeHost> m_Host;
     CompositeProbe m_Probe;

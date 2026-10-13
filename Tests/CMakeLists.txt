@@ -32,6 +32,7 @@ endif()
 #   Tools/Web/smoke-project/Assets/Scenes/ web seed-project scenes
 #   Tools/Web/smoke-project/Assets/Particles/ the particle stack they reference
 #   Tests/Assets/TestData/BigglesCaseShadow.assetdb  frozen pre-migration journal
+#   Apps/Editor/ProjectTemplates/      shipped picker scenes and their assets
 if(EXISTS ${CMAKE_SOURCE_DIR}/Engine/Assets)
   # Each mirror is copy + orphan prune: copy_directory_if_different never
   # deletes, so without the prune a staged mirror keeps files whose sources
@@ -40,6 +41,13 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/Engine/Assets)
   # (cmake/PruneStagedMirrorOrphans.cmake), so runtime state tests write into
   # the staged root — script assemblies, derived cache, logs — is never touched.
   add_custom_target(StageTestAssets
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+            ${CMAKE_SOURCE_DIR}/Apps/Editor/ProjectTemplates
+            ${CMAKE_BINARY_DIR}/Apps/Editor/ProjectTemplates
+    COMMAND ${CMAKE_COMMAND}
+            -DSRC=${CMAKE_SOURCE_DIR}/Apps/Editor/ProjectTemplates
+            -DDST=${CMAKE_BINARY_DIR}/Apps/Editor/ProjectTemplates
+            -P ${CMAKE_SOURCE_DIR}/cmake/PruneStagedMirrorOrphans.cmake
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
             ${CMAKE_SOURCE_DIR}/Engine/Assets
             ${CMAKE_BINARY_DIR}/Assets
@@ -181,6 +189,32 @@ add_test(NAME StagePackages.RemovedPackageLeavesTheStagedTree
           -DWORK=${CMAKE_BINARY_DIR}/Tests/StagePackagesScratch
           -P ${CMAKE_SOURCE_DIR}/cmake/Tests/StagePackagesTest.cmake)
 
+# Shader staging must recover a failed copy or fail the build, for both formats.
+foreach(_ge_shader_extension IN ITEMS shaderpkg spv)
+  add_test(NAME StageShaderPkgs.CopyFailures_${_ge_shader_extension}
+    COMMAND ${CMAKE_COMMAND}
+            -DSCRIPT=${CMAKE_SOURCE_DIR}/cmake/StageShaderPkgs.cmake
+            -DWORK=${CMAKE_BINARY_DIR}/Tests/StageShaderPkgsScratch_${_ge_shader_extension}
+            -DEXTENSION=${_ge_shader_extension}
+            -P ${CMAKE_SOURCE_DIR}/cmake/Tests/StageShaderPkgsTest.cmake)
+endforeach()
+# Deleted and renamed SDK headers leave all three mirrors on an ordinary rebuild.
+add_test(NAME EngineSdk.HeaderMirrorsPruneRemovedFiles
+  COMMAND ${CMAKE_COMMAND}
+          -DSCRIPT=${CMAKE_SOURCE_DIR}/cmake/GameEngineSDK.cmake
+          -DWORK=${CMAKE_BINARY_DIR}/Tests/StageSdkHeadersScratch
+          -DGENERATOR=${CMAKE_GENERATOR}
+          -P ${CMAKE_SOURCE_DIR}/cmake/Tests/StageSdkHeadersTest.cmake)
+
+# Engine's public interface: an interface definition or include directory of Engine or
+# a module that cmake/EnginePublicInterface.cmake does not list fails configure.
+# Exercised against scratch INTERFACE targets in child configures.
+add_test(NAME EnginePublicInterface.RefusesUnreviewedEntries
+  COMMAND ${CMAKE_COMMAND}
+          -DSCRIPT=${CMAKE_SOURCE_DIR}/cmake/EnginePublicInterface.cmake
+          -DWORK=${CMAKE_BINARY_DIR}/Tests/EnginePublicInterfaceScratch
+          -P ${CMAKE_SOURCE_DIR}/cmake/Tests/EnginePublicInterfaceTest.cmake)
+
 # Complete notice texts survive staging for transitive ports and vendored components.
 add_test(NAME StageThirdPartyNotices.CompleteTexts
   COMMAND ${CMAKE_COMMAND}
@@ -276,6 +310,12 @@ add_test(NAME VcpkgPin.PinsAndReportsTheVcpkgCheckout
           -DSCRIPT=${CMAKE_SOURCE_DIR}/cmake/VcpkgPin.cmake
           -DWORK=${CMAKE_BINARY_DIR}/Tests/VcpkgPinScratch
           -P ${CMAKE_SOURCE_DIR}/cmake/Tests/VcpkgPinTest.cmake)
+
+add_test(NAME VcpkgMakeOptions.KeepsDefaultInstallPaths
+  COMMAND ${CMAKE_COMMAND}
+          -DSCRIPT=${CMAKE_SOURCE_DIR}/cmake/ports/vcpkg-make/vcpkg_make_common.cmake
+          -DVCPKG_DIR=${VCPKG_DIR}
+          -P ${CMAKE_SOURCE_DIR}/cmake/Tests/VcpkgMakeOptionsTest.cmake)
 
 # The nethost and hostfxr the build stages come from the newest installed .NET;
 # this exercises the version ordering against scratch pack paths, without a build.
@@ -1073,7 +1113,7 @@ endforeach()
 set(_GE_PAGE_RESOLVE_PROBE_SPV ${CMAKE_BINARY_DIR}/Shaders/terrain_page_resolve_probe.comp.spv)
 add_custom_command(
   OUTPUT ${_GE_PAGE_RESOLVE_PROBE_SPV}
-  COMMAND ${CBT_GLSLC_EXECUTABLE} --target-env=vulkan1.3
+  COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3
           -I ${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Shaders/CBT
           ${CMAKE_CURRENT_SOURCE_DIR}/TerrainPageResolveProbe.comp -o ${_GE_PAGE_RESOLVE_PROBE_SPV}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/TerrainPageResolveProbe.comp ${_GE_PAGE_RESOLVE_GLSL}
@@ -1280,6 +1320,18 @@ set_tests_properties(TerrainModifierGizmoTests PROPERTIES
 if (WIN32 AND TARGET Editor)
   find_program(POWERSHELL_EXECUTABLE powershell)
   if (POWERSHELL_EXECUTABLE)
+    # Passed as one comma-joined argument: through -File, a second value after -Scenarios binds
+    # to the runner's next positional parameter. The runner prints "[UIReplay] N scenarios", and
+    # PASS_REGULAR_EXPRESSION requires N to be this list's length. While that property is set, CTest
+    # ignores the exit code: the test asserts the scenario count only, not that the scenarios passed.
+    set(_GE_UI_REPLAY_SMOKE_SCENARIOS
+      smoke_idle.json
+      repro_project_picker_recent_project_sceneview_primitives_visible.json
+      repro_assets_listview_horizontal_scrollbar_drag.json
+    )
+    list(LENGTH _GE_UI_REPLAY_SMOKE_SCENARIOS _GE_UI_REPLAY_SMOKE_COUNT)
+    list(TRANSFORM _GE_UI_REPLAY_SMOKE_SCENARIOS PREPEND "${CMAKE_SOURCE_DIR}/Tests/UIReplay/")
+    list(JOIN _GE_UI_REPLAY_SMOKE_SCENARIOS "," _GE_UI_REPLAY_SMOKE_ARG)
     add_test(NAME UIReplay.Smoke
       COMMAND ${POWERSHELL_EXECUTABLE} -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/Tests/run_ui_replay_tests_safe.ps1"
         -EditorExe $<TARGET_FILE:Editor>
@@ -1288,12 +1340,10 @@ if (WIN32 AND TARGET Editor)
         -OutDir ${CMAKE_BINARY_DIR}/Tests/UIReplay/out
         -ExitAfterFrames 700
         -TimeoutSeconds 120
-        -Scenarios
-          "${CMAKE_SOURCE_DIR}/Tests/UIReplay/smoke_idle.json"
-          "${CMAKE_SOURCE_DIR}/Tests/UIReplay/repro_project_picker_recent_project_sceneview_primitives_visible.json"
-          "${CMAKE_SOURCE_DIR}/Tests/UIReplay/repro_assets_listview_horizontal_scrollbar_drag.json"
+        -Scenarios "${_GE_UI_REPLAY_SMOKE_ARG}"
     )
     set_tests_properties(UIReplay.Smoke PROPERTIES
+      PASS_REGULAR_EXPRESSION "\\[UIReplay\\] ${_GE_UI_REPLAY_SMOKE_COUNT} scenarios"
       TIMEOUT 900
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )

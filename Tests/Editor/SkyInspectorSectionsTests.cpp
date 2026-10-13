@@ -170,7 +170,7 @@ TEST(SkyInspectorSections, EachSectionContainsTheRowsItTook)
         // span that runs past them reads three of its rows as stars that landed elsewhere.
         {"stars", "AddComponentFloatRowWithDrag<Components::SkyEnvironment>(stars, \"Star density\"",
          "if (!sky->AutoSunMoon)",
-         {"\"Brightness\"", "\"Size\"", "\"Diamond Shape\"", "\"Core Size\"", "\"Glow Falloff\"",
+         {"\"Brightness\"", "\"Size\"", "\"Sparkle Points\"", "\"Core Size\"", "\"Glow Falloff\"",
           "\"Twinkle Speed\"", "\"Twinkle Intensity\""}},
         // Sun size 2D leads the group: it belongs with the other 2D-only knobs rather than beside
         // the sun's real size, because it is a screen fraction and not an angle.

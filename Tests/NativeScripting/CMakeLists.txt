@@ -215,7 +215,10 @@ add_executable(NativeScriptManagerTests
     BuildHostTests.cpp
     # Linux runtime template checks: the x64 ELF Player and the one list of game files
     # a template export leaves behind.
-    LinuxRuntimeTemplateTests.cpp)
+    LinuxRuntimeTemplateTests.cpp
+    # The desktop export's material cook: its command line, the packages it names and
+    # their copy into the bundle's read-only shader cache.
+    MaterialVariantCookToolTests.cpp)
 set_target_properties(NativeScriptManagerTests PROPERTIES UNITY_BUILD OFF)
 # PlayerBuildConfigTests asserts per-configuration truths, so it needs the one
 # source that can name this binary's configuration. Preprocessor state cannot:

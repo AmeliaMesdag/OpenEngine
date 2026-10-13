@@ -123,6 +123,21 @@ inline void DisableRowOfControl(UIElement* control, const char* reason = nullptr
         control->SetTooltip(reason);
 }
 
+// Makes the inspector row `row` and everything in it inactive: the whole-row form of
+// DisableRowOfControl, for rows whose controls the caller does not hold (reflected rows). Every
+// element under the row is disabled, as each control's inactive look keys off its own state. A
+// non-empty `reason` becomes the row's tooltip.
+inline void DisableRow(UIElement* row, const char* reason = nullptr)
+{
+    if (!row)
+        return;
+    row->SetEnabled(false);
+    for (const auto& child : row->GetChildren())
+        DisableRow(child.get());
+    if (reason)
+        row->SetTooltip(reason);
+}
+
 inline FloatField* AddFloat(UIElement* parent, float value)
 {
     auto field = std::make_unique<FloatField>();

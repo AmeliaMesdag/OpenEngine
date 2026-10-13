@@ -515,9 +515,13 @@
     {
       "enabled": true,
       "id": "HeightFog",
+      "inputGates": {
+        "uSkyBackdrop": "heightFogSkyColorActive"
+      },
       "inputs": {
         "uSceneColor": "VolumetricClouds",
-        "uDepth": "View.DepthResolved"
+        "uDepth": "View.DepthResolved",
+        "uSkyBackdrop": "SkyBackdrop"
       },
       "inputUsages": {
         "uDepth": "Sampled"
@@ -534,7 +538,8 @@
       "passthroughInput": "uSceneColor",
       "samplers": {
         "uDepth": "LinearClamp",
-        "uSceneColor": "LinearClamp"
+        "uSceneColor": "LinearClamp",
+        "uSkyBackdrop": "LinearRepeat"
       },
       "shaderPkg": "Shaders/height_fog.shaderpkg",
       "skipWhen": {
@@ -1538,8 +1543,6 @@
         "ditherMode": 0,
         "exposure": 1.0,
         "ictcpChromaCompression": 0.0,
-        "outEncoding": 0,
-        "paperWhiteNits": 350.0,
         "tonemapMode": 4,
         "useAutoExposure": 0
       },
@@ -1550,7 +1553,6 @@
       "skipWhen": {
         "tonemapMode": 5.0,
         "exposure": 1.0,
-        "ditherMode": 0.0,
         "ictcpChromaCompression": 0.0,
         "useAutoExposure": 0.0
       },

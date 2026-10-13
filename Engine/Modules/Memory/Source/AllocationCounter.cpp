@@ -4,9 +4,10 @@
 //
 // One copy per process. The Memory module compiles it into Engine; a test executable
 // that links neither Engine nor the Memory module compiles its own copy. A target that
-// links either sees GE_ALLOCATION_COUNTER_LINKED (Memory's interface definition, which
-// Engine re-exports) and compiles this file empty, so its hook and its scopes reach the
-// linked copy instead of a second counter that the linked images would never feed.
+// links either sees GE_ALLOCATION_COUNTER_LINKED (set on this file alone, from the
+// link-interface property Memory and Engine carry: cmake/AllocationHook.cmake) and
+// compiles this file empty, so its hook and its scopes reach the linked copy instead of
+// a second counter that the linked images would never feed.
 //
 // No exported data and no exported thread_local: the state below has internal linkage,
 // and the functions are plain (no GE_API), exported on Windows through Engine.dll's

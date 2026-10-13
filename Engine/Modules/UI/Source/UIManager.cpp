@@ -217,10 +217,10 @@ void UIManagerUnregisterTransitioningElement(UIManager* owner, UIElement* el)
 // through ~UIManager too, because DetachSurvivingElements reads it after the owned tree is
 // destroyed. `owner` never dangles: an element outliving its manager is detached by that
 // manager's destructor.
-void UIManagerUnregisterElementInstanceId(UIManager* owner, UIElement* el)
+void UIManagerUnregisterElementLookups(UIManager* owner, UIElement* el)
 {
     if (owner && el)
-        owner->UnregisterElementInstanceId(el->GetInstanceId(), el);
+        owner->UnregisterElementLookups(el->GetInstanceId(), el);
 }
 
 void UIManagerNotifyElementContentDirty(UIManager* owner, UIElement* el)

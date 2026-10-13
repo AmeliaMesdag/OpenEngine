@@ -8,7 +8,8 @@
 //  - OccupancySnapshotTest: SnapshotOccupancy() names what every pool thread
 //    runs while jobs are parked on it, with a start time for Background and
 //    channel jobs; a body that ran nested jobs reads as itself again, with its
-//    own start time; an inline pool has no slots.
+//    own start time, and keeps that start time while a nested job of its own
+//    class runs; an inline pool has no slots.
 //  - CurrentJobContextTest: a job body runs as the class of the lane it was
 //    dequeued from (local, global, steal and Background pops, the spin poll's
 //    Background find), as its channel on a blocking thread, including after a
@@ -423,6 +424,41 @@ TEST(OccupancySnapshotTest, ABodyThatRanNestedJobsReadsAsItselfWithItsOwnStartTi
     EXPECT_EQ(body->SinceNs, outerSinceNs.load()) << "the slot kept a nested job's start time";
 }
 
+// A Background body on the only worker forks and waits, so the worker runs
+// each tagged job nested inside the body, as the body's own class. While a
+// nested job runs, the slot keeps the body's start time, not the nested
+// job's: the hang watchdog reports how long the body has been running.
+TEST(OccupancySnapshotTest, ANestedJobOfTheBodysOwnClassKeepsTheBodysStartTime) {
+    WorkStealingThreadPool pool(1);
+    std::atomic<uint64> outerSinceNs{0};
+    std::atomic<uint64> nestedSinceNs{0};
+    std::atomic<bool> joined{false};
+    pool.EnqueueWork(
+        [&] {
+            const std::vector<Occupancy> before = Snapshot(pool);
+            if (const Occupancy* self = FindRunning(before, ThreadKind::Worker, "Background")) {
+                outerSinceNs.store(self->SinceNs);
+            }
+            JobCounter counter;
+            pool.Run(
+                [&] {
+                    // The nested job starts measurably after the body.
+                    std::this_thread::sleep_for(1ms);
+                    const std::vector<Occupancy> nested = Snapshot(pool);
+                    if (const Occupancy* self = FindRunning(nested, ThreadKind::Worker, "Background")) {
+                        nestedSinceNs.store(self->SinceNs);
+                    }
+                },
+                counter);
+            pool.Wait(counter);
+            joined.store(true);
+        },
+        JobPriority::Background);
+    ASSERT_TRUE(WaitUntil([&] { return joined.load(); }));
+    ASSERT_NE(outerSinceNs.load(), 0u) << "the body did not find its own slot";
+    EXPECT_EQ(nestedSinceNs.load(), outerSinceNs.load()) << "the slot carries the nested job's start time";
+}
+
 // An inline pool has no threads and so no slots.
 TEST(OccupancySnapshotTest, AnInlinePoolHasNoSlots) {
     WorkStealingThreadPool pool(0);
@@ -803,7 +839,7 @@ TEST(PublishCountScopeTest, TheInnermostScopeCounts) {
     EXPECT_EQ(inner, 2u);
 }
 
-// The test thread parks in Wait, so the job's body runs on a worker and its
+// A bare job runs on a worker, never on the publishing thread, so its
 // publishes happen there, outside the test thread's scope: the scope counts
 // the job and not the jobs it publishes; the pool's total counts both.
 TEST(PublishCountScopeTest, OtherThreadsPublishesAreNotCounted) {
@@ -813,16 +849,14 @@ TEST(PublishCountScopeTest, OtherThreadsPublishesAreNotCounted) {
     std::atomic<int> ran{0};
     {
         WorkStealingThreadPool::PublishCountScope scope(published);
-        JobCounter counter;
-        pool.Run([&pool, &ran] {
+        pool.EnqueueWork([&pool, &ran] {
             JobCounter nested;
             pool.Run([&ran] { ran.fetch_add(1); }, nested);
             pool.Run([&ran] { ran.fetch_add(1); }, nested);
             pool.Wait(nested);
-        }, counter);
-        pool.Wait(counter);
+        });
+        ASSERT_TRUE(WaitUntil([&] { return ran.load() == 2; }));
     }
-    EXPECT_EQ(ran.load(), 2);
     EXPECT_EQ(published, 1u);
     EXPECT_EQ(pool.GetPublishedJobCount() - publishedBefore, 3u);
 }

@@ -9,6 +9,7 @@
 namespace GameEngine
 {
 
+class Dropdown;
 class FloatField;
 class Label;
 class PopoverArrow;
@@ -50,8 +51,8 @@ public:
 
     // Re-reads SceneViewSettings into the controls. Runs on every ShowAt;
     // also called externally when settings change while the popup is open
-    // (e.g. the post-fx context menu's auto-exposure toggle, which seeds
-    // Fixed EV100 as a side effect).
+    // (e.g. the post-fx context menu's exposure mode rows, whose switch to
+    // Fixed seeds Fixed EV100 as a side effect).
     void SyncFromSettings();
 
 private:
@@ -84,8 +85,8 @@ private:
                             std::initializer_list<TickMark> ticks);
     // Muted caption line aligned to the slider column (e.g. the EV legend).
     UIElement* AddCaption(UIElement& parent, const char* id, const char* text);
-    // Auto mode shows the adaptation clamps; manual shows the fixed EV pin with
-    // its tick anchors. Compensation is visible in both modes.
+    // Auto shows the adaptation clamps, Scene Light its derived EV, Fixed the
+    // fixed EV pin with its tick anchors. Compensation is visible in every mode.
     void UpdateExposureRowVisibility();
 
     bool m_Visible = false;
@@ -108,7 +109,9 @@ private:
     SliderRow m_CompensationRow;
     UIElement* m_ExposureEvLegend = nullptr;
     UIElement* m_AdaptationDelayRow = nullptr;
-    Toggle* m_AutoExposureToggle = nullptr;
+    UIElement* m_SceneLightEvRow = nullptr;
+    Label* m_SceneLightEvLabel = nullptr;
+    Dropdown* m_ExposureModeDropdown = nullptr;
     Toggle* m_UseAdaptationDelayToggle = nullptr;
     uint64_t m_SettingsChangedListenerId = 0;
 };

@@ -116,6 +116,7 @@ MaterialBuildResult BuildMaterialToShaderPackage(const GameEngine::MaterialDocum
         ShaderProgramCompileRequest creq{};
         creq.debugName = debugName.empty() ? materialPath.stem().string() : debugName;
         creq.baseDirectory = materialPath.parent_path();
+        creq.readOnlyCacheRoots = context.ReadOnlyCacheRoots;
         creq.cacheRoot = cacheRoot;
 
         ShaderVariantKey variantKey{};
@@ -252,7 +253,7 @@ MaterialBuildResult BuildMaterialToShaderPackage(const GameEngine::MaterialDocum
                 out.errors.push_back(
                     "Hint: the surface shader '" + doc.surfaceShader +
                     "' must define exactly: SurfaceOutput EvaluateSurface(SurfaceInput). "
-                    "See Engine/Modules/Rendering/docs/SurfaceShaderAuthoring.html.");
+                    "See docs/rendering/surface-shader-authoring.mdx.");
             }
             // Dump only the stage that failed (CompileProgramToCache stops at
             // the first failing stage — "Compile failed (<stage>):"). If the

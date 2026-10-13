@@ -439,11 +439,18 @@ void BuildMarkupVolumeSection(const InspectorContext& ctx, MarkupEditorBridge& b
     RebuildOnPlayModeChange(ctx, bridge);
 }
 
-void RegisterSectionTitle(ECS::ComponentTypeId type, const char* title)
+// The mark-up glyph the Scene View tool strip's Mark-up entry shows (markup.svg): one class for the
+// inspector section header and the Add Component picker, one for the Hierarchy row.
+constexpr const char* kMarkupIconClass = "inspector-section-icon-markup";
+constexpr const char* kMarkupHierarchyRowClass = "hierarchy-entity-markup";
+
+void RegisterSectionTraits(ECS::ComponentTypeId type, const char* title, const char* hierarchyRowClass)
 {
     EditorComponentTraits traits;
     EditorComponentTraitsRegistry::Get().TryGet(type, traits);
     traits.DisplayName = title;
+    traits.InspectorIconClass = kMarkupIconClass;
+    traits.HierarchyRowClass = hierarchyRowClass;
     EditorComponentTraitsRegistry::Get().Register(type, std::move(traits));
 }
 
@@ -451,8 +458,8 @@ void RegisterSectionTitle(ECS::ComponentTypeId type, const char* title)
 
 void RegisterMarkupInspector(MarkupEditorBridge& bridge)
 {
-    RegisterSectionTitle(ECS::GetComponentTypeId<Markup>(), "Mark-up");
-    RegisterSectionTitle(ECS::GetComponentTypeId<MarkupVolume>(), "Mark-up Volume");
+    RegisterSectionTraits(ECS::GetComponentTypeId<Markup>(), "Mark-up", kMarkupHierarchyRowClass);
+    RegisterSectionTraits(ECS::GetComponentTypeId<MarkupVolume>(), "Mark-up Volume", "");
     InspectorRegistry::Get().RegisterComponentInspector<MarkupVolume>(
         [&bridge](const InspectorContext& ctx) { BuildMarkupVolumeSection(ctx, bridge); });
     RegisterMarkupRegionTraits();
@@ -469,7 +476,7 @@ void RegisterMarkupInspector(MarkupEditorBridge& bridge)
         Dropdown* status = AddStatusRow(ctx, bridge, *markup);
         AddColorRow(ctx, bridge, *markup);
         TextField* tags = AddTagsRow(ctx, bridge, notes);
-        InspectorUI::AddTextBlock(ctx.Parent, CreatedChangedText(*markup, bridge.Now()), "markup-inspector-history");
+        InspectorUI::AddInfoCard(ctx.Parent, CreatedChangedText(*markup, bridge.Now()));
         TextArea* description = AddDescriptionRow(ctx, bridge, notes);
         AddMarkupRegionBlock(ctx, bridge);
         AddMarkupPathBlock(ctx, bridge);

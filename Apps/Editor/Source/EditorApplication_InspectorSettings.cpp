@@ -8,6 +8,7 @@
 #include "Editor/Settings/AssetPreviewSettings.h"
 #include "Editor/Settings/InfoCardAppearanceSettings.h"
 #include "Editor/Settings/GameUIScaleSettingsPage.h"
+#include "Editor/Settings/SceneViewExposureSettingsPage.h"
 #include "Editor/Settings/GraphSettingsPage.h"
 #include "Editor/Settings/LodSettingsPage.h"
 #include "Editor/Settings/EditorSettingsRegistry.h"
@@ -467,6 +468,8 @@ void EditorApplication::InitializeAssetsGridAndSmartFolderSettings(SettingsPanel
     Editor::RegisterLodSettingsCategory();
     // Game UI Scaling likewise; the game UI hosts read it back from the project.
     Editor::RegisterGameUIScaleSettingsCategory();
+    // The Scene View's exposure rows, inline on its Preferences page.
+    Editor::RegisterSceneViewExposureSettingsCategory();
     // Experimental renderer switches own theirs, and apply them at startup.
     Editor::RegisterExperimentalRenderingSettingsCategory();
     // Interface (context-menu backend) likewise.

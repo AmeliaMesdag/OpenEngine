@@ -16,7 +16,7 @@
 //     TryReadField / ReadableFieldNames, and — since Phase 2 — by the
 //     BlendPostProcessSettings fold (each entry carries its blend rule and
 //     contributes-group). Volume-core names (exposure, tonemapMode,
-//     ditherMode) and the fog-glow group shared by both fog effects stay in
+//     ictcpChromaCompression) and the fog-glow group shared by both fog effects stay in
 //     PostProcessSettings.cpp appendices.
 //   - Gates: the computed "<effect>Active" skipWhen names this effect alone
 //     decides, with their predicates. Gates that combine effects live in the
@@ -274,6 +274,7 @@ void CopyHeightFogEffectToSettings(
     settings.HeightFogUseTimeOfDay = effect.UseTimeOfDay ? 1 : 0;
     settings.HeightFogSkyHorizonOffset = std::clamp(effect.SkyHorizonOffset, -1.0f, 1.0f);
     settings.HeightFogSkyBottomStrength = std::clamp(effect.SkyBottomStrength, 0.0f, 1.0f);
+    settings.HeightFogColorMode = static_cast<int32_t>(effect.ColorMode);
 
     // A volume can contain both fog components. They intentionally share one
     // post-fog pyramid; the stronger enabled authoring block owns its shape.
@@ -593,7 +594,6 @@ constexpr EffectSettingsField kColorFilterSettings[]{
     PP_SETTING("colorFilterB", ColorFilterB),
     PP_SETTING("colorFilterIntensity", ColorFilterIntensity),
     PP_SETTING("colorFilterBlendMode", ColorFilterBlendMode),
-    PP_SETTING("colorFilterStackOrder", ColorFilterStackOrder),
 };
 
 constexpr EffectSettingsField kContrastAdaptiveSharpenSettings[]{
@@ -788,6 +788,7 @@ constexpr EffectSettingsField kHeightFogSettings[]{
     PP_BLEND_IN(HeightFogNoiseVelY, HeightFog),
     PP_BLEND_IN(HeightFogNoiseVelZ, HeightFog),
     PP_BLEND_IN(HeightFogUseTimeOfDay, HeightFog),
+    PP_BLEND_IN(HeightFogColorMode, HeightFog),
 };
 
 constexpr EffectSettingsField kColorGradeSettings[]{
@@ -1060,6 +1061,7 @@ constexpr EffectSettingsGate kVolumetricFogGates[]{
 };
 constexpr EffectSettingsGate kHeightFogGates[]{
     {"heightFogActive", [](const PPS& s) { return s.IsHeightFogActive(); }},
+    {"heightFogSkyColorActive", [](const PPS& s) { return s.IsHeightFogSkyColorActive(); }},
 };
 constexpr EffectSettingsGate kAtmosphericCloudGates[]{
     {"atmosphericCloudActive", [](const PPS& s) { return s.IsAtmosphericCloudActive(); }},
@@ -1544,7 +1546,6 @@ void RegisterBuiltInPostProcessEffectDescriptors()
                 out.Settings.ColorFilterB         = cf->Color[2];
                 out.Settings.ColorFilterIntensity = cf->Intensity;
                 out.Settings.ColorFilterBlendMode = static_cast<int32>(cf->BlendMode);
-                out.Settings.ColorFilterStackOrder = cf->StackOrder;
             }
         },
     });

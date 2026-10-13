@@ -46,6 +46,17 @@ function(ge_add_production_allocation_hook target_name)
     _ge_allocation_hook_compile_alone(${target_name})
 endfunction()
 
+# The counter copy compiles empty in a target whose link closure already holds the
+# counter: Memory and Engine carry the GE_ALLOCATION_COUNTER_LINKED link-interface
+# property (COMPATIBLE_INTERFACE_BOOL), which $<TARGET_PROPERTY:...> evaluates over the
+# compiling target's dependencies. Only this source sees the definition.
+function(_ge_allocation_counter_compile_empty_when_linked target_name)
+    set_source_files_properties(${GE_ALLOCATION_COUNTER_SOURCE}
+        TARGET_DIRECTORY ${target_name}
+        PROPERTIES COMPILE_DEFINITIONS
+            "$<$<BOOL:$<TARGET_PROPERTY:GE_ALLOCATION_COUNTER_LINKED>>:GE_ALLOCATION_COUNTER_LINKED>")
+endfunction()
+
 function(_ge_is_test_executable target_name out_var)
     set(${out_var} FALSE PARENT_SCOPE)
     get_target_property(_type ${target_name} TYPE)
@@ -70,6 +81,7 @@ function(ge_add_allocation_hook_to_test_executables)
         target_sources(${_target} PRIVATE ${GE_ALLOCATION_HOOK_SOURCE} ${GE_ALLOCATION_COUNTER_SOURCE})
         target_include_directories(${_target} PRIVATE ${GE_ALLOCATION_COUNTER_INCLUDE_DIRS})
         _ge_allocation_hook_compile_alone(${_target})
+        _ge_allocation_counter_compile_empty_when_linked(${_target})
         math(EXPR _count "${_count} + 1")
     endforeach()
     message(STATUS "Allocation counter: hook compiled into ${_count} test executables")

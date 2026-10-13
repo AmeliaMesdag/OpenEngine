@@ -247,7 +247,7 @@ bool UIManager::DispatchMouseButtonPress()
                 m_MouseCaptured = true;
                 m_CaptureElement = root;
                 m_CaptureInstanceId = root->GetInstanceId();
-                m_CaptureId = root->GetId();
+                m_CaptureId = EnsureElementId(root);
             }
             return true;
         }
@@ -378,10 +378,12 @@ bool UIManager::DispatchMouseButtonRelease()
         return consumed;
 
     // A captured press deferred its focus assignment to this release (see the
-    // press half). Honor the capture's focus target first so a drag that ends
-    // outside the control (text drag-selection past the field edge) still
-    // focuses it; non-focusable captures (scrollbar thumb, splitter) fall
-    // through without touching focus.
+    // press half). Only the capture's focus target can take it, so a drag that
+    // ends outside the control (text drag-selection past the field edge) still
+    // focuses it, and a non-focusable capture (scrollbar thumb, splitter, the
+    // root holding a swallowed press) ends without touching focus, whatever
+    // lies under the pointer by now. Only an uncaptured release focuses the
+    // pointer target.
     UIElement* released = nullptr;
     if (hadCapture)
     {
@@ -394,7 +396,7 @@ bool UIManager::DispatchMouseButtonRelease()
         if (released && !(released->ResolveFocusTarget() && released->ResolveFocusTarget()->IsFocusable()))
             released = nullptr;
     }
-    if (!released)
+    if (!released && !hadCapture)
         released = pointerTarget;
     UIElement* focusTarget = released ? released->ResolveFocusTarget() : nullptr;
     if (focusTarget && focusTarget->IsFocusable() && focusTarget->IsEnabledInHierarchy())
@@ -1153,6 +1155,9 @@ bool UIManager::DispatchBubbleEvent(UIElement* target, EventId id, int button,
     if (!treeMutated) { if (m_TreeStructureGeneration.load(std::memory_order_relaxed) != treeGenBefore) treeMutated = true; }
     // Accept capture — but only if the requesting element survived the deferred actions above.
     // Prefer storing the pointer (re-resolved by id) to work across Mount portals.
+    // A press whose requester did not survive (a dropdown item whose commit rebuilt the
+    // inspector) still owns the rest of its gesture: the root holds it, so the release reaches
+    // no control and, as a non-focusable capture, moves no focus (DispatchMouseButtonRelease).
     if (captureReqInstanceId != 0 && !m_MouseCaptured)
     {
         UIElement* cap = FindElementByInstanceId(captureReqInstanceId);
@@ -1166,6 +1171,16 @@ bool UIManager::DispatchBubbleEvent(UIElement* target, EventId id, int button,
             {
                 // Capture must be restorable across rebuilds (splitter drag, virtualization).
                 m_CaptureId = EnsureElementId(cap);
+            }
+        }
+        else if (id == kEventMouseDown)
+        {
+            if (UIElement* root = GetRootElement())
+            {
+                m_MouseCaptured = true;
+                m_CaptureElement = root;
+                m_CaptureInstanceId = root->GetInstanceId();
+                m_CaptureId = EnsureElementId(root);
             }
         }
     }

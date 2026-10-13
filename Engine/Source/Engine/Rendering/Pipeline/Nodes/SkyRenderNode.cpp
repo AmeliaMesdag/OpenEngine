@@ -1,14 +1,16 @@
 #include "Engine/Rendering/Pipeline/Nodes/SkyRenderNode.h"
 #include "Engine/Rendering/Pipeline/RenderPipeline.h"
 #include "Engine/Rendering/RenderServices.h"
+#include "Engine/Rendering/SkyBackdrop.h"
 #include "Engine/Rendering/SkyRenderFeature.h"
-#include "Components/Rendering/SkyEnvironment.h" // Components::SkyMode
 #include "Logger/Logger.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Sky/SkyRenderer.h"
 #include "Rendering/Sky/SkySettings.h"
+#include "Rendering/Sky/StarSparkleEnergy.h"
 
 #include <nlohmann/json.hpp>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <numbers>
@@ -28,22 +30,6 @@ static constexpr float kProjectionEpsilon = 1e-6f;
 // sky_render.frag: starSizeRange.w >= 0 selects HDRI path (intensity may be 0 for black sky).
 // Sentinel selects procedural/analytic sky so zero intensity is not confused with "no HDRI".
 static constexpr float kSkyHdriProceduralSentinel = -1.0f;
-
-// Scene Skybox with an equirectangular HDRI: the fragment shader samples the environment
-// map directly by view direction. Procedural transmittance / sky-view LUT work is unused.
-static bool IsHdriBackdropSky(const Rendering::SkySettings& settings)
-{
-    return settings.environmentTexture.IsValid();
-}
-
-// Gradient sky renders a stylized 3-color gradient instead of the atmosphere, so — like the
-// HDRI backdrop — it needs neither the sky-view LUT compute nor the star billboards. HDRI wins
-// if both somehow resolve (a gradient sky never sets an environment texture).
-static bool IsGradientSky(const Rendering::SkySettings& settings)
-{
-    return settings.skyMode == static_cast<uint32_t>(Components::SkyMode::Gradient) &&
-           !settings.environmentTexture.IsValid();
-}
 
 static constexpr uint32_t DivCeil(uint32_t a, uint32_t b) { return (a + b - 1) / b; }
 
@@ -128,6 +114,9 @@ static float ExtractAspect(const Rendering::CameraData& cam)
 
 static constexpr float kBaseStarRadius    = 0.225f;
 static constexpr float kBaseDiamondRadius = 0.5625f;
+static_assert(kBaseStarRadius / kBaseDiamondRadius - Rendering::kStarSparkleCoreRadius < 1e-6f &&
+                  Rendering::kStarSparkleCoreRadius - kBaseStarRadius / kBaseDiamondRadius < 1e-6f,
+              "the star sparkle's energy gain integrates the core at this radius");
 static constexpr float kBaseCellScale     = 256.0f; // Shader clamps to [64, 4096]
 static constexpr float kTwinkleMinFreq    = 0.3f;
 static constexpr float kTwinkleMaxFreq    = 1.5f;
@@ -185,8 +174,9 @@ static void FillSkyUBOFromSettings(const Rendering::SkySettings& settings, SkyUB
 
     ubo.starTwinkleAmp[0] = settings.twinkleIntensity;
     ubo.starTwinkleAmp[1] = 1.2f;
-    ubo.starTwinkleAmp[2] = 0.0f; // Multi-cell flag: 0 = disabled
-    ubo.starTwinkleAmp[3] = 0.0f; // vec4 padding
+    // The star's glow and sparkle energy gains; the sky pass sets them (StarSparkleEnergyFor).
+    ubo.starTwinkleAmp[2] = 1.0f;
+    ubo.starTwinkleAmp[3] = 1.0f;
 
     ubo.starDensityHorizon[0] = settings.starDensity;
     ubo.starDensityHorizon[1] = kHorizonFadeStart;
@@ -210,9 +200,7 @@ static void FillSkyUBOFromSettings(const Rendering::SkySettings& settings, SkyUB
     // Gradient sky: .rgb already scene-linear (intensity folded in by the system). The mode
     // sentinel rides gradientSkyTop.w: an HDRI backdrop wins (it is a separate component path),
     // so gradient is only active when there is no environment texture.
-    const bool gradientMode =
-        settings.skyMode == static_cast<uint32_t>(Components::SkyMode::Gradient) &&
-        !settings.environmentTexture.IsValid();
+    const bool gradientMode = ClassifySkyBackdrop(settings) == SkyBackdropKind::Gradient;
     for (int i = 0; i < 3; ++i)
     {
         ubo.gradientSkyTop[i]     = settings.gradientSkyTopColor[i];
@@ -445,7 +433,7 @@ void SkyRenderNode::Declare(RenderPipelineInstance& instance, const PipelineDecl
     m_WarnedNoComponent = false;
 
     const auto& settings = sky.GetSettings();
-    if (IsHdriBackdropSky(settings) || IsGradientSky(settings))
+    if (ClassifySkyBackdrop(settings) != SkyBackdropKind::Atmosphere)
         return; // backdrop-only: the per-view draw samples the env texture / gradient directly
 
     auto& renderer = sky.GetRenderer();
@@ -634,17 +622,47 @@ void SkyRenderNode::Declare(RenderPipelineInstance& instance, const PipelineDecl
     }
 }
 
+Rendering::StarSparkleEnergy SkyRenderNode::StarSparkleEnergyFor(const Rendering::SkySettings& settings)
+{
+    const std::array<float, 3> inputs{settings.starDiamondShape, settings.starCoreSize, settings.starGlowFalloff};
+    if (inputs != m_StarSparkleEnergyInputs)
+    {
+        m_StarSparkleEnergyInputs = inputs;
+        m_StarSparkleEnergy = Rendering::ComputeStarSparkleEnergy(inputs[0], inputs[1], inputs[2]);
+    }
+    return m_StarSparkleEnergy;
+}
+
 void SkyRenderNode::DeclareForView(ViewDeclare& d)
 {
     auto& rs = d.Services;
     auto* skyFeat = rs.GetFeature<SkyRenderFeature>();
     if (!skyFeat || !skyFeat->IsInitialized() || !skyFeat->HasActiveSettings())
+    {
+        // The name always resolves, so a pass reading the backdrop never declines for want of a
+        // sky; its readers learn there is none from their own sky settings check.
+        d.PublishTexture(Names::Res::SkyBackdrop,
+                         d.Frame.ImportExternalTexture("Sky_Backdrop_Absent",
+                                                       rs.Textures().GetDefaultBlackTexture(),
+                                                       Rendering::ResourceState::ShaderResource));
         return;
+    }
     auto& sky = *skyFeat;
     auto& renderer = sky.GetRenderer();
     EnsureDescriptorSetDescs(renderer.GetBindingSlots());
     const Rendering::ViewId viewId = d.View.id;
     const uint32_t viewKey = static_cast<uint32_t>(viewId);
+
+    const auto& settings = sky.GetSettings();
+    const Rendering::StarSparkleEnergy starEnergy = StarSparkleEnergyFor(settings);
+    const Rendering::TextureHandle skySourceTex = settings.environmentTexture.IsValid()
+                                                      ? settings.environmentTexture
+                                                      : renderer.GetSkyViewLutTexture();
+    // Dedup-by-handle lands these on the frame-scope Declare's ids when the
+    // LUT path is active; the HDRI env texture imports fresh as sampled.
+    const RenderGraph::RGTexture skySource = d.Frame.ImportExternalTexture(
+        "Sky_Backdrop_Source", skySourceTex, Rendering::ResourceState::ShaderResource);
+    d.PublishTexture(Names::Res::SkyBackdrop, skySource);
 
     const RenderGraph::RGTexture out = d.ResolveTexture(m_OutputRef);
     if (!out.IsValid())
@@ -653,15 +671,6 @@ void SkyRenderNode::DeclareForView(ViewDeclare& d)
     // AT DECLARATION: the world arm (later in blueprint order) reads this
     // when deciding Clear-vs-Load for its color attach.
     rs.Views().MarkViewSkyBackdropScheduled(viewId);
-
-    const auto& settings = sky.GetSettings();
-    const Rendering::TextureHandle skySourceTex = settings.environmentTexture.IsValid()
-                                                      ? settings.environmentTexture
-                                                      : renderer.GetSkyViewLutTexture();
-    // Dedup-by-handle lands these on the frame-scope Declare's ids when the
-    // LUT path is active; the HDRI env texture imports fresh as sampled.
-    const RenderGraph::RGTexture skySource = d.Frame.ImportExternalTexture(
-        "Sky_Backdrop_Source", skySourceTex, Rendering::ResourceState::ShaderResource);
     const RenderGraph::RGTexture trans = d.Frame.ImportExternalTexture(
         "Sky_Transmittance_LUT", renderer.GetTransmittanceLutTexture(),
         renderer.IsTransmittanceComputed() ? Rendering::ResourceState::ShaderResource
@@ -695,8 +704,8 @@ void SkyRenderNode::DeclareForView(ViewDeclare& d)
             p.Read(skySource, RenderGraph::RGTextureRead::Sampled);
             p.Read(trans, RenderGraph::RGTextureRead::Sampled);
         },
-        [this, rendererPtr, skyPtr, rsPtr, viewId, viewKey, vpX, vpY, vpW,
-         vpH](RenderGraph::RGContext& passCtx)
+        [this, rendererPtr, skyPtr, rsPtr, viewId, viewKey, vpX, vpY, vpW, vpH,
+         starEnergy](RenderGraph::RGContext& passCtx)
         {
             auto* cl = passCtx.Cmd;
             auto* dev = passCtx.GetDevice();
@@ -731,6 +740,8 @@ void SkyRenderNode::DeclareForView(ViewDeclare& d)
             const auto& settings = skyPtr->GetSettings();
             SkyUBOGPU skyUbo{};
             FillSkyUBOFromSettings(settings, skyUbo);
+            skyUbo.starTwinkleAmp[2] = starEnergy.GlowGain;
+            skyUbo.starTwinkleAmp[3] = starEnergy.SparkleGain;
             skyUbo.cameraPosition[0] = camPos[0];
             skyUbo.cameraPosition[1] = camPos[1];
             skyUbo.cameraPosition[2] = camPos[2];
@@ -793,7 +804,7 @@ void SkyRenderNode::DeclareForView(ViewDeclare& d)
             cl->BindDescriptorSet(0, ds, pipeVar);
             cl->Draw(3, 1);
 
-            if (IsHdriBackdropSky(settings) || IsGradientSky(settings))
+            if (ClassifySkyBackdrop(settings) != SkyBackdropKind::Atmosphere)
                 return;
 
             const float nightBlend = settings.nightSkyBlend;

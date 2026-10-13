@@ -161,17 +161,12 @@ public:
         
         // Enable JavaScript (required for YouTube embeds)
         WKPreferences* preferences = [[WKPreferences alloc] init];
-        preferences.javaScriptEnabled = YES;
+        config.defaultWebpagePreferences.allowsContentJavaScript = YES;
         // Enable HTML5 fullscreen API so YouTube (and other sites) can go fullscreen
         if ([preferences respondsToSelector:@selector(_setFullScreenEnabled:)]) {
             [preferences _setFullScreenEnabled:YES];
         }
         config.preferences = preferences;
-        
-        // Set process pool to allow proper referrer handling
-        if (!config.processPool) {
-            config.processPool = [[WKProcessPool alloc] init];
-        }
         
         // Configure website data store for proper cookie/security settings
         // Use default data store which supports cookies and secure connections
@@ -475,6 +470,9 @@ public:
         m_OnMouseDown = std::move(callback);
     }
 
+    // Creation fails synchronously here: CreateWebView returns nullptr instead.
+    void SetOnUnavailable(std::function<void(const std::string&)> /*callback*/) override {}
+
     void Destroy() override {
         if (m_MouseDownMonitor) {
             [NSEvent removeMonitor:m_MouseDownMonitor];
@@ -505,7 +503,7 @@ private:
     bool m_Initialized = false;
 };
 
-std::unique_ptr<IWebView> CreateWebView(Window* parentWindow) {
+std::unique_ptr<IWebView> CreateWebView(Window* parentWindow, const std::filesystem::path& /*userDataFolder*/) {
     if (!parentWindow) {
         return nullptr;
     }

@@ -133,7 +133,8 @@ void GameUIHost::ConfigureFonts(const std::filesystem::path& assetsDir)
     if (!reg.IsAssetRegistered(fontPath))
         reg.RegisterAsset(fontPath);
     const GUID fontGuid = reg.GetAssetGUID(fontPath);
-    const std::vector<uint8_t>& bytes = ReadDefaultFontBytesCached(fontPath.string());
+    const std::string fontPathString = fontPath.string();
+    const std::vector<uint8_t>& bytes = ReadDefaultFontBytesCached(fontPathString);
     if (!m_UI->SetDefaultFontBytes(bytes, fontGuid))
         Logger::Log::Warning("Game UI: failed to install default font '{}'", fontPath.string());
 

@@ -2085,11 +2085,11 @@ void RegisterSkyEnvironmentInspector()
             [](Components::SkyEnvironment& u, float v) { u.StarSize = std::clamp(v, 0.1f, 3.0f); },
             sky->StarSize, "Star size.", extras);
 
-        AddComponentFloatRowWithDrag<Components::SkyEnvironment>(stars, "Diamond Shape", sky->StarDiamondShape, w, e, n,
-            undo, "Change Sky Star Diamond Shape",
+        AddComponentFloatRowWithDrag<Components::SkyEnvironment>(stars, "Sparkle Points", sky->StarDiamondShape, w, e, n,
+            undo, "Change Sky Star Sparkle Points",
             [](Components::SkyEnvironment& u, float v) { u.StarDiamondShape = std::clamp(v, 0.0f, 1.0f); },
             sky->StarDiamondShape,
-            "Diamond spike strength.", extras);
+            "How bright the sparkle's four points are against its core.", extras);
 
         AddComponentFloatRowWithDrag<Components::SkyEnvironment>(stars, "Core Size", sky->StarCoreSize, w, e, n,
             undo, "Change Sky Star Core Size",

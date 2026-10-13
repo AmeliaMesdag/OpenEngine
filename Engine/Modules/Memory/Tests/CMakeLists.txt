@@ -3,15 +3,19 @@
 
 find_package(GTest REQUIRED)
 
-# The counter and its windows, the stats registry and the arena, over the Memory module's own
-# copy of each. JobSystem gives the Process window a real worker to fork onto.
+# The counter and its windows, the stats registry, the arena, the object pool and scratch scopes,
+# over the Memory module's own copy of each. JobSystem gives the Process window a real worker to
+# fork onto, and scratch scopes the pool's ways of nesting bodies on one thread.
 add_executable(MemoryTests
     AllocationCountScopeTests.cpp
     AllocationSiteTagTests.cpp
     ArenaImagePinTests.cpp
     ArenaTests.cpp
     ArenaUseTests.cpp
+    ObjectPoolTests.cpp
+    ObjectPoolUseTests.cpp
     ScopedAllocationFaultTests.cpp
+    ScratchScopeTests.cpp
     TrackedBytesTests.cpp
 )
 target_compile_features(MemoryTests PRIVATE cxx_std_20)

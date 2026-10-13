@@ -20,7 +20,6 @@
 #include "Assets/TimelineAsset.h"
 #include "Assets/AnimationGraphAsset.h"
 #include "Assets/NavGridAsset.h"
-#include "Assets/NavMeshAsset.h"
 #include "Assets/SceneAsset.h"
 #include "Graph/GraphAsset.h"
 
@@ -132,8 +131,6 @@ void RegisterCoreAssetTypes(AssetTypeRegistry& typeRegistry)
 
     RegisterCoreType(typeRegistry, AssetType::NavigationGrid, &CreateAssetAtPath<NavGridAsset>,
                      "Navigation Grid Asset");
-    RegisterCoreType(typeRegistry, AssetType::NavigationMesh, &CreateAssetAtPath<NavMeshAsset>,
-                     "Navigation Mesh Asset");
 
     // Ocean payloads are consumed by the ocean systems directly.
     RegisterCoreType(typeRegistry, AssetType::OceanDepthCache, &CreateBinaryAsset, "Ocean Depth Cache");

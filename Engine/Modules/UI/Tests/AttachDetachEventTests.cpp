@@ -728,6 +728,8 @@ TEST(AttachDetachEventTests, ReconcilePreservedElementsGetNoPairAndNewOnesAttach
     auto* layout = dynamic_cast<UILayoutAsset*>(asset.get());
     ASSERT_NE(layout, nullptr);
 
+    AttachLog log;
+    AttachLog addedLog;
     UIManager ui(dev.get(), &assets);
     ASSERT_TRUE(ui.LoadLayoutFromAsset(*layout));
     ui.Update(0.0f, /*interactive=*/false);
@@ -739,7 +741,6 @@ TEST(AttachDetachEventTests, ReconcilePreservedElementsGetNoPairAndNewOnesAttach
 
     // Subscribe AFTER the initial build, so the log starts empty and anything in it comes
     // from the reload.
-    AttachLog log;
     Watch(*kept, "kept", log);
 
     {
@@ -764,7 +765,6 @@ TEST(AttachDetachEventTests, ReconcilePreservedElementsGetNoPairAndNewOnesAttach
 
     UIElement* added = ui.GetRootElement()->FindById("added");
     ASSERT_NE(added, nullptr);
-    AttachLog addedLog;
     Watch(*added, "added", addedLog);
     // The new element was created and parented during the reload, so its attach is already
     // settled — subscribing now is too late to hear it, which is exactly why an element's
@@ -951,13 +951,9 @@ TEST(AttachDetachEventTests, ASurvivingMountTargetIsAnnouncedAgainByItsNextManag
 // element announced ATTACHED is one the scripting ABI can resolve, always.
 //
 // The case that can break it is a Mount targeted BEFORE the Mount itself is parented. The
-// Mount cannot propagate an owner it does not have, so the target starts ownerless while
-// the portal edge already routes it into the tree; Mount::OnPostLayout adopts it later in
-// the same frame, which is after the settle has already run. A walk that inherited the
-// queued root's verdict straight down the portal edge would therefore announce the target
-// while it is still ownerless — and an ownerless element is registered nowhere, so
-// FindElementByInstanceId cannot resolve it and IsAlive reports false. The announcement
-// waits for the adoption instead.
+// Mount cannot propagate an owner it does not have. Parenting the Mount now adopts
+// an ownerless target immediately for authored-id lookup; the attach event must still
+// wait for the settle, when both the authored-id and instance-id indexes can resolve it.
 TEST(AttachDetachEventTests, AnElementIsNeverAnnouncedAttachedBeforeTheAbiCanResolveIt)
 {
     auto dev = MakeHeadlessDevice();
@@ -990,13 +986,9 @@ TEST(AttachDetachEventTests, AnElementIsNeverAnnouncedAttachedBeforeTheAbiCanRes
     ASSERT_EQ(target->GetOwnerManager(), nullptr) << "precondition: unowned target";
     rootRaw->AddChild(std::move(mountOwned));
 
-    ui.Update(0.0f, /*interactive=*/false);
-    EXPECT_EQ(log.CountOf("attach:t"), 0u)
-        << "the target was still ownerless when this frame's settle ran, so announcing it "
-           "would have named an element no lookup could resolve";
-
-    // OnPostLayout adopted it during that frame, which changed its owner and queued it.
-    ASSERT_EQ(target->GetOwnerManager(), &ui) << "Mount::OnPostLayout adopts the target";
+    ASSERT_EQ(target->GetOwnerManager(), &ui) << "parenting adopts an ownerless target";
+    EXPECT_EQ(rootRaw->FindById("t"), target.get());
+    EXPECT_EQ(log.CountOf("attach:t"), 0u) << "adoption alone must not dispatch attach";
 
     ui.Update(0.0f, /*interactive=*/false);
     EXPECT_EQ(log.CountOf("attach:t"), 1u) << "announced once the owner is real";

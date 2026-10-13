@@ -487,11 +487,11 @@ class AssemblyPrepTask : public HotReloadTask
 class MainThreadSwapTask : public HotReloadTask
 {
   public:
-    MainThreadSwapTask(JobSystem::WorkStealingThreadPool* jobSystem, const String& assemblyPath, void* preparedContext,
+    MainThreadSwapTask(JobSystem::WorkStealingThreadPool* jobSystem, const String& assemblyPath,
                        std::shared_ptr<PreloadSync> preloadSync,
                        std::unique_ptr<Jobs::IAssemblySwapper> swapper = nullptr,
                        std::shared_ptr<HotReloadCancellation> cancellation = nullptr)
-        : HotReloadTask(jobSystem, assemblyPath, HotReloadCancellation::Token(cancellation)), m_PreparedContext(preparedContext), m_Swapper(std::move(swapper)), m_PreloadSync(std::move(preloadSync)),
+        : HotReloadTask(jobSystem, assemblyPath, HotReloadCancellation::Token(cancellation)), m_Swapper(std::move(swapper)), m_PreloadSync(std::move(preloadSync)),
           m_Cancellation(cancellation ? std::move(cancellation) : std::make_shared<HotReloadCancellation>()) {}
 
     void Execute() override;
@@ -523,7 +523,6 @@ class MainThreadSwapTask : public HotReloadTask
     void UpdateAssemblyReferences();
 
   private:
-    void* m_PreparedContext;
     void* m_OldContext{nullptr};
     std::chrono::milliseconds m_SwapDuration{0};
     bool m_SwapCompleted{false};

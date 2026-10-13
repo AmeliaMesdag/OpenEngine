@@ -151,7 +151,7 @@ TEST(ArenaUseDeathTest, TwoThreadsInsideOneArenaAtOnceAssert)
 }
 #endif
 
-#if defined(GE_ARENA_ASAN)
+#if defined(GE_MEMORY_ASAN)
 TEST(ArenaUseDeathTest, ReadAfterResetIsReportedUnderAsan)
 {
     EXPECT_DEATH(

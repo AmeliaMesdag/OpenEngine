@@ -59,7 +59,6 @@ struct PostProcessVolume {
 
     // Tonemapping
     TonemapMode Tonemap {TonemapMode::Neutral};
-    int32 DitherMode {0}; // 0=Bayer, 1=BlueNoise
     // HDR10/HDR10+ only: perceptually compress highlight chroma in ICtCp after
     // tonemapping and before UI composition / the terminal PQ encode. Zero is
     // an exact pass-through and keeps the feature opt-in.

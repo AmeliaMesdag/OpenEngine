@@ -54,6 +54,32 @@ enum class SelectionHighlightStyle : uint8_t
     Both    = 2,
 };
 
+// How the Scene View sets its exposure. The Game View always meters (its camera's Auto); the two
+// views may differ.
+enum class SceneViewExposureMode : uint8_t
+{
+    // The reflected meter, as the Game View: histogram metering with eye adaptation.
+    Auto = 0,
+    // A fixed exposure derived from the scene's light: every directional light and the sky on a
+    // horizontal surface (SceneLightExposure), re-derived when either changes.
+    SceneLight = 1,
+    // The pinned Fixed EV100.
+    Fixed = 2,
+};
+
+// The user-facing name of each exposure mode, shared by the camera popover, the
+// post-processing menu and Preferences.
+inline const char* SceneViewExposureModeLabel(SceneViewExposureMode mode)
+{
+    switch (mode)
+    {
+        case SceneViewExposureMode::Auto: return "Auto";
+        case SceneViewExposureMode::Fixed: return "Fixed";
+        case SceneViewExposureMode::SceneLight: break;
+    }
+    return "Scene Light";
+}
+
 // User-level settings for the editor Scene View camera.
 // Values are persisted in the Editor preferences (Preferences.json).
 class SceneViewSettings
@@ -220,7 +246,14 @@ public:
         prefs.TryGetBool("sceneView.postFxColorFilterEnabled", m_PostFxColorFilterEnabled);
         prefs.TryGetBool("sceneView.postFxCasEnabled", m_PostFxCasEnabled);
         prefs.TryGetBool("sceneView.postFxCrtEnabled", m_PostFxCrtEnabled);
-        prefs.TryGetBool("sceneView.postFxAutoExposureEnabled", m_PostFxAutoExposureEnabled);
+        {
+            double modeD = static_cast<double>(m_ExposureMode);
+            prefs.TryGetDouble("sceneView.exposureMode", modeD);
+            const int modeInt = static_cast<int>(modeD);
+            if (modeInt >= static_cast<int>(SceneViewExposureMode::Auto) &&
+                modeInt <= static_cast<int>(SceneViewExposureMode::Fixed))
+                m_ExposureMode = static_cast<SceneViewExposureMode>(modeInt);
+        }
         prefs.TryGetBool("sceneView.postFxAutoExposureUseAdaptationDelay",
                          m_PostFxAutoExposureUseAdaptationDelay);
         {
@@ -393,7 +426,7 @@ public:
         prefs.SetBool("sceneView.postFxColorFilterEnabled", m_PostFxColorFilterEnabled);
         prefs.SetBool("sceneView.postFxCasEnabled", m_PostFxCasEnabled);
         prefs.SetBool("sceneView.postFxCrtEnabled", m_PostFxCrtEnabled);
-        prefs.SetBool("sceneView.postFxAutoExposureEnabled", m_PostFxAutoExposureEnabled);
+        prefs.SetDouble("sceneView.exposureMode", static_cast<double>(m_ExposureMode));
         prefs.SetBool("sceneView.postFxAutoExposureUseAdaptationDelay",
                       m_PostFxAutoExposureUseAdaptationDelay);
         prefs.SetDouble("sceneView.postFxFixedExposureEv", static_cast<double>(m_PostFxFixedExposureEv));
@@ -479,23 +512,32 @@ public:
     bool GetPostFxColorFilterEnabled() const { return m_PostFxColorFilterEnabled; }
     bool GetPostFxCasEnabled() const { return m_PostFxCasEnabled; }
     bool GetPostFxCrtEnabled() const { return m_PostFxCrtEnabled; }
-    // Scene View exposure mode: true = metered Auto, false = the fixed EV100 pin,
-    // applied via the per-view post-process override.
-    bool GetPostFxAutoExposureEnabled() const { return m_PostFxAutoExposureEnabled; }
+    // Scene View exposure mode, applied via the per-view post-process override.
+    SceneViewExposureMode GetExposureMode() const { return m_ExposureMode; }
+    // Runtime only: the EV100 Scene Light mode derives from the scene's light (SceneLightExposure),
+    // false until the first derivation. Shown read-only by the camera popover.
+    bool TryGetSceneLightExposureEv(float& outEv) const
+    {
+        if (!m_SceneLightExposureEvValid)
+            return false;
+        outEv = m_SceneLightExposureEv;
+        return true;
+    }
     // When false, metered exposure snaps to the current target instead of using
     // the world sensor's eye-adaptation speeds.
     bool GetPostFxAutoExposureUseAdaptationDelay() const
     {
         return m_PostFxAutoExposureUseAdaptationDelay;
     }
-    // EV100 the Scene View is pinned to while Auto Exposure is off.
+    // EV100 the Scene View is pinned to in Fixed mode.
     float GetPostFxFixedExposureEv() const { return m_PostFxFixedExposureEv; }
     // Auto-mode adaptation clamps for the Scene View's metering (EV100).
     float GetPostFxAutoExposureMinEv() const { return m_PostFxAutoExposureMinEv; }
     float GetPostFxAutoExposureMaxEv() const { return m_PostFxAutoExposureMaxEv; }
-    // ± stops applied on top of the Scene View's exposure in BOTH modes: folds
-    // into the metering key under Auto, multiplies the pinned EV's scale under
-    // Fixed (the ResolveExposureScale convention — + brightens).
+    // ± stops applied on top of the Scene View's exposure in every mode: folds
+    // into the metering key under Auto, multiplies the pinned or derived EV's
+    // scale under Fixed and Scene Light (the ResolveExposureScale convention —
+    // + brightens).
     float GetPostFxExposureCompensation() const { return m_PostFxExposureCompensation; }
     MarqueeShape GetMarqueeShape() const { return m_MarqueeShape; }
     uint32_t GetMarqueeColor() const { return m_MarqueeColor; }
@@ -821,37 +863,38 @@ public:
         Save();
     }
 
-    // fromUserToggle threads the caller's intent: only an in-session user
-    // toggle may run the AE-lock handoff below. Pass false when applying
-    // persisted or programmatic state — there the stored fixed EV is
-    // authoritative and must not be overwritten by whatever the meter last
-    // saw (a startup metering transient seeded this way pins a wildly wrong
-    // EV and blacks out the viewport).
-    void SetPostFxAutoExposureEnabled(bool value, bool fromUserToggle)
+    // fromUserSwitch threads the caller's intent: only an in-session user
+    // switch may run the lock handoff below. Pass false when applying persisted
+    // or programmatic state — there the stored fixed EV is authoritative and
+    // must not be overwritten by whatever the view last showed (a startup
+    // metering transient seeded this way pins a wildly wrong EV and blacks out
+    // the viewport).
+    void SetExposureMode(SceneViewExposureMode mode, bool fromUserSwitch)
     {
-        const bool beforeEnabled = m_PostFxAutoExposureEnabled;
+        const SceneViewExposureMode beforeMode = m_ExposureMode;
         const float beforeFixedEv = m_PostFxFixedExposureEv;
-        // Auto -> Fixed handoff (AE-lock): pin the fixed EV to what the meter
-        // was showing so the image does not jump at the moment of the toggle.
+        // Auto or Scene Light -> Fixed handoff (AE-lock): pin the fixed EV to
+        // what the view was showing so the image does not jump at the switch.
         // The cached seed already folds compensation in (see
-        // SetLastMeteredExposureEv); Validate() clamps it into slider range.
+        // SetLastShownExposureEv); Validate() clamps it into slider range.
         // Quantized to the slider's detent in double + decimal grid, exactly
         // like Slider::QuantizeToStep: float round(ev/step)*step lands
         // off-detent (168 * 0.1f == 16.800001, not float("16.8")), which the
         // round-trip-exact edit display would surface and persist.
-        if (fromUserToggle && m_PostFxAutoExposureEnabled && !value && m_LastMeteredExposureEvValid)
+        if (fromUserSwitch && beforeMode != SceneViewExposureMode::Fixed &&
+            mode == SceneViewExposureMode::Fixed && m_LastShownExposureEvValid)
         {
             const double step = static_cast<double>(kExposureSliderStep);
-            const double snapped = std::round(m_LastMeteredExposureEv / step) * step;
+            const double snapped = std::round(m_LastShownExposureEv / step) * step;
             m_PostFxFixedExposureEv = static_cast<float>(
                 std::round(snapped * kEvSeedDecimalGrid) / kEvSeedDecimalGrid);
-            m_LastMeteredExposureEvValid = false; // stale once metering stops
         }
-        m_PostFxAutoExposureEnabled = value;
+        if (mode != beforeMode)
+            m_LastShownExposureEvValid = false; // stale once the view stops showing it
+        m_ExposureMode = mode;
         Validate();
         Save();
-        if (m_PostFxAutoExposureEnabled != beforeEnabled ||
-            m_PostFxFixedExposureEv != beforeFixedEv)
+        if (m_ExposureMode != beforeMode || m_PostFxFixedExposureEv != beforeFixedEv)
             NotifyCameraSettingsChanged();
     }
 
@@ -865,17 +908,29 @@ public:
     }
 
     // Runtime only (not persisted): the EV100 that reproduces the Scene View's
-    // current auto-metered image if pinned as Fixed EV100. SceneViewController
-    // refreshes it every metered frame from the GPU exposure readback, with
+    // current image if pinned as Fixed EV100 — the metered EV under Auto (from
+    // the GPU exposure readback), the derived EV under Scene Light — with
     // compensation folded in so Fixed mode (which re-applies compensation)
     // resolves to the identical image. With several scene views the last
-    // writer wins — this is a toggle-time convenience seed, not per-view state.
-    void SetLastMeteredExposureEv(float ev)
+    // writer wins — this is a switch-time convenience seed, not per-view state.
+    void SetLastShownExposureEv(float ev)
     {
-        // Finiteness is guaranteed by the one producer: the exposure readback
-        // gates on the shader's valid flag and a finite positive scale.
-        m_LastMeteredExposureEv = ev;
-        m_LastMeteredExposureEvValid = true;
+        // Finiteness is guaranteed by the producers: the exposure readback
+        // gates on a finite positive scale, and SceneLightEv100 clamps.
+        m_LastShownExposureEv = ev;
+        m_LastShownExposureEvValid = true;
+    }
+
+    // Runtime only: Scene Light mode's derived EV100 (SceneLightExposure).
+    // Notifies on change so an open popover refreshes its read-only value; it
+    // changes only when the scene's sun or sky does.
+    void SetSceneLightExposureEv(float ev)
+    {
+        if (m_SceneLightExposureEvValid && m_SceneLightExposureEv == ev)
+            return;
+        m_SceneLightExposureEv = ev;
+        m_SceneLightExposureEvValid = true;
+        NotifyCameraSettingsChanged();
     }
 
     void SetPostFxFixedExposureEv(float value, bool save = true)
@@ -1226,17 +1281,20 @@ private:
     bool m_PostFxColorFilterEnabled = true;
     bool m_PostFxCasEnabled = true;
     bool m_PostFxCrtEnabled = true;
-    bool m_PostFxAutoExposureEnabled = false;
+    SceneViewExposureMode m_ExposureMode = SceneViewExposureMode::SceneLight;
     bool m_PostFxAutoExposureUseAdaptationDelay = true;
-    // EV100 pin for the Scene View while Auto Exposure is off.
+    // EV100 pin for the Scene View in Fixed mode.
     float m_PostFxFixedExposureEv = Components::kDefaultManualExposureEv;
     // Auto-mode metering tune: adaptation clamps (EV100) + ± stop compensation.
     float m_PostFxAutoExposureMinEv = kDefaultAutoExposureMinEv;
     float m_PostFxAutoExposureMaxEv = kDefaultAutoExposureMaxEv;
     float m_PostFxExposureCompensation = 0.0f;
-    // Runtime-only Auto->Fixed handoff seed (SetLastMeteredExposureEv); never persisted.
-    float m_LastMeteredExposureEv = 0.0f;
-    bool m_LastMeteredExposureEvValid = false;
+    // Runtime-only handoff seed into Fixed (SetLastShownExposureEv); never persisted.
+    float m_LastShownExposureEv = 0.0f;
+    bool m_LastShownExposureEvValid = false;
+    // Runtime-only Scene Light derivation (SetSceneLightExposureEv); never persisted.
+    float m_SceneLightExposureEv = 0.0f;
+    bool m_SceneLightExposureEvValid = false;
     // Selection tool marquee drag-select appearance.
     MarqueeShape m_MarqueeShape      = MarqueeShape::Rectangle;
     uint32_t     m_MarqueeColor      = 0xFFFFFF33u; // ARGB, pale yellow

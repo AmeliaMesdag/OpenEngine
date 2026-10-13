@@ -19,12 +19,10 @@ function(_ge_notice_copy src dst)
     endif()
     get_filename_component(_dst_dir "${dst}" DIRECTORY)
     file(MAKE_DIRECTORY "${_dst_dir}")
-    execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${src}" "${dst}"
-        RESULT_VARIABLE _copy_result
-    )
+    # In-process: a cmake process per notice file cost seconds on every build.
+    file(COPY_FILE "${src}" "${dst}" ONLY_IF_DIFFERENT RESULT _copy_result)
     if(NOT _copy_result EQUAL 0)
-        message(FATAL_ERROR "StageThirdPartyNotices: failed to copy ${src} to ${dst}")
+        message(FATAL_ERROR "StageThirdPartyNotices: failed to copy ${src} to ${dst}: ${_copy_result}")
     endif()
     set_property(GLOBAL APPEND PROPERTY GE_STAGED_NOTICE_FILES "${dst}")
 endfunction()
@@ -239,30 +237,34 @@ _ge_notice_copy(
 string(ASCII 1 2 3 4 5 6 7 8 11 12 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
     _ge_control_bytes)
 
-# CMake regular expressions stop at the first NUL, so "^.*" matches the bytes before
-# it while LENGTH and SUBSTRING see the whole string. The match can also stop short of
-# a non-NUL byte (CMake 4.3.1 returns "^.*" one byte short on inputs of a few hundred
-# kilobytes), so a stop at a byte that "^." matches keeps that byte and carries on;
-# only a byte "^." cannot match is a NUL, and only that is dropped.
-function(_ge_notice_drop_nul text_var)
+# CMake regular expressions stop at the first NUL, so "^.*" spans the bytes before it
+# while LENGTH and SUBSTRING see the whole string. The span is measured from what
+# REGEX REPLACE leaves after it, never from a REGEX MATCH result: CMake 4.3 returns a
+# REGEX MATCH result as a list, without its empty elements and escapes, so "a;;b"
+# comes back as "a;b" and a span measured from it is short. The byte where the span
+# ends is a NUL; anything else stops staging rather than altering a notice.
+function(_ge_notice_drop_nul text_var path)
     set(_text "${${text_var}}")
     set(_kept "")
+    set(_consumed 0)
     while(TRUE)
-        string(REGEX MATCH "^.*" _head "${_text}")
-        string(LENGTH "${_head}" _head_length)
-        string(LENGTH "${_text}" _text_length)
-        if(_head_length EQUAL _text_length)
-            string(APPEND _kept "${_head}")
+        string(REGEX REPLACE "^.*" "" _rest "${_text}")
+        string(LENGTH "${_rest}" _rest_length)
+        if(_rest_length EQUAL 0)
+            string(APPEND _kept "${_text}")
             break()
         endif()
-        string(SUBSTRING "${_text}" ${_head_length} 1 _stop)
+        string(LENGTH "${_text}" _text_length)
+        math(EXPR _head_length "${_text_length} - ${_rest_length}")
+        string(SUBSTRING "${_rest}" 0 1 _stop)
         if(_stop MATCHES "^.")
-            string(APPEND _kept "${_head}${_stop}")
-        else()
-            string(APPEND _kept "${_head}")
+            math(EXPR _offset "${_consumed} + ${_head_length}")
+            message(FATAL_ERROR "StageThirdPartyNotices: CMake ${CMAKE_VERSION} stopped matching ${path} at byte ${_offset}, which is not NUL; staging stops rather than alter a notice. Report this file and the CMake version.")
         endif()
-        math(EXPR _tail_start "${_head_length} + 1")
-        string(SUBSTRING "${_text}" ${_tail_start} -1 _text)
+        string(SUBSTRING "${_text}" 0 ${_head_length} _head)
+        string(APPEND _kept "${_head}")
+        string(SUBSTRING "${_rest}" 1 -1 _text)
+        math(EXPR _consumed "${_consumed} + ${_head_length} + 1")
     endwhile()
     set(${text_var} "${_kept}" PARENT_SCOPE)
 endfunction()
@@ -311,12 +313,14 @@ endfunction()
 get_property(_ge_notice_files GLOBAL PROPERTY GE_STAGED_NOTICE_FILES)
 list(REMOVE_DUPLICATES _ge_notice_files)
 list(SORT _ge_notice_files)
+# Built in memory and written only when it differs, like every staged file: this
+# runs on every build, and a rewrite would give the book a new timestamp each time.
 set(_ge_notice_book "${GE_NOTICES_DEST}/THIRD_PARTY_NOTICES.md")
-file(WRITE "${_ge_notice_book}" "# Third-party notices\n\nThese texts cover the installed dependency triplet and bundled source components. The triplet can include build-only and optional ports; inclusion does not assert that each port is linked into every executable. Component source records state their versions and scope.\n\n")
+set(_ge_notice_book_text "# Third-party notices\n\nThese texts cover the installed dependency triplet and bundled source components. The triplet can include build-only and optional ports; inclusion does not assert that each port is linked into every executable. Component source records state their versions and scope.\n\n")
 foreach(_ge_notice_file IN LISTS _ge_notice_files)
     file(RELATIVE_PATH _ge_relative_notice "${GE_NOTICES_DEST}" "${_ge_notice_file}")
     file(READ "${_ge_notice_file}" _ge_notice_text)
-    _ge_notice_drop_nul(_ge_notice_text)
+    _ge_notice_drop_nul(_ge_notice_text "${_ge_notice_file}")
     string(REGEX REPLACE "[${_ge_control_bytes}]" "" _ge_notice_text "${_ge_notice_text}")
     get_filename_component(_ge_notice_extension "${_ge_notice_file}" LAST_EXT)
     string(TOLOWER "${_ge_notice_extension}" _ge_notice_extension)
@@ -333,5 +337,12 @@ foreach(_ge_notice_file IN LISTS _ge_notice_files)
         endif()
     endforeach()
     string(REPEAT "`" ${_ge_fence_length} _ge_fence)
-    file(APPEND "${_ge_notice_book}" "## ${_ge_relative_notice}\n\n${_ge_fence}\n${_ge_notice_text}\n${_ge_fence}\n\n")
+    string(APPEND _ge_notice_book_text "## ${_ge_relative_notice}\n\n${_ge_fence}\n${_ge_notice_text}\n${_ge_fence}\n\n")
 endforeach()
+set(_ge_notice_book_current "")
+if(EXISTS "${_ge_notice_book}")
+    file(READ "${_ge_notice_book}" _ge_notice_book_current)
+endif()
+if(NOT _ge_notice_book_current STREQUAL _ge_notice_book_text)
+    file(WRITE "${_ge_notice_book}" "${_ge_notice_book_text}")
+endif()

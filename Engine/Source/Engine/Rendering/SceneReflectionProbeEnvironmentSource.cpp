@@ -2,6 +2,7 @@
 
 #include "Engine/Rendering/ImageBasedLightingFeature.h"
 #include "Engine/Rendering/IRenderFeature.h"
+#include "Engine/Rendering/IrradianceReadbackFeature.h"
 #include "Engine/Rendering/RenderOrigin.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "RenderServicesDetail.h"
@@ -706,6 +707,10 @@ void SceneReflectionProbeEnvironmentSource::DeclareFinalizePasses(
         [self, feature = &feature](RenderGraph::RGContext& c) {
             self->RecordDiffuseConvolve(c, *feature);
         });
+    // The probe's cube is what lights the scene while it is active, so the readback follows it.
+    if (auto* irradianceReadback = m_Services->GetFeature<IrradianceReadbackFeature>())
+        irradianceReadback->DeclareCopy(*ctx.Device, frame, irrCube, ImageBasedLightingFeature::kIrradianceSize,
+                                        bakedDigest);
 
     frame.AddComputePass(
         "IBLGen.SceneProbeSpecularPrefilter", PassPhase::kWorldRender + 1,
@@ -733,6 +738,12 @@ void SceneReflectionProbeEnvironmentSource::ScheduleBake(const EnvironmentBakeCo
     RenderGraph::RGFrame& frame = *ctx.Frame;
     ImageBasedLightingFeature& feature = *ctx.Feature;
     feature.TickFramesSinceBake();
+
+    // An idle probe declares no bake this frame, so a readback that arrives between bakes copies
+    // the cube as it rests, once.
+    if (m_CaptureState == CaptureState::Idle)
+        if (auto* irradianceReadback = m_Services->GetFeature<IrradianceReadbackFeature>())
+            irradianceReadback->DeclareRestingCopy(*ctx.Device, frame, feature);
 
     // Realtime REBAKES time-slice (one face per frame); the first-ever bake,
     // Once probes, and every-frame probes take the single-frame path so the

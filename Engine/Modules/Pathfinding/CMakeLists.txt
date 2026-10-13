@@ -11,7 +11,6 @@ add_library(Pathfinding OBJECT
     Source/ObstacleAvoidance.cpp
     Source/NavigationWorld.cpp
     Source/PathSmoother.cpp
-    Source/NavCacheManager.cpp
 )
 
 target_compile_features(Pathfinding PUBLIC cxx_std_20)

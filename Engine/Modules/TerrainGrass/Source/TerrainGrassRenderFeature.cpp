@@ -1,5 +1,6 @@
 #include "TerrainGrass/TerrainGrassRenderFeature.h"
 
+#include "TerrainGrass/GrassComputePrograms.h"
 #include "TerrainGrass/GrassDrawMode.h"
 #include "TerrainGrass/GrassPlacementElisionInputs.h"
 #include "TerrainECS/TerrainRenderFeature.h"
@@ -26,6 +27,7 @@
 #include "Rendering/Utils/BufferHelpers.h"
 #include "Terrain/TerrainTypes.h"
 #include "AssetCore/GUID.h"
+#include "Assets/ShaderProgramAsset.h"
 #include "AssetCore/SharedFileRead.h"
 #include "Components/Terrain/TerrainGrass.h"
 #include "Core/Application.h"
@@ -855,9 +857,11 @@ namespace
 {
 struct GrassShaderLocation
 {
+    // The directory holding the grass programs: the sources, or the cooked WGSL.
     std::filesystem::path Dir;
-    std::filesystem::path IncludeRoot;
-    std::filesystem::path CbtDir; // holds cbt_atlas.glsl (the resident-window atlas resolve grass shares)
+    // The engine shader tree the sources compile against (MakeGrassComputeCompileRequest); empty
+    // for cooked WGSL.
+    std::filesystem::path EngineShaders;
 };
 
 // The staged grass compute sources under the install assets root's Shaders directory; nullopt
@@ -875,20 +879,22 @@ std::optional<GrassShaderLocation> FindGrassShaderLocation(bool cookedPrograms)
         const fs::path programDir = shaders / "TerrainGrass";
         if (!fs::exists(programDir / "terrain_grass_place.comp.wgsl", ec))
             return std::nullopt;
-        return GrassShaderLocation{programDir, {}, {}};
+        return GrassShaderLocation{programDir, {}};
     }
-    GrassShaderLocation location{shaders / "TerrainGrass", shaders, shaders / "CBT"};
+    GrassShaderLocation location{shaders / "TerrainGrass", shaders};
     if (!fs::exists(location.Dir / "terrain_grass_place.comp", ec))
         return std::nullopt;
     return location;
 }
 
 bool CompileGrassComputePipeline(Rendering::IDevice& device, const GrassShaderLocation& location,
-                                 const char* shaderFile, const char* debugName, bool compat,
+                                 const GrassComputeProgram& program, bool compat,
                                  Rendering::ComputePipelineId& outId,
                                  Rendering::PipelineHandle& outPipeline)
 {
     namespace fs = std::filesystem;
+    const char* shaderFile = program.ShaderFile;
+    const char* debugName = program.DebugName;
     Vector<uint8> computeProgram;
     if (device.PreferredShaderSource() == Rendering::ShaderSourceKind::Wgsl)
     {
@@ -903,17 +909,13 @@ bool CompileGrassComputePipeline(Rendering::IDevice& device, const GrassShaderLo
     }
     else
     {
-        Rendering::ShaderProgramCompileRequest req{};
-        req.debugName = debugName;
-        req.baseDirectory = location.Dir;
-        req.cacheRoot = fs::path(".Cache") / "Shaders";
-        req.includeDirs = {location.IncludeRoot, location.CbtDir, location.Dir};
-        // The compat profile selects the named-binding arm of the source, the same arm the
-        // web cook builds, so a desktop run under GE_FORCE_COMPAT exercises it too.
-        std::vector<std::string> defines;
-        if (compat)
-            defines.push_back("GE_COMPAT_PROFILE");
-        req.stages = {{"cs", shaderFile, "main", std::move(defines)}};
+        Rendering::ShaderProgramCompileRequest req =
+            MakeGrassComputeCompileRequest(location.EngineShaders, program, compat);
+        // A packaged game's cooked cache is probed first (MaterialVariantCook cooks these programs
+        // for a desktop export); a program it lacks compiles into the workspace cache.
+        const ShaderCacheRoots& cacheRoots = ShaderProgramAsset::GetShaderCacheRoots();
+        req.readOnlyCacheRoots = cacheRoots.ReadOnly;
+        req.cacheRoot = cacheRoots.Writable.empty() ? fs::path(".Cache") / "Shaders" : cacheRoots.Writable;
         Rendering::ShaderProgramCompileResult result{};
         std::string compileError;
         if (!Rendering::ShaderCompileService::CompileProgramToCache(
@@ -976,14 +978,11 @@ bool TerrainGrassRenderFeature::EnsureComputePipeline(Engine::Renderer::RenderSe
         Logger::Log::Warning("TerrainGrass: placement compute shader not found");
         return false;
     }
-    if (!CompileGrassComputePipeline(*m_Device, *location, "terrain_grass_classify.comp",
-                                     "TerrainGrassClassify_Pipeline", compat, m_ClassifyPipelineId,
+    if (!CompileGrassComputePipeline(*m_Device, *location, kGrassClassifyProgram, compat, m_ClassifyPipelineId,
                                      m_ClassifyPipeline)
-        || !CompileGrassComputePipeline(*m_Device, *location, "terrain_grass_plan.comp",
-                                        "TerrainGrassPlan_Pipeline", compat, m_PlanPipelineId,
+        || !CompileGrassComputePipeline(*m_Device, *location, kGrassPlanProgram, compat, m_PlanPipelineId,
                                         m_PlanPipeline)
-        || !CompileGrassComputePipeline(*m_Device, *location, "terrain_grass_place.comp",
-                                        "TerrainGrassPlace_Pipeline", compat, m_ComputePipelineId,
+        || !CompileGrassComputePipeline(*m_Device, *location, kGrassPlaceProgram, compat, m_ComputePipelineId,
                                         m_ComputePipeline))
         return false;
     Logger::Log::Info("TerrainGrass: placement compute pipeline ready");

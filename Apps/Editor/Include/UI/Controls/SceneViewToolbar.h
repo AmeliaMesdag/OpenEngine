@@ -34,11 +34,11 @@ public:
     {
         m_OnOpenGridSettings = std::move(cb);
     }
-    // The auto-exposure toggle seeds Fixed EV100 as a side effect (AE-lock); the host uses
+    // A switch to Fixed exposure seeds Fixed EV100 as a side effect (AE-lock); the host uses
     // this to sync an open camera-settings popup whose stale field would clobber the seed.
-    void SetOnPostFxAutoExposureToggled(std::function<void()> cb)
+    void SetOnExposureModeChanged(std::function<void()> cb)
     {
-        m_OnPostFxAutoExposureToggled = std::move(cb);
+        m_OnExposureModeChanged = std::move(cb);
     }
     // Left-click on the camera button; opens the scene camera quick-settings popup
     // anchored below it (window coordinates).
@@ -90,7 +90,7 @@ private:
     UIElement*             m_DragRootEl = nullptr; // not owned — main window root for ghosts
     std::function<bool()> m_OnToggleView2D;
     std::function<void()> m_OnOpenGridSettings;
-    std::function<void()> m_OnPostFxAutoExposureToggled;
+    std::function<void()> m_OnExposureModeChanged;
     std::function<void(float, float)> m_OnOpenCameraSettings;
     // One entry per button id WireControls has ever asked for. The key is a value, not
     // a pointer into the caller's id: nothing can dangle, and hashing a string_view

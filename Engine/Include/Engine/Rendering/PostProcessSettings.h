@@ -118,10 +118,8 @@ struct PostProcessSettings
     // Default to Khronos PBR Neutral: tonemapping is a baseline of the pipeline,
     // so volume-less worlds are tonemapped by default. A PostProcessVolume
     // overrides this. The always-present Tonemap pass's skipWhen still skips it
-    // only when something EXPLICITLY selects Linear (mode 5) + exposure 1 +
-    // dither 0.
+    // only when something EXPLICITLY selects Linear (mode 5) + exposure 1.
     int32   TonemapMode    = 4; // Components::TonemapMode as int32 (4 = Neutral)
-    int32   DitherMode     = 0;
     // HDR10/HDR10+ highlight-chroma compression in ICtCp. The tonemap node
     // forces this to zero for SDR, HLG, and scRGB. Zero is exact pass-through.
     float32 IctcpChromaCompression = 0.0f;
@@ -205,7 +203,6 @@ struct PostProcessSettings
     float32 ColorFilterB         = 1.0f;
     float32 ColorFilterIntensity = 0.0f;
     int32   ColorFilterBlendMode = 0; // Components::ColorFilterBlendMode as int32
-    int32   ColorFilterStackOrder = 0;
     float32 CasStrength          = 0.0f;
     int32   CasStackOrder        = 1;
 
@@ -372,6 +369,8 @@ struct PostProcessSettings
     int32 HeightFogUseTimeOfDay = 0;
     float32 HeightFogSkyHorizonOffset = 0.0f;
     float32 HeightFogSkyBottomStrength = 0.0f;
+    // Components::HeightFogColorMode: 0 fixed colour, 1 the sky's horizon radiance.
+    int32 HeightFogColorMode = 1;
 
     // HDR color grade (unified three-way corrector in hdr_color_fx.frag), before
     // tonemap. Band offsets are zero-centered (0 = neutral); Contrast/Saturation
@@ -632,6 +631,8 @@ struct PostProcessSettings
     bool IsDofActive(float32 epsilon = 1.0f / 1024.0f) const;
     bool IsHeatDistortionActive(float32 epsilon = 1.0f / 1024.0f) const;
     bool IsHeightFogActive(float32 epsilon = 1.0f / 1024.0f) const;
+    // The height fog runs and takes its colour from the sky (it reads the sky backdrop).
+    bool IsHeightFogSkyColorActive(float32 epsilon = 1.0f / 1024.0f) const;
     bool IsVolumetricFogActive(float32 epsilon = 1.0f / 1024.0f) const;
     bool IsAtmosphericCloudActive(float32 epsilon = 1.0f / 1024.0f) const;
     bool IsVolumetricCloudsActive(float32 epsilon = 1.0f / 1024.0f) const;

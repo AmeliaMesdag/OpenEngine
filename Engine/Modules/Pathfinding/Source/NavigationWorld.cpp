@@ -134,6 +134,15 @@ void NavigationWorld::RemoveMap(NavMapHandle handle)
     m_FreeMapSlots.push_back(handle.Index);
 }
 
+GridMap* NavigationWorld::ReplaceGridMap(NavMapHandle handle, std::unique_ptr<GridMap> grid)
+{
+    MapEntry* entry = GetMapEntry(handle);
+    if (!entry || entry->Type != MapType::Grid || !grid)
+        return nullptr;
+    entry->Map = std::move(grid);
+    return static_cast<GridMap*>(entry->Map.get());
+}
+
 GridMap* NavigationWorld::GetGridMap(NavMapHandle handle)
 {
     MapEntry* entry = GetMapEntry(handle);

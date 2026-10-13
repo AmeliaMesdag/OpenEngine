@@ -24,6 +24,7 @@ set(EDITOR_SOURCES
     Source/Editor/Settings/ToggleAppearanceSettings.cpp
     Source/Editor/Settings/LodProjectSettingsWriter.cpp
     Source/Editor/Settings/GameUIScaleSettingsPage.cpp
+    Source/Editor/Settings/SceneViewExposureSettingsPage.cpp
     Source/Editor/Settings/GraphSettingsPage.cpp
     Source/Editor/Settings/LodSettingsPage.cpp
     Source/Editor/Settings/PhysicsProjectSettings.cpp
@@ -158,6 +159,7 @@ set(EDITOR_SOURCES
     Source/PlayMode/ModelAnimationPlayMode.cpp
     Source/PlayMode/AnimationPlayModeHelpers.cpp
     Source/PlayMode/RuntimeInputConnection.cpp
+    Source/PlayMode/GameViewPointerLock.cpp
     Source/Scene/DefaultSceneEntities.cpp
     Source/Scene/SceneBackupRecovery.cpp
     Source/Scene/SceneDocumentManager.cpp
@@ -227,6 +229,7 @@ set(EDITOR_SOURCES
 	Source/UI/Layout/EditorDockConfigParser.cpp
 	Source/Inspectors/TransformInspector.cpp
 	Source/Inspectors/BuiltInInspectorRegistration.cpp
+	Source/Inspectors/ComponentIconClass.cpp
 	Source/Inspectors/ComponentPresets.cpp
 	Source/Inspectors/DefaultComponentInspector.cpp
 	Source/Inspectors/GeneratedEntityNotice.cpp
@@ -238,6 +241,7 @@ set(EDITOR_SOURCES
 	Source/Inspectors/TerrainRuleNotices.cpp
 	Source/Inspectors/TerrainSizingNotice.cpp
 	Source/Inspectors/MeshRendererInspector.cpp
+	Source/Inspectors/NavigationSurfaceInspector.cpp
 	Source/Inspectors/SkinnedMeshRendererInspector.cpp
 	Source/Inspectors/AnimatorInspector.cpp
 	Source/Inspectors/ValueCurveInspector.cpp
@@ -424,6 +428,7 @@ set(EDITOR_SOURCES
 	Source/SceneView/SceneViewSelectionTool.cpp
 	Source/SceneView/NavDebugGizmo.cpp
 	Source/SceneView/PostProcessVolumeGizmo.cpp
+	Source/SceneView/Gizmos/NavigationSurfaceGizmo.cpp
 	Source/SceneView/Gizmos/ParticleEmitterGizmo.cpp
 	Source/SceneView/WindVolumeGizmo.cpp
 	Source/SceneView/LocalVolumeGizmo.cpp
@@ -477,6 +482,7 @@ set(EDITOR_SOURCES
 	Source/SceneView/TerrainPresence.cpp
 	Source/SceneView/SceneViewProjection.cpp
 	Source/SceneView/SceneViewPostProcessSwitches.cpp
+	Source/SceneView/SceneLightExposure.cpp
 	Source/SceneView/EditorSceneViewDropWiring.cpp
 	Source/SceneView/SceneViewEntityLinks.cpp
 	Source/SceneView/GizmoSettingsWiring.cpp
@@ -545,6 +551,7 @@ set(EDITOR_SOURCES
 	Source/DebugServer/GroundQueryDebugHandlers.cpp
 	Source/DebugServer/JobSystemDebugHandlers.cpp
 	Source/DebugServer/JobSystemReport.cpp
+	Source/DebugServer/MemoryDebugHandlers.cpp
 	Source/DebugServer/NavigationDebugHandlers.cpp
 	Source/DebugServer/SystemWaveTraceReport.cpp
 	Source/DebugServer/FramePhaseDebugHandlers.cpp
@@ -590,6 +597,7 @@ set(EDITOR_HEADERS
 	Source/DebugServer/GroundQueryDebugHandlers.h
 	Source/DebugServer/JobSystemDebugHandlers.h
 	Source/DebugServer/JobSystemReport.h
+	Source/DebugServer/MemoryDebugHandlers.h
 	Source/DebugServer/NavigationDebugHandlers.h
 	Source/DebugServer/SystemWaveTraceReport.h
 	Source/DebugServer/FramePhaseDebugHandlers.h
@@ -633,11 +641,14 @@ set(EDITOR_HEADERS
     Include/UndoRedo/DeleteAssetPathsCommand.h
     Include/PlayMode/PlayModeManager.h
     Include/PlayMode/RuntimeInputConnection.h
+    Include/PlayMode/GameViewPointerLock.h
+    Source/PlayMode/GameViewPointerLockRule.h
     Include/UndoRedo/VcsRevertCommand.h
     Include/UndoRedo/TagCommands.h
     Include/UndoRedo/MultiEntityComponentSnapshot.h
     Include/Inspectors/TransformInspector.h
 	Include/Inspectors/MeshRendererInspector.h
+	Include/Inspectors/NavigationSurfaceInspector.h
 	Include/Inspectors/SkinnedMeshRendererInspector.h
 	Include/Inspectors/ValueCurveInspector.h
 	Include/Inspectors/CameraInspector.h

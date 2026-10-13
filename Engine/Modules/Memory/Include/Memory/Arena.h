@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Memory/AddressSanitizer.h"
 #include "Memory/SerialUseCheck.h"
 #include "Memory/StatsRecord.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -17,19 +19,17 @@
 #include <utility>
 #include <vector>
 
-#if defined(__SANITIZE_ADDRESS__)
-#define GE_ARENA_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define GE_ARENA_ASAN 1
-#endif
-#endif
-#if defined(GE_ARENA_ASAN)
-#include <sanitizer/asan_interface.h>
-#endif
-
 namespace GameEngine::Memory
 {
+
+namespace Detail
+{
+class ScratchThread;
+/// Selects the constructor of a thread's scratch arena.
+struct ScratchArenaTag
+{
+};
+} // namespace Detail
 
 /// The first block an `Arena` acquires, unless its constructor names another size.
 inline constexpr std::size_t kArenaFirstBlockBytes = 64 * 1024;
@@ -131,6 +131,34 @@ class Arena
     std::size_t BytesReserved() const;
 
   private:
+    /// A thread's `ScratchScope` state owns one arena through these: a scratch stats record,
+    /// the peak its hysteresis reads at the outermost close, a rewind and a reset that leave the
+    /// stats for later with inline fast paths for a steady scope's close, and the release of its
+    /// block.
+    friend class Detail::ScratchThread;
+
+    /// Registers as `StatsKind::Scratch` with the thread's OS id.
+    Arena(Detail::ScratchArenaTag, std::string_view statsName, std::uint64_t threadId);
+    /// The most bytes in use since the last `Reset`, the bytes in use now included.
+    std::size_t PeakBytesSinceReset() const;
+    /// Frees every block of an empty arena; the next allocation acquires a block of
+    /// `firstBlockBytes`, which also becomes the smallest block `Reset` coalesces into.
+    void ReleaseBlocks(std::size_t firstBlockBytes);
+    /// `Rewind`, with the stats stores only when `publishStats`: a nested scratch scope's close
+    /// never publishes. The peak since the last `Reset` still takes what it rewinds.
+    void RewindPublishing(Marker marker, bool publishStats);
+    /// `Reset`, with the stats stores only when `publishStats`: a scratch arena publishes at
+    /// every 64th outermost close.
+    void ResetPublishing(bool publishStats);
+    /// `ResetPublishing(false)` for an arena of one block holding no recorded destructor (a
+    /// steady outermost scratch close), inline. On success `peakBytes` is what
+    /// `PeakBytesSinceReset` read before the reset; any other arena returns false unchanged.
+    bool TryResetOneBlock(std::size_t& peakBytes);
+    /// `RewindPublishing(marker, false)` for a marker in the current block with no destructor
+    /// recorded after it (a steady nested scratch close), inline; false, changing nothing,
+    /// otherwise.
+    bool TryRewindWithinCurrentBlock(Marker marker);
+
     class ArenaResource final : public std::pmr::memory_resource
     {
       public:
@@ -166,6 +194,11 @@ class Arena
 
     /// The fast path's bump into the current block; null when the request does not fit.
     void* TryBump(std::size_t bytes, std::size_t alignment);
+    /// Marks `[begin, begin + bytes)` as rewound: filled with 0xDD where instrumentation is on,
+    /// and poisoned under AddressSanitizer, so a read through a pointer that outlived its Rewind
+    /// or Reset shows. The range holds alignment padding that was never handed out and is still
+    /// poisoned, so it is unpoisoned before the fill.
+    static void RetireRange(std::byte* begin, std::size_t bytes);
     /// Serves a request the current block cannot: the next retained block that fits, else a
     /// new one.
     void* AllocateFromNextBlock(std::size_t bytes, std::size_t alignment);
@@ -188,7 +221,7 @@ class Arena
 #if GE_DEBUG_INSTRUMENTATION
             : m_Arena(arena)
         {
-            m_Arena.m_SerialUse.Enter();
+            m_Arena.m_SerialUse.Enter("Arena");
         }
         ~UseScope() { m_Arena.m_SerialUse.Exit(); }
 #else
@@ -206,11 +239,13 @@ class Arena
 
     std::vector<Block> m_Blocks;
     std::vector<DestructorRecord> m_Destructors;
-    std::size_t m_Current = 0;
     /// The bump cursor and the end of the current block. With no block both are such that
-    /// every request misses: 1 and 0.
-    std::uintptr_t m_Cursor = 1;
+    /// every request misses: 1 and 0. Never adjacent: the compiler reads adjacent members with
+    /// one paired load, which cannot be forwarded from the previous bump's 8-byte store of the
+    /// cursor and stalls every bump of a sequence until that store retires.
     std::uintptr_t m_Limit = 0;
+    std::size_t m_Current = 0;
+    std::uintptr_t m_Cursor = 1;
     /// Bytes used in the blocks before the current one.
     std::size_t m_UsedBeforeCurrent = 0;
     /// The largest `BytesUsed()` since the last `Reset`: the size `Reset` coalesces into.
@@ -235,13 +270,65 @@ inline void* Arena::TryBump(std::size_t bytes, std::size_t alignment)
         return nullptr;
     m_Cursor = aligned + bytes;
     void* memory = reinterpret_cast<void*>(aligned);
-#if defined(GE_ARENA_ASAN)
+#if defined(GE_MEMORY_ASAN)
     ASAN_UNPOISON_MEMORY_REGION(memory, bytes);
 #endif
 #if GE_DEBUG_INSTRUMENTATION
     std::memset(memory, 0xCD, bytes);
 #endif
     return memory;
+}
+
+inline Arena::Marker Arena::GetMarker() const
+{
+    Marker marker;
+    marker.Block = static_cast<std::uint32_t>(m_Current);
+    marker.DestructorCount = static_cast<std::uint32_t>(m_Destructors.size());
+    marker.Offset = m_Blocks.empty() ? 0 : m_Cursor - reinterpret_cast<std::uintptr_t>(m_Blocks[m_Current].Data);
+    return marker;
+}
+
+inline void Arena::RetireRange([[maybe_unused]] std::byte* begin, [[maybe_unused]] std::size_t bytes)
+{
+#if defined(GE_MEMORY_ASAN)
+    ASAN_UNPOISON_MEMORY_REGION(begin, bytes);
+#endif
+#if GE_DEBUG_INSTRUMENTATION
+    std::memset(begin, 0xDD, bytes);
+#endif
+#if defined(GE_MEMORY_ASAN)
+    ASAN_POISON_MEMORY_REGION(begin, bytes);
+#endif
+}
+
+inline bool Arena::TryResetOneBlock(std::size_t& peakBytes)
+{
+    if (m_Blocks.size() != 1 || !m_Destructors.empty())
+        return false;
+    const UseScope use(*this);
+    Block& block = m_Blocks.front();
+    const std::uintptr_t data = reinterpret_cast<std::uintptr_t>(block.Data);
+    const std::size_t used = m_Cursor - data;
+    peakBytes = std::max(m_PeakSinceReset, used);
+    RetireRange(block.Data, used);
+    block.Used = 0;
+    m_Cursor = data;
+    m_PeakSinceReset = 0;
+    return true;
+}
+
+inline bool Arena::TryRewindWithinCurrentBlock(Marker marker)
+{
+    if (m_Blocks.empty() || marker.Block != m_Current || marker.DestructorCount != m_Destructors.size())
+        return false;
+    const UseScope use(*this);
+    const std::uintptr_t data = reinterpret_cast<std::uintptr_t>(m_Blocks[m_Current].Data);
+    const std::uintptr_t target = data + marker.Offset;
+    assert(target <= m_Cursor && "Rewind to a marker taken before a later Rewind or Reset");
+    m_PeakSinceReset = std::max(m_PeakSinceReset, m_UsedBeforeCurrent + (m_Cursor - data));
+    RetireRange(reinterpret_cast<std::byte*>(target), m_Cursor - target);
+    m_Cursor = target;
+    return true;
 }
 
 inline void* Arena::Allocate(std::size_t bytes, std::size_t alignment)

@@ -521,6 +521,7 @@ void SkyRenderer::GenerateStarCatalog()
 
     static constexpr float kPi = 3.14159265358979f;
     static constexpr float kTwoPi = 2.0f * kPi;
+    static constexpr float kStarRotationJitterRadians = 0.2f;
 
     for (uint32_t i = 0; i < maxStars; ++i)
     {
@@ -536,7 +537,10 @@ void SkyRenderer::GenerateStarCatalog()
 
         float brightness = 0.3f + 0.7f * dist01(rng);
         float sizeScale = 0.6f + 1.2f * dist01(rng);
-        float rotAngle = kTwoPi * dist01(rng);
+        // The sparkle's points stay within about 11 degrees of the screen's axes: a four-pointed
+        // star a few pixels across with its points on the pixel grid's diagonals reads as a
+        // square (star_sparkle.glsl).
+        float rotAngle = kStarRotationJitterRadians * (2.0f * dist01(rng) - 1.0f);
         float twinkleSeed = dist01(rng);
         float colorTemp = dist01(rng);
 
@@ -589,11 +593,9 @@ void SkyRenderer::SetCamera(const CameraState& camera)
     m_Camera = camera;
 }
 
-void SkyRenderer::InvalidateTransmittance()
-{
-    m_TransmittanceComputed = false;
-}
-
+// Earth's clear-sky atmosphere as Hillaire 2020 gives it ("A Scalable and Production Ready Sky and
+// Atmosphere Rendering Technique", table 1, after Bruneton's reference): per-metre coefficients at
+// sea level, scale heights in metres, ozone as a tent between 10 and 40 km.
 void SkyRenderer::FillDefaultAtmosphere(AtmosphereParametersGPU& atmo)
 {
     atmo.planetRadius = 6360.0e3f;
@@ -603,10 +605,26 @@ void SkyRenderer::FillDefaultAtmosphere(AtmosphereParametersGPU& atmo)
     atmo.betaRayleigh[0] = 5.802e-6f;
     atmo.betaRayleigh[1] = 13.558e-6f;
     atmo.betaRayleigh[2] = 33.100e-6f;
-    atmo.betaMie[0] = 2.0e-6f;
-    atmo.betaMie[1] = 2.0e-6f;
-    atmo.betaMie[2] = 2.0e-6f;
+    atmo.betaMie[0] = 3.996e-6f;
+    atmo.betaMie[1] = 3.996e-6f;
+    atmo.betaMie[2] = 3.996e-6f;
+    // Mie extinction 4.440e-6 per metre: absorption is the extinction less the scattering.
+    atmo.mieAbsorption[0] = 0.444e-6f;
+    atmo.mieAbsorption[1] = 0.444e-6f;
+    atmo.mieAbsorption[2] = 0.444e-6f;
     atmo.mieG = 0.8f;
+    // Ozone per linear-sRGB channel. The paper samples the cross section at 680, 550 and 440 nm
+    // (0.650, 1.881, 0.085)e-6, but the Chappuis band peaks at 600 nm, between the red and green
+    // samples, so that under-weights red and turns the twilight zenith violet. These are the same
+    // data (300 Dobson units, Serdyuchenko 233 K cross sections, the solar spectrum) integrated
+    // against the CIE 1931 functions and the sRGB primaries: what each channel of the sun loses
+    // through the zenith column. From the zenith column to the horizon path red moves 0.9 % and
+    // green 2.6 %; blue stays within -0.03..0.05e-6, so it is 0.
+    atmo.ozoneAbsorption[0] = 2.480e-6f;
+    atmo.ozoneAbsorption[1] = 1.795e-6f;
+    atmo.ozoneAbsorption[2] = 0.0f;
+    atmo.ozoneCenterHeight = 25.0e3f;
+    atmo.ozoneHalfWidth = 15.0e3f;
     atmo.groundAlbedo[0] = 0.3f;
     atmo.groundAlbedo[1] = 0.3f;
     atmo.groundAlbedo[2] = 0.3f;

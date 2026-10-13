@@ -4,6 +4,7 @@
 #include "compat_profile.glsl"
 
 #include "sky_ray_sphere.glsl"
+#include "sky_transmittance_lut.glsl"
 
 // Shared sky composite: the ground / below-horizon blend and the night-sky
 // gradient that sit on TOP of the atmospheric sky-view LUT sample. Factored out
@@ -219,6 +220,102 @@ vec3 GE_SkyDiffuseMeanRadiance(sampler2D skyViewLut, float lutHeight)
     return sum / float(GE_SKY_AMBIENT_SAMPLE_COUNT);
 }
 
+// Where a horizon colour comes from (GE_SkyHorizonColor); HeightFogColorSource mirrors the values.
+#define GE_SKY_HORIZON_SOURCE_VIEW_LUT 1
+#define GE_SKY_HORIZON_SOURCE_CONSTANT 2
+#define GE_SKY_HORIZON_SOURCE_HDRI 3
+
+// Compass resolution of an HDRI's horizon colour: the row is averaged over 1/64 of a turn
+// (5.6 degrees) around each direction, so its detail (a fence, a tree line, the sun) washes out
+// instead of drawing one column of colour per texel.
+#define GE_SKY_HORIZON_HDRI_COLUMNS 64.0
+#define GE_SKY_HORIZON_HDRI_TAPS 4
+
+// The visible sky's radiance at the horizon in the azimuth of dirWS: scene-linear, before the
+// sky's exposure trim, which sky_render.frag multiplies in last and a caller multiplies in the same
+// way. This is the colour of the far air a ground-hugging haze stands in front of: the backdrop's
+// horizon row (v = 0.5) under the shared night composite, evaluated at viewZenithCos == 0, where
+// the composite's ground block does not apply. Below-horizon view directions read the horizon of
+// their own azimuth, so a haze over the ground meets the sky without a seam.
+//
+// skyBackdrop is the texture the sky pass draws its backdrop from: the sky-view LUT, or an HDRI.
+// At the horizon the two encodings coincide (the LUT's u is the same atan(z, x) azimuth as the
+// HDRI's lat-long u, and both put the horizon at v = 0.5). The LUT is smooth along its horizon
+// row and is tapped once at lod 0. An HDRI is averaged (averageAlongRow): from the mip whose width
+// is GE_SKY_HORIZON_HDRI_COLUMNS where its chain reaches that far, with GE_SKY_HORIZON_HDRI_TAPS
+// taps across the window for what the chain does not cover (an HDRI cooked without mips).
+// azimuthOffsetRadians is the HDRI's rotation about the zenith (0 for the LUT); nightAmount is 0
+// for an HDRI, which the sky draws without the night composite.
+//
+// The planet-local frame is taken as the world axes (east +X, up +Y, north +Z): the sky pass's frame
+// for a camera above the world origin. Away from the origin the sky's up tilts by distance over the
+// planet radius, about 0.01 degrees per kilometre at Earth scale.
+//
+// Explicit lods: callers evaluate this per fragment inside non-uniform branches, where WGSL
+// refuses an implicit one.
+vec3 GE_SkyHorizonRadiance(sampler2D skyBackdrop,
+                           vec3 dirWS,
+                           float azimuthOffsetRadians,
+                           float nightAmount,
+                           vec3 nightSkyHorizonColor,
+                           bool averageAlongRow)
+{
+    // A view straight up or down has no azimuth; any horizon direction is as good as another.
+    vec3 flatDir = vec3(dirWS.x, 0.0, dirWS.z);
+    vec3 horizonDir = dot(flatDir, flatDir) > 1e-12 ? normalize(flatDir) : vec3(1.0, 0.0, 0.0);
+    // The HDRI's rotation turns the tap about the zenith. At offset 0 the tap direction equals
+    // horizonDir bit for bit, so a LUT tap lands exactly where the sky pass's own tap does.
+    float cosOffset = cos(azimuthOffsetRadians);
+    float sinOffset = sin(azimuthOffsetRadians);
+    vec3 tapDir = vec3(cosOffset * horizonDir.x - sinOffset * horizonDir.z, 0.0,
+                       sinOffset * horizonDir.x + cosOffset * horizonDir.z);
+    vec2 tapUv = GE_SkyDirToViewLutUv(tapDir);
+
+    vec3 skyColor;
+    if (averageAlongRow)
+    {
+        float width = float(textureSize(skyBackdrop, 0).x);
+        float lod = clamp(log2(width / GE_SKY_HORIZON_HDRI_COLUMNS), 0.0,
+                          float(textureQueryLevels(skyBackdrop) - 1));
+        skyColor = vec3(0.0);
+        for (int i = 0; i < GE_SKY_HORIZON_HDRI_TAPS; ++i)
+        {
+            float offset = ((float(i) + 0.5) / float(GE_SKY_HORIZON_HDRI_TAPS) - 0.5) /
+                           GE_SKY_HORIZON_HDRI_COLUMNS;
+            skyColor += textureLod(skyBackdrop, vec2(tapUv.x + offset, tapUv.y), lod).rgb;
+        }
+        skyColor /= float(GE_SKY_HORIZON_HDRI_TAPS);
+    }
+    else
+    {
+        skyColor = textureLod(skyBackdrop, tapUv, 0.0).rgb;
+    }
+    // The night composite's per-direction dither hashes horizonDir, the direction of the sky pixel
+    // the haze stands in front of.
+    return GE_ApplySkyGroundAndNight(skyColor, horizonDir, 0.0, nightAmount,
+                                     false, vec3(0.0), 0.0, vec3(0.0), 0.0, vec3(0.0), 1.0,
+                                     nightSkyHorizonColor);
+}
+
+// A haze's colour from the sky, in the units the sky draws in. source is one of the
+// GE_SKY_HORIZON_SOURCE_* values. A constant source (the gradient sky's horizon, the stylized
+// ground's rim) is horizonColor itself; the backdrop sources read GE_SkyHorizonRadiance with
+// horizonColor as the night sky's horizon colour. scale is the sky's exposure trim, times the
+// HDRI's intensity for an HDRI.
+vec3 GE_SkyHorizonColor(sampler2D skyBackdrop,
+                        int source,
+                        vec3 dirWS,
+                        float azimuthOffsetRadians,
+                        float nightAmount,
+                        vec3 horizonColor,
+                        float scale)
+{
+    if (source == GE_SKY_HORIZON_SOURCE_CONSTANT)
+        return horizonColor * scale;
+    return GE_SkyHorizonRadiance(skyBackdrop, dirWS, azimuthOffsetRadians, nightAmount, horizonColor,
+                                 source == GE_SKY_HORIZON_SOURCE_HDRI) * scale;
+}
+
 // Radiance leaving the Lambertian planet floor: sunlight attenuated by the atmosphere on
 // the way down, plus the skylight the floor actually receives, both reflected by the
 // ground albedo.
@@ -282,6 +379,7 @@ vec3 GE_CompositeGroundFloor(vec3 skyColor,
                              vec3 dirWS,
                              vec3 planetCenter,
                              float planetRadius,
+                             float atmosphereRadius,
                              float camR,
                              float viewZenithCos,
                              vec3 groundAlbedo,
@@ -346,12 +444,10 @@ vec3 GE_CompositeGroundFloor(vec3 skyColor,
         distToFloor = tg0;
     }
 
-    // Sun shadowing from the transmittance LUT at the surface row (the hit point is on
-    // the sphere, so the normalized height is 0).
-    float uMu        = 0.5 + 0.5 * dot(upAtHit, sunDir);
-    // Compat needs an explicit lod here: the hit branch is per-fragment, and
-    // WGSL forbids implicit lod in non-uniform control flow.
-    vec3  transToSun = GE_TAP_LOD0(transLUT, vec2(uMu, 0.0)).rgb;
+    // Sun shadowing from the transmittance LUT at the surface (the hit point is on the
+    // sphere), 0 once the sun is below the hit point's horizon.
+    vec3  transToSun = GE_SkyTransmittanceToTop(transLUT, planetRadius, dot(upAtHit, sunDir),
+                                                planetRadius, atmosphereRadius);
 
     vec3 floorColor = GE_GroundBounceRadiance(groundAlbedo, groundBrightness, upAtHit, sunDir,
                                               transToSun, sunColor, sunIntensity, skyDiffuseMeanRadiance,

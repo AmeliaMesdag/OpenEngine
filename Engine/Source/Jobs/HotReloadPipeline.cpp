@@ -177,9 +177,9 @@ std::future<HotReloadPipeline::PipelineStats> HotReloadPipeline::ExecuteAsync(
                 auto assemblyPrepTask = std::make_unique<AssemblyPrepTask>(&m_ThreadPool, chosenPath, fileLoadHandle, preloadSync, runCancelToken);
                 std::unique_ptr<MainThreadSwapTask> swapTask;
                 if (m_SwapperFactory) {
-                    swapTask = std::make_unique<MainThreadSwapTask>(&m_ThreadPool, chosenPath, nullptr, preloadSync, m_SwapperFactory(), runCancellation);
+                    swapTask = std::make_unique<MainThreadSwapTask>(&m_ThreadPool, chosenPath, preloadSync, m_SwapperFactory(), runCancellation);
                 } else {
-                    swapTask = std::make_unique<MainThreadSwapTask>(&m_ThreadPool, chosenPath, nullptr, preloadSync, nullptr, runCancellation);
+                    swapTask = std::make_unique<MainThreadSwapTask>(&m_ThreadPool, chosenPath, preloadSync, nullptr, runCancellation);
                 }
 
                 const JobSystem::TaskId assemblyPrepId = assemblyPrepTask->GetTaskId();

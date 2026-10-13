@@ -106,8 +106,12 @@ void ReferenceOpticalDepth(const Rendering::AtmosphereParametersGPU& atmo, doubl
             std::max(0.0, std::sqrt(r * r + sMid * sMid + 2.0 * r * mu * sMid) - atmo.planetRadius);
         const double rayleigh = std::exp(-height / atmo.rayleighScaleHeight);
         const double mie = std::exp(-height / atmo.mieScaleHeight);
+        const double ozone =
+            std::max(0.0, 1.0 - std::fabs(height - atmo.ozoneCenterHeight) / atmo.ozoneHalfWidth);
         for (int c = 0; c < 3; ++c)
-            outTau[c] += (atmo.betaRayleigh[c] * rayleigh + atmo.betaMie[c] * mie) * ds;
+            outTau[c] += (atmo.betaRayleigh[c] * rayleigh + (atmo.betaMie[c] + atmo.mieAbsorption[c]) * mie +
+                          atmo.ozoneAbsorption[c] * ozone) *
+                         ds;
     }
 }
 
@@ -160,13 +164,15 @@ std::string LoadEngineSource(const char* relativePath)
 } // namespace
 
 // Verify the yardstick before measuring with it. For a straight-up ray the path parameter IS the
-// height, so the optical depth has a closed form, beta * H * (1 - exp(-thickness / H)). With Mie
-// switched off (its 1200 m scale height is the term any quadrature resolves worst) the test's own
-// converged reference must land on it — otherwise every comparison below is against a broken ruler.
+// height, so the optical depth has a closed form: beta * H * (1 - exp(-thickness / H)) for Rayleigh,
+// and the ozone tent's area, its half width, for ozone. With Mie switched off (its 1200 m scale
+// height is the term any quadrature resolves worst) the test's own converged reference must land on
+// it — otherwise every comparison below is against a broken ruler.
 TEST(SkySunColor, TheReferenceIntegralMatchesTheAnalyticRadialForm)
 {
     Rendering::AtmosphereParametersGPU atmo = DefaultAtmosphere();
     atmo.betaMie[0] = atmo.betaMie[1] = atmo.betaMie[2] = 0.0f;
+    atmo.mieAbsorption[0] = atmo.mieAbsorption[1] = atmo.mieAbsorption[2] = 0.0f;
     const float thickness = atmo.atmosphereRadius - atmo.planetRadius;
 
     double reference[3];
@@ -175,12 +181,13 @@ TEST(SkySunColor, TheReferenceIntegralMatchesTheAnalyticRadialForm)
     for (int c = 0; c < 3; ++c)
     {
         const double expected = atmo.betaRayleigh[c] * atmo.rayleighScaleHeight *
-                                (1.0 - std::exp(-thickness / atmo.rayleighScaleHeight));
+                                    (1.0 - std::exp(-thickness / atmo.rayleighScaleHeight)) +
+                                atmo.ozoneAbsorption[c] * atmo.ozoneHalfWidth;
         EXPECT_NEAR(reference[c], expected, expected * 0.001) << "channel " << c;
     }
 }
 
-// The 32-step quadrature is inherited from the shader, not a free parameter: it has to be close
+// The 256-step quadrature is inherited from the shader, not a free parameter: it has to be close
 // enough to the converged integral that the light's colour is the atmosphere's answer rather than
 // the step count's.
 TEST(SkySunColor, QuadratureAgreesWithItsConvergedLimit)
@@ -200,7 +207,7 @@ TEST(SkySunColor, QuadratureAgreesWithItsConvergedLimit)
         {
             // Relative on a floor, because the horizon's blue channel is ~1e-4 and an absolute
             // tolerance there would pass anything.
-            const double tolerance = std::max(reference[c] * 0.01, 1e-4);
+            const double tolerance = std::max(reference[c] * 0.001, 1e-5);
             EXPECT_NEAR(actual[c], reference[c], tolerance)
                 << "elevation " << elevation << " channel " << c;
         }
@@ -410,16 +417,20 @@ TEST(SkySunColor, TheLinkedLightNeverFlaresBackOnAcrossTheSunsetHandoff)
         const float delivered = Luminance(linkedLight);
 
         if (previous >= 0.0f)
+        {
             EXPECT_LE(delivered, previous * 1.5f)
                 << "hour " << hour << ": the delivered light brightened " << (delivered / previous)
                 << "x in one 0.05 h step";
+        }
 
         const float sunElevationDeg = std::asin(std::clamp(state.sunDirWS[1], -1.0f, 1.0f)) *
                                       180.0f / 3.14159265358979323846f;
         if (sunElevationDeg <= -2.0f)
+        {
             EXPECT_LT(Luminance(ground), moonSourceLuminance * 1.2f)
                 << "hour " << hour << ": sun is " << sunElevationDeg
                 << " degrees under and the source colour is brighter than moonlight";
+        }
 
         if (step == 0)
             firstLuminance = delivered;
@@ -491,18 +502,25 @@ TEST(SkySunColor, TransmittanceShaderStillIntegratesTheMirroredModel)
     const std::string shader = LoadShader("sky_transmittance_lut.comp");
     ASSERT_FALSE(shader.empty()) << "sky_transmittance_lut.comp not found via GE_RENDERER_REPO_ROOT";
 
-    EXPECT_NE(shader.find("const int kSteps = 32;"), std::string::npos)
+    EXPECT_NE(shader.find("const int kSteps = 256;"), std::string::npos)
         << "step count must match kOpticalDepthSteps in AtmosphereTransmittance.cpp";
-    EXPECT_NE(shader.find("float sm = 0.5 * (s0 + s1);"), std::string::npos)
+    EXPECT_NE(shader.find("float sm = (float(i) + 0.5) * ds;"), std::string::npos)
         << "midpoint sampling";
     EXPECT_NE(shader.find("float r2 = r * r + sm * sm + 2.0 * r * mu * sm;"), std::string::npos)
         << "sample radius along the ray";
-    EXPECT_NE(shader.find("vec3 sigma = uAtmos.betaRayleigh * rayleigh + uAtmos.betaMie * mie;"),
+    EXPECT_NE(shader.find("tau += GE_SkyMediumAt(hSample).extinction * ds;"), std::string::npos)
+        << "the optical depth integrates the shared medium's extinction";
+    const std::string medium = LoadShader("Includes/sky_atmosphere_ubo.glsl");
+    EXPECT_NE(medium.find("m.extinction = m.scatterRayleigh + (uAtmos.betaMie + uAtmos.mieAbsorption) * mieDensity +"),
               std::string::npos)
-        << "extinction is Rayleigh + Mie with no tint or floor";
+        << "extinction is Rayleigh + Mie scattering and absorption + ozone, with no tint or floor";
+    EXPECT_NE(medium.find("max(0.0, 1.0 - abs(h - uAtmos.ozoneCenterHeight) / uAtmos.ozoneHalfWidth)"),
+              std::string::npos)
+        << "the ozone tent the mirror copies";
     EXPECT_NE(shader.find("vec3 transmittance = exp(-tau);"), std::string::npos);
-    EXPECT_NE(shader.find("sMax = sGround;"), std::string::npos)
-        << "downward rays clamp to their own hit with the ground";
+    EXPECT_NE(shader.find("GE_SkyTransmittanceLutUvToRMu("), std::string::npos)
+        << "the LUT stores only rays that leave the atmosphere; below the horizon the mirror's chord "
+           "through the planet and the readers' 0 are the two occlusions";
 }
 
 // The sky-view LUT applies the transmittance toward the sun at every march step. That is the OTHER

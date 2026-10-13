@@ -33,14 +33,17 @@ struct ShaderProgramCompileRequest
 {
     std::string debugName;                 // diagnostics/log output only — never part of the cache key
     std::filesystem::path baseDirectory;   // base for resolving relative source paths
-    std::filesystem::path cacheRoot;       // <workspace>/.Cache/Shaders
+    // Read-only caches probed in order before cacheRoot (a packaged game's cooked cache). A program
+    // found in one is served from it; nothing is ever written to them.
+    std::vector<std::filesystem::path> readOnlyCacheRoots;
+    std::filesystem::path cacheRoot;       // <workspace>/.Cache/Shaders: probed last, a miss compiles into it
     std::vector<std::filesystem::path> includeDirs;
     std::vector<ShaderStageCompileSpec> stages;
 };
 
 struct ShaderProgramCompileResult
 {
-    std::filesystem::path outputDir;       // cache directory for this build
+    std::filesystem::path outputDir;       // cache directory for this build: the root that served it
     std::filesystem::path shaderPkgPath;   // emitted .shaderpkg path
     ShaderMeta meta{};
     // stage -> cooked bytes in the ShaderSourceKind the compile was asked for

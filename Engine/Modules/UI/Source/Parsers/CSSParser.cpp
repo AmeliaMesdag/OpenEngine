@@ -1082,7 +1082,8 @@ static int CountSiblingsOfType(const UIElement& el, bool ofType)
     const std::type_info& elType = typeid(el);
     for (const auto& child : children)
     {
-        if (typeid(*child) == elType)
+        const UIElement* childElement = child.get();
+        if (typeid(*childElement) == elType)
             ++count;
     }
     return count;

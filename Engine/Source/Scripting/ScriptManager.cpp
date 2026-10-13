@@ -739,6 +739,9 @@ void ScriptManager::Shutdown()
     // on above; the channel goes before the pool it is registered with.
     m_CompileChannel.reset();
 
+    // No compile can start any more: stop the compile servers this process launched.
+    CompileServerClient::StopStartedServers();
+
     // Shutdown CoreCLR
     m_ClrHost.Shutdown();
 

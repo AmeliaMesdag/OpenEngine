@@ -20,10 +20,14 @@ using Rendering::VertexAttributeFlags;
 //
 // DECLARED, NOT DERIVED. The renderer chooses pass keywords per view, so this
 // table is a claim about which views a cooked build supports — not a proof. A
-// view that turns on a keyword outside it (GTAO, SSSR, ray-traced shadows,
-// LOD crossfade) asks for a variant no cook produced, and the runtime says so
-// by name rather than drawing wrong. Widen the table when the shipped pipeline
-// grows a pass.
+// view that turns on a keyword outside it (ray-traced shadows, say) asks for a
+// variant no cook produced, and the runtime says so by name rather than drawing
+// wrong. Widen the table when the shipped pipeline grows a pass. A desktop cook
+// also adds, for a material the runtime prewarms, every key that prewarm asks
+// for (MaterialPrewarmVariantKeys: the LOD-crossfade tails, the asset preview
+// and the depth heads) under every world pass this table declares, so a view
+// with per-view keywords (GTAO, SSSR, DDGI, contact shadows), which prewarm does
+// not ask for, finds its crossfade tails cooked too.
 //
 // The material's own keywords are derived, not declared: VariantsFor adds what the document decides
 // (DeriveBaseVariantKey: its lobes and AlphaTest) to every row, as registration keeps them in every

@@ -22,7 +22,7 @@ It also builds for the web: the same engine runs in the browser on WebGPU, shipp
 - A cross-platform editor for Windows, macOS, Linux and the web. Yes, the editor runs in the browser.
 - An ECS built on a true data-oriented design.
 - UI driven by CSS layout and XML, in the editor and in games.
-- Built for AI-assisted development: a bundled MCP server and CLI let AI agents drive the running editor, and an in-editor AI assistant ships as a preview. See [docs/MCP_SETUP.md](docs/MCP_SETUP.md).
+- Built for AI-assisted development: a bundled MCP server and CLI let AI agents drive the running editor, and an in-editor AI assistant ships as a preview. See [docs/getting-started/mcp-setup.mdx](docs/getting-started/mcp-setup.mdx).
 
 ## Try it in the browser
 
@@ -47,7 +47,7 @@ cmake --build --preset vs2026-x64-local --config DebugFast --target Editor -j 12
 build\vs2026-x64-local\bin\DebugFast\Apps\Editor\Editor.exe
 ```
 
-The first configure bootstraps vcpkg and builds the third-party dependencies once (expect tens of minutes); every build after that is incremental. macOS and Linux build the same Editor through their own presets (`macos-arm64-local`, `linux-x64-local`); platform prerequisites, the Ninja fast build, Steam Deck, tests and troubleshooting are in [BUILD.md](BUILD.md). With the editor running, [Your first project](docs/first-project.html) creates a project, saves a scene and exports a game.
+The first configure bootstraps vcpkg and builds the third-party dependencies once (expect tens of minutes); every build after that is incremental. macOS and Linux build the same Editor through their own presets (`macos-arm64-local`, `linux-x64-local`); platform prerequisites, the Ninja fast build, Steam Deck, tests and troubleshooting are in [BUILD.md](BUILD.md). With the editor running, [Your first project](docs/getting-started/first-project.mdx) creates a project, saves a scene and exports a game.
 
 ## Repository layout
 

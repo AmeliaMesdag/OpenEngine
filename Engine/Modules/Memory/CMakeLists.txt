@@ -7,6 +7,8 @@ project(Memory LANGUAGES CXX)
 set(MEMORY_SOURCES
     Source/AllocationCounter.cpp
     Source/Arena.cpp
+    Source/ObjectPool.cpp
+    Source/ScratchScope.cpp
     Source/StatsRegistry.cpp
     Source/TrackedBytes.cpp
 )
@@ -23,10 +25,13 @@ target_include_directories(Memory
         Testing
 )
 
-# A target that links Memory (or Engine, which re-exports this definition) reaches the
+# A target that links Memory (or Engine, which carries the same marker) reaches the
 # process's one allocation counter here, so the copy of AllocationCounter.cpp that
-# cmake/AllocationHook.cmake adds to test executables compiles empty in it.
-target_compile_definitions(Memory INTERFACE GE_ALLOCATION_COUNTER_LINKED)
+# cmake/AllocationHook.cmake adds to test executables compiles empty in it. The marker
+# is a link-interface property, not a definition: only that one source reads it, and a
+# definition would sit on the command line of every target that links Engine.
+set_target_properties(Memory PROPERTIES INTERFACE_GE_ALLOCATION_COUNTER_LINKED ON)
+set_property(TARGET Memory APPEND PROPERTY COMPATIBLE_INTERFACE_BOOL GE_ALLOCATION_COUNTER_LINKED)
 
 # Types only, so every other module, the logger and the platform layer included, can
 # allocate through Memory without a dependency cycle.

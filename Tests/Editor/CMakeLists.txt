@@ -5,6 +5,8 @@
 # the new UI module via AssetRuntime's ParserRegistry (UILayoutAsset/UIStyleAsset
 # registration).
 set(EDITOR_TEST_SOURCES
+	CssInspectorIdleTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Modules/CssInspector/CssInspector.cpp
 	SceneViewTransformToolTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/MeasureSceneGizmo.cpp
 	# The shared gizmo icon helpers: billboard basis, icon world radius, circle emitter.
@@ -16,11 +18,16 @@ set(EDITOR_TEST_SOURCES
 	MarkupRegionInspectorTests.cpp
 	MarkupRegionSceneViewTests.cpp
 	MarkupSceneViewTests.cpp
+	# The Mark-up tool menu's shape rows and their icons.
+	MarkupToolMenuTests.cpp
 	# The debug server's request gates over a loopback connection, with the mark-ups' gate.
 	DebugServerRequestGatesTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/DebugServer/EditorDebugServer.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/DebugServer/AssistantSessionHandlers.cpp
 	SceneViewToolStripTests.cpp
+	# The tool strip's badge count, laid out over the real editor stylesheets: inside its strip at
+	# every count it can show, in both floating orientations and in the toolbar.
+	SceneViewToolStripBadgeLayoutTests.cpp
 	MarkupNotesEditCommandTests.cpp
 	GizmoEllipseTests.cpp
 	SceneViewPostProcessSwitchesTests.cpp
@@ -42,6 +49,8 @@ set(EDITOR_TEST_SOURCES
 	MeshBvhDiskFormatTests.cpp
 	EntityDuplicateTests.cpp
 	DefaultSceneEntitiesTests.cpp
+	NewSceneSeedTests.cpp
+	SceneViewExposureTests.cpp
 	TerrainZoneStrokeCommandTests.cpp
 	SphereSculptStrokeCommandTests.cpp
 	SceneBackupZonePayloadFlushTests.cpp
@@ -226,6 +235,12 @@ set(EDITOR_TEST_SOURCES
 	# which never runs that path. Same leaf-TU shape as the notice above.
 	PreservedFieldNoticeTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/PreservedFieldNotice.cpp
+	# The Navigation Surface inspector: its reflected rows per mode, the bake status notice and the
+	# Bake action, over the reflection-driven row builder it composes.
+	NavigationSurfaceInspectorTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/NavigationSurfaceInspector.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/DefaultComponentInspector.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/Gizmos/NavigationSurfaceGizmo.cpp
 	# The Model Inspector's per-submesh LOD badge: whether the renderer draws the
 	# chain the importer read. The classifier asks the shared geometry resolver,
 	# so the rule an author reads is checkable without a running editor.
@@ -265,6 +280,10 @@ set(EDITOR_TEST_SOURCES
 	# traits registry in EditorSDK.dll. Leaf TU, like the notices above.
 	InspectorSectionHostsTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/InspectorSectionHosts.cpp
+	# The Add Component picker's icon, read from the traits registry by class. Leaf TU
+	# over the component headers and the registry, like the host order above.
+	ComponentPickerIconTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/ComponentIconClass.cpp
 	# The Surface Rules condition widget's testable halves: the unit and band
 	# copy, the per-row ignored state, and the arm that holds the terrain preview
 	# cadence open for a drag. Leaf TUs over the component header, the UI element
@@ -425,6 +444,10 @@ set(EDITOR_TEST_SOURCES
 	# TU (InputSystem only), so it compiles in rather than dragging EditorApplication.
 	RuntimeInputConnectionTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/RuntimeInputConnection.cpp
+	# When the editor grants the game's pointer lock. Leaf TU (InputSystem +
+	# Window), so it compiles in rather than dragging EditorApplication.
+	GameViewPointerLockTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/GameViewPointerLock.cpp
 	# The colour picker dialog's own routing: a UI-only chain, plus the
 	# eyedropper's screen-wide pointer grab and the Escape that ends it. Leaf TU
 	# (WindowInputRouter + std::function), so it compiles in rather than dragging
@@ -609,6 +632,7 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/TerrainBrushToolStripEntry.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/TerrainPresence.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewPostProcessSwitches.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneLightExposure.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SelectionOutlineContributors.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewGizmos.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewGizmoThickLines.cpp
@@ -1361,13 +1385,14 @@ add_test(NAME PanelDeferredBindLatchTests
 
 # The project picker's network jobs on their channels: the community catalog fetch and a
 # project acquisition hold no compute worker, and the catalog service's destructor waits for a
-# fetch in flight; and the startup scene a project opens on and is given when created. Its own
-# target because it points GE_EDITOR_USER_DATA_ROOT at a scratch preferences file for the
-# whole process.
+# fetch in flight; and the startup scene a project opens on and is given when created, for every
+# built-in template too, plus real loads of the staged template scenes. Its own target because it points
+# GE_EDITOR_USER_DATA_ROOT at a scratch preferences file for the whole process.
 add_executable(ProjectPickerJobTests
 	ProjectCatalogServiceTests.cpp
 	ProjectAcquisitionTests.cpp
 	ProjectStartupSceneTests.cpp
+	ShippedTemplateSceneTests.cpp
 	NewProjectLocationTests.cpp
 	ProjectCatalogTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Projects/ProjectCatalogService.cpp
@@ -1387,7 +1412,10 @@ add_executable(ProjectPickerJobTests
 target_include_directories(ProjectPickerJobTests PRIVATE
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Include
 	${CMAKE_SOURCE_DIR}/Engine/Source/ThirdParty/miniz
+	${CMAKE_SOURCE_DIR}/Engine/Tests
 )
+target_compile_definitions(ProjectPickerJobTests PRIVATE
+	GE_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}/Apps/Editor")
 # The vendored miniz sources are third-party C; source properties are scoped to the
 # directory that sets them, so the Editor's /w does not reach this target's copies.
 if(MSVC)
@@ -1410,6 +1438,7 @@ set_target_properties(ProjectPickerJobTests PROPERTIES
 )
 ge_set_output_tests(ProjectPickerJobTests)
 ge_stage_runtime_dependencies(ProjectPickerJobTests)
+add_dependencies(ProjectPickerJobTests StageTestAssets)
 add_test(NAME ProjectPickerJobTests
 	COMMAND "${CMAKE_COMMAND}"
 		-DTEST_EXE=$<TARGET_FILE:ProjectPickerJobTests>

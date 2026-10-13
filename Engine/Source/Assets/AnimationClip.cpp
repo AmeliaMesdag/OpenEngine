@@ -196,7 +196,7 @@ AnimInterp ParseAnimInterp(const std::string& value)
 
 void InitializeDefaultKeyframe(AnimKeyframe& keyframe)
 {
-    std::memset(&keyframe, 0, sizeof(keyframe));
+    keyframe = AnimKeyframe{};
     keyframe.rotation[3] = 1.0f;
     keyframe.scale[0] = 1.0f;
     keyframe.scale[1] = 1.0f;

@@ -3,6 +3,7 @@
 #include "Core/Application.h"
 #include "Engine/Build/BuildPipeline.h"
 #include "Engine/Build/GameConfig.h"
+#include "Engine/Build/MaterialVariantCookTool.h"
 #include "Engine/GameUI/UIScaleProjectSettings.h"
 
 #include <cstdlib>
@@ -23,29 +24,6 @@ constexpr const char* kPlayerTemplateFiles[] = {"WebPlayer.html", "WebPlayer.js"
 /// developer usually has.
 constexpr const char* kWasmPresetBinDirs[] = {"build/wasm-release/bin", "build/wasm-debug/bin"};
 
-/// First existing file at `relative` under `start` or any of its ancestors.
-///
-/// The walk runs to the filesystem root rather than a fixed depth: the staged
-/// Editor sits nine directories inside a build tree on macOS (bundle Contents,
-/// Apps/Editor, bin/<config>, the preset directory) and fewer elsewhere, and a
-/// depth guess that is right on one platform silently finds nothing on another.
-std::filesystem::path FindFileUpward(std::filesystem::path start,
-                                     const std::filesystem::path& relative)
-{
-    std::error_code ec;
-    while (!start.empty())
-    {
-        const auto candidate = start / relative;
-        if (std::filesystem::is_regular_file(candidate, ec))
-            return candidate;
-        const auto parent = start.parent_path();
-        if (parent == start)
-            break;
-        start = parent;
-    }
-    return {};
-}
-
 std::string Quote(const std::filesystem::path& path)
 {
     return "\"" + path.generic_string() + "\"";
@@ -62,11 +40,11 @@ std::filesystem::path FindExportScript(const std::filesystem::path& projectRoot)
 
     if (!projectRoot.empty())
     {
-        const auto inProject = FindFileUpward(projectRoot, relative);
+        const auto inProject = PathUtils::FindFileUpward(projectRoot, relative);
         if (!inProject.empty())
             return inProject;
     }
-    return FindFileUpward(PathUtils::GetExecutableDirectory(), relative);
+    return PathUtils::FindFileUpward(PathUtils::GetExecutableDirectory(), relative);
 }
 
 std::filesystem::path FindPythonExecutable()
@@ -109,19 +87,6 @@ std::filesystem::path FindPythonExecutable()
         }
     }
     return {};
-}
-
-/// MaterialVariantCook is staged into <bin>/Tools by ge_set_output_tools, which
-/// is a sibling of the Apps/ tree the Editor is staged into rather than the
-/// Editor's own directory.
-std::filesystem::path FindMaterialVariantCook()
-{
-#if defined(_WIN32)
-    const std::filesystem::path relative = std::filesystem::path("Tools") / "MaterialVariantCook.exe";
-#else
-    const std::filesystem::path relative = std::filesystem::path("Tools") / "MaterialVariantCook";
-#endif
-    return FindFileUpward(PathUtils::GetExecutableDirectory(), relative);
 }
 
 bool IsPlayerTemplateDir(const std::filesystem::path& directory)

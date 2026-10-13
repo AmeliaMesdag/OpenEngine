@@ -34,6 +34,9 @@ enum class SettingsCategoryGroup : uint32_t
     // Trees / … rather than replacing them. Unlike UIAppearance, these get
     // their own settings-tree row.
     UI,
+    // Renders inline on the Scene View page, after the hand-built rows — no
+    // tree child of its own.
+    SceneView,
 };
 
 // One settings row, declared as data. Exactly one control alternative is

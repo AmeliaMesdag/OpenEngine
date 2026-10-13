@@ -800,9 +800,7 @@ void Query<Ts...>::ParallelBatchEach(Func&& func, [[maybe_unused]] std::size_t m
 
             const std::size_t batchEnd = (chunkIdx < numChunks) ? chunkIdx + 1 : numChunks;
 
-            auto task = [chunks, batchStart, batchEnd, colIdx, colOffsets, ehOffset, fnShared,
-                         tablePtr, kHasGate, kGateVersion, changedCols, changedColCount,
-                         stampVersion]()
+            auto task = [=]()
             {
                 for (std::size_t ci = batchStart; ci < batchEnd; ++ci)
                 {
@@ -972,9 +970,7 @@ void Query<Ts...>::Parallel(Func&& func, [[maybe_unused]] std::size_t minBatchSi
             // At sentinel (chunkIdx == numChunks), don't add 1 — there's no chunk there.
             const std::size_t batchEnd = (chunkIdx < numChunks) ? chunkIdx + 1 : numChunks;
 
-            auto task = [chunks, batchStart, batchEnd, colIdx, colOffsets, ehOffset, fnShared,
-                         tablePtr, kHasGate, kGateVersion, changedCols, changedColCount,
-                         stampVersion]()
+            auto task = [=]()
             {
                 for (std::size_t ci = batchStart; ci < batchEnd; ++ci)
                 {
@@ -1190,7 +1186,7 @@ void Query<Ts...>::ParallelChunks(Func&& func)
                                 kGateVersion))
                 continue;
 
-            auto task = [chunks, chunkIdx, colIdx, fnShared, tablePtr, stampVersion]()
+            auto task = [=]()
             {
                 auto& chunk = chunks[chunkIdx];
                 uint32_t count = chunk.GetCount();

@@ -57,6 +57,12 @@ struct MaterialBuildContext
     // CollectPackageShaderDirs.
     std::vector<std::filesystem::path> PackageShaderDirs;
 
+    // Shader caches probed in order before CacheRoot and never written: a packaged game's cooked
+    // cache (PathUtils::GetBundledShaderCacheRoot), or the editor cache an offline cook reuses
+    // (--reuse-cache). Empty unless that folder exists.
+    std::vector<std::filesystem::path> ReadOnlyCacheRoots;
+    // The writable shader cache: probed last, a miss compiles into it, and derived files (a graph
+    // material's generated surface) are written under it.
     std::filesystem::path CacheRoot;
     std::vector<std::filesystem::path> IncludeDirs;
 };

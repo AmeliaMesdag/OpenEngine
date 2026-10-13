@@ -478,8 +478,8 @@ bool MaterializeShaderGraphSurfaceFromModel(const Graph::Model& model,
     outErrors.clear();
     outSource.clear();
     const auto doc = GraphModelToSgDocument(model, graphName);
-    const auto& library =
-        ShaderGraph::GetSharedNodeLibraryIndex(FindProjectNodesRoot(outputGlslPath));
+    const auto nodesRoot = FindProjectNodesRoot(outputGlslPath);
+    const auto& library = ShaderGraph::GetSharedNodeLibraryIndex(nodesRoot);
     return MaterializeShaderGraphSurface(doc, graphName, library, outSource, outErrors);
 }
 
@@ -513,8 +513,8 @@ bool WriteMaterializedShaderGraphSurfaceFromFile(const std::filesystem::path& gr
     }
 
     const auto file = ShaderGraph::LoadGraphFile(graphGlslPath);
-    const auto& library =
-        ShaderGraph::GetSharedNodeLibraryIndex(FindProjectNodesRoot(graphGlslPath));
+    const auto nodesRoot = FindProjectNodesRoot(graphGlslPath);
+    const auto& library = ShaderGraph::GetSharedNodeLibraryIndex(nodesRoot);
     const std::string graphName = file.Document.GraphName.empty()
                                       ? graphGlslPath.stem().string()
                                       : file.Document.GraphName;

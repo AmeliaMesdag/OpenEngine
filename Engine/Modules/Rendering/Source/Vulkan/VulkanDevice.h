@@ -1279,6 +1279,9 @@ class VulkanDevice : public IDevice
     VulkanFaultInjection m_FaultInjection;
     uint64_t m_FaultFrameCounter = 0;  // 1-based BeginFrame ordinal
     uint64_t m_FaultSubmitCounter = 0; // 1-based graphics-submit ordinal
+    uint64_t m_FaultAcquireCounter = 0; // 1-based successful-acquire ordinal
+    // This frame's acquire was forced to VK_SUBOPTIMAL_KHR; its present follows suit.
+    bool m_FaultAcquireForcedSuboptimal = false;
     // Start time of the most recent rebuild attempt; TickDeviceRecovery spaces the
     // next attempt by RebuildBackoffFor() so a real TDR reset settles first.
     std::chrono::steady_clock::time_point m_LastRebuildAttemptTime{};
@@ -1776,6 +1779,9 @@ class VulkanDevice : public IDevice
 
     // Track swapchain acquisition and whether we've consumed imageAvailable in this frame
     bool m_AcquiredThisFrame = false;
+    // The last acquire returned VK_SUBOPTIMAL_KHR: PresentImage recreates the
+    // swapchain after presenting even when the present itself succeeds.
+    bool m_AcquireReportedSuboptimal = false;
     bool m_WaitedOnImageAvailableThisFrame = false;
     VkSemaphore m_AcquireSemaphoreThisFrame = VK_NULL_HANDLE;
 

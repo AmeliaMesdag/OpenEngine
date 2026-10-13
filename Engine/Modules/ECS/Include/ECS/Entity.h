@@ -284,11 +284,12 @@ private:
     // OnAdd: invoked after a component is first added to an entity (not on update/set of existing).
     // OnSet: invoked after a component's value is written (both initial add and subsequent updates).
     //
-    // Invoke receives the source entity handle. Callbacks registered via the
-    // legacy `void(*)(T&)` API ignore the entity; the entity-aware
-    // `void(*)(EntityHandle, T&)` API uses it. Both coexist.
+    // Invoke receives the world that runs the hook and the source entity handle.
+    // Callbacks registered via the `void(*)(T&)` API ignore both; the
+    // entity-aware `void(*)(EntityHandle, T&)` API uses the entity; the
+    // world-aware remove hook uses both.
     struct ComponentHook {
-        void(*Invoke)(EntityHandle, void* componentPtr, void* userData);
+        void(*Invoke)(const World&, EntityHandle, void* componentPtr, void* userData);
         void* UserData = nullptr;             // per-registration context (e.g. typed callback pointer)
         std::size_t ComponentSize;            // sizeof(T), for batch iteration stride
         uint64 RegistrationId = 0;
@@ -445,6 +446,14 @@ public:
         return RegisterComponentHook<T>(ComponentHookKind::Remove, callback);
     }
 
+    // World-aware variant. Also receives the world the component leaves, for a
+    // resource that belongs to one world while copies of the component's bytes
+    // may sit in another (a copy's teardown must not release the original's).
+    template<Component T>
+    ComponentHookToken RegisterOnRemove(void(*callback)(const World&, EntityHandle, T&)) {
+        return RegisterComponentHook<T>(ComponentHookKind::Remove, callback);
+    }
+
     // Count registrations whose callback OR invocation thunk lies in a module
     // image [base, base + size), once per hook. Includes add/set/remove hooks
     // across this linked ECS copy's live worlds. Main-thread unload boundary:
@@ -531,21 +540,21 @@ public:
     void InvokeRemoveHook(ComponentTypeId typeId, EntityHandle entity, void* ptr) const {
         auto it = m_OnRemoveHooks.find(typeId);
         if (it != m_OnRemoveHooks.end()) {
-            it->second.Invoke(entity, ptr, it->second.UserData);
+            it->second.Invoke(*this, entity, ptr, it->second.UserData);
         }
     }
 
     void InvokeAddHook(ComponentTypeId typeId, EntityHandle entity, void* ptr) const {
         auto it = m_OnAddHooks.find(typeId);
         if (it != m_OnAddHooks.end()) {
-            it->second.Invoke(entity, ptr, it->second.UserData);
+            it->second.Invoke(*this, entity, ptr, it->second.UserData);
         }
     }
 
     void InvokeSetHook(ComponentTypeId typeId, EntityHandle entity, void* ptr) const {
         auto it = m_OnSetHooks.find(typeId);
         if (it != m_OnSetHooks.end()) {
-            it->second.Invoke(entity, ptr, it->second.UserData);
+            it->second.Invoke(*this, entity, ptr, it->second.UserData);
         }
     }
 
@@ -1427,7 +1436,7 @@ private:
         static_assert(sizeof(void*) >= sizeof(callback), "void* must be able to hold a function pointer");
         ComponentHook hook{};
         hook.UserData = reinterpret_cast<void*>(callback);
-        hook.Invoke = [](EntityHandle, void* ptr, void* data) {
+        hook.Invoke = [](const World&, EntityHandle, void* ptr, void* data) {
             reinterpret_cast<void(*)(T&)>(data)(*static_cast<T*>(ptr));
         };
         hook.ComponentSize = sizeof(T);
@@ -1442,8 +1451,24 @@ private:
         static_assert(sizeof(void*) >= sizeof(callback), "void* must be able to hold a function pointer");
         ComponentHook hook{};
         hook.UserData = reinterpret_cast<void*>(callback);
-        hook.Invoke = [](EntityHandle entity, void* ptr, void* data) {
+        hook.Invoke = [](const World&, EntityHandle entity, void* ptr, void* data) {
             reinterpret_cast<void(*)(EntityHandle, T&)>(data)(entity, *static_cast<T*>(ptr));
+        };
+        hook.ComponentSize = sizeof(T);
+        return InstallComponentHook(kind, GetComponentTypeId<T>(), hook);
+    }
+
+    template<Component T>
+    ComponentHookToken RegisterComponentHook(ComponentHookKind kind,
+                                             void(*callback)(const World&, EntityHandle, T&)) {
+        if (!callback)
+            return {};
+        AutoComponentRegistrar<T>::EnsureRegistered();
+        static_assert(sizeof(void*) >= sizeof(callback), "void* must be able to hold a function pointer");
+        ComponentHook hook{};
+        hook.UserData = reinterpret_cast<void*>(callback);
+        hook.Invoke = [](const World& world, EntityHandle entity, void* ptr, void* data) {
+            reinterpret_cast<void(*)(const World&, EntityHandle, T&)>(data)(world, entity, *static_cast<T*>(ptr));
         };
         hook.ComponentSize = sizeof(T);
         return InstallComponentHook(kind, GetComponentTypeId<T>(), hook);

@@ -1,4 +1,5 @@
 #include "Engine/Rendering/PostProcessSettings.h"
+#include "Components/Rendering/PostProcessEffects/HeightFogEffect.h"
 #include "Engine/Rendering/PostProcessEffectRegistry.h"
 #include "Engine/Rendering/VolumetricFogSettings.h"
 #include "Engine/Rendering/Exposure.h"
@@ -316,6 +317,12 @@ bool PostProcessSettings::IsHeightFogActive(float32 epsilon) const
     return HeightFogIntensity > epsilon && HeightFogDensity > epsilon && (distanceActive || heightActive || skyActive);
 }
 
+bool PostProcessSettings::IsHeightFogSkyColorActive(float32 epsilon) const
+{
+    return HeightFogColorMode == static_cast<int32>(::GameEngine::Components::HeightFogColorMode::SkyHorizon) &&
+           IsHeightFogActive(epsilon);
+}
+
 bool PostProcessSettings::IsVolumetricFogActive(float32 epsilon) const
 {
     return VolumetricFogIntensity > epsilon && VolumetricFogDensity > epsilon;
@@ -342,7 +349,6 @@ bool PostProcessSettings::IsVolumetricCloudsActive(float32 epsilon) const
 #define PP_CORE_SHARED_FIELDS(X)                \
     X("exposure", Exposure)                     \
     X("tonemapMode", TonemapMode)               \
-    X("ditherMode", DitherMode)                 \
     X("ictcpChromaCompression", IctcpChromaCompression) \
     X("fogGlowIntensity", FogGlowIntensity)     \
     X("fogGlowQuality", FogGlowQuality)         \
@@ -594,7 +600,6 @@ constexpr EffectSettingsField kCoreBlendFields[]{
     // (one stop), not the arithmetic 2.5x.
     PP_CORE_BLEND(Exposure, Log2Lerp, Always),
     PP_CORE_BLEND(TonemapMode, Dominant, Always),
-    PP_CORE_BLEND(DitherMode, Dominant, Always),
     PP_CORE_BLEND(IctcpChromaCompression, Lerp, Always),
     PP_CORE_BLEND(AutoExposureMinEv, Lerp, Always),
     PP_CORE_BLEND(AutoExposureMaxEv, Lerp, Always),

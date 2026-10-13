@@ -3,6 +3,7 @@
 #include "Includes/compat_profile.glsl"
 #include "Includes/screen_position.glsl"
 #include "Includes/sky_composite.glsl"
+#include "Includes/star_sparkle.glsl"
 #include "Includes/sun_disc.glsl"
 
 layout(location = 0) in vec2 vUV;
@@ -39,6 +40,7 @@ layout(set = 0, binding = 0) uniform SkyUBO
 layout(set = 0, binding = 1) uniform sampler2D uSkyViewLUT;
 
 #include "Includes/sky_atmosphere_ubo.glsl"
+#include "Includes/sky_transmittance_lut.glsl"
 
 layout(set = 0, binding = 3) uniform sampler2D uTransLUT;
 layout(set = 0, binding = 4) uniform sampler2D uMoonFullTexture;
@@ -85,19 +87,15 @@ float Hash13(vec3 p)
     return fract(p.x * p.y * p.z);
 }
 
-vec2 EncodeDirToLutUv(vec3 dirWS)
+// Transmittance from the camera to the top of the atmosphere along dirWS; 0 below the horizon.
+vec3 TransmittanceAlongView(vec3 dirWS)
 {
     vec3 planetCenter = vec3(0.0, -uAtmos.planetRadius, 0.0);
     vec3 camPos = uSky.cameraPositionWS;
     float r = length(camPos - planetCenter);
     vec3 up = (camPos - planetCenter) / r;
-
     float mu = clamp(dot(dirWS, up), -1.0, 1.0);
-    float rNorm = clamp((r - uAtmos.planetRadius) /
-                        (uAtmos.atmosphereRadius - uAtmos.planetRadius), 0.0, 1.0);
-    float u = 0.5 * (mu + 1.0);
-    float v = sqrt(rNorm);
-    return vec2(u, v);
+    return GE_SkyTransmittanceToTop(uTransLUT, r, mu, uAtmos.planetRadius, uAtmos.atmosphereRadius);
 }
 
 float MoonPhaseMask(vec2 moonUv, float phase01)
@@ -129,6 +127,38 @@ vec3 FallingStarTangent(vec3 startDir, float seed)
                                   mix(-1.35, -0.45, Hash13(vec3(seed, 23.0, 31.0))),
                                   mix(-0.9, 0.9, Hash13(vec3(seed, 19.0, 5.0)))));
     return normalize(fallDir - startDir * dot(fallDir, startDir));
+}
+
+// A falling star's head is the night stars' four-pointed sparkle (star_sparkle.glsl), with a
+// smaller core and points as bright as the core, so it reads as a sparkle at the end of its
+// trail rather than as a blob.
+const float kFallingStarHeadCoreRadius = 0.3;
+const float kFallingStarHeadPointAmount = 1.0;
+const float kFallingStarHeadCoreSize = 0.15;
+const float kFallingStarHeadFalloff = 10.0;
+// Reach of the head's points per unit of Falling Star Dot Size: radians on the perspective
+// path (0.015 rad, about 13 px at 900 px over a 60 degree FOV, at the default 0.1), and screen
+// units (the viewport's height is 2) on the 2D backdrop (about 13 px at the default 0.979).
+// Only the inner part reads on screen: the points fade to nothing well before their reach.
+const float kFallingStarHeadRadiusPerDot = 0.15;
+const float kFallingStarHeadRadiusPerDot2D = 0.03;
+
+// The head's intensity at an offset from it along the screen's right and up, in the units
+// headRadius is given in, filtered over the pixel. The points follow the screen axes, not the
+// trail: a sparkle a few pixels across with its points on the pixel grid's diagonals reads as
+// a square. Called in uniform control flow: it takes screen derivatives. The sparkle is zero
+// past |q| = 1, so a pixel whose footprint cannot reach it returns before the four taps: the
+// eight meteors cost every other sky pixel one distance test each.
+float FallingStarHead(vec2 screenOffset, float headRadius)
+{
+    vec2 q = screenOffset / headRadius;
+    vec2 dqdx = dFdx(q);
+    vec2 dqdy = dFdy(q);
+    float reach = 1.0 + 0.5 * (length(dqdx) + length(dqdy));
+    if (dot(q, q) > reach * reach)
+        return 0.0;
+    return GE_StarSparkleFiltered(q, dqdx, dqdy, kFallingStarHeadCoreRadius, kFallingStarHeadPointAmount,
+                                  kFallingStarHeadCoreSize, kFallingStarHeadFalloff);
 }
 
 // Sample the same HDR backdrop source as the perspective sky for one virtual
@@ -348,7 +378,7 @@ void RenderOrthoBackdrop(vec2 ndc)
             float behindTip = smoothstep(0.0, 0.006, rawAlong) *
                               (1.0 - smoothstep(visibleAlongMax * 0.88, visibleAlongMax, rawAlong));
             float tail = exp(-dist * dist * widthFalloff) * exp(-along * lengthFalloff) * behindTip;
-            float tip = exp(-dot(p - h, p - h) * widthFalloff * 0.42 / max(dotSize * dotSize, 0.01));
+            float tip = FallingStarHead(p - h, kFallingStarHeadRadiusPerDot2D * dotSize);
             vec3 tailColor = vec3(0.62, 0.78, 1.0);
             vec3 tipColor = vec3(1.0, 0.96, 0.82);
             col += (tailColor * tail * 0.85 + tipColor * tip * 2.4) *
@@ -472,20 +502,17 @@ void main()
     float muSun = dot(dirWS, sunDir);
     float sunRadius = uSky.sunAngularRadius;
 
+    // The planet hides the disc where the view ray meets it: the transmittance below is 0 there,
+    // which sets the disc on the true horizon at any altitude.
     float sunDisk = 0.0;
-    if (sunRadius > 0.0 && muSun > 0.0 && viewZenithCos > 0.0)
+    if (sunRadius > 0.0 && muSun > 0.0)
     {
         float angle = acos(clamp(muSun, -1.0, 1.0));
         sunDisk = clamp(GE_SunDiscProfile(angle, sunRadius), 0.0, 1.0);
-
-        const float kHorizonFadeEnd = 0.02;
-        float horizonFade = smoothstep(0.0, kHorizonFadeEnd, viewZenithCos);
-        sunDisk *= horizonFade;
         sunDisk *= (1.0 - nightAmount);
     }
 
-    vec2 transUv = EncodeDirToLutUv(dirWS);
-    vec3 transmittance = GE_TAP_LOD0(uTransLUT, transUv).rgb;
+    vec3 transmittance = TransmittanceAlongView(dirWS);
 
     // The sky's single exposure factor; the disc's peak is bounded against the value it puts
     // in the fp16 target, so it has to know the multiply that lands it there.
@@ -566,7 +593,8 @@ void main()
             float behindTip = smoothstep(0.0, 0.002, rawAlong) *
                               (1.0 - smoothstep(visibleAlongMax * 0.88, visibleAlongMax, rawAlong));
             float tail = exp(-dist * dist * widthFalloff) * exp(-along * lengthFalloff) * facing * behindTip;
-            float tip = exp(-max(0.0, 1.0 - dot(dirWS, headDir)) * 9000.0 / max(dotSize * dotSize, 0.01)) * facing;
+            float tip = FallingStarHead(vec2(dot(delta, basisRight), dot(delta, basisUp)),
+                                        kFallingStarHeadRadiusPerDot * dotSize) * facing;
             vec3 tailColor = vec3(0.62, 0.78, 1.0);
             vec3 tipColor = vec3(1.0, 0.96, 0.82);
             fallingStarRadiance += (tailColor * tail * 0.85 + tipColor * tip * 2.4) *
@@ -607,7 +635,8 @@ void main()
     {
         skyColor = GE_CompositeGroundFloor(skyColor, uTransLUT,
                                            GE_SkyDiffuseMeanRadiance(uSkyViewLUT, kSkyViewLutHeight),
-                                           camPos, dirWS, planetCenter, uAtmos.planetRadius, camR,
+                                           camPos, dirWS, planetCenter, uAtmos.planetRadius,
+                                           uAtmos.atmosphereRadius, camR,
                                            viewZenithCos,
                                            uAtmos.groundAlbedo, uAtmos.groundBrightness,
                                            sunDir, uSky.sunColor, uSky.sunIntensity,

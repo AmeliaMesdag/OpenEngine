@@ -2,7 +2,18 @@
 
 Welcome to the Game Engine documentation! This directory contains comprehensive guides for developers, users, and contributors.
 
-**Browse as a site:** open [`index.html`](index.html) locally, or enable **GitHub Pages** (Settings → Pages → GitHub Actions) to publish the `docs/` folder—see `.github/workflows/docs-site.yml`.
+**Browse locally:** open [`index.html`](index.html). The GitHub Pages workflow (`.github/workflows/docs-site.yml`) publishes nothing and is retired when openengine.dev switches to these pages.
+
+## Writing a page
+
+The documentation is moving to Markdown, readable here on github.com and published on [openengine.dev/docs](https://openengine.dev/docs/) once the site switches to it. The first page in the new form is [The input system](input/input-system.mdx); the other pages are converted in planned batches, and until a page's batch lands an edit keeps it in its current form.
+
+- A page is an `.mdx` file in its area's lower-case folder (`docs/input/`, `docs/rendering/`, ...) with `title` and `description` in its front matter.
+- Links are file links relative to the page, with the extension and the anchor: `[Pointer lock](../input/input-system.mdx#pointer-lock)`.
+- Every API item with both forms is one code view with a `C++` tab and a `C#` tab (`:::::tabs`, `::::tab[C++]`, `::::tab[C#]`); notes and warnings are `:::note` and `:::caution` asides.
+- Images go in the area's `img/` folder.
+
+The full rules, with every directive and the mapping from the HTML pages' styles, are in [`.claude/rules/documentation.md`](../.claude/rules/documentation.md).
 
 ## Quick Start
 
@@ -12,30 +23,35 @@ Welcome to the Game Engine documentation! This directory contains comprehensive 
 ## Documentation Index
 
 ### Using the editor
-- **[Your first project](first-project.html)** - Create or open a project, save a scene, export a game you can run
+- **[Your first project](getting-started/first-project.mdx)** - Create or open a project, save a scene, export a game you can run
 - **[Game builds and Steam publishing](GamePublishing.html)** - Prepare, verify and upload releases; Steam Deck builds and deployment
-- **[Running the Player headless](running-headless.html)** - No window, graphics device or audio: dedicated servers, simulations, exit codes
-- **[Editor Keyboard Shortcuts](EditorKeyboardShortcuts.md)** - Gizmo tools, camera navigation, tab management
+- **[Running the Player headless](getting-started/running-headless.mdx)** - No window, graphics device or audio: dedicated servers, simulations, exit codes
+- **[The input system](input/input-system.mdx)** - Keys, the mouse and its delta, pointer lock for mouse look; how the editor and the Player deliver input
+- **[Navigation Surface](navigation-surface.html)** - Where agents can walk: bake from the terrain, colliders and meshes, read the status, find a path from C++
+- **[Editor Keyboard Shortcuts](editor/keyboard-shortcuts.mdx)** - Gizmo tools, camera navigation, tab management
 - **[Smart Folders](SmartFolders.md)** - Saved asset queries in the project browser
-- **[HDR Post-Processing](HDR_POST_PROCESSING_USER_GUIDE.md)** - Tonemapping, bloom and volume settings
-- **[Spline Walls](Editor/spline-walls.html)** - Drawing a wall along a spline: corners, slopes and materials
-- **[Shader Warm-Up](ShaderCompilation.html)** - How the editor compiles a project's material shaders in the background, and what can still compile on first use
+- **[HDR Post-Processing](rendering/hdr-post-processing.mdx)** - Tonemapping, bloom and volume settings
+- **[Spline Walls](editor/spline-walls.mdx)** - Drawing a wall along a spline: corners, slopes and materials
+- **[Shader Warm-Up](rendering/shader-compilation.mdx)** - How the editor compiles a project's material shaders in the background, and what can still compile on first use
+- **[AI Assistant](editor/ai-assistant.mdx)** - The editor's AI Assistant panel: providers, the conversation, local Claude Code and Codex sessions, letting the assistant act in the editor, and its settings
 
 ### Developer Documentation
-- **[Documentation hub (HTML)](index.html)** - Entry point for static docs and GitHub Pages
+- **[Documentation hub (HTML)](index.html)** - Entry point for the HTML pages
 - **[`CodingStyle.md`](../CodingStyle.md)** - Naming, headers, comments, C++20 idioms
-- **[Scripting](Scripting/README.md)** - C# scripting, the ABI, hot reload, the compile server
+- **[Scripting](scripting/csharp-ecs-systems-architecture.mdx)** - C# systems and components, hot reload, InitializeOnLoad and logging, native C++ scripting
+- **[Scripting ABI](scripting/ScriptingABI.md)** - the C ABI between native code and managed scripts
+- **[Compile server](scripting/CompileServer.md)** - the compile server and its protocol; [language settings for script authors](scripting/CompileServer.md#language-settings-for-script-authors)
 - **[Unity Import](Assets/unity-import.html)** - Converting the scenes of a Unity package into engine scenes with Tools > Import Unity Package, and where the converter comes from
 - **[Model Extras](Assets/model-extras.html)** - Reading the custom data a glTF file attaches to its scenes, nodes, meshes, materials and animations from a script
-- **[glTF Clip Schema](Animation/gltf-clip-schema.html)** - Declaring a clip's loop, speed, root motion bone, translation mode and events in a glTF animation's extras
-- **[Humanoid Retargeting](Animation/HumanoidRetargeting.html)** - Playing a clip authored on one humanoid skeleton on another: assets, import, auto-bootstrap, what runs each frame
-- **[Animation Events](Animation/animation-events.html)** - When a clip's events fire during playback, and reading them from a script with `AnimatorApi.PollEvents` or from engine code
+- **[glTF Clip Schema](animation/gltf-clip-schema.mdx)** - Declaring a clip's loop, speed, root motion bone, translation mode and events in a glTF animation's extras
+- **[Humanoid Retargeting](animation/humanoid-retargeting.mdx)** - Playing a clip authored on one humanoid skeleton on another: assets, import, auto-bootstrap, what runs each frame
+- **[Animation Events](animation/animation-events.mdx)** - When a clip's events fire during playback, and reading them from a script with `AnimatorApi.PollEvents` or from engine code
 - **[ECS Parallel Queries](ECS_ParallelQueries.md)** - running a query on the job system, and the rules that come with it
-- **[Editor UI Component Library](Editor/UI_COMPONENT_LIBRARY.html)** - Current editor UI controls, classes, states, sizing, and usage patterns
-- **[Editor UI Guidelines](Editor/UI_GUIDELINES.md)** - Design and implementation rules for authoring consistent editor UI
+- **[Editor UI Component Library](editor/ui-component-library.mdx)** - Current editor UI controls, classes, states, sizing, and usage patterns
+- **[Editor UI Guidelines](contributing/editor-ui-guidelines.mdx)** - Design and implementation rules for authoring consistent editor UI
 
 ### AI Integration
-- **[MCP Setup](MCP_SETUP.md)** - Model Context Protocol setup and configuration
+- **[MCP Setup](getting-started/mcp-setup.mdx)** - Model Context Protocol setup and configuration: an AI client such as Claude Code, Cursor or Claude Desktop driving the editor; the editor's own [AI Assistant](editor/ai-assistant.mdx) panel attaches the same server
 
 ## Architecture Overview
 
@@ -67,11 +83,11 @@ The Game Engine consists of several key components:
 
 ### Common Issues
 - See the Troubleshooting section of [`BUILD.md`](../BUILD.md) for build issues
-- See [MCP Setup](MCP_SETUP.md) for AI integration problems
+- See [MCP Setup](getting-started/mcp-setup.mdx) for AI integration problems
 
 ### Development Support
 - Read [`CodingStyle.md`](../CodingStyle.md) for coding standards
-- Read [Scripting](Scripting/README.md) for scripting and hot-reload issues
+- Read [Hot reload and scripting best practices](scripting/hot-reload-best-practices.mdx) for scripting and hot-reload issues
 - Review architecture documents for system design
 
 ### Contributing

@@ -51,7 +51,11 @@ bool AStarSolver::Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
     if (grid.IsCellBlocked(startX, startZ) || grid.IsCellBlocked(endX, endZ))
         return false;
 
-    const uint32 maxIterations = std::min(cellCount * 2, static_cast<uint32>(65536));
+    // Every cell is expanded at most once (the closed set), so a solve expands at most cellCount
+    // cells: a path that exists is found on any grid, however far it detours. The cost is one
+    // expansion per reachable cell in the worst case, a goal that cannot be reached: about 210 ms
+    // on a 1024 x 1024 grid in Release (a detour around a wall across it, about 55 ms).
+    const uint32 maxExpansions = cellCount;
 
     m_GScore.resize(cellCount);
     m_Parent.resize(cellCount);
@@ -67,11 +71,9 @@ bool AStarSolver::Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
     m_GScore[startIndex] = 0.0f;
     openList.push_back({startIndex, Heuristic(grid, startIndex, endIndex)});
 
-    uint32 iterations = 0;
-    while (!openList.empty() && iterations < maxIterations)
+    uint32 expansions = 0;
+    while (!openList.empty() && expansions < maxExpansions)
     {
-        ++iterations;
-
         std::pop_heap(openList.begin(), openList.end(), NodeCompare{});
         AStarNode current = openList.back();
         openList.pop_back();
@@ -91,6 +93,7 @@ bool AStarSolver::Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
         if (m_Closed[current.CellIndex])
             continue;
         m_Closed[current.CellIndex] = 1;
+        ++expansions;
 
         uint32 neighbors[8];
         float32 baseCosts[8];

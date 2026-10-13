@@ -921,10 +921,9 @@ bool JoltPhysicsBackend::UpdateHeightFieldRegion(BodyHandle body, ShapeHandle sh
     // bodies share shapes immutably. This is the one sanctioned mutation site
     // (applied at the step-quiescent physics-init window). Jolt documents a
     // race between SetHeights and concurrent queries; the scheduler's waves
-    // keep every query caller out of this window — NavigationBuildSystem, the
-    // only one, is ordered after the entire physics pipeline via its
-    // PhysicsWriteback dependency. The assert enforces that contract against
-    // future violators, including any caller that becomes wave-concurrent.
+    // must keep every query caller out of this window. The assert enforces that
+    // contract against future violators, including any caller that becomes
+    // wave-concurrent.
     assert(m_Impl->activeQueryCount.load(std::memory_order_relaxed) == 0 &&
            "UpdateHeightFieldRegion while a physics query is in flight — Jolt SetHeights races queries");
     auto* hf = const_cast<JPH::HeightFieldShape*>(static_cast<const JPH::HeightFieldShape*>(shapeRef->GetPtr()));

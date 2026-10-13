@@ -280,7 +280,9 @@ PipelineVariantCache::GetOrCompileColorVariantImpl(
         ctx.GetCurrentSampleCount(),
         Rendering::NarrowColorPassKeywords(material.GetVariantKey().materialKeywords, passKeywords),
         topology,
-        material.IsDoubleSided() ? Rendering::CullModeFlagBits::None : m_Materials->DebugCullMode(),
+        material.IsDoubleSided()
+            ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
+            : m_Materials->DebugCullMode(),
         frontFace};
 
     const uint32_t materialVersion = material.GetVersion();
@@ -387,7 +389,7 @@ PipelineVariantCache::GetOrCompileDepthInstancedVariantImpl(
 {
     auto& cache = m_DepthInstancedVariantCache;
     const Rendering::CullModeFlags depthCullMode = material.IsDoubleSided()
-        ? Rendering::CullModeFlagBits::None
+        ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
         : m_Materials->DebugCullMode();
     InstancedVariantKey key{&material,     vertexFlags,      samples,
                             passKeywords,  topology,         depthCullMode,
@@ -469,8 +471,9 @@ const PipelineVariantCache::VariantServeUnit* PipelineVariantCache::FindOrReques
                                   0u,
                                   passKeywords,
                                   topology,
-                                  material.IsDoubleSided() ? Rendering::CullModeFlagBits::None
-                                                           : m_Materials->DebugCullMode(),
+                                  material.IsDoubleSided()
+                                      ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
+                                      : m_Materials->DebugCullMode(),
                                   frontFace};
     {
         std::shared_lock lock(m_CacheMutex);
@@ -1058,7 +1061,9 @@ PipelineVariantCache::EnqueueColorVariantCompileForTesting(
 {
     InstancedVariantKey key{
         &material, vertexFlags, sampleCount, passKeywords, topology,
-        material.IsDoubleSided() ? Rendering::CullModeFlagBits::None : m_Materials->DebugCullMode(),
+        material.IsDoubleSided()
+            ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
+            : m_Materials->DebugCullMode(),
         frontFace};
     EnqueueVariantCompile(key, /*isDepth=*/false);
     return key;
@@ -1104,7 +1109,9 @@ PipelineVariantCache::EnqueueDepthVariantCompileForTesting(
 {
     InstancedVariantKey key{
         &material, vertexFlags, sampleCount, passKeywords, topology,
-        material.IsDoubleSided() ? Rendering::CullModeFlagBits::None : m_Materials->DebugCullMode(),
+        material.IsDoubleSided()
+            ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
+            : m_Materials->DebugCullMode(),
         frontFace, depthBiasEnable, depthClampEnable};
     EnqueueVariantCompile(key, /*isDepth=*/true);
     return key;

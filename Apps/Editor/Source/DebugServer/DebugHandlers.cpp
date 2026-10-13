@@ -42,6 +42,7 @@
 #include "DebugServer/JobSystemDebugHandlers.h"
 #include "DebugServer/NavigationDebugHandlers.h"
 #include "DebugServer/MarkupDebugHandlers.h"
+#include "DebugServer/MemoryDebugHandlers.h"
 #include "DebugServer/PerformDropRequest.h"
 #include "DebugServer/SkyDebugHandlers.h"
 #include "DebugServer/ThumbnailDebugHandlers.h"
@@ -109,6 +110,7 @@
 #include "Rendering/Core/RenderGraph/RGBarrier.h"
 #include "Rendering/Core/RenderGraph/RGTypes.h"
 #include "JobSystem/WorkStealingThreadPool.h"
+#include "Input/InputSystem.h"
 #include "Logger/LogLevel.h"
 #include "Logger/RingBufferSink.h"
 #include "Panels/AnimationWindowPanel.h"
@@ -2720,6 +2722,8 @@ void RegisterDebugHandlers(EditorDebugServer& server,
                 result["focusedElementId"] = app.m_Windows[0]->ui->GetFocusedElementId();
                 result["hoveredElement"] = app.m_Windows[0]->ui->GetHoveredElementDebugName();
                 result["mouseCaptured"] = app.m_Windows[0]->ui->IsMouseCaptured();
+                result["pointerLocked"] = app.m_RuntimeInput &&
+                    app.m_RuntimeInput->GetPointerLockState() == Input::PointerLockState::Locked;
                 result["captureElementId"] = app.m_Windows[0]->ui->GetCaptureId();
             }
         }
@@ -3139,6 +3143,9 @@ void RegisterDebugHandlers(EditorDebugServer& server,
 
     // 4j. navigation: what the path solve budget solved, queued and left waiting
     RegisterNavigationDebugHandlers(server);
+
+    // 4k. the Memory module's stats registry: arenas, tracked bytes, each thread's scratch
+    RegisterMemoryDebugHandlers(server, app);
 
     // 5. query_ecs
     server.RegisterHandler("query_ecs", [](const EditorDebugServer::RequestContext& ctx) -> json
@@ -5503,6 +5510,8 @@ void RegisterDebugHandlers(EditorDebugServer& server,
                     {"windowTicks", ex.WindowTicks},
                     {"escalationReasonBits", ex.EscalationReasonBits},
                     {"feedPatchedCount", ex.FeedPatchedCount},
+                    {"deltaFrame", ex.DeltaFrame},
+                    {"deltaPreparedCount", ex.DeltaPreparedCount},
                     {"subsetRefreshedCount", ex.SubsetRefreshedCount},
                     {"pendingMeshEntry", ex.PendingMeshEntry},
                     {"pendingMaterialLoad", ex.PendingMaterialLoad},
@@ -7634,7 +7643,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
 
         return Editor::RefuseRequest("Unsupported asset type: " + ext); });
 
-    server.RegisterHandler("graph_set_viewport", [&app](const EditorDebugServer::RequestContext& ctx) -> json
+    server.RegisterHandler("graph_set_viewport", [](const EditorDebugServer::RequestContext& ctx) -> json
                            {
         GraphPanel* nodeGraphPanel = ResolveDebugGraphPanel();
         if (!nodeGraphPanel)
@@ -7653,7 +7662,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         canvas->GetPanZoom(panX, panY, zoom);
         return json{{"ok", true}, {"panX", panX}, {"panY", panY}, {"zoom", zoom}}; });
 
-    server.RegisterHandler("graph_spike_dummy_nodes", [&app](const EditorDebugServer::RequestContext& ctx) -> json
+    server.RegisterHandler("graph_spike_dummy_nodes", [](const EditorDebugServer::RequestContext& ctx) -> json
                            {
         GraphPanel* nodeGraphPanel = ResolveDebugGraphPanel();
         if (!nodeGraphPanel)
@@ -7665,7 +7674,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         canvas->SpikeSpawnDummyNodes(count);
         return json{{"ok", true}, {"count", count}}; });
 
-    server.RegisterHandler("graph_get_nodes", [&app](const EditorDebugServer::RequestContext&) -> json
+    server.RegisterHandler("graph_get_nodes", [](const EditorDebugServer::RequestContext&) -> json
                            {
         GraphPanel* nodeGraphPanel = ResolveDebugGraphPanel();
         if (!nodeGraphPanel)
@@ -7683,7 +7692,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         }
         return json{{"ok", true}, {"nodes", nodes}}; });
 
-    server.RegisterHandler("graph_delete_node", [&app](const EditorDebugServer::RequestContext& ctx) -> json
+    server.RegisterHandler("graph_delete_node", [](const EditorDebugServer::RequestContext& ctx) -> json
                            {
         const std::string nodeId = ctx.params.value("nodeId", std::string{});
         if (nodeId.empty())
@@ -9696,7 +9705,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         return result; });
 
     // Skeleton store diagnostics: per-world runtime state for debugging multi-world skinning isolation.
-    server.RegisterHandler("get_skeleton_store_state", [&app](const EditorDebugServer::RequestContext& ctx) -> json
+    server.RegisterHandler("get_skeleton_store_state", [](const EditorDebugServer::RequestContext& ctx) -> json
                            {
         auto& store = Engine::Renderer::SkeletonStore::Instance();
         const uint32_t count = store.GetCount();

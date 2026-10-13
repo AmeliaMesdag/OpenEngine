@@ -1275,10 +1275,11 @@ TEST(NativeScriptManager, EditorOnlyModulesBuildAfterTheModulesPlayModeLoads)
     JobSystem::WorkStealingThreadPool pool(2);
     ns::NativeScriptManager manager;
     ASSERT_TRUE(manager.Initialize(&pool));
-    // One call per built module; a failed build reports no module id, so the modules are told
-    // apart by FailedShippedModules below.
-    int completions = 0;
-    manager.SetBuildCompletedCallback([&completions](const ns::NativeBuildResult&) { ++completions; });
+    std::vector<std::string> completedModules;
+    manager.SetBuildCompletedCallback([&completedModules](const ns::NativeBuildResult& result) {
+        EXPECT_FALSE(result.Success());
+        completedModules.push_back(result.ModuleId);
+    });
     manager.SetPackageModuleConfigs({runtimePackage, editorPackage});
     manager.SetBuildConfig(project);
     manager.RequestRebuild();
@@ -1286,24 +1287,26 @@ TEST(NativeScriptManager, EditorOnlyModulesBuildAfterTheModulesPlayModeLoads)
 
     EXPECT_TRUE(manager.AreShippedModuleBuildsPending());
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-    while (completions < 2 && std::chrono::steady_clock::now() < deadline)
+    while (completedModules.size() < 2 && std::chrono::steady_clock::now() < deadline)
     {
         manager.Tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     // The first batch is the two modules play mode loads, applied in load order (packages first).
-    ASSERT_EQ(completions, 2) << "the editor-only module was built in the same batch";
+    ASSERT_EQ(completedModules.size(), 2u) << "the editor-only module was built in the same batch";
+    EXPECT_EQ(completedModules, (std::vector<std::string>{"RuntimePackage", "UserScripts"}));
     EXPECT_EQ(manager.FailedShippedModules(), (std::vector<std::string>{"RuntimePackage", "UserScripts"}));
     EXPECT_FALSE(manager.AreShippedModuleBuildsPending()) << "play waited for an editor-only module";
     EXPECT_TRUE(manager.AreModulesPending()) << "the editor-only module was dropped";
     EXPECT_FALSE(manager.InitialPackageModulePassComplete());
 
-    while (completions < 3 && std::chrono::steady_clock::now() < deadline)
+    while (completedModules.size() < 3 && std::chrono::steady_clock::now() < deadline)
     {
         manager.Tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    ASSERT_EQ(completions, 3);
+    ASSERT_EQ(completedModules.size(), 3u);
+    EXPECT_EQ(completedModules, (std::vector<std::string>{"RuntimePackage", "UserScripts", "ToolsPackage.Editor"}));
     EXPECT_FALSE(manager.AreModulesPending());
     EXPECT_TRUE(manager.InitialPackageModulePassComplete());
 

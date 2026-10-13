@@ -1,8 +1,9 @@
 #include "PathfindingECS/NavigationService.h"
 #include "PathfindingECS/Components/NavigationAgent.h"
 #include "PathfindingECS/Components/NavigationAgentState.h"
-#include "PathfindingECS/Components/NavigationGrid.h"
-#include "PathfindingECS/Systems/NavigationBuildSystem.h"
+#include "PathfindingECS/Components/NavigationSurface.h"
+#include "NavigationTestSurfaces.h"
+#include "PathfindingECS/Systems/NavigationSurfaceSystem.h"
 #include "PathfindingECS/Systems/NavigationPathfindingSystem.h"
 #include "PathfindingECS/Systems/NavigationMovementSystem.h"
 #include "Components/Transform.h"
@@ -44,19 +45,7 @@ protected:
 
     ECS::Entity CreateGrid(uint32 width = 16, uint32 depth = 16)
     {
-        auto entity = m_World->Create();
-        Components::NavigationGrid grid{};
-        grid.GridType = Pathfinding::GridType::Square;
-        grid.CellSize = 1.0f;
-        grid.Width = width;
-        grid.Depth = depth;
-        entity.Set(grid);
-        m_World->ProcessCommands();
-
-        NavigationBuildSystem buildSystem;
-        buildSystem.Update(*m_World, kDt);
-        m_World->ProcessCommands();
-        return entity;
+        return Testing::CreateFlatGridSurface(*m_World, width, depth, 1.0f);
     }
 
     ECS::Entity CreateAgent(float32 startX, float32 startZ,
@@ -113,7 +102,7 @@ protected:
 TEST_F(NavigationRepathingTest, ProximityCheckTriggersRepathWhenCellBlocked)
 {
     auto gridEntity = CreateGrid();
-    auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
+    auto* gridSrc = gridEntity.Get<Components::NavigationSurface>();
     ASSERT_NE(gridSrc, nullptr);
 
     auto agentEntity = CreateAgent(1.5f, 8.5f, 14.5f, 8.5f,
@@ -159,7 +148,7 @@ TEST_F(NavigationRepathingTest, ProximityCheckTriggersRepathWhenCellBlocked)
 TEST_F(NavigationRepathingTest, ProximityIgnoresBlockedCellAdjacentToDest)
 {
     auto gridEntity = CreateGrid();
-    auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
+    auto* gridSrc = gridEntity.Get<Components::NavigationSurface>();
     ASSERT_NE(gridSrc, nullptr);
 
     auto agentEntity = CreateAgent(1.5f, 8.5f, 8.5f, 8.5f,
@@ -205,7 +194,7 @@ TEST_F(NavigationRepathingTest, ProximityIgnoresBlockedCellAdjacentToDest)
 TEST_F(NavigationRepathingTest, TimerReplanFiresAfterInterval)
 {
     auto gridEntity = CreateGrid();
-    auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
+    auto* gridSrc = gridEntity.Get<Components::NavigationSurface>();
 
     auto agentEntity = CreateAgent(1.5f, 1.5f, 14.5f, 14.5f,
                                     gridSrc->NavMapIndex, gridSrc->NavMapGeneration, 0.5f);
@@ -246,7 +235,7 @@ TEST_F(NavigationRepathingTest, TimerReplanFiresAfterInterval)
 TEST_F(NavigationRepathingTest, NoReplanWhenIntervalIsZero)
 {
     auto gridEntity = CreateGrid();
-    auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
+    auto* gridSrc = gridEntity.Get<Components::NavigationSurface>();
 
     auto agentEntity = CreateAgent(1.5f, 1.5f, 14.5f, 14.5f,
                                     gridSrc->NavMapIndex, gridSrc->NavMapGeneration, 0.0f);
@@ -275,7 +264,7 @@ TEST_F(NavigationRepathingTest, NoReplanWhenIntervalIsZero)
 TEST_F(NavigationRepathingTest, TimerReplansShareTheSolveBudget)
 {
     auto gridEntity = CreateGrid(32, 32);
-    auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
+    auto* gridSrc = gridEntity.Get<Components::NavigationSurface>();
 
     // Create 20 agents all with the same short replan interval
     constexpr uint32 kAgentCount = 20;
@@ -334,7 +323,7 @@ TEST_F(NavigationRepathingTest, TimerReplansShareTheSolveBudget)
 TEST_F(NavigationRepathingTest, StaggeredReplanTimers)
 {
     auto gridEntity = CreateGrid();
-    auto* gridSrc = gridEntity.Get<Components::NavigationGrid>();
+    auto* gridSrc = gridEntity.Get<Components::NavigationSurface>();
 
     // Create several agents with same ReplanInterval
     std::vector<ECS::Entity> agents;

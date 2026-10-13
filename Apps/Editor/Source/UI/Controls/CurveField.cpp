@@ -115,7 +115,7 @@ float TimeLabelStripPx(CurveField::TimeLabels labels, float fontSizePx)
 std::string HoursOfDayLabel(float hours)
 {
     const int minutes = std::clamp(static_cast<int>(std::lround(hours * kLabelMinutesPerHour)), 0, kLabelMinutesPerDay);
-    char text[8];
+    char text[16];
     std::snprintf(text, sizeof(text), "%02d:%02d", minutes / kLabelMinutesPerHour, minutes % kLabelMinutesPerHour);
     return text;
 }

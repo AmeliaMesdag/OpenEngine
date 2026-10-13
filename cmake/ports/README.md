@@ -194,3 +194,29 @@ definitions back into `Engine`.
 ThorVG is a separate project; once it stops defining these functions in its
 static library (or offers a build option that leaves them out), delete this
 overlay and this section.
+
+### vcpkg-make — preserve configure paths on CMake before 3.31
+
+This overlay retains the baseline registry's **2026-07-09** helper port
+(registry tree `0fecb9ee23ddb28e79fca1a0fbf269abfaef864e`) and quotes the
+optional exclusion filter before comparing it with an empty string. On
+CMake before 3.31, parsing an empty filter leaves the variable undefined;
+comparing its unquoted name treats it as nonempty, then an empty regex
+removes every configure option. Autotools falls back to `/usr/local`, and
+`pthread-stubs` cannot find the pkg-config file it just installed.
+
+The failure requires `VCPKG_FORCE_SYSTEM_BINARIES=1` with system CMake older
+than 3.31 (3.28.3 in the ARM64 development image). The default x64 Linux and
+Steam Deck builds use vcpkg's pinned CMake 4.3.3 and are unaffected, although
+they use the same helper. An x64 build forced to use older system CMake has
+the same failure. `VcpkgMakeOptions.KeepsDefaultInstallPaths` checks omitted,
+empty and explicit exclusion filters for release and debug with the older
+argument semantics.
+
+Upstream master still has the unquoted comparison at
+`ports/vcpkg-make/vcpkg_make_common.cmake:660`
+([checked revision e4563094](https://github.com/microsoft/vcpkg/blob/e456309491fd875487bf02b8a0dca76c1b1b00cc/ports/vcpkg-make/vcpkg_make_common.cmake#L660)).
+Remove the overlay after the baseline includes an upstream quoted comparison,
+or when every supported build runs ports with vcpkg's pinned CMake and
+`CMP0174=NEW`, so system CMake older than 3.31 cannot reach this helper.
+Retain the regression against the replacement helper.

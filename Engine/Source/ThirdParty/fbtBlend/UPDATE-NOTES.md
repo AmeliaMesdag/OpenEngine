@@ -15,7 +15,7 @@ Vendored copy of the fbtBlend-Header-Only library by Flix01.
 | File | Source path in upstream | Bytes |
 |---|---|---|
 | `fbtBlend.h` | `405_LTS/fbtBlend.h` (with the local modifications below) | 548 977 upstream |
-| `Blender.h`  | `405_LTS/Blender.h`  | 221 515 |
+| `Blender.h`  | `405_LTS/Blender.h` (with the local modifications below) | 221 515 upstream |
 | `LICENSE`    | `LICENSE`            |     900 |
 | `fbtBlend.cpp` | (added by us — implementation shim) | ~2.6k |
 
@@ -64,8 +64,16 @@ links what is found. Uncompressed `.blend` files always parse.
 
 ## Local modifications
 
-`fbtBlend.h` differs from the pinned upstream commit in `fbtMemoryStream`
-only:
+`Blender.h` forward-declares the unused `raw_data` instead of defining it as an empty struct (an empty struct differs in size between C and C++).
+
+`fbtBlend.h` has these strict-build changes:
+
+- `fbtCharHashKey`, `fbtSizeHashKey` and `fbtFixedString` explicitly default
+  their copy assignment operators alongside their existing copy constructors.
+- `fbtFile::reflect` uses `snprintf` with the version buffer size instead of
+  the unbounded `sprintf`.
+
+`fbtMemoryStream` also differs from the pinned upstream commit:
 
 - Every release of `m_buffer` outside a reallocation goes through
   `fbtMemoryStream::release()`, which `delete[]`s it, nulls it and zeroes

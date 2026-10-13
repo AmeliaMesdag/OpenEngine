@@ -21,6 +21,7 @@
 #include "SceneView/MeasureSceneGizmo.h"
 #include "Markups/MarkupGizmo.h"
 #include "SceneView/SceneViewGridRenderer.h"
+#include "SceneView/SceneLightExposure.h"
 #include "SceneView/SplineSceneGizmo.h"
 #include "UI/UITextureSpace.h"
 #include <algorithm>
@@ -640,6 +641,8 @@ class SceneViewController
     // RenderServices) so the feature is never created for views that never
     // use auto exposure.
     Engine::Renderer::ExposureReadbackFeature* m_ExposureReadback = nullptr;
+    // Scene Light exposure: derived from this view's world's directional lights and sky.
+    Editor::SceneLightExposure m_SceneLightExposure;
 
     // Logical camera & view registered with RenderServices (shared with ECS rendering).
     Rendering::CameraId m_CameraId{0};

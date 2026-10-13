@@ -59,11 +59,6 @@ static constexpr EnumEntry<PostProcessVolumeShape> kVolumeShapes[] = {
     {PostProcessVolumeShape::Cylinder, "Cylinder"},
 };
 
-static constexpr EnumEntry<int32_t> kDitherModes[] = {
-    {0, "Bayer 8x8"},
-    {1, "Blue Noise"},
-};
-
 constexpr float kPostProcessEffectPickerWidthPx = 360.0f;
 
 struct AddVolumeEffectChoice
@@ -433,13 +428,6 @@ void RegisterPostProcessVolumeInspector()
         tmField->SetOnValueChanged([w, e, n, undo](TonemapMode v) {
             CommitComponentWithUndo<PP>(w, e, n, undo, "Change Tonemap Mode",
                 [v](PP& u) { u.Tonemap = v; });
-        });
-
-        auto* ditherField = InspectorUI::AddEnumRow(ctx.Parent, "DitherMode", kDitherModes, vol->DitherMode,
-            "Dithering method for banding reduction");
-        ditherField->SetOnValueChanged([w, e, n, undo](int32_t v) {
-            CommitComponentWithUndo<PP>(w, e, n, undo, "Change Dither Mode",
-                [v](PP& u) { u.DitherMode = v; });
         });
 
         AddComponentFloatRowWithDrag<PP>(ctx.Parent, "ICtCp Chroma Compression",

@@ -4,6 +4,7 @@
 #include "Engine/Build/DirectoryCopy.h"
 #include "Engine/Build/LinuxRuntimeTemplate.h"
 #include "Engine/Build/MacBundleAssembler.h"
+#include "Engine/Build/MaterialVariantCookTool.h"
 #include "Engine/Build/NativeAotProject.h"
 #include "Engine/Build/NativeAotPublish.h"
 #include "Engine/Build/NativeScriptStaging.h"
@@ -18,6 +19,7 @@
 #include "Scripting/ScriptTargetFramework.h"
 #include "Engine/Build/CancellableShellProcess.h"
 #include "Engine/GameUI/UIScaleProjectSettings.h"
+#include "Engine/Rendering/PackageShaderDirs.h"
 #include "Assets/Packages/PackagesIndex.h"
 #include "Scripting/NativeAotScriptsLibrary.h"
 #include "Scripting/PathResolver.h"
@@ -31,6 +33,7 @@
 #include "Assets/LodAssetSettings.h"
 #include "Assets/RuntimeAssetMetadata.h"
 #include "Assets/MeshLODCache.h"
+#include "Assets/ShaderProgramAsset.h"
 #include "TerrainECS/TerrainBakeCache.h"
 #include "Assets/MeshLODGenerator.h"
 #include "Assets/ModelAsset.h"
@@ -829,6 +832,16 @@ bool BuildPipeline::ExecuteImpl(const BuildSettings& settings)
         if (m_Progress.cancelled)
             return false;
         m_Progress.warnings.push_back("Engine shader copy failed or skipped");
+    }
+
+    // 9a. Cook the material variants into the content root's read-only shader cache. A missing
+    // tool or a package that cannot be staged fails the build; a variant that does not cook is a
+    // warning.
+    if (!CookMaterialVariants(contentRoot, settings))
+    {
+        if (!m_Progress.cancelled)
+            ReportProgress(BuildProgress::Stage::Failed, 0.0f, "Failed to cook material shaders");
+        return false;
     }
 
     // 9b. Stage third-party notices/licenses for bundled engine modules and assets.
@@ -1927,6 +1940,126 @@ bool BuildPipeline::CopyEngineShaders(const fs::path& stagingDir)
     if (!CopyDirectoryRecursive(shaderSrc, dst, [this]() { return m_CancelRequested.load(); }))
         return FailIfCancelled(), false;
     Logger::Log::Info("Build: Copied engine shaders from '{}'", shaderSrc.string());
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// CookMaterialVariants
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// The last lines of a child's output, for an error that names the failure without the whole log.
+std::string OutputTail(const std::string& output, std::size_t lineCount)
+{
+    std::size_t start = output.size();
+    for (std::size_t lines = 0; start > 0 && lines <= lineCount;)
+    {
+        --start;
+        if (output[start] == '\n')
+            ++lines;
+    }
+    return output.substr(start);
+}
+
+// The cook's summary lines ("MaterialVariantCook: ..."), how many variants it cooked and reused, in the
+// export log.
+void LogCookSummary(const std::string& output)
+{
+    constexpr std::string_view kSummary = "MaterialVariantCook: ";
+    std::size_t lineStart = 0;
+    while (lineStart < output.size())
+    {
+        std::size_t lineEnd = output.find_first_of("\r\n", lineStart);
+        if (lineEnd == std::string::npos)
+            lineEnd = output.size();
+        const std::string_view line = std::string_view(output).substr(lineStart, lineEnd - lineStart);
+        if (line.starts_with(kSummary))
+            Logger::Log::Info("Build: {}", line);
+        lineStart = lineEnd + 1;
+    }
+}
+
+// The warning of a cook that exited non-zero: the materials whose variants failed, grouped and
+// capped, which compile when the game first draws them; the output's tail when the cook named none
+// (it stopped before cooking).
+std::string DescribeFailedCook(int exitCode, const std::string& output)
+{
+    constexpr std::size_t kListedMaterials = 20;
+    std::string message = "MaterialVariantCook failed (exit " + std::to_string(exitCode) + ")";
+    const std::vector<std::string> failed = FailedCookMaterials(output);
+    if (failed.empty())
+        return message + "; the game compiles every material on first use:\n" + OutputTail(output, 25);
+    message += "; these materials compile when the game first draws them:";
+    for (std::size_t i = 0; i < failed.size() && i < kListedMaterials; ++i)
+        message += "\n  " + failed[i];
+    if (failed.size() > kListedMaterials)
+        message += "\n  and " + std::to_string(failed.size() - kListedMaterials) + " more";
+    return message;
+}
+
+} // namespace
+
+bool BuildPipeline::CookMaterialVariants(const fs::path& contentRoot, const BuildSettings& s)
+{
+    const fs::path tool = FindMaterialVariantCook();
+    if (tool.empty())
+    {
+        m_Progress.errors.push_back(
+            "MaterialVariantCook is missing from the Tools folder beside this Editor's Apps folder; the Editor "
+            "build stages it there. Build the Editor target again, then export.");
+        return false;
+    }
+    // The cook composes against the engine shader tree this export ships, so its keys are the ones the
+    // packaged runtime computes.
+    const fs::path engineShaders = contentRoot / "Assets" / "Shaders";
+    if (!fs::is_directory(engineShaders))
+    {
+        m_Progress.warnings.push_back("Material variant cook skipped: the export staged no engine shaders.");
+        return true;
+    }
+
+    DesktopMaterialCookInputs inputs;
+    inputs.ProjectAssets = s.projectRoot / "Assets";
+    inputs.EngineShaders = engineShaders;
+    for (const ResolvedPackage& package : m_PackageResolution.MountOrder)
+    {
+        // A package without an assets folder (code only) has no materials to cook.
+        if (package.AssetsDir.empty() || !fs::is_directory(package.AssetsDir))
+            continue;
+        if (fs::is_directory(package.AssetsDir / "Shaders"))
+            inputs.PackageShaderDirs.push_back(package.AssetsDir / "Shaders");
+        inputs.ScanRoots.push_back({package.AssetsDir, package.Alias});
+    }
+    AppendStagedModuleShaderDirs(engineShaders, inputs.PackageShaderDirs);
+    inputs.Cache = s.projectRoot / ".Build" / "MaterialVariantCook";
+    // A program the editor already compiled is the same program under the same key, so the cook copies it.
+    const fs::path editorCache = ShaderProgramAsset::GetShaderCacheRoots().Writable;
+    if (!editorCache.empty() && fs::is_directory(editorCache) && editorCache != inputs.Cache)
+        inputs.ReuseCache = editorCache;
+
+    std::string command = "\"" + tool.generic_string() + "\"";
+    for (const std::string& argument : DesktopMaterialCookArguments(inputs))
+        command += " \"" + argument + "\"";
+    Logger::Log::Info("Build: material variant cook: {}", command);
+    const ShellProcessResult result = RunShellCommandImpl(command + " 2>&1", nullptr);
+    if (result.cancelled)
+        return FailIfCancelled(), false;
+    // A material that does not cook is reported, not fatal: the game compiles it on first use and
+    // shows the same compile error the editor does. Everything that cooked still ships.
+    if (result.exitCode != 0)
+        m_Progress.warnings.push_back(DescribeFailedCook(result.exitCode, result.output));
+    LogCookSummary(result.output);
+
+    const std::vector<fs::path> packages = CookedShaderPackages(result.output);
+    std::string error;
+    if (!StageCookedShaderPackages(packages, inputs.Cache, contentRoot / ".Cache" / "Shaders", error))
+    {
+        m_Progress.errors.push_back(error);
+        return false;
+    }
+    Logger::Log::Info("Build: staged {} cooked shader package(s) into '{}'", packages.size(),
+                      (contentRoot / ".Cache" / "Shaders").string());
     return true;
 }
 

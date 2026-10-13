@@ -658,10 +658,13 @@ bool VulkanDevice::Initialize(const DeviceDesc& desc)
     m_FaultInjection = FaultInjectionFromEnv();
     m_FaultFrameCounter = 0;
     m_FaultSubmitCounter = 0;
+    m_FaultAcquireCounter = 0;
+    m_FaultAcquireForcedSuboptimal = false;
     m_InitDesc = desc; // stashed for RebuildDevice (Q6 slice 2)
     if (m_FaultInjection.Active())
     {
-        Logger::Log::Warning("VulkanDevice: [fault-injection] active — GE_VK_FORCE_DEVICE_LOST / GE_VK_FORCE_BEGINFRAME_TIMEOUT set");
+        Logger::Log::Warning("VulkanDevice: [fault-injection] active — GE_VK_FORCE_DEVICE_LOST / GE_VK_FORCE_BEGINFRAME_TIMEOUT / "
+                             "GE_VK_FORCE_GPU_HANG / GE_VK_FORCE_ACQUIRE_SUBOPTIMAL set");
     }
     m_DebugLayerEnabled = desc.enableDebugLayer;
     m_ApplicationName = desc.applicationName;
@@ -931,6 +934,7 @@ bool VulkanDevice::CreateDeviceAndResources(const DeviceDesc& desc)
     // Configure pipeline cache with platform-specific directory
     VulkanPipelineCache::Config cacheConfig;
     cacheConfig.CacheDirectory = VulkanPipelineCache::GetPlatformCacheDirectory();
+    cacheConfig.PersistToDisk = desc.persistPipelineCache;
 
     m_VkDiskPipelineCache = std::make_unique<VulkanPipelineCache>(m_Device, cacheConfig);
     if (!m_VkDiskPipelineCache->Initialize())
@@ -10413,6 +10417,7 @@ bool VulkanDevice::RecreateActiveSwapchain(uint32_t width, uint32_t height)
     m_SwapchainTextures.clear();
     m_CurrentSwapchainImage = UINT32_MAX;
     m_AcquiredThisFrame = false;
+    m_AcquireReportedSuboptimal = false;
     m_AcquireSemaphoreThisFrame = VK_NULL_HANDLE;
     m_WaitedOnImageAvailableThisFrame = false;
     m_AnyGraphicsSubmitThisFrame = false;
@@ -11074,7 +11079,7 @@ bool VulkanDevice::CreateSwapchain(uint32_t width, uint32_t height)
             hdrDisplay.hdrAvailable = true;
         }
     }
-    hdrDisplay.diagnosticHints.push_back(m_SwapchainColorSpaceExtEnabled
+    hdrDisplay.diagnosticHints.emplace_back(m_SwapchainColorSpaceExtEnabled
                                              ? "VK_EXT_swapchain_colorspace enabled."
                                              : "VK_EXT_swapchain_colorspace not exposed; HDR10/HLG Vulkan color spaces are unavailable.");
     if (m_HdrState.enabled && !hdrDisplay.hdrAvailable)
@@ -12399,6 +12404,19 @@ bool VulkanDevice::AcquireNextImage(uint32_t& imageIndex)
     const auto t1 = std::chrono::high_resolution_clock::now();
     m_LastFrameSyncTimings.acquireMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
+    m_FaultAcquireForcedSuboptimal = false;
+    if (result == VK_SUCCESS && m_FaultInjection.acquireSuboptimalEvery > 0)
+    {
+        ++m_FaultAcquireCounter;
+        if (m_FaultInjection.ShouldForceAcquireSuboptimal(m_FaultAcquireCounter))
+        {
+            result = VK_SUBOPTIMAL_KHR;
+            m_FaultAcquireForcedSuboptimal = true;
+            Logger::Log::Warning("VulkanDevice: [fault-injection] forcing VK_SUBOPTIMAL_KHR on acquire {}", m_FaultAcquireCounter);
+        }
+    }
+    m_AcquireReportedSuboptimal = (result == VK_SUBOPTIMAL_KHR);
+
     // Mark that we must wait on the imageAvailable semaphore once this frame
     m_WaitedOnImageAvailableThisFrame = false;
 
@@ -12406,8 +12424,8 @@ bool VulkanDevice::AcquireNextImage(uint32_t& imageIndex)
     // imageAvailable semaphore will be signaled, so the frame must go on to
     // render and present it. Skipping the frame here would leave that binary
     // semaphore signaled, and the next acquire on this frame slot would reuse it
-    // (VUID-vkAcquireNextImageKHR-semaphore-01286). PresentImage sees the
-    // suboptimal swapchain again and recreates it after the present.
+    // (VUID-vkAcquireNextImageKHR-semaphore-01286). PresentImage recreates the
+    // swapchain after the present, whatever the present itself returns.
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
     {
         m_CurrentSwapchainImage = imageIndex;
@@ -12552,6 +12570,12 @@ bool VulkanDevice::PresentImage(uint32_t imageIndex)
     const auto t1 = std::chrono::high_resolution_clock::now();
     m_LastFrameSyncTimings.presentMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
+    if (m_FaultAcquireForcedSuboptimal && m_FaultInjection.acquireSuboptimalAlsoPresent && result == VK_SUCCESS)
+    {
+        result = VK_SUBOPTIMAL_KHR;
+    }
+    m_FaultAcquireForcedSuboptimal = false;
+
     if (result == VK_SUCCESS)
     {
 
@@ -12564,6 +12588,16 @@ bool VulkanDevice::PresentImage(uint32_t imageIndex)
             auto it = m_WindowTargets.find(m_ActiveWindowTargetId);
             if (it != m_WindowTargets.end())
                 it->second.frameIndex = m_ActiveWindowTargetFrameIndex;
+        }
+        // A present can succeed on a swapchain its acquire reported as suboptimal;
+        // the surface still no longer matches it.
+        if (m_AcquireReportedSuboptimal && m_SwapchainExtent.width > 0 && m_SwapchainExtent.height > 0)
+        {
+            const WindowTargetHandle activeTarget = GetActiveWindowTarget();
+            if (activeTarget.IsValid())
+            {
+                RecreateWindowTargetSwapchain(activeTarget, m_SwapchainExtent.width, m_SwapchainExtent.height);
+            }
         }
         return true;
     }

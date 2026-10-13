@@ -672,6 +672,7 @@ void UIManager::NotifyElementOwnerChanged(UIElement* el)
     // instanceId -> element map (slice E1): insert on owner-gain. Erase
     // happens in the SetOwnerManager detach branch + ~UIElement.
     m_ElementsByInstanceId[el->GetInstanceId()] = el;
+    m_ElementIdIndex.Register(*el);
 
     if (!m_AssetManager)
         return;

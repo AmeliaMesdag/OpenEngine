@@ -93,6 +93,9 @@ inline constexpr const char* ClusterBuffer = "ClusterBuffer";
 inline constexpr const char* ClusterParams = "ClusterParams";
 inline constexpr const char* LightIndexBuffer = "LightIndexBuffer";
 inline constexpr const char* DepthMinMaxBuffer = "DepthMinMaxBuffer";
+// The texture the sky pass draws its backdrop from (the sky-view LUT or the HDRI), published per
+// view by SkyRender; a black texture when no sky is active.
+inline constexpr const char* SkyBackdrop = "SkyBackdrop";
 } // namespace Res
 
 // Pipeline output-slot names (RenderPipelineBlueprint::outputs keys).

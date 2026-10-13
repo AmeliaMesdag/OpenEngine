@@ -909,8 +909,12 @@ if(GE_STEAMDECK_BUILD)
     add_compile_definitions(GE_STEAMDECK_BUILD=1 PLATFORM_STEAMDECK=1)
 endif()
 
-# When enabled, treat warnings as errors on non-MSVC compilers in dev configs.
-option(ENABLE_WERROR_NON_MSVC "Treat warnings as errors on non-MSVC compilers (Debug/RelWithDebInfo)" OFF)
+# GCC and Clang-family builds are strict by default.
+set(_ge_werror_non_msvc_default OFF)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+	set(_ge_werror_non_msvc_default ON)
+endif()
+option(ENABLE_WERROR_NON_MSVC "Treat warnings as errors on non-MSVC compilers (Debug/DebugFast/RelWithDebInfo)" ${_ge_werror_non_msvc_default})
 
 # Compiler-specific options
 if(MSVC)
@@ -919,7 +923,7 @@ if(MSVC)
 	#  - /Zc:preprocessor           : conforming preprocessor
 	#  - /Zc:__cplusplus            : make __cplusplus report the actual standard level
 	#  - /W4                        : high warning level
-	#  - /WX (Debug/RelWithDebInfo) : treat *compiler* warnings as errors in dev configs
+	#  - /WX (Debug/DebugFast/RelWithDebInfo) : treat *compiler* warnings as errors in dev configs
 	#  - /MP                        : multi-processor compilation
 	#  - /analyze (Debug only)      : static analysis where iteration speed doesn't
 	#                                 matter; RelWithDebInfo is the perf-verification
@@ -945,7 +949,7 @@ if(MSVC)
 	)
 	add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
-	# GCC/Clang: strong warnings everywhere; -Werror only when explicitly requested.
+	# GCC/Clang: strong warnings everywhere; dev configs default to errors.
 	add_compile_options(
 		-Wall
 		-Wextra
@@ -957,11 +961,12 @@ else()
 		-Wno-unused-variable
 		-Wno-missing-field-initializers
 		-Wno-unused-parameter
-		$<$<CXX_COMPILER_ID:GNU>:-Wno-changes-meaning>
+		$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-changes-meaning>
 	)
 	if(ENABLE_WERROR_NON_MSVC)
 		add_compile_options(
 			$<$<CONFIG:Debug>:-Werror>
+			$<$<CONFIG:DebugFast>:-Werror>
 			$<$<CONFIG:RelWithDebInfo>:-Werror>
 		)
 	endif()
@@ -1052,6 +1057,10 @@ endif()
 
 
 # Include directories (removed global include paths; targets declare their own)
+
+# The shader compiler, before any engine directory that compiles shaders.
+include(cmake/GlslcCompiler.cmake)
+ge_find_glslc()
 
 # Add subdirectories in dependency order
 
@@ -1286,6 +1295,13 @@ if(BUILD_TESTING)
 endif()
 if(BUILD_TOOLS)
   add_subdirectory(Tools)
+elseif(TARGET Editor)
+  # The Editor's desktop export runs MaterialVariantCook (BuildPipeline::CookMaterialVariants), so the
+  # Editor builds it whatever BUILD_TOOLS says, staged into bin/<config>/Tools beside ShaderReflect.
+  add_subdirectory(Tools/MaterialVariantCook)
+endif()
+if(TARGET Editor)
+  add_dependencies(Editor MaterialVariantCook)
 endif()
 if(ENABLE_SCRIPTING)
   # Convenience target to build only scripting-related artifacts

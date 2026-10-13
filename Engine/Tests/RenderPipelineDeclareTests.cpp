@@ -1034,7 +1034,9 @@ TEST_F(PipelineResourceParseTest, ParsesOnceAcrossViewsAndFramesAndInvalidatesOn
                           width * (index + 1) / 2);
             }
             if (sceneValid && absoluteWidth)
+            {
                 EXPECT_EQ(calls[0].MaterializedTex.Id, calls[1].MaterializedTex.Id) << "replacement is frame-scoped";
+            }
             device->WaitForIdle();
         };
         declare(0, 64);
@@ -3710,7 +3712,9 @@ TEST(RenderPipelineDeclareTests, ShadowVolumeFiltersRestoreBaseAndFollowViewWorl
                 ASSERT_EQ(settings.HasOverride, overrides[i].has_value()) << "world " << i;
                 EXPECT_FLOAT_EQ(settings.DistanceFadeFraction, expectedFade[i]) << "world " << i;
                 if (overrides[i])
+                {
                     ASSERT_EQ(static_cast<Q>(settings.Filter), *overrides[i]) << "world " << i;
+                }
                 rs.SubmitLight(worldIds[i], sun);
             }
             rs.BuildWorldBatchKeys();
@@ -9848,9 +9852,11 @@ std::vector<std::string> FragmentOnlyBindingsTheHeadDeclares(Rendering::IDevice&
         if (set.Set >= unit.SetLayouts.size())
             continue;
         if (set.Set != 1u)
+        {
             EXPECT_EQ(device.InternDescriptorSetLayout(Rendering::MaterialBuilder::BuildSetLayout(set)),
                       unit.SetLayouts[set.Set])
                 << "set " << set.Set << ": the pipeline declares the layout of the meta the binder walks";
+        }
         for (const Rendering::DescriptorBindingMeta& binding : set.Bindings)
         {
             if (set.Set != 1u && (binding.StagesMask & Rendering::ShaderMetaStage::kVertex) == 0u)
@@ -17119,7 +17125,9 @@ TEST(RenderPipelineDeclareTests, DdgiInactiveLobesRespectStorageAliasingCapabili
                 EXPECT_EQ(rough.Id == irradiance.Id, aliasesAllowed);
                 EXPECT_EQ(glossy.Id == irradiance.Id, aliasesAllowed);
                 if (!aliasesAllowed)
+                {
                     EXPECT_NE(rough.Id, glossy.Id);
+                }
 
                 const auto resolve = RGQuery::FindDeclared(graph, RGQuery::Exact{"DDGI.Test.Resolve"});
                 const auto blur = RGQuery::FindDeclared(graph, RGQuery::Exact{"DDGI.Test.ResolveBlur"});
@@ -17143,7 +17151,9 @@ TEST(RenderPipelineDeclareTests, DdgiInactiveLobesRespectStorageAliasingCapabili
                     const bool blurred = std::string_view(lobe).ends_with("Blur");
                     EXPECT_TRUE(graph.HasWriteAccess(blurred ? blur : resolve, found)) << name;
                     if (!blurred)
+                    {
                         EXPECT_TRUE(graph.HasReadAccess(blur, found)) << name;
+                    }
                 }
                 // Execute both capability arms: declaration alone cannot catch
                 // invalid descriptor byte ranges in the resolve callback.
@@ -17812,6 +17822,11 @@ TEST(RenderPipelineDeclareTests, SceneAsForgetsItsBlasMapOnADeviceRebuild)
     auto device = CreateRayQueryDevice();
     if (!device)
         GTEST_SKIP() << "No device with ray query and an acceleration-structure backend";
+    if (device->GetAPI() != GraphicsAPI::Vulkan)
+    {
+        device->Shutdown();
+        GTEST_SKIP() << "Metal on macOS does not support the Vulkan device-loss injection used by this test";
+    }
     {
         RenderServices rs;
         ASSERT_TRUE(rs.Initialize(device.get()));

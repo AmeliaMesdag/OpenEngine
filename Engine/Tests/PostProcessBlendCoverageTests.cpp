@@ -90,8 +90,8 @@ const std::unordered_set<std::string> kComputedReads = {
     "colorGradeActive", "hdrColorFxActive", "casActive", "lutActive",
     "ldrStackActive", "vhsActive", "chromaticAberrationActive", "filmSimulationGrainActive",
     "filmSimulationArtifactsActive", "crtActive", "fastBlurActive", "dofActive",
-    "heatDistortionActive", "heightFogActive", "volumetricFogActive", "atmosphericCloudActive",
-    "volumetricCloudsActive",
+    "heatDistortionActive", "heightFogActive", "heightFogSkyColorActive", "volumetricFogActive",
+    "atmosphericCloudActive", "volumetricCloudsActive",
     "bloomIntensity", "volumetricFogIntensity",
 };
 
@@ -158,8 +158,8 @@ TEST(PostProcessBlendCoverage, EveryReflectedFieldBlendsOrIsExcluded)
 // pin the migration: the exact name set cannot drift, and every registered
 // (name, offset, kind) triple must resolve the member TryReadField reports.
 
-// Golden set of every readable name, 303 in total: 44 computed gates (11 core +
-// 33 registered) + 257 shared members (16 core appendix + 241 registered) + 2
+// Golden set of every readable name, 302 in total: 45 computed gates (11 core +
+// 34 registered) + 255 shared members (15 core appendix + 240 registered) + 2
 // read-only aliases. A new effect field extends this list in the same change
 // that registers it; a missing name here means a registration line was lost,
 // not that the list is stale.
@@ -175,7 +175,7 @@ TEST(PostProcessSettingsWrite, ReadableFieldNamesMatchGoldenSet)
     "aoActive", "useAutoExposure", "colorFilterActive", "colorGradeActive",
     "hdrColorFxActive", "casActive", "lutActive", "ldrStackActive",
     "chromaticAberrationActive", "filmSimulationGrainActive", "filmSimulationArtifactsActive", "crtActive",
-    "fastBlurActive", "dofActive", "heatDistortionActive", "heightFogActive",
+    "fastBlurActive", "dofActive", "heatDistortionActive", "heightFogActive", "heightFogSkyColorActive",
     "volumetricFogActive", "atmosphericCloudActive", "volumetricCloudsActive", "exposure", "threshold",
     "knee", "bloomAntiFlicker", "intensity", "bloomScatteringAmount",
     "bloomTintR", "bloomTintG", "bloomTintB", "bloomRadius",
@@ -189,7 +189,7 @@ TEST(PostProcessSettingsWrite, ReadableFieldNamesMatchGoldenSet)
     "fogGlowScatter", "fogGlowFadeStart", "fogGlowFadeEnd", "fogGlowTintR",
     "fogGlowTintG", "fogGlowTintB", "halationIntensity", "halationRadius",
     "halationTintR", "halationTintG", "halationTintB", "tonemapMode",
-    "ditherMode", "ictcpChromaCompression", "chromaticAberrationIntensity", "chromaticAberrationStartOffset", "chromaticAberrationSaturation",
+    "ictcpChromaCompression", "chromaticAberrationIntensity", "chromaticAberrationStartOffset", "chromaticAberrationSaturation",
     "chromaticAberrationLongitudinal", "chromaticAberrationComa", "dofIntensity", "dofMaxRadius",
     "dofSamplingQuality", "dofDebugMode", "dofDebugAlpha", "dofFocusDistance",
     "dofFocalLengthMm", "dofAperture", "dofSensorHeightMm", "dofApertureBladeCount",
@@ -203,7 +203,7 @@ TEST(PostProcessSettingsWrite, ReadableFieldNamesMatchGoldenSet)
     "filmSimulationDustIntensity", "filmSimulationDustSize", "filmSimulationDustRandomSize", "filmSimulationGateWeaveEnabled",
     "filmSimulationGateWeaveHorizontal", "filmSimulationGateWeaveVertical", "filmSimulationGateWeaveRotation", "filmSimulationGateMask",
     "filmSimulationGateMaskFeather", "filmSimulationGateMaskRoundness", "colorFilterR", "colorFilterG",
-    "colorFilterB", "colorFilterIntensity", "colorFilterBlendMode", "colorFilterStackOrder",
+    "colorFilterB", "colorFilterIntensity", "colorFilterBlendMode",
     "casStrength", "casStackOrder", "lutIntensity", "lutStackOrder",
     "lutInputEncoding", "lutTextureFormat", "vignetteIntensity", "vignetteSmoothness",
     "vignetteRounded", "vignetteColorR", "vignetteColorG", "vignetteColorB",
@@ -312,14 +312,14 @@ TEST(PostProcessSettingsWrite, RegistryFieldsResolveDeclaredMembersByName)
             }
         });
 
-    // 257 shared members minus the 16 core/fog-glow appendix names
+    // 255 shared members minus the 15 core/fog-glow appendix names
     // (PP_CORE_SHARED_FIELDS in PostProcessSettings.cpp). The named
     // set is an on-disk/shader contract: it must not move without extending the
     // golden name list above.
-    EXPECT_EQ(namedCount, 241u);
-    // Blend-only members (Phase 2): 2 bloom + 40 height fog + 62 volumetric fog
+    EXPECT_EQ(namedCount, 240u);
+    // Blend-only members (Phase 2): 2 bloom + 41 height fog + 62 volumetric fog
     // + 1 deband + 3 AO + 7 SSSR + 3 exposure adjustment + 35 volumetric clouds.
-    EXPECT_EQ(blendOnlyCount, 153u);
+    EXPECT_EQ(blendOnlyCount, 154u);
 }
 
 // Every gate an effect registers is readable by name, listed once, and reads
@@ -355,8 +355,8 @@ TEST(PostProcessSettingsWrite, RegistryGatesReadTheirPredicatesByName)
             }
         });
 
-    // 44 gates in total: 33 decided by one effect, 11 in the core table.
-    EXPECT_EQ(gateCount, 33u);
+    // 45 gates in total: 34 decided by one effect, 11 in the core table.
+    EXPECT_EQ(gateCount, 34u);
     EXPECT_EQ(R::PostProcessEffectRegistry::FindGate("fogGlowActive"), nullptr)
         << "a gate combining effects belongs in the core table, not one effect's registration";
 }
@@ -1712,7 +1712,6 @@ using GameEngine::uint64;
     X(HalationTintG) \
     X(HalationTintB) \
     X(TonemapMode) \
-    X(DitherMode) \
     X(IctcpChromaCompression) \
     X(ChromaticAberrationIntensity) \
     X(ChromaticAberrationStartOffset) \
@@ -1773,7 +1772,6 @@ using GameEngine::uint64;
     X(ColorFilterB) \
     X(ColorFilterIntensity) \
     X(ColorFilterBlendMode) \
-    X(ColorFilterStackOrder) \
     X(CasStrength) \
     X(CasStackOrder) \
     X(LutIntensity) \
@@ -1922,6 +1920,7 @@ using GameEngine::uint64;
     X(HeightFogUseTimeOfDay) \
     X(HeightFogSkyHorizonOffset) \
     X(HeightFogSkyBottomStrength) \
+    X(HeightFogColorMode) \
     X(ColorGradeShadowsR) \
     X(ColorGradeShadowsG) \
     X(ColorGradeShadowsB) \
@@ -2107,7 +2106,7 @@ constexpr std::size_t kFieldCount = 0 PP_BLEND_LOCK_FIELDS(PP_LOCK_COUNT);
 constexpr std::size_t kExactFieldCount = 0 PP_BLEND_LOCK_EXACT_FIELDS(PP_LOCK_COUNT);
 constexpr std::size_t kToleranceFieldCount = 0 PP_BLEND_LOCK_TOLERANCE_FIELDS(PP_LOCK_COUNT);
 #undef PP_LOCK_COUNT
-static_assert(kFieldCount == 421, "PostProcessSettings member count moved: regenerate PP_BLEND_LOCK_FIELDS");
+static_assert(kFieldCount == 420, "PostProcessSettings member count moved: regenerate PP_BLEND_LOCK_FIELDS");
 static_assert(kToleranceFieldCount == 1, "the ULP-pinned set is Exposure alone");
 static_assert(kExactFieldCount + kToleranceFieldCount == kFieldCount,
               "the lock partition must cover every member exactly once");
@@ -2137,10 +2136,10 @@ constexpr std::size_t kTailPad = sizeof(PostProcessSettings) -
 static_assert(kPadAfterAutoExposureActive == 3, "layout moved: re-derive the pad pins");
 static_assert(kPadBeforeBloomDirtGuid == 0, "layout moved: re-derive the pad pins");
 static_assert(kPadBeforeLutGuid == 0, "layout moved: re-derive the pad pins");
-// The current layout ends 4 bytes short of its 8-byte boundary (the 8-aligned GUID
-// word arrays set the struct's alignment), so the tail pad is 4. Pinning it still
-// ensures an appended member cannot be silently absorbed by an ABI alignment hole.
-static_assert(kTailPad == 4, "layout moved: extend PP_BLEND_LOCK_FIELDS and re-derive the pad pins");
+// The current layout ends on its 8-byte boundary (the 8-aligned GUID word arrays
+// set the struct's alignment), so the tail pad is 0. Pinning it still ensures an
+// appended member cannot be silently absorbed by an ABI alignment hole.
+static_assert(kTailPad == 0, "layout moved: extend PP_BLEND_LOCK_FIELDS and re-derive the pad pins");
 static_assert(kFieldBytes + kPadAfterAutoExposureActive + kPadBeforeBloomDirtGuid +
                   kPadBeforeLutGuid + kTailPad == sizeof(PostProcessSettings),
               "PP_BLEND_LOCK_FIELDS is stale: a PostProcessSettings member is missing from the equivalence lock");
@@ -2451,6 +2450,7 @@ void RefCopyHeightFogFields(PostProcessSettings& dst, const PostProcessSettings&
     dst.HeightFogUseTimeOfDay = src.HeightFogUseTimeOfDay;
     dst.HeightFogSkyHorizonOffset = src.HeightFogSkyHorizonOffset;
     dst.HeightFogSkyBottomStrength = src.HeightFogSkyBottomStrength;
+    dst.HeightFogColorMode = src.HeightFogColorMode;
 }
 
 void RefCopyAtmosphericCloudFields(PostProcessSettings& dst, const PostProcessSettings& src)
@@ -2617,7 +2617,6 @@ PostProcessSettings BlendReference(
     // Discrete settings: use B when weight >= 0.5 (highest priority wins)
     out.AutoExposureActive = (w >= 0.5f) ? b.AutoExposureActive : a.AutoExposureActive;
     out.TonemapMode    = (w >= 0.5f) ? b.TonemapMode : a.TonemapMode;
-    out.DitherMode     = (w >= 0.5f) ? b.DitherMode : a.DitherMode;
     out.IctcpChromaCompression = lerp(a.IctcpChromaCompression, b.IctcpChromaCompression, w);
     out.ChromaticAberrationIntensity = lerp(a.ChromaticAberrationIntensity, b.ChromaticAberrationIntensity, w);
     out.ChromaticAberrationStartOffset = lerp(a.ChromaticAberrationStartOffset, b.ChromaticAberrationStartOffset, w);
@@ -2675,7 +2674,6 @@ PostProcessSettings BlendReference(
     out.ColorFilterB         = lerp(a.ColorFilterB,         b.ColorFilterB,         w);
     out.ColorFilterIntensity = lerp(a.ColorFilterIntensity, b.ColorFilterIntensity, w);
     out.ColorFilterBlendMode = (w >= 0.5f) ? b.ColorFilterBlendMode : a.ColorFilterBlendMode;
-    out.ColorFilterStackOrder = (w >= 0.5f) ? b.ColorFilterStackOrder : a.ColorFilterStackOrder;
     out.CasStrength          = lerp(a.CasStrength,          b.CasStrength,          w);
     out.CasStackOrder        = (w >= 0.5f) ? b.CasStackOrder : a.CasStackOrder;
     out.LutIntensity         = lerp(a.LutIntensity,         b.LutIntensity,         w);
@@ -2846,6 +2844,7 @@ PostProcessSettings BlendReference(
     out.HeightFogUseTimeOfDay = (w >= 0.5f) ? b.HeightFogUseTimeOfDay : a.HeightFogUseTimeOfDay;
     out.HeightFogSkyHorizonOffset = lerp(a.HeightFogSkyHorizonOffset, b.HeightFogSkyHorizonOffset, w);
     out.HeightFogSkyBottomStrength = lerp(a.HeightFogSkyBottomStrength, b.HeightFogSkyBottomStrength, w);
+    out.HeightFogColorMode = (w >= 0.5f) ? b.HeightFogColorMode : a.HeightFogColorMode;
     out.VolumetricFogIntensity         = lerp(a.VolumetricFogIntensity, b.VolumetricFogIntensity, w);
     out.VolumetricFogIsGlobal          = (w >= 0.5f) ? b.VolumetricFogIsGlobal : a.VolumetricFogIsGlobal;
     out.VolumetricFogVolumeShape       = (w >= 0.5f) ? b.VolumetricFogVolumeShape : a.VolumetricFogVolumeShape;

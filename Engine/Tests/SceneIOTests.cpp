@@ -753,9 +753,13 @@ static void ExpectComponentsEnabled(ECS::World& world, const char* tag, bool mes
     ASSERT_TRUE(e.IsValid()) << tag;
     const ECS::Entity entity(&world, e);
     if (world.HasComponent<Components::MeshRenderer>(e))
+    {
         EXPECT_EQ(entity.IsEnabled<Components::MeshRenderer>(), meshEnabled) << tag;
+    }
     if (world.HasComponent<Components::ReflectionProbe>(e))
+    {
         EXPECT_EQ(entity.IsEnabled<Components::ReflectionProbe>(), probeEnabled) << tag;
+    }
 }
 
 // The switch line reads case-insensitively ("MeshRenderer.enabled", "ReflectionProbe.Enabled")
@@ -1117,8 +1121,8 @@ void ExpectSameTransformWithinRoundTripBound(const Components::Transform& actual
 
     // Componentwise, sign included: q and -q are the same rotation, but a save that flips the sign
     // rewrites every rotation line.
-    const auto& a = actual.GetRotation().GetGLM();
-    const auto& e = expected.GetRotation().GetGLM();
+    const auto a = actual.GetRotation().GetGLM();
+    const auto e = expected.GetRotation().GetGLM();
     EXPECT_NEAR(a.x, e.x, kRoundTripRotationBound);
     EXPECT_NEAR(a.y, e.y, kRoundTripRotationBound);
     EXPECT_NEAR(a.z, e.z, kRoundTripRotationBound);
@@ -1432,7 +1436,9 @@ TEST(SceneIO, ReflectionSchema_SplinePlacementElementKeys)
     for (std::uint32_t i = 0; i < Components::kSplinePoolCapacity; ++i)
     {
         if (i != 1u)
+        {
             EXPECT_TRUE(comp->StraightPool[i].IsNull()) << "slot " << i;
+        }
     }
 
     // The pre-pool single-slot key from a pre-P1 scene: tolerated skip.
@@ -4579,7 +4585,6 @@ TEST(SceneIO, PostProcessSchemaCollapse_CrtEffectReflectionParity)
 {
     Components::CrtEffect crt{};
     crt.Enabled = false;
-    crt.StackOrder = 5;
     crt.Intensity = 0.75f;
     crt.Curvature = 0.15f;
     crt.Scanlines = 0.3f;
@@ -4592,7 +4597,6 @@ TEST(SceneIO, PostProcessSchemaCollapse_CrtEffectReflectionParity)
                                  [](const Components::CrtEffect& a, const Components::CrtEffect& b)
                                  {
                                      EXPECT_EQ(a.Enabled, b.Enabled);
-                                     EXPECT_EQ(a.StackOrder, b.StackOrder);
                                      EXPECT_FLOAT_EQ(a.Intensity, b.Intensity);
                                      EXPECT_FLOAT_EQ(a.Curvature, b.Curvature);
                                      EXPECT_FLOAT_EQ(a.Scanlines, b.Scanlines);
@@ -4602,6 +4606,23 @@ TEST(SceneIO, PostProcessSchemaCollapse_CrtEffectReflectionParity)
                                      EXPECT_EQ(a.ExposureCompensation, b.ExposureCompensation);
                                      EXPECT_FLOAT_EQ(a.EmulatedResolutionDiv, b.EmulatedResolutionDiv);
                                  });
+}
+
+// The CRT runs as its own blueprint pass at a fixed place, so no stack order is authored or saved for it.
+TEST(SceneIO, CrtEffectSavesNoStackOrder)
+{
+    ECS::World world;
+    const ECS::EntityHandle e = world.CreateEntity();
+    ASSERT_TRUE(e.IsValid());
+    world.AddComponentImmediate(e, Components::CrtEffect{});
+    const Scene::ISceneComponentSchema* schema = Scene::SceneSchemaRegistry::Find("CrtEffect");
+    ASSERT_NE(schema, nullptr);
+    Scene::SceneSaveContext saveCtx{};
+    std::vector<std::string> lines;
+    schema->Serialize(world, e, saveCtx, lines);
+    ASSERT_FALSE(lines.empty());
+    for (const std::string& line : lines)
+        EXPECT_EQ(line.find("stackOrder"), std::string::npos) << line;
 }
 
 TEST(SceneIO, PostProcessSchemaCollapse_ExposureAdjustmentEffectReflectionParity)
@@ -4765,7 +4786,6 @@ TEST(SceneIO, PostProcessSchemaCollapse_ColorFilterEffectReflectionParity)
 {
     Components::ColorFilterEffect filter{};
     filter.Enabled = false;
-    filter.StackOrder = 2;
     filter.BlendMode = Components::ColorFilterBlendMode::Screen;
     filter.Color[0] = 0.25f;
     filter.Color[1] = 0.5f;
@@ -4776,7 +4796,6 @@ TEST(SceneIO, PostProcessSchemaCollapse_ColorFilterEffectReflectionParity)
         [](const Components::ColorFilterEffect& a, const Components::ColorFilterEffect& b)
         {
             EXPECT_EQ(a.Enabled, b.Enabled);
-            EXPECT_EQ(a.StackOrder, b.StackOrder);
             EXPECT_EQ(a.BlendMode, b.BlendMode);
             EXPECT_FLOAT_EQ(a.Color[0], b.Color[0]);
             EXPECT_FLOAT_EQ(a.Color[1], b.Color[1]);
@@ -6889,6 +6908,7 @@ TEST(SceneIO, SaveThenLoad_RoundTripHeightFogEffectCamelCaseProperties)
     fog.SkyFillEnd = 1.0f;
     fog.SkyHorizonOffset = 0.07f;
     fog.SkyBottomStrength = 0.18f;
+    fog.ColorMode = Components::HeightFogColorMode::FixedColor;
     fog.FogGlowEnabled = true;
     fog.FogGlowQualityLevel = Components::FogGlowQuality::Cinematic;
     fog.FogGlowIntensity = 0.42f;
@@ -6912,6 +6932,7 @@ TEST(SceneIO, SaveThenLoad_RoundTripHeightFogEffectCamelCaseProperties)
     EXPECT_NE(saved.find("HeightFogEffect.horizonHeightOffset = 33"), std::string::npos);
     EXPECT_NE(saved.find("HeightFogEffect.noiseMin = 0.12"), std::string::npos);
     EXPECT_NE(saved.find("HeightFogEffect.skyBottomStrength = 0.18"), std::string::npos);
+    EXPECT_NE(saved.find("HeightFogEffect.colorMode = 0"), std::string::npos);
     EXPECT_NE(saved.find("HeightFogEffect.fogGlowOctaves = 7"), std::string::npos);
     EXPECT_NE(saved.find("HeightFogEffect.fogGlowQuality = 3"), std::string::npos);
 
@@ -6984,6 +7005,7 @@ TEST(SceneIO, SaveThenLoad_RoundTripHeightFogEffectCamelCaseProperties)
     EXPECT_FLOAT_EQ(loaded->SkyFillEnd, fog.SkyFillEnd);
     EXPECT_FLOAT_EQ(loaded->SkyHorizonOffset, fog.SkyHorizonOffset);
     EXPECT_FLOAT_EQ(loaded->SkyBottomStrength, fog.SkyBottomStrength);
+    EXPECT_EQ(loaded->ColorMode, fog.ColorMode);
     EXPECT_EQ(loaded->FogGlowEnabled, fog.FogGlowEnabled);
     EXPECT_EQ(loaded->FogGlowQualityLevel, fog.FogGlowQualityLevel);
     EXPECT_FLOAT_EQ(loaded->FogGlowIntensity, fog.FogGlowIntensity);

@@ -860,7 +860,9 @@ TEST(GPUDrawStreamCrossfadeTail, PerSliceCursorBlocksTileTheClaimWithoutAliasing
         const uint32_t blockEnd = offsets[s] + kHalf * 2u;
         EXPECT_LE(offsets[s] + kHalf + kHalf, blockEnd) << "tail half escapes slice " << s;
         if (s + 1 < offsets.size())
+        {
             EXPECT_LE(blockEnd, offsets[s + 1]) << "slice " << s << " overlaps its successor";
+        }
     }
 }
 

@@ -1417,6 +1417,7 @@ void NativeScriptManager::DispatchBuildBatch(std::vector<StaleModule> staleModul
 
             for (ModuleOutcome& outcome : outcomes)
             {
+                outcome.Result.ModuleId = outcome.ModuleId;
                 // Every processed package outcome of the initial pass is terminal
                 // for InitialPackageModulePassComplete — loaded, failed, or
                 // stashed for play-exit (play can't be active during the project

@@ -1204,10 +1204,12 @@ void SettingsTreeDataProvider::RefreshRegistryNodes() const
         const TreeId id = static_cast<TreeId>(kRegistrySettingsCategoryBase + i);
         // Labels can change on module replace-forward; refresh unconditionally.
         m_Nodes[id] = {categories[i].Title, {}, false};
-        // VersionControl- and UIAppearance-group categories render inline on
-        // their host pages rather than as tree children; they contribute no node.
+        // VersionControl-, UIAppearance- and SceneView-group categories render
+        // inline on their host pages rather than as tree children; they
+        // contribute no node.
         if (categories[i].Group == Editor::SettingsCategoryGroup::VersionControl ||
-            categories[i].Group == Editor::SettingsCategoryGroup::UIAppearance)
+            categories[i].Group == Editor::SettingsCategoryGroup::UIAppearance ||
+            categories[i].Group == Editor::SettingsCategoryGroup::SceneView)
             continue;
 
         TreeId parent = 0;
@@ -3589,6 +3591,8 @@ void SettingsPanel::RequestShowRegistryCategory(std::string_view categoryId)
                 target = SettingsCategory::VersionControl;
             else if (categories[i].Group == Editor::SettingsCategoryGroup::UIAppearance)
                 target = SettingsCategory::UIAppearance;
+            else if (categories[i].Group == Editor::SettingsCategoryGroup::SceneView)
+                target = SettingsCategory::Camera;
             RequestShowCategory(target);
             return;
         }
@@ -4020,7 +4024,7 @@ void SettingsPanel::CreateUIColorsContent()
         section->AddChild(std::move(swatch));
 
         const uint32_t kDefaultAssetIconTint = 0xFFAAAAAA;
-        AddDoubleClickReset(iconTintLabelPtr, [this, kDefaultAssetIconTint]()
+        AddDoubleClickReset(iconTintLabelPtr, [this]()
         {
             m_UIAssetIconTint = kDefaultAssetIconTint;
             auto prefs = Editor::OpenEditorPreferences();
@@ -4184,7 +4188,7 @@ void SettingsPanel::CreateUIColorsContent()
         section->AddChild(std::move(swatch));
 
         const uint32_t kDefaultSmartFolderIconTint = 0xFF6BA4F8;
-        AddDoubleClickReset(smartLabelPtr, [this, kDefaultSmartFolderIconTint]()
+        AddDoubleClickReset(smartLabelPtr, [this]()
         {
             m_UISmartFolderIconTint = kDefaultSmartFolderIconTint;
             auto prefs = Editor::OpenEditorPreferences();
@@ -7203,7 +7207,7 @@ void SettingsPanel::CreateUIInspectorContent()
         }
         syncFromValue(current);
 
-        auto onPicked = [this, leftCb, middleCb, rightCb, syncFromValue](const std::string& value) {
+        auto onPicked = [this, syncFromValue](const std::string& value) {
             syncFromValue(value);
             auto prefs = Editor::OpenEditorPreferences();
             std::string err;
@@ -7215,7 +7219,7 @@ void SettingsPanel::CreateUIInspectorContent()
         };
 
         // Derive selected value from checkbox state and notify once (robust to event order / double-firing)
-        auto applyFromSelection = [onPicked, leftCb, middleCb, rightCb]() {
+        auto applyFromSelection = [onPicked, middleCb, rightCb]() {
             const std::string value = middleCb->IsChecked() ? "middle" : (rightCb->IsChecked() ? "right" : "left");
             onPicked(value);
         };
@@ -8155,90 +8159,6 @@ void SettingsPanel::CreateCameraSettingsContent()
         createCameraSliderRow(config, "SettingsSceneCameraAcceleration");
     }
 
-    // Scene View pinned exposure (used while its Auto Exposure toggle is off)
-    {
-        SettingsSliderConfig config;
-        config.labelText = "Fixed Exposure (EV100)";
-        config.defaultValue = Components::kDefaultManualExposureEv;
-        config.initialValue = settings.GetPostFxFixedExposureEv();
-        config.minValue = SceneViewSettings::kMinExposureEv;
-        config.maxValue = SceneViewSettings::kMaxExposureEv;
-        config.step = 0.1f;
-        config.prefKey.clear(); // Use SceneViewSettings for persistence
-        config.onValueChanging = [](float value) {
-            SceneViewSettings::Get().SetPostFxFixedExposureEv(value, false);
-        };
-        config.onValueChanged = [](float value) {
-            SceneViewSettings::Get().SetPostFxFixedExposureEv(value);
-        };
-
-        createCameraSliderRow(config, "SettingsSceneCameraFixedEv");
-    }
-
-    {
-        m_ContentBody->AddContent(MakeSettingsInfoCard(
-            "EV100 the Scene View is pinned to while its Auto Exposure toggle (viewport "
-            "post-fx menu or camera popup) is off."));
-    }
-
-    // Scene View auto-metering tune (applies while Auto Exposure is on)
-    {
-        SettingsSliderConfig config;
-        config.labelText = "Auto Exposure Min EV100";
-        config.defaultValue = SceneViewSettings::kDefaultAutoExposureMinEv;
-        config.initialValue = settings.GetPostFxAutoExposureMinEv();
-        config.minValue = SceneViewSettings::kMinExposureEv;
-        config.maxValue = SceneViewSettings::kMaxExposureEv;
-        config.step = 0.1f;
-        config.prefKey.clear(); // Use SceneViewSettings for persistence
-        config.onValueChanging = [](float value) {
-            SceneViewSettings::Get().SetPostFxAutoExposureMinEv(value, false);
-        };
-        config.onValueChanged = [](float value) {
-            SceneViewSettings::Get().SetPostFxAutoExposureMinEv(value);
-        };
-
-        createCameraSliderRow(config, "SettingsSceneCameraAutoMinEv");
-    }
-
-    {
-        SettingsSliderConfig config;
-        config.labelText = "Auto Exposure Max EV100";
-        config.defaultValue = SceneViewSettings::kDefaultAutoExposureMaxEv;
-        config.initialValue = settings.GetPostFxAutoExposureMaxEv();
-        config.minValue = SceneViewSettings::kMinExposureEv;
-        config.maxValue = SceneViewSettings::kMaxExposureEv;
-        config.step = 0.1f;
-        config.prefKey.clear(); // Use SceneViewSettings for persistence
-        config.onValueChanging = [](float value) {
-            SceneViewSettings::Get().SetPostFxAutoExposureMaxEv(value, false);
-        };
-        config.onValueChanged = [](float value) {
-            SceneViewSettings::Get().SetPostFxAutoExposureMaxEv(value);
-        };
-
-        createCameraSliderRow(config, "SettingsSceneCameraAutoMaxEv");
-    }
-
-    {
-        SettingsSliderConfig config;
-        config.labelText = "Exposure Compensation";
-        config.defaultValue = 0.0f;
-        config.initialValue = settings.GetPostFxExposureCompensation();
-        config.minValue = -SceneViewSettings::kMaxExposureCompensation;
-        config.maxValue = SceneViewSettings::kMaxExposureCompensation;
-        config.step = 0.1f;
-        config.prefKey.clear(); // Use SceneViewSettings for persistence
-        config.onValueChanging = [](float value) {
-            SceneViewSettings::Get().SetPostFxExposureCompensation(value, false);
-        };
-        config.onValueChanged = [](float value) {
-            SceneViewSettings::Get().SetPostFxExposureCompensation(value);
-        };
-
-        createCameraSliderRow(config, "SettingsSceneCameraExposureComp");
-    }
-
     // Max orbit distance
     {
         SettingsSliderConfig config;
@@ -8297,7 +8217,7 @@ void SettingsPanel::CreateCameraSettingsContent()
         section->AddChild(std::move(swatch));
 
         constexpr uint32_t kDefaultBackgroundColor = 0xFF1A1A1Au;
-        AddDoubleClickReset(labelPtr, [this, kDefaultBackgroundColor]() {
+        AddDoubleClickReset(labelPtr, [this]() {
             m_SceneViewBackgroundColor = kDefaultBackgroundColor;
             SceneViewSettings::Get().SetBackgroundColor(kDefaultBackgroundColor);
             UpdateSceneViewBackgroundColorSwatchStyle();
@@ -8499,7 +8419,7 @@ void SettingsPanel::CreateCameraSettingsContent()
         section->AddChild(std::move(swatch));
 
         constexpr uint32_t kDefaultIndicatorColor = 0xF2F2664Du;
-        AddDoubleClickReset(labelPtr, [this, kDefaultIndicatorColor]() {
+        AddDoubleClickReset(labelPtr, [this]() {
             m_RulerIndicatorColor = kDefaultIndicatorColor;
             SceneViewSettings::Get().SetRulerIndicatorColor(kDefaultIndicatorColor);
             UpdateRulerIndicatorColorSwatchStyle();
@@ -8547,7 +8467,7 @@ void SettingsPanel::CreateCameraSettingsContent()
         section->AddChild(std::move(swatch));
 
         constexpr uint32_t kDefaultMeasureColor = 0xFFFFC738u;
-        AddDoubleClickReset(labelPtr, [this, kDefaultMeasureColor]() {
+        AddDoubleClickReset(labelPtr, [this]() {
             m_MeasureColor = kDefaultMeasureColor;
             SceneViewSettings::Get().SetMeasureColor(kDefaultMeasureColor);
             UpdateMeasureColorSwatchStyle();
@@ -8836,6 +8756,12 @@ void SettingsPanel::CreateCameraSettingsContent()
         CreateSettingsSliderRow(config, m_ContentBody);
     }
 
+    // Pages registered against the SceneView group render here, after the
+    // hand-built rows.
+    for (const auto& category : Editor::EditorSettingsRegistry::Get().Snapshot())
+        if (category.Group == Editor::SettingsCategoryGroup::SceneView)
+            CreateRegistrySettingsContent(category);
+
     // Description
     {
         m_ContentBody->AddContent(MakeSettingsInfoCard(
@@ -8866,10 +8792,6 @@ void SettingsPanel::SyncCameraSettingsControls()
     sync("SettingsSceneCameraMoveSpeed", settings.GetMoveSpeed());
     sync("SettingsSceneCameraFastMultiplier", settings.GetFastMoveMultiplier());
     sync("SettingsSceneCameraAcceleration", settings.GetMoveAccelerationTime());
-    sync("SettingsSceneCameraFixedEv", settings.GetPostFxFixedExposureEv());
-    sync("SettingsSceneCameraAutoMinEv", settings.GetPostFxAutoExposureMinEv());
-    sync("SettingsSceneCameraAutoMaxEv", settings.GetPostFxAutoExposureMaxEv());
-    sync("SettingsSceneCameraExposureComp", settings.GetPostFxExposureCompensation());
 }
 
 
@@ -10773,7 +10695,7 @@ void SettingsPanel::CreateHDROutputSettingsContent()
         auto toggle = std::make_unique<Toggle>();
         toggle->SetChecked(hdrEnabled);
         Editor::SceneViewSettings::Get().SetHdrOutputEnabled(hdrEnabled);
-        toggle->SetOnValueChanged([this, saveHdrSetting, requestHdrOutputRefresh, setHdrControlsVisible, rebuildHdrContent](const bool& enabled) {
+        toggle->SetOnValueChanged([saveHdrSetting, requestHdrOutputRefresh, setHdrControlsVisible, rebuildHdrContent](const bool& enabled) {
             saveHdrSetting([enabled](nlohmann::json& hdr)
             {
                 hdr["enabled"] = enabled;
@@ -11387,6 +11309,7 @@ void SettingsPanel::CreatePerformanceSettingsContent()
                 {
                     case Rendering::GraphicsAPI::Vulkan: activeApi = "Vulkan"; break;
                     case Rendering::GraphicsAPI::Metal: activeApi = "Metal"; break;
+                    case Rendering::GraphicsAPI::WebGPU: activeApi = "WebGPU"; break;
                     case Rendering::GraphicsAPI::DirectX12: activeApi = "DirectX 12"; break;
                     case Rendering::GraphicsAPI::Auto: activeApi = "Auto"; break;
                 }
@@ -11775,7 +11698,7 @@ void SettingsPanel::CreateTagsSettingsContent()
         sectionHeader->AddClass("settings-section-header");
         sectionHeader->SetFocusable(true);
         constexpr uint32_t kCmdResetTagsToDefaults = 1;
-        sectionHeader->RegisterEventHandler(kEventMouseDown, [this, kCmdResetTagsToDefaults](UIEvent& e) {
+        sectionHeader->RegisterEventHandler(kEventMouseDown, [this](UIEvent& e) {
             if (e.Button != 1 || !m_EditorContext || !m_EditorContext->MainWindow)
                 return;
             e.Stop();
@@ -11808,7 +11731,7 @@ void SettingsPanel::CreateTagsSettingsContent()
                         auto processBatchRef = std::make_shared<std::function<void()>>();
                         *processBatchRef = [processBatchRef, panel, paths = std::move(paths),
                                            defaultNamesLower = std::move(defaultNamesLower),
-                                           nextIndex, batchSize]() {
+                                           nextIndex]() {
                             AssetRegistry& registry = EngineCore::GetInstance().GetAssetManager().GetRegistry();
                             const size_t start = *nextIndex;
                             const size_t end = (std::min)(start + batchSize, paths.size());
@@ -11890,9 +11813,8 @@ void SettingsPanel::CreateTagsSettingsContent()
             .Set(Style::Width, StyleLength::Px(20.0f)).Set(Style::Height, StyleLength::Px(20.0f)).Set(Style::MinWidth, StyleLength::Px(20.0f)).Set(Style::MinHeight, StyleLength::Px(20.0f))
             .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{4.0f, 4.0f, 4.0f, 4.0f}).Set(Style::BorderWidth, Box4{1.0f, 1.0f, 1.0f, 1.0f}).Set(Style::BorderColor, BorderColorsTRBL{0xFF555555u, 0xFF555555u, 0xFF555555u, 0xFF555555u})
             .Set(Style::BackgroundColor, (uint32_t)swatchArgb).Set(Style::FlexShrink, 0.0f).Set(Style::Cursor, CursorStyle::Pointer);
-        UIElement* swatchPtr = swatch.get();
 
-        swatch->RegisterEventHandler(kEventMouseDown, [this, tagIndex, swatchPtr, hasProject](UIEvent& e) {
+        swatch->RegisterEventHandler(kEventMouseDown, [this, tagIndex, hasProject](UIEvent& e) {
             if (e.Button != 0 || !hasProject) return;
             std::vector<EditorTagDefinition> current = EditorTags::Load();
             if (tagIndex >= current.size()) return;
@@ -11925,7 +11847,7 @@ void SettingsPanel::CreateTagsSettingsContent()
         nameField->SetOnValueChanged([this, tagIndex, hasProject](const std::string& newName) {
             if (!hasProject || newName.empty()) return;
             std::string nameCopy = newName;
-            this->PostAction([this, tagIndex, nameCopy]() {
+            this->PostAction([tagIndex, nameCopy]() {
                 std::vector<EditorTagDefinition> t = EditorTags::Load();
                 if (tagIndex < t.size()) {
                     t[tagIndex].Name = nameCopy;
@@ -13115,6 +13037,8 @@ void SettingsPanel::RegisterSearchableItems()
                 category = SettingsCategory::VersionControl;
             else if (categories[i].Group == Editor::SettingsCategoryGroup::UIAppearance)
                 category = SettingsCategory::UIAppearance;
+            else if (categories[i].Group == Editor::SettingsCategoryGroup::SceneView)
+                category = SettingsCategory::Camera;
             if (!categories[i].SearchKeywords.empty())
             {
                 std::string keywords = categories[i].Title + " " + categories[i].SearchKeywords;

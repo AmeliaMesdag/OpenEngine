@@ -155,6 +155,17 @@ const char* PresetUndoDisplayName(ComponentPreset p)
 
     switch (p)
     {
+    case Preset::TerrainFlattenArea:
+    case Preset::TerrainHeightOffsetArea:
+    case Preset::TerrainNoiseArea:
+    case Preset::TerrainStampArea:
+    case Preset::TerrainPaintArea:
+    case Preset::TerrainRulesArea:
+    case Preset::TerrainGroundClaimArea:
+    case Preset::TerrainGrassArea:
+        break; // Handled by FindTerrainAreaPreset above.
+    case Preset::Count:
+        break; // Sentinel, not a preset.
     case Preset::Camera:
         return "Camera";
     case Preset::Light:
@@ -213,6 +224,17 @@ std::vector<ECS::ComponentTypeId> ComponentTypeIdsForPreset(ComponentPreset p)
 
     switch (p)
     {
+    case Preset::TerrainFlattenArea:
+    case Preset::TerrainHeightOffsetArea:
+    case Preset::TerrainNoiseArea:
+    case Preset::TerrainStampArea:
+    case Preset::TerrainPaintArea:
+    case Preset::TerrainRulesArea:
+    case Preset::TerrainGroundClaimArea:
+    case Preset::TerrainGrassArea:
+        break; // Handled by FindTerrainAreaPreset above.
+    case Preset::Count:
+        break; // Sentinel, not a preset.
     case Preset::Camera:
         return {ECS::GetComponentTypeId<Components::Camera>()};
     case Preset::Light:

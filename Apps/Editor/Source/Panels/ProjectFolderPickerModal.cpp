@@ -2303,21 +2303,8 @@ void ProjectFolderPickerModal::ShowImportProjectView()
 
     if (m_ImportDestinationField && TrimProjectText(m_ImportDestinationField->GetValue()).empty())
     {
-        std::filesystem::path initialDestination;
-        Editor::SettingsStore prefs = Editor::OpenEditorPreferences();
-        std::string err;
-        (void)prefs.Load(&err);
-        std::string lastBrowsedDirectory;
-        if (prefs.TryGetString("lastBrowsedDirectory", lastBrowsedDirectory) &&
-            !lastBrowsedDirectory.empty())
-        {
-            std::error_code ec;
-            if (std::filesystem::is_directory(lastBrowsedDirectory, ec))
-                initialDestination = lastBrowsedDirectory;
-        }
-        if (initialDestination.empty())
-            initialDestination = ResolveHomePath();
-        m_ImportDestinationField->SetValue(initialDestination.generic_string());
+        m_ImportDestinationField->SetValue(
+            Editor::LoadNewProjectLocation(ResolveHomePath()).generic_string());
     }
     if (m_StackedScrim)
         m_StackedScrim->Overrides().Set(Style::Display, DisplayMode::Flex);
@@ -2591,6 +2578,7 @@ void ProjectFolderPickerModal::OnImportProjectClicked()
         setError("Another project is still being imported.");
         return;
     }
+    Editor::SaveNewProjectLocation(parent);
     m_AcquireInFlight = true;
     UpdateImportProjectEnabled();
     ShowLoading();
@@ -3010,7 +2998,7 @@ void ProjectFolderPickerModal::RefreshRecentProjectsList()
     newName->SetText("New project");
     newName->AddClass("project-card-title");
     auto newMeta = std::make_unique<Label>();
-    newMeta->SetText("Blank · 3D · Open World");
+    newMeta->SetText("Blank · 3D");
     newMeta->AddClass("project-card-meta");
     newBody->AddChild(std::move(newName));
     newBody->AddChild(std::move(newMeta));

@@ -54,6 +54,8 @@
   --ui_color_text_muted: #E0E0E0;
   --ui_color_text_bright: #FFFFFF;
   --ui_color_text_dim: #b2b2b2;
+  /* Component icon glyphs (inspector headers, pickers) at rest. */
+  --ui_color_icon: rgba(200, 200, 200, 1.0);
   --ui_color_text_disabled: #666666;
   /* Status banners drawn over a view's 3D content (ViewOverlayLayer.css): a translucent
      dark pill and its text. */
@@ -147,6 +149,8 @@
   /* Text that says something did not happen (an action refused or failed): the badge's red
      lightened to read as 12 px text on a panel (5.4:1 on #272727). */
   --ui_color_error_text: #FF6B6B;
+  /* The wash behind an error notice: the badge's red over the panel, as the warning wash is amber. */
+  --ui_color_error_background: rgba(209, 52, 56, 0.14);
   /* A layer that sits over scrolled content casts this along its top edge (the AI
      Assistant's input pane over its conversation). */
   --ui_shadow_layer_above: 0 -4px 10px rgba(0, 0, 0, 0.35);

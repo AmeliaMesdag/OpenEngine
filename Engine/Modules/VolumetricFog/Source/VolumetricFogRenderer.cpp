@@ -186,7 +186,7 @@ bool IsFogActive(const VolumetricFogSettings& settings)
 bool IsTemporalCompatible(const VolumetricFogSettings& a, const VolumetricFogSettings& b)
 {
     constexpr float eps = 0.0001f;
-    auto near3 = [eps](const float lhs[3], const float rhs[3]) {
+    auto near3 = [](const float lhs[3], const float rhs[3]) {
         return std::abs(lhs[0] - rhs[0]) <= eps &&
                std::abs(lhs[1] - rhs[1]) <= eps &&
                std::abs(lhs[2] - rhs[2]) <= eps;
@@ -639,7 +639,7 @@ bool VolumetricFogRenderer::CreateJitterAtlasTexture()
 
     const uint32_t n = kJitterAtlasSize;
     std::vector<float> base(n * n * n, 0.0f);
-    auto indexOf = [n](uint32_t x, uint32_t y, uint32_t z) {
+    auto indexOf = [](uint32_t x, uint32_t y, uint32_t z) {
         return static_cast<size_t>(x + y * n + z * n * n);
     };
 
@@ -723,7 +723,7 @@ bool VolumetricFogRenderer::CreateDensityNoiseAtlasTexture()
         return false;
 
     const uint32_t n = kDensityNoiseAtlasSize;
-    auto indexOf = [n](uint32_t x, uint32_t y, uint32_t z, uint32_t c) {
+    auto indexOf = [](uint32_t x, uint32_t y, uint32_t z, uint32_t c) {
         return static_cast<size_t>((x + y * n + z * n * n) * 4u + c);
     };
 

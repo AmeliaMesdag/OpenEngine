@@ -1,6 +1,7 @@
 // The process's stats registry: an intrusive list of the records that live inside their
-// owners (TrackedBytes, Arena), guarded by one mutex that registration, unregistration,
-// snapshots and the image-pin query take. Owners write their counts without it.
+// owners (TrackedBytes, Arena, ObjectPool<T>, each thread's scratch arena), guarded by one
+// mutex that registration, unregistration, snapshots and the image-pin query take. Owners write
+// their counts without it.
 //
 // One registry per process: Memory is spliced into Engine, and an executable that links
 // Engine links no second copy of the module (cmake/EngineModuleDuplicationCheck.cmake).
@@ -50,7 +51,7 @@ void RegisterStats(StatsRecord& record, std::string_view name, StatsKind kind, R
     {
         std::fprintf(stderr, "Memory stats name '%.*s' is %zu characters; stats names are at most %zu: shorten it.\n",
                      static_cast<int>(name.size()), name.data(), name.size(), StatsRecord::kMaxNameLength);
-        assert(false && "stats name too long; shorten the name passed to TrackedBytes or Arena (named above)");
+        assert(false && "stats name too long; shorten the name passed to TrackedBytes, Arena or ObjectPool (named above)");
     }
 #endif
     const std::size_t length = std::min(name.size(), StatsRecord::kMaxNameLength);
@@ -120,7 +121,9 @@ std::vector<StatsEntry> SnapshotStats()
                            record->Bytes.load(std::memory_order_relaxed),
                            record->ReservedBytes.load(std::memory_order_relaxed),
                            record->HighWaterBytes.load(std::memory_order_relaxed),
-                           record->Blocks.load(std::memory_order_relaxed)});
+                           record->Blocks.load(std::memory_order_relaxed), record->ThreadId,
+                           record->OutOfOrder.load(std::memory_order_relaxed),
+                           record->Shrinks.load(std::memory_order_relaxed)});
     return entries;
 }
 

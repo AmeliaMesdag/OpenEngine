@@ -194,6 +194,7 @@ ShadowSettingsEffect.enabled = true
 CubeLutEffect.enabled = true
 VolumetricFogEffect.enabled = true
 HeightFogEffect.enabled = true
+HeightFogEffect.colorMode = 0
 AtmosphericCloudLayer.enabled = true
 Transform.position = (0, 0, 0)
 Transform.rotation = (0, 0, 0, 1)

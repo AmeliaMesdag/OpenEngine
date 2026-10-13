@@ -394,19 +394,32 @@ button.scene-tool-btn.ruler-tool-icon.icon-active:hover,
 
 /* A registered tool strip entry's badge button and its unread count. The count sits beside
    the button in the host, so the resting button's opacity does not dim it; it widens with
-   its digits. */
+   its digits, leftward, up to "99+". It sits on the button's top-right corner, lifted 3 px
+   above the button's box so it covers less of the icon. In the vertical strip the button sits
+   below the built-in tools and in the toolbar row the room above the 24 px buttons takes the
+   lift, so the count stays 2 px or more inside either strip. The horizontal strip's buttons
+   sit on its 4 px top padding, where 2 px is the largest lift that keeps the count 2 px clear
+   of the strip's rounded border.
+   The label centres its line box in its content box, which leaves the 9 px tall digits of the
+   12 px font half a pixel low in the 16 px circle: 4 px of red above them, 3 px below at 1x.
+   The 2 px bottom padding lifts the line box one whole pixel, to 3 px above and 4 px below at
+   1x: a digit an odd number of pixels tall cannot centre on the pixel grid, and the high side
+   reads as centred where the low side reads as sinking. A half-pixel lift is not enough: it
+   rounds up or down with the strip's sub-pixel position, so the floating strip kept the low
+   side while the toolbar took the high one. */
 .scene-tool-badge-host {
 	position: relative;
 }
 
 .scene-tool-badge {
 	position: absolute;
-	top: -4px;
-	right: -6px;
+	top: -3px;
+	right: 0;
 	min-width: 16px;
 	height: 16px;
 	padding-left: 4px;
 	padding-right: 4px;
+	padding-bottom: 2px;
 	border-radius: 8px;
 	background-color: var(--ui_color_badge_background);
 	color: var(--ui_color_text_bright);
@@ -414,6 +427,10 @@ button.scene-tool-btn.ruler-tool-icon.icon-active:hover,
 	font-weight: 700;
 	text-align: center;
 	pointer-events: none;
+}
+
+.scene-tool-overlay.horizontal .scene-tool-badge {
+	top: -2px;
 }
 
 /* Space toggle: global (default) / local (when icon-active) */

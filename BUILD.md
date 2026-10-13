@@ -24,9 +24,9 @@ How to build the editor from a fresh clone on **Windows** (primary), **macOS** a
 
 ## Quick start
 
-Install the [prerequisites](#prerequisites), then copy the block for your platform. `Editor` also builds `Player`, the runtime the editor exports games with. `McpServer` builds the `mcp/` server that `node mcp/ge.mjs` and AI tools drive the editor with; it exists only when Node.js was on PATH at configure, so skip that line without it. The same tools build as a terminal command with `GameEngineCli` ([Standalone CLI](#standalone-cli-gameenginecli)). On first launch the editor asks you to create or open a project: [Your first project](docs/first-project.html).
+Install the [prerequisites](#prerequisites), then copy the block for your platform. `Editor` also builds `Player`, the runtime the editor exports games with. `McpServer` builds the `mcp/` server that `node mcp/ge.mjs` and AI tools drive the editor with; it exists only when Node.js was on PATH at configure, so skip that line without it. The same tools build as a terminal command with `GameEngineCli` ([Standalone CLI](#standalone-cli-gameenginecli)). On first launch the editor asks you to create or open a project: [Your first project](docs/getting-started/first-project.mdx).
 
-The first configure compiles about 60 third-party libraries (tens of minutes) unless the binary cache has them; later configures take about a minute. When a dependency version moves (a `git pull` that changes `vcpkg.json`, `cmake/VcpkgPin.cmake` or `cmake/ports/`, or a Visual Studio update), the configure stops and tells you to delete `build/<preset>` and reconfigure.
+The first configure compiles about 60 third-party libraries (tens of minutes) unless the binary cache has them; later configures take about a minute. When a dependency version moves (a `git pull` that changes `vcpkg.json` or `cmake/ports/`), the configure installs the new version in place and marks its headers as changed, so the next build recompiles the files that include them. When a dependency is rebuilt at the same version with a different ABI (a Visual Studio update, or a `cmake/VcpkgPin.cmake` change that moves the vcpkg checkout), no file would recompile against it, so the configure stops and tells you to delete `build/<preset>` and reconfigure.
 
 ### Windows (Visual Studio)
 
@@ -125,6 +125,7 @@ node --version && python3 --version    # optional tools
 | Requirement | Notes | Where |
 |---|---|---|
 | **C++20 toolchain** (recent GCC or Clang), **CMake 3.25 or newer**, **Ninja**, **pkg-config**, **Git** | | your distribution's packages |
+| **NASM (x86/x64)** | Required by FFmpeg when the video feature is enabled. | `sudo apt install nasm` |
 | **Windowing packages** | Required by vcpkg's `glfw3`. | `sudo apt install libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config` |
 | **Vulkan driver and tools** | Runtime requirement, plus the validation layers. | `sudo apt install mesa-vulkan-drivers vulkan-tools vulkan-validationlayers` |
 | **.NET 10 SDK** | C# scripting host and managed assemblies. | [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) |
@@ -186,9 +187,11 @@ From a Mac, `./Tools/Scripts/build-steamdeck-docker.sh` produces the same build 
 ## Build configurations
 
 - **Debug**: `/Od /Zi /MDd /RTC1`, iterator debugging, static analysis as warnings, Vulkan validation layers on. The slowest; use it when you want every check firing.
-- **DebugFast**: the default and the daily configuration. Same source-level debugging as Debug without the debug CRT (`/MD`, no `/RTC1`, no static analysis), validation layers off by default, asserts live.
+- **DebugFast**: the default and the daily configuration. Same source-level debugging as Debug without the debug CRT (`/MD`, no `/RTC1`, no static analysis), validation layers off by default, asserts live, compiler warnings treated as errors by default on MSVC, GCC and Clang (including AppleClang).
 - **RelWithDebInfo**: `/O2` with symbols, asserts compiled out. For performance checks with usable crash stacks.
 - **Release**: optimized; the shipping configuration, and the only one a performance number comes from.
+
+MSVC treats compiler warnings as errors in Debug, DebugFast and RelWithDebInfo. Non-MSVC compilers use the same configurations when `ENABLE_WERROR_NON_MSVC` is ON. A fresh configure defaults to ON for GCC, Clang and AppleClang. Existing build caches retain their saved value; use `-DENABLE_WERROR_NON_MSVC=ON` to enable it there. An explicit `OFF` opts out on non-MSVC compilers. Release does not use this option.
 
 Choosing one:
 
@@ -265,7 +268,7 @@ build\vs2026-x64-local\bin\DebugFast\gameenginecli.exe get_editor_state
 build\vs2026-x64-local\bin\DebugFast\gameenginecli.exe get_log --count 50 --min-level warning
 ```
 
-Usage, argument shapes and exit codes: [docs/MCP_SETUP.md](docs/MCP_SETUP.md).
+Usage, argument shapes and exit codes: [docs/getting-started/mcp-setup.mdx](docs/getting-started/mcp-setup.mdx).
 
 ## Sanitizers
 

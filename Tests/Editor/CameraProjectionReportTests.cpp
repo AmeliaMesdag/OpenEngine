@@ -202,7 +202,7 @@ TEST(CameraProjectionReport, GameCameraReportsDeclaredTranslationRollProjectionA
     EXPECT_EQ(out["projection"]["viewportHeightPx"], 90);
     EXPECT_EQ(out["exposure"]["mode"], "auto");
     EXPECT_TRUE(out["exposure"]["metered"].is_null()) << "settings are not a meter sample";
-    for (const auto [mode, name] : {std::pair{Components::ExposureMode::Fixed, "fixed"},
+    for (const auto& [mode, name] : {std::pair{Components::ExposureMode::Fixed, "fixed"},
                                   std::pair{Components::ExposureMode::Manual, "manual"},
                                   std::pair{Components::ExposureMode::Physical, "physical"}})
     {

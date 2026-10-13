@@ -1,0 +1,46 @@
+---
+title: Height fog
+description: The Height Fog Effect, a screen-space haze that thickens with distance, thins with height and veils the sky near the horizon, and where its color comes from.
+---
+
+The **Height Fog Effect** is a screen-space haze: it thickens with distance from the camera, can thin out with height above a base level, and can veil the sky near the horizon. Add it to an entity that carries a **Post Process Volume**; it applies wherever that volume does, and blends with other volumes like every other effect. It is the cheap way to put air between the camera and the distance. For light shafts and local fog volumes, use the **Volumetric Fog Effect**.
+
+## Color modes
+
+**Color Mode** decides where the fog's color comes from.
+
+| Mode | The fog's color | Use it when |
+|---|---|---|
+| **Sky Horizon** (default) | The sky's own color at the horizon, in the direction the camera looks, at the sky's brightness. | The scene has a **Sky Environment** and its time of day can change: the haze stays the color of the sky behind it at noon, at dusk and at night, with nothing to retune. |
+| **Fixed Color** | **Emissive**, optionally blended by a **Gradient Mode**, plus sunlight scattered by the fog (the **Directional Light** rows). | The look is authored for one sky: a stylized color, a colored mist, a scene whose time of day never changes. |
+
+### Sky Horizon in detail
+
+- Each pixel takes the sky's color at the horizon of its own compass direction, so a haze in front of a sunset is orange on the sun's side and blue on the other.
+- Distant ground and the sky meet without a band: where the fog is thick, the ground fades into exactly the color the sky shows at the horizon.
+- It follows every kind of sky the **Sky Environment** draws: the physical atmosphere (including its night sky), the gradient sky (its horizon color) and an HDRI skybox (its horizon row, with the skybox's rotation and intensity). With the stylized ground, the fog takes the stylized horizon rim color.
+- An HDRI's horizon row carries the photo's detail: trees, buildings, the sun. The fog averages the row over about 6 degrees of compass direction, so that detail does not turn into vertical streaks in the haze; the fog's color still turns with the sky around the horizon.
+- **Emissive**, the gradient and the directional light rows do not apply and are hidden, and a line in the inspector says the sky supplies the color: the sky's color at the horizon already contains the sunlight the air scatters.
+- Without a **Sky Environment** in the scene there is no sky color to follow, and the fog uses its fixed color.
+- **Color Mode** is kept when you pick a **Preset** and under the time-of-day keyframes (**Use Time Of Day**): they set the fog's shape (density, distances, heights), and the colors they carry apply in Fixed Color only.
+- Where two Post Process Volumes in different color modes overlap, the fog switches mode halfway through the blend, so its color changes in one step there. Give volumes that blend into each other the same color mode. Space no volume covers counts as Sky Horizon: a Fixed Color volume that fades in over it switches to its own color halfway through the fade.
+
+:::caution[Custom render pipelines]
+The mode reads the sky's backdrop texture, which the `SkyRender` pass publishes as `SkyBackdrop`. A pipeline whose `HeightFog` pass was copied before this mode existed has no `uSkyBackdrop` input: copy the input, its `inputGates` entry and its sampler from `Engine/Assets/RenderPipelines/ForwardPlus.rendergraph`, or the fog shows black in Sky Horizon mode. A pipeline without a `SkyRender` pass skips the fog in this mode.
+:::
+
+## Shape
+
+| Setting | What it does |
+|---|---|
+| **Intensity**, **Density**, **Max Opacity** | How strongly the fog applies; **Max Opacity** caps it so dense fog cannot wash the frame out. |
+| **Distance Fog**: **Min Distance**, **Smooth Length**, **Max Distance** | Where the fog starts, how softly it fades in, and the distance over which **Density** reaches full strength. |
+| **Height Fog**: **Base Height**, **Transition Length** | Below the base the fog is uniform; above it, it thins over the transition length. |
+| **Sky**: **Sky Fill Start**, **Sky Fill End**, **Sky Power** | How far up the sky the haze reaches above the horizon. |
+
+## Changelog
+
+- 2026-10-12: Converted from `docs/Rendering/height-fog.html`.
+- 2026-10-12: Sky Horizon is the default color mode for a new fog.
+- 2026-10-12: an HDRI's horizon is averaged around each direction; presets keep the color mode; the blend between volumes in different modes; the inspector line in Sky Horizon.
+- 2026-10-12: first version: the effect's purpose and shape settings; the Fixed Color and Sky Horizon color modes.

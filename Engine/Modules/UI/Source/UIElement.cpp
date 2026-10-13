@@ -226,7 +226,7 @@ UIElement::~UIElement()
     // dispatch paths store ids instead of raw pointers for exactly this.
     if (m_OwnerManager)
     {
-        UIManagerUnregisterElementInstanceId(m_OwnerManager, this);
+        UIManagerUnregisterElementLookups(m_OwnerManager, this);
     }
 }
 
@@ -728,6 +728,8 @@ bool UIElement::AddManipulator(const std::shared_ptr<Manipulator>& manipulator)
     if (!manipulator)
         return false;
 
+    const Manipulator* manipulatorInstance = manipulator.get();
+
     // One instance, one element. A manipulator records its subscriptions on itself with no
     // element attached to the record, and handler keys are minted per element — so a second
     // attach mixes two elements' tokens into one list, and detaching from either unregisters
@@ -739,7 +741,7 @@ bool UIElement::AddManipulator(const std::shared_ptr<Manipulator>& manipulator)
             "element (or its element was destroyed). One instance serves one element: its "
             "subscription records name no element, so removing it here would unregister the "
             "other element's handlers. Build a second instance for this element.",
-            GetId(), typeid(*manipulator).name());
+            GetId(), typeid(*manipulatorInstance).name());
         return false;
     }
 
@@ -761,14 +763,15 @@ bool UIElement::AddManipulator(const std::shared_ptr<Manipulator>& manipulator)
                 it = entries.erase(it);
                 continue;
             }
-            if (typeid(*existing) == typeid(*manipulator))
+            const Manipulator* existingInstance = existing.get();
+            if (typeid(*existingInstance) == typeid(*manipulatorInstance))
             {
                 Logger::Log::Warning(
                     "UI: AddManipulator refused on element '{}' — a {} is already attached. The "
                     "second one can never fire (the first claims the gesture and the dispatch "
                     "stops there). Remove the existing one first, or attach this instance to a "
                     "different element.",
-                    GetId(), typeid(*manipulator).name());
+                    GetId(), typeid(*manipulatorInstance).name());
                 return false;
             }
             ++it;
@@ -1134,7 +1137,27 @@ bool UIElement::PostSafeAction(std::function<void()> action)
     });
 }
 
+void UIElement::SetId(const std::string& id)
+{
+    if (m_Id == id)
+        return;
+    if (m_OwnerManager)
+        m_OwnerManager->m_ElementIdIndex.Unregister(*this);
+    m_Id = id;
+    m_IdHash = id.empty() ? StringId{0} : HashStringId(id);
+    if (m_OwnerManager)
+        m_OwnerManager->m_ElementIdIndex.Register(*this);
+    // Id selectors affect descendants and, when used, following sibling selectors.
+    InvalidateRuleCacheSubtree();
+    if (UIManagerUsesSiblingCombinators(m_OwnerManager))
+        InvalidateRuleCacheFollowingSiblings();
+}
+
 UIElement* UIElement::FindById(std::string_view id) {
+    if (m_OwnerManager && !id.empty())
+        return m_OwnerManager->m_ElementIdIndex.Find(*this, id);
+
+    // Offline trees have no manager index; preserve their construction-time lookup.
     // Treat id and name as aliases (name is folded into m_Id during parsing).
     if (m_Id == id) return this;
     for (auto& c : m_Children) {
@@ -1142,13 +1165,10 @@ UIElement* UIElement::FindById(std::string_view id) {
     }
     // Include portal-like Mount targets in lookup so ids inside mounted panel subtrees
     // are discoverable by callers (automation, editor integration, debugging tools).
-    if (auto* m = dynamic_cast<Mount*>(this))
+    if (UIElement* target = GetMountTarget())
     {
-        if (UIElement* tgt = m->GetTarget())
-        {
-            if (UIElement* f = tgt->FindById(id))
-                return f;
-        }
+        if (UIElement* found = target->FindById(id))
+            return found;
     }
     return nullptr;
 }

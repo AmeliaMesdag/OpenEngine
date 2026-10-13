@@ -170,7 +170,8 @@ void main()
     {
         skyColor = GE_CompositeGroundFloor(skyColor, uTransLUT,
                                            GE_SkyDiffuseMeanRadiance(uSkyViewLUT, kSkyViewLutHeight),
-                                           camPos, dirWS, planetCenter, uAtmos.planetRadius, camR,
+                                           camPos, dirWS, planetCenter, uAtmos.planetRadius,
+                                           uAtmos.atmosphereRadius, camR,
                                            viewZenithCos,
                                            uAtmos.groundAlbedo, uAtmos.groundBrightness,
                                            normalize(uSky.sunDirectionWS),

@@ -4604,9 +4604,6 @@ void AssetsBrowserController::HandleDirectoryAction(const std::filesystem::path&
     case EditorContextMenu::DirectoryAction::CreateNavGrid:
         CreateNewNavGridInDirectory(directory);
         break;
-    case EditorContextMenu::DirectoryAction::CreateNavMesh:
-        CreateNewNavMeshInDirectory(directory);
-        break;
     case EditorContextMenu::DirectoryAction::CreateGameSystem:
     case EditorContextMenu::DirectoryAction::CreateEntitySystem:
     case EditorContextMenu::DirectoryAction::CreateComponent:
@@ -4825,14 +4822,6 @@ void AssetsBrowserController::CreateNewNavGridInDirectory(const std::filesystem:
 {
     if (!m_Context) return;
     auto result = Editor::CreateDefaultNavGridFile(dir, "NewNavGrid",
-                                                    m_Context->UndoRedo, m_Context->Assets);
-    RevealCreatedAsset(result.path);
-}
-
-void AssetsBrowserController::CreateNewNavMeshInDirectory(const std::filesystem::path& dir)
-{
-    if (!m_Context) return;
-    auto result = Editor::CreateDefaultNavMeshFile(dir, "NewNavMesh",
                                                     m_Context->UndoRedo, m_Context->Assets);
     RevealCreatedAsset(result.path);
 }

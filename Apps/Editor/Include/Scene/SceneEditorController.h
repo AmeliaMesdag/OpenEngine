@@ -75,8 +75,8 @@ class SceneEditorController
     void RequestNewScene();
 
     // Called once a project has opened, with the workspace root already on it:
-    // opens the project's startup scene (Projects/ProjectStartupScene.h), or an
-    // empty scene when it names none. Prompts like any open when the outgoing
+    // opens the project's startup scene (Projects/ProjectStartupScene.h), or a
+    // default scene when it names none. Prompts like any open when the outgoing
     // scene is dirty, unless `outgoingChangesDiscarded`: the user already chose
     // Don't Save for the switch (PromptSaveBefore).
     void OpenProjectStartupScene(const std::filesystem::path& projectRoot, bool outgoingChangesDiscarded);
@@ -86,7 +86,7 @@ class SceneEditorController
     /// Save As dialog (e.g. toolbar save with Shift held).
     void RequestSaveSceneAs();
     // Discard unsaved edits. Saved documents reload from disk; untitled
-    // documents become a new empty scene. Shows a confirmation first.
+    // documents become a new default scene. Shows a confirmation first.
     // Play mode is a no-op (the simulated world must not replace the document).
     void RequestRevertScene();
 

@@ -346,7 +346,6 @@ PostProcessVolume.weight = 1
 PostProcessVolume.priority = 0
 PostProcessVolume.postProcessMask = 4294967295
 PostProcessVolume.tonemap = 4
-PostProcessVolume.ditherMode = 0
 PostProcessVolume.ictcpChromaCompression = 0
 PostProcessVolume.isGlobal = true
 PostProcessVolume.shape = 0

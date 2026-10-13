@@ -4554,7 +4554,7 @@ void HierarchyPanel::SetChangeNotifications(Editor::EditorChangeNotifications* n
     // Live hierarchy icon tint: follow color-picker drags on Light.Color.
     const ECS::ComponentTypeId lightTypeId = ECS::GetComponentTypeId<Components::Light>();
     m_LightChangedSub = m_ChangeNotifications->SubscribeComponentChanged(
-        [this, lightTypeId](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
+        [this](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
         {
             if (e.world != m_World || e.componentType != lightTypeId)
                 return;
@@ -4564,7 +4564,7 @@ void HierarchyPanel::SetChangeNotifications(Editor::EditorChangeNotifications* n
     // Refresh sprite/model thumbnails when MeshRenderer changes (e.g. texture drop on mesh).
     const ECS::ComponentTypeId meshRendererTypeId = ECS::GetComponentTypeId<Components::MeshRenderer>();
     m_MeshRendererChangedSub = m_ChangeNotifications->SubscribeComponentChanged(
-        [this, meshRendererTypeId](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
+        [this](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
         {
             if (e.world != m_World || e.componentType != meshRendererTypeId)
                 return;
@@ -4608,7 +4608,7 @@ void HierarchyPanel::SetChangeNotifications(Editor::EditorChangeNotifications* n
     // the coalesced full label rebuild, byte-identical to before.
     const ECS::ComponentTypeId nameTypeId = ECS::GetComponentTypeId<Components::Name>();
     m_NameChangedSub = m_ChangeNotifications->SubscribeComponentChanged(
-        [this, nameTypeId](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
+        [this](const Editor::EditorChangeNotifications::ComponentChangedEvent& e)
         {
             if (e.world != m_World || e.componentType != nameTypeId)
                 return;

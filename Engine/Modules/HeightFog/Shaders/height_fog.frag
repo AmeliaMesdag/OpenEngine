@@ -1,5 +1,9 @@
 #version 450
 
+// The sky's horizon radiance (GE_SkyHorizonRadiance), reached by relative path into Rendering
+// like the ViewParams field list below.
+#include "../../Rendering/Shaders/Includes/sky_composite.glsl"
+
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 oColor;
 
@@ -76,15 +80,29 @@ layout(set = 0, binding = 3, std140) uniform HeightFogParamsBlock
     float noiseFadeEnd;
     float skyHorizonOffset;
     float skyBottomStrength;
+    int colorSource;
+    float skyHorizonScale;
+    float skyNightAmount;
+    float skyAzimuthOffset;
+    float skyHorizonColorR;
+    float skyHorizonColorG;
+    float skyHorizonColorB;
     float _pad0;
     float _pad1;
+    float _pad2;
 } HeightFogParams;
+
+// What the sky pass draws its backdrop from (the sky-view LUT or the HDRI), published by the
+// SkyRender node. Read only when colorSource names a backdrop.
+layout(set = 0, binding = 4) uniform sampler2D uSkyBackdrop;
 
 const float kInvFourPi = 0.07957747154594767;
 const int kFlagDistanceEnabled = 1;
 const int kFlagHeightEnabled = 2;
 const int kFlagNoiseEnabled = 4;
 const int kFlagSkyEnabled = 8;
+// HeightFogColorSource (HeightFogParamsUBO.h); the sky sources are GE_SKY_HORIZON_SOURCE_* values.
+const int kColorSourceFixed = 0;
 
 float Saturate(float x)
 {
@@ -270,6 +288,25 @@ vec3 SampleHeightFogLighting(vec3 viewDir, float extinction, vec3 emissive)
     return emissive + sunColor * Saturate(phase);
 }
 
+// In-scattered colour of the fog along viewDirWS: the sky's horizon radiance in the sky colour
+// mode, otherwise the emissive with the gradient and the sun's in-scatter.
+vec3 HeightFogColor(vec3 originWS, vec3 viewDirWS, float segmentLength, vec2 uv, float extinction)
+{
+    if (HeightFogParams.colorSource != kColorSourceFixed)
+    {
+        vec3 skyHorizonColor = vec3(HeightFogParams.skyHorizonColorR, HeightFogParams.skyHorizonColorG,
+                                    HeightFogParams.skyHorizonColorB);
+        return GE_SkyHorizonColor(uSkyBackdrop, HeightFogParams.colorSource, viewDirWS,
+                                  HeightFogParams.skyAzimuthOffset, HeightFogParams.skyNightAmount,
+                                  skyHorizonColor, HeightFogParams.skyHorizonScale);
+    }
+
+    vec3 sunDir = vec3(HeightFogParams.sunDirX, HeightFogParams.sunDirY, HeightFogParams.sunDirZ);
+    vec3 emissive = vec3(HeightFogParams.emissiveR, HeightFogParams.emissiveG, HeightFogParams.emissiveB);
+    emissive = ApplyDualColor(emissive, originWS, viewDirWS, segmentLength, uv, sunDir);
+    return SampleHeightFogLighting(viewDirWS, extinction, emissive);
+}
+
 void ComputeHeightFog(vec3 originWS, vec3 viewDirWS, float segmentLength, vec2 uv, out vec3 scattering, out float transmittance)
 {
     float density = clamp(HeightFogParams.density, 0.0, 1.0);
@@ -329,10 +366,7 @@ void ComputeHeightFog(vec3 originWS, vec3 viewDirWS, float segmentLength, vec2 u
     float fogOpacity = clamp(1.0 - exp(-opticalDepth), 0.0, clamp(HeightFogParams.maxOpacity, 0.0, 1.0));
     transmittance = 1.0 - fogOpacity;
 
-    vec3 sunDir = vec3(HeightFogParams.sunDirX, HeightFogParams.sunDirY, HeightFogParams.sunDirZ);
-    vec3 emissive = vec3(HeightFogParams.emissiveR, HeightFogParams.emissiveG, HeightFogParams.emissiveB);
-    emissive = ApplyDualColor(emissive, originWS, viewDirWS, segmentLength, uv, sunDir);
-    vec3 fogColor = SampleHeightFogLighting(viewDirWS, extinction, emissive);
+    vec3 fogColor = HeightFogColor(originWS, viewDirWS, segmentLength, uv, extinction);
     vec3 albedo = vec3(extinction);
     scattering = (fogColor * albedo - fogColor * albedo * transmittance) / max(extinction, 0.0001);
 }
@@ -375,9 +409,8 @@ void main()
         float bottom = pow(Saturate(-axisDot), max(HeightFogParams.skyPower, 0.001)) *
                        clamp(HeightFogParams.skyBottomStrength, 0.0, 1.0);
         s = max(s, bottom);
-        vec3 sunDir = vec3(HeightFogParams.sunDirX, HeightFogParams.sunDirY, HeightFogParams.sunDirZ);
-        vec3 emissive = ApplyDualColor(vec3(HeightFogParams.emissiveR, HeightFogParams.emissiveG, HeightFogParams.emissiveB), originWS, viewDirWS, viewLength, vUV, sunDir);
-        vec3 fogColor = SampleHeightFogLighting(viewDirWS, FogExtinctionPerWorldUnit(HeightFogParams.density), emissive);
+        vec3 fogColor = HeightFogColor(originWS, viewDirWS, viewLength, vUV,
+                                       FogExtinctionPerWorldUnit(HeightFogParams.density));
         float skyAmount = s * (1.0 - exp(-MaxFogOpticalDepth(HeightFogParams.density)));
         skyAmount = min(skyAmount, clamp(HeightFogParams.maxOpacity, 0.0, 1.0));
         scattering = fogColor * skyAmount;

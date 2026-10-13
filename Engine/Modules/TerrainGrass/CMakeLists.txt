@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(TerrainGrass LANGUAGES CXX)
 
 add_library(TerrainGrass OBJECT
+    Include/TerrainGrass/GrassComputePrograms.h
     Include/TerrainGrass/GrassPlacementElisionInputs.h
     Include/TerrainGrass/GrassPlacementModel.h
     Include/TerrainGrass/TerrainGrassClamps.h
@@ -11,6 +12,7 @@ add_library(TerrainGrass OBJECT
     Include/TerrainGrass/TerrainGrassRenderNode.h
     Include/TerrainGrass/RegisterTerrainGrass.h
     Include/TerrainGrass/Scene/TerrainGrassSceneSchemas.h
+    Source/GrassComputePrograms.cpp
     Source/GrassPlacementElisionInputs.cpp
     Source/TerrainGrassComponents.cpp
     Source/TerrainGrassPlacementStats.cpp

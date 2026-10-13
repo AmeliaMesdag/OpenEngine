@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
+#include <string>
 #include <thread>
 
 #if defined(__EMSCRIPTEN__)
@@ -54,6 +56,12 @@ inline void SetCurrentThreadName([[maybe_unused]] const char* name)
     }
 #endif
 }
+
+// The name a thread of this process was given (SetCurrentThreadName, or by the
+// runtime), by its OS thread id: GetCurrentThreadId on Windows,
+// pthread_threadid_np on macOS, gettid on Linux. Empty when the thread is gone,
+// has no name, or the platform cannot read another thread's name.
+std::string GetThreadName(std::uint64_t osThreadId);
 
 // Blocks the calling thread for `duration`, overshooting by well under a
 // millisecond. std::this_thread::sleep_for on Windows rounds up to the system

@@ -26,6 +26,16 @@ enum class HeightFogLayerMode : int32 {
     Additive = 1,
 };
 
+// Where the fog takes its colour from.
+enum class HeightFogColorMode : int32 {
+    // Emissive, the gradient and the sun in-scatter term: an authored look that holds at one sky.
+    FixedColor = 0,
+    // The visible sky's radiance at the horizon in each pixel's view azimuth, in the units and
+    // exposure the sky renders in, so the haze follows the time of day. Emissive, the gradient and
+    // the sun terms do not apply: the sky's radiance already carries the sun's scattering.
+    SkyHorizon = 1,
+};
+
 enum class HeightFogPreset : int32 {
     Custom = 0,
     MorningHaze = 1,
@@ -66,6 +76,7 @@ struct HeightFogEffect {
     HeightFogAxisMode AxisMode{HeightFogAxisMode::WorldY};
     float32 CustomAxis[3]{0.0f, 1.0f, 0.0f};
 
+    HeightFogColorMode ColorMode{HeightFogColorMode::SkyHorizon};
     float32 Emissive[3]{0.48f, 0.54f, 0.60f};
 
     HeightFogGradientMode GradientMode{HeightFogGradientMode::None};

@@ -219,7 +219,9 @@ TEST(HlodRuntimeReconcile, ReconcileSpawnsEvictedProxiesAndTagsMembers) {
     for (ECS::EntityHandle member : cluster.Members) {
         const auto* gpu = world->GetComponent<MeshGPUData>(member);
         if (gpu)
+        {
             EXPECT_FALSE(gpu->hlodEvicted);
+        }
         // C6: eviction never disables the entity.
         ASSERT_NE(world->GetComponent<MeshRenderer>(member), nullptr);
         EXPECT_TRUE(ECS::Entity(world.get(), member).IsEnabled<MeshRenderer>());

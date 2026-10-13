@@ -45,6 +45,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -482,15 +483,15 @@ ECS::EntityHandle AddMarkupEntity(ECS::World& world, const NewMarkup& added, int
     return entity;
 }
 
-// "<parent> exclusion <n>" for the smallest n from `from` that no mark-up in the world is titled,
-// as it is stored: `parent` is cut so the title fits a Name with its suffix whole.
-std::string FreeExclusionTitle(ECS::World& world, const std::string& parent, std::size_t& from)
+// "<head><tail> <n>" for the smallest n from `from` that no mark-up in the world is titled, as it
+// is stored: `head` is cut so the title fits a Name with `tail` and the number whole.
+std::string FreeNumberedTitle(ECS::World& world, const std::string& head, std::string_view tail, std::size_t& from)
 {
     constexpr std::size_t kTitleCapacity = sizeof(Components::Name::value) - 1;
     for (;; ++from)
     {
-        const std::string suffix = " exclusion " + std::to_string(from);
-        const std::string title = parent.substr(0, kTitleCapacity - suffix.size()) + suffix;
+        const std::string suffix = std::string(tail) + " " + std::to_string(from);
+        const std::string title = head.substr(0, kTitleCapacity - suffix.size()) + suffix;
         bool taken = false;
         world.Query<ECS::Read<Components::Markup>, ECS::Read<Components::Name>>().Each(
             [&taken, &title](ECS::EntityHandle, const Components::Markup&, const Components::Name& name) {
@@ -515,7 +516,7 @@ std::vector<MarkupRegionMember> AddExclusionRegions(ECS::World& world, ECS::Enti
     for (std::size_t i = 0; i < exclusions.size(); ++i)
     {
         NewMarkup exclusion = parent;
-        exclusion.Title = FreeExclusionTitle(world, parent.Title, index);
+        exclusion.Title = FreeNumberedTitle(world, parent.Title, " exclusion", index);
         exclusion.Description.clear();
         const RegionPlacement placement = NewRegionPlacement(exclusions[i], regionWorld, regionWorld[13]);
         exclusion.Transform = placement.Local;
@@ -859,6 +860,12 @@ json CreateMarkup(const MarkupRequestContext& context, const json& params)
         answer["exclusionIds"] = std::move(exclusions);
     }
     return SceneRevision(world, std::move(answer));
+}
+
+std::string FreeMarkupTitle(ECS::World& world, const std::string& name)
+{
+    std::size_t from = 1;
+    return FreeNumberedTitle(world, name, {}, from);
 }
 
 namespace

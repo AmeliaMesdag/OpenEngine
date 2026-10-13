@@ -1,6 +1,6 @@
 [scene name="OceanSurfaceLookdev" version=1]
 ; Open water, a sloping shallow shore, and one rock under a fixed daylight rig.
-; The ocean surface detail guide (docs/Rendering/ocean-surface-detail.html) explains the controls.
+; The ocean surface detail guide (docs/rendering/ocean-surface-detail.mdx) explains the controls.
 
 [entity id="sun"]
 Name.value = "Sun"

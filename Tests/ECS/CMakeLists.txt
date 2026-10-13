@@ -5,12 +5,16 @@
 # Find Google Test
 find_package(GTest REQUIRED)
 
+# Every executable here links Memory beside ECS: ECS calls into it (the wave runner's
+# ScratchScope in ECS/Systems.h), and an OBJECT library's objects reach only the targets that
+# link it directly.
+
 # Destruction contract and allocation-failure injection (this executable arms
 # allocation faults) stay out of the benchmark suites.
 add_executable(EntityDestroyNotificationTests EntityDestroyNotificationTests.cpp EntityDestroyAllocationTests.cpp)
 set_target_properties(EntityDestroyNotificationTests PROPERTIES UNITY_BUILD OFF)
 target_compile_features(EntityDestroyNotificationTests PRIVATE cxx_std_20)
-target_link_libraries(EntityDestroyNotificationTests PRIVATE GTest::gtest_main Logger JobSystem ECS)
+target_link_libraries(EntityDestroyNotificationTests PRIVATE GTest::gtest_main Logger JobSystem ECS Memory)
 ge_set_output_tests(EntityDestroyNotificationTests)
 ge_stage_runtime_dependencies(EntityDestroyNotificationTests)
 add_test(NAME EntityDestroyNotificationTests COMMAND EntityDestroyNotificationTests)
@@ -21,7 +25,7 @@ add_executable(QueryAllocationTests QueryAllocationTests.cpp)
 set_target_properties(QueryAllocationTests PROPERTIES UNITY_BUILD OFF)
 target_compile_features(QueryAllocationTests PRIVATE cxx_std_20)
 target_include_directories(QueryAllocationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(QueryAllocationTests PRIVATE GTest::gtest_main Logger JobSystem ECS)
+target_link_libraries(QueryAllocationTests PRIVATE GTest::gtest_main Logger JobSystem ECS Memory)
 ge_set_output_tests(QueryAllocationTests)
 ge_stage_runtime_dependencies(QueryAllocationTests)
 add_test(NAME QueryAllocationTests COMMAND QueryAllocationTests)
@@ -31,7 +35,7 @@ set_tests_properties(QueryAllocationTests PROPERTIES TIMEOUT 30)
 add_executable(SystemWaveTraceAllocationTests SystemWaveTraceAllocationTests.cpp)
 set_target_properties(SystemWaveTraceAllocationTests PROPERTIES UNITY_BUILD OFF)
 target_compile_features(SystemWaveTraceAllocationTests PRIVATE cxx_std_20)
-target_link_libraries(SystemWaveTraceAllocationTests PRIVATE GTest::gtest_main Logger JobSystem ECS)
+target_link_libraries(SystemWaveTraceAllocationTests PRIVATE GTest::gtest_main Logger JobSystem ECS Memory)
 ge_set_output_tests(SystemWaveTraceAllocationTests)
 ge_stage_runtime_dependencies(SystemWaveTraceAllocationTests)
 add_test(NAME SystemWaveTraceAllocationTests COMMAND SystemWaveTraceAllocationTests)
@@ -127,6 +131,7 @@ target_link_libraries(ECSCoreTests PRIVATE
     Logger
     JobSystem
     ECS
+    Memory
     # ComponentReflectionTests exercises the Mathematics field-type traits
     # (Components/MathReflectionTraits.h). Mathematics is INTERFACE/header-only, so
     # this propagates its include dirs to the TEST only — ECS stays Mathematics-free.
@@ -162,6 +167,7 @@ target_link_libraries(ECSAdvancedTests PRIVATE
     Logger
     JobSystem
     ECS
+    Memory
     # Lightweight component registration uses Components/MathReflectionTraits.h.
     Mathematics
 )
@@ -187,6 +193,7 @@ target_link_libraries(ECSIntegrationTests PRIVATE
     Logger
     JobSystem
     ECS
+    Memory
 )
 
 ge_set_output_tests(ECSIntegrationTests)
@@ -232,7 +239,7 @@ foreach(case IN LISTS ECS_COMPILE_FAIL_CASES)
         UNITY_BUILD OFF)
     target_compile_features(ECSCompileFail_${case} PUBLIC cxx_std_20)
     target_include_directories(ECSCompileFail_${case} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(ECSCompileFail_${case} PRIVATE Logger JobSystem ECS)
+    target_link_libraries(ECSCompileFail_${case} PRIVATE Logger JobSystem ECS Memory)
 
     add_test(NAME ECSCompileFail.${case}
              COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
@@ -252,7 +259,7 @@ set_target_properties(ECSCompileFail_Control PROPERTIES
     UNITY_BUILD OFF)
 target_compile_features(ECSCompileFail_Control PUBLIC cxx_std_20)
 target_include_directories(ECSCompileFail_Control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ECSCompileFail_Control PRIVATE Logger JobSystem ECS)
+target_link_libraries(ECSCompileFail_Control PRIVATE Logger JobSystem ECS Memory)
 add_test(NAME ECSCompileFail.PositiveControl
          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
                  --target ECSCompileFail_Control --config $<CONFIG>)

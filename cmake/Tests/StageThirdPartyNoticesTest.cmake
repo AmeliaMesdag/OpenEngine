@@ -4,11 +4,13 @@ if(NOT DEFINED SCRIPT OR NOT DEFINED SOURCE OR NOT DEFINED WORK)
 endif()
 set(_share "${WORK}/installed/test-triplet/share")
 set(_out "${WORK}/out")
+# The fixture text carries ";;" and an escaped semicolon: CMake 4.3 returns a REGEX MATCH
+# result as a list without its empty elements and escapes, and the aggregate must not.
 foreach(_port IN ITEMS ez-tree-upstream diharaw-volumetric-fog-upstream
         sanielx-height-fog-upstream mirzabeig-gpu-fog-particles-upstream
         crest-ocean-upstream godot-visual-shader-upstream renderdoc-app-api-upstream
         transitive-only-port)
-    file(WRITE "${_share}/${_port}/copyright" "Copyright ${_port}\nPermission text; keep this complete.\n```nested fence```\n")
+    file(WRITE "${_share}/${_port}/copyright" "Copyright ${_port}\nPermission text; keep this complete.\nfor (;;) keeps both semicolons, and \\; keeps its backslash;\n```nested fence```\n")
 endforeach()
 file(WRITE "${_share}/transitive-only-port/LICENSES/nested/part.txt" "Sidecar permission text; retained verbatim.\n")
 file(WRITE "${_share}/ez-tree-upstream/EZTREE_UPSTREAM.json" "{}\n")

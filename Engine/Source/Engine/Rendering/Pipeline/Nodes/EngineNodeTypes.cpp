@@ -213,7 +213,9 @@ void RegisterEngineNodeTypes(RenderPipelineNodeRegistry& registry)
         []() -> std::unique_ptr<IRenderPipelineNode>
         { return std::make_unique<SkyRenderNode>(); },
         /*perView*/ true,
-        RenderPipelineNodeResourceFields{.RefKeys = {"output"}, .PublishKeys = {{"output", Names::View::Color}}});
+        RenderPipelineNodeResourceFields{.RefKeys = {"output"},
+                                         .PublishKeys = {{"output", Names::View::Color}},
+                                         .StaticPublishNames = {Names::Res::SkyBackdrop}});
 
     (void)registry.Register(
         "ShadowMap",

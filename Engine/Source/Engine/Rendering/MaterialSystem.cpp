@@ -1876,13 +1876,13 @@ bool MaterialSystem::EnsureMaterialBuildContextReady()
             return false; // No Engine instance (e.g. unit-test harness).
         auto& am = engine.GetAssetManager();
         m_MaterialBuildContext.AdapterShaderDir = ResolveAdapterShaderDir(am);
-        // The bundle cache root wins when one is set: a compiler-less runtime
-        // (web) ships its cooked variants beside the binary, not under the
-        // workspace.
-        const std::filesystem::path& shaderCacheRoot = ShaderProgramAsset::GetShaderCacheRoot();
-        m_MaterialBuildContext.CacheRoot = shaderCacheRoot.empty()
+        // A packaged runtime's cooked cache is probed first; a miss compiles
+        // into the workspace's.
+        const ShaderCacheRoots& shaderCacheRoots = ShaderProgramAsset::GetShaderCacheRoots();
+        m_MaterialBuildContext.ReadOnlyCacheRoots = shaderCacheRoots.ReadOnly;
+        m_MaterialBuildContext.CacheRoot = shaderCacheRoots.Writable.empty()
             ? engine.GetWorkspaceRoot() / ".Cache" / "Shaders"
-            : shaderCacheRoot;
+            : shaderCacheRoots.Writable;
         m_MaterialBuildContext.IncludeDirs = {am.GetAssetRoot()};
         m_MaterialBuildContext.ProjectRoots = CollectProjectRoots(am);
         m_MaterialBuildContext.AssetSourceRoots = CollectAssetSourceRoots(am);
@@ -2155,7 +2155,7 @@ void MaterialSystem::CompileMaterialPipeline(Material& mat, const MaterialDocume
         mat.GetAlphaMode(), mat.GetBlendState(), mat.GetDepthWriteOverride(),
         mat.GetDepthTestOverride());
     const Rendering::CullModeFlags cullMode = mat.IsDoubleSided()
-        ? Rendering::CullModeFlagBits::None
+        ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
         : DebugCullMode();
 
     const Rendering::GraphicsPipelineId pipelineId = InternBaseMaterialPipeline(
@@ -2264,7 +2264,7 @@ void MaterialSystem::SubmitAsyncBaseCompile(const GUID& guid, Material& mat,
         mat.GetAlphaMode(), mat.GetBlendState(), mat.GetDepthWriteOverride(),
         mat.GetDepthTestOverride());
     const Rendering::CullModeFlags cullMode = mat.IsDoubleSided()
-        ? Rendering::CullModeFlagBits::None
+        ? static_cast<Rendering::CullModeFlags>(Rendering::CullModeFlagBits::None)
         : DebugCullMode();
     const Rendering::FrontFace frontFace = DebugFrontFace();
     const Rendering::VertexAttributeFlags vertexFlags = variantKey.vertexFlags;

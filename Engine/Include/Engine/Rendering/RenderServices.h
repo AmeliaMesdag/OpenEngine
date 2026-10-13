@@ -275,6 +275,15 @@ static_assert(offsetof(ForwardLightUBO, uSecondaryCount) == 128);
 static_assert(offsetof(ForwardLightUBO, uSecondaryDirs) == 144);
 static_assert(offsetof(ForwardLightUBO, uSecondaryColors) == 192);
 
+// The directionals the forward pass shades, from a finalized (strongest-first) world light list:
+// the primary (SelectPrimaryDirectional) in out[0], then up to kMaxSecondaryDirectionals
+// secondaries, the next-strongest directionals that emit (castsLight set and DeliveredLuminance
+// above zero). Directionals past the cap are not shaded. Returns how many entries of `out` it
+// filled: 0 when the list has no directional. Every reader of "which directionals light the
+// world" asks here.
+uint32 SelectShadedDirectionals(std::span<const ExtractedLight> sortedLights,
+                                std::array<const ExtractedLight*, kMaxDirectionalLights>& out);
+
 // Fills the directional lanes of the composed LightUBO from a finalized
 // (strongest-first) world light list: primary = SelectPrimaryDirectional
 // (unchanged semantics — its castsShadows flag rides in uLightColorWorld.w),
@@ -1453,7 +1462,10 @@ class RenderServices
         // Last-frame counters (context for the timing splits).
         // On GE_EXTRACTION_FEED fast frames RecordCount/RebuildCount/
         // SkippedCount describe the LAST FULL PASS, not a per-frame walk —
-        // read FastFrame/FeedPatchedCount for what the tick actually did.
+        // read FastFrame/FeedPatchedCount for what the tick actually did. On
+        // a structural delta frame RecordCount still describes the last full
+        // pass; RebuildCount/SkippedCount and DeltaPreparedCount describe the
+        // delta pass.
         uint32_t RecordCount = 0;     // renderable records gathered
         uint32_t SubmissionCount = 0; // per-view submissions produced
         uint32_t RebuildCount = 0;    // records that MISSED the dirty-skip (rebuilt + uploaded)
@@ -1469,6 +1481,8 @@ class RenderServices
         uint32_t WindowTicks = 0;          // ticks currently in the stats window
         uint32_t EscalationReasonBits = 0; // why the full lane ran (0 on fast ticks)
         uint32_t FeedPatchedCount = 0;     // dirty entities patched this fast tick
+        uint32_t DeltaFrame = 0;           // 1 = a structural change took the delta lane
+        uint32_t DeltaPreparedCount = 0;   // renderables the delta lane re-prepared
         uint32_t SubsetRefreshedCount = 0; // always-refresh entities re-prepared this fast tick
         // Pending-transient breakdown at the last full pass (E8). Per-shape so
         // a permanently pinned full lane is attributable in one poll — a

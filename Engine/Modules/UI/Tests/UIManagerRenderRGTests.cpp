@@ -289,10 +289,12 @@ TEST(UIManagerRenderRGTests, StalePublishIsNeverConsumed)
             if (name == "Test.Src")
                 FAIL() << "a stale publish must never materialize the previous frame's texture";
             if (frame.Graph().HasReadAccess(pass2, rid))
+            {
                 EXPECT_TRUE(name == "UISdfPrims" || name == "UISdfClips" ||
                             name == "UISdfDrawOrder")
                     << "unexpected UI-pass read of '" << name
                     << "' — a stale publish leaked through an aliased frame-local id";
+            }
         }
         frame.Execute();
         dev->WaitForIdle();

@@ -2,6 +2,8 @@
 
 #include "Markups/MarkupPresentation.h"
 
+#include <string>
+
 #include <nlohmann/json.hpp>
 
 namespace GameEngine
@@ -37,7 +39,7 @@ struct MarkupRequestContext
 // The eight markup_* debug-server methods (DebugServer/MarkupDebugHandlers.cpp registers
 // them; mcp/src/tools/markups.ts exposes them). Each returns its result, or a refusal
 // built by RefuseRequest whose reason names the fix. The parameters and results are
-// documented in docs/Editor/world-markups.html.
+// documented in docs/editor/world-markups.mdx.
 
 // Rows sorted by last update, newest first; filters: status, author, since (a scene
 // revision, strictly after), changedBy, includeHidden.
@@ -62,5 +64,9 @@ nlohmann::json FrameMarkup(const MarkupRequestContext& context, const nlohmann::
 nlohmann::json ContainsInMarkup(const MarkupRequestContext& context, const nlohmann::json& params);
 // Shows or hides one mark-up or all: a view state, no scene edit, no undo step.
 nlohmann::json SetMarkupsVisible(const MarkupRequestContext& context, const nlohmann::json& params);
+
+/// The first title "<name> <n>", n counting from 1, that no mark-up in `world` has, as a Name
+/// stores it (`name` is cut so the number fits whole): a deleted mark-up's number is taken again.
+std::string FreeMarkupTitle(ECS::World& world, const std::string& name);
 
 } // namespace GameEngine::Editor

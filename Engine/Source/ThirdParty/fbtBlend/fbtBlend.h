@@ -855,6 +855,8 @@ public:
 		return m_hash;
 	}
 
+	fbtCharHashKey& operator=(const fbtCharHashKey&) = default;
+
 	FBT_INLINE bool operator== (const fbtCharHashKey& v) const    {return hash() == v.hash();}
 	FBT_INLINE bool operator!= (const fbtCharHashKey& v) const    {return hash() != v.hash();}
 	FBT_INLINE bool operator== (const FBThash& v) const           {return hash() == v;}
@@ -918,6 +920,8 @@ public:
 		_FBT_TWHASH(m_hash);
 		return m_hash;
 	}
+
+	fbtSizeHashKey& operator=(const fbtSizeHashKey&) = default;
 
 	FBT_INLINE bool operator== (const fbtSizeHashKey& v) const  { return hash() == v.hash();}
 	FBT_INLINE bool operator!= (const fbtSizeHashKey& v) const  { return hash() != v.hash();}
@@ -1468,6 +1472,8 @@ public:
 		m_buffer[m_size] = 0;
 	}
 
+
+	fbtFixedString& operator=(const fbtFixedString&) = default;
 
 	fbtFixedString(const char* rhs)
 		:   m_size(0), m_hash(FBT_NPOS)
@@ -3458,13 +3464,13 @@ int fbtFile::reflect(const char* path, const int mode, const fbtEndian& /*endian
 	// put magic
 	//fs->writef("%s%c%c%i", m_uhid, cp, ce, m_version);
 	char header[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
-	char version[33];
-	sprintf(version, "%i",m_version);
+	char version[33]{};
+	snprintf(version, sizeof(version), "%i", m_version);
 	
 	strncpy(&header[0], m_uhid, 7); // 7 first bytes of header
 	header[7] = cp;					// 8th byte = pointer size
 	header[8] = ce;					// 9th byte = endianness
-	strncpy(&header[9], version, 3);// last 3 bytes vor 3 version char
+	memcpy(&header[9], version, 3); // fixed-width 3-byte version field
 	
 	fs->write(header, 12);
 	
@@ -3869,7 +3875,7 @@ FBTsize fbtGzStream::write(const void* src, FBTsize nr)
 {
 	if (m_mode == fbtStream::SM_READ) return -1;
 	if (!src || !m_handle) return -1;
-    return gzwrite((gzFile)m_handle,(const voidp) src, nr);
+    return gzwrite((gzFile)m_handle, src, nr);
 }
 
 

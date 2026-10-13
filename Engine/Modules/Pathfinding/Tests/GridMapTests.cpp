@@ -225,21 +225,6 @@ TEST_F(GridMapTest, FindPathFromAToBProducesValidWaypoints)
     EXPECT_NEAR(last.Z, 0.5f, 1.0f);
 }
 
-TEST_F(GridMapTest, BakeHeightsPopulatesHeightData)
-{
-    auto heightQuery = [](float32 /*x*/, float32 /*z*/, float32& outHeight) -> bool
-    {
-        outHeight = 10.0f;
-        return true;
-    };
-
-    m_Map->BakeHeights(heightQuery);
-
-    EXPECT_FLOAT_EQ(m_Map->GetCellHeight(0, 0), 10.0f);
-    EXPECT_FLOAT_EQ(m_Map->GetCellHeight(7, 7), 10.0f);
-    EXPECT_FLOAT_EQ(m_Map->GetCellHeight(15, 15), 10.0f);
-}
-
 TEST_F(GridMapTest, ReserveCellAndGetCellReservation)
 {
     m_Map->ReserveCell(3, 4, 42, 100.0f);
@@ -412,9 +397,5 @@ TEST_F(GridMapTest, TopologyVersionIncrements)
     const uint32 v3 = m_Map->GetTopologyVersion();
     EXPECT_GT(v3, v2);
 
-    m_Map->BakeHeights([](float32, float32, float32& h) { h = 1.0f; return true; });
-    const uint32 v4 = m_Map->GetTopologyVersion();
-    EXPECT_GT(v4, v3);
-
-    EXPECT_EQ(v4, v0 + 4u);
+    EXPECT_EQ(v3, v0 + 3u);
 }

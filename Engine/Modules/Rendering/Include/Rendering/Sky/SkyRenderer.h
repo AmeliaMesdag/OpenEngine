@@ -49,9 +49,17 @@ struct AtmosphereParametersGPU
     // PlanetGround aerial-perspective haze strength on its own std140 row at 192.
     float groundHazeStrength;
     float groundHazeStrengthPad[3];
+    // Aerosol absorption per metre at sea level (Mie extinction = betaMie + mieAbsorption), on the
+    // Mie density profile.
+    float mieAbsorption[3];
+    // Ozone layer: a tent of density 1 at ozoneCenterHeight falling linearly to 0 at
+    // ozoneCenterHeight +- ozoneHalfWidth (metres). It absorbs and does not scatter.
+    float ozoneCenterHeight;
+    float ozoneAbsorption[3];
+    float ozoneHalfWidth;
 };
 
-static_assert(sizeof(AtmosphereParametersGPU) == 208,
+static_assert(sizeof(AtmosphereParametersGPU) == 240,
               "AtmosphereParametersGPU must match GLSL AtmosphereUBO std140 layout");
 static_assert(offsetof(AtmosphereParametersGPU, groundNightColor) == 64, "AtmosphereUBO groundNightColor offset mismatch");
 static_assert(offsetof(AtmosphereParametersGPU, groundHorizonColor) == 80, "AtmosphereUBO groundHorizonColor offset mismatch");
@@ -68,6 +76,10 @@ static_assert(offsetof(AtmosphereParametersGPU, belowHorizonDarkColorStd140PrePa
 static_assert(offsetof(AtmosphereParametersGPU, belowHorizonDarkColor) == 176, "AtmosphereUBO belowHorizonDarkColor offset mismatch");
 static_assert(offsetof(AtmosphereParametersGPU, belowHorizonMode) == 188, "AtmosphereUBO belowHorizonMode offset mismatch");
 static_assert(offsetof(AtmosphereParametersGPU, groundHazeStrength) == 192, "AtmosphereUBO groundHazeStrength offset mismatch");
+static_assert(offsetof(AtmosphereParametersGPU, mieAbsorption) == 208, "AtmosphereUBO mieAbsorption offset mismatch");
+static_assert(offsetof(AtmosphereParametersGPU, ozoneCenterHeight) == 220, "AtmosphereUBO ozoneCenterHeight offset mismatch");
+static_assert(offsetof(AtmosphereParametersGPU, ozoneAbsorption) == 224, "AtmosphereUBO ozoneAbsorption offset mismatch");
+static_assert(offsetof(AtmosphereParametersGPU, ozoneHalfWidth) == 236, "AtmosphereUBO ozoneHalfWidth offset mismatch");
 
 // Camera + celestial + star upload block. Hand-padded so C++ tight-packing
 // matches the GLSL SkyUBO std140 layout byte-for-byte (320 B). Shared by the
@@ -223,8 +235,6 @@ class SkyRenderer
     void SetCamera(const CameraState& camera);
 
     void Update(const SkySettings& settings, const SkySystemState& state);
-
-    void InvalidateTransmittance();
 
     static void FillDefaultAtmosphere(AtmosphereParametersGPU& atmo);
 

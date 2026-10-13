@@ -973,7 +973,7 @@ TEST(AiAssistantPanelTests, AnImageAndATileOfferTheAssetsPanelsFileMenu)
     actions.ShowInFileManager = record("show");
     actions.CopyPath = record("copy");
     Editor::SetEditorAssetActions(actions);
-    for (const std::filesystem::path file :
+    for (const std::filesystem::path& file :
          {Editor::CaptureOutputDirectory() / "screenshot_viewport_1.png", std::filesystem::path("C:/Project/Materials/Brick.mat")})
     {
         ran.clear();
@@ -1964,7 +1964,7 @@ TEST(AiAssistantPanelTests, TheSessionListOffersNewAndResumeLastAndSearchesFirst
 
 TEST(AiAssistantPanelTests, SessionFooterCountsSessionsWithoutTheNewAndResumeActions)
 {
-    for (const std::string lastSession : {std::string{}, std::string{"id-older"}})
+    for (const std::string& lastSession : {std::string{}, std::string{"id-older"}})
     {
         SCOPED_TRACE(lastSession);
         AgentSessionSearchProvider search(lastSession);

@@ -207,6 +207,7 @@
 #include "Placement/RecipeControllers.h"
 #include "PlayMode/PlayModeEntryModal.h"
 #include "PlayMode/PlayModeManager.h"
+#include "PlayMode/GameViewPointerLock.h"
 #include "PlayMode/RuntimeInputConnection.h"
 #include "Scene/SceneEditorController.h"
 #include "Scene/SceneThumbnailCapture.h"
@@ -1502,7 +1503,7 @@ EditorApplication::EditorApplication(const ApplicationConfig& config)
     // The untitled-scene save prompt waits for the picker to close and for a
     // queued startup scene to be requested.
     m_SceneEditor->SetBootFlowActiveProbe(
-        [this]() { return ShouldIdleWorldPathForProjectPicker() || !m_DeferredStartupScene.empty(); });
+        [this]() { return ShouldIdleWorldPathForProjectPicker() || !m_DeferredStartupSceneWorkspace.empty(); });
     // The recipe controllers' generated entities are scoped to the open scene
     // (RecipeControllers::ReleaseSceneScoped). Release them at the swap, while the
     // outgoing world is still the one they describe. Wired here rather than at the
@@ -2131,6 +2132,7 @@ bool EditorApplication::Initialize()
     // rest keep travelling to the editor.
     m_RuntimeInput = std::make_unique<Input::InputSystem>(Input::SinkRole::Gameplay);
     EngineCore::GetInstance().SetRuntimeInput(m_RuntimeInput.get());
+    m_GameViewPointerLock = std::make_unique<Editor::GameViewPointerLock>();
     Logger::Log::Info("[Startup] InputSystem config: {:.1f}ms", MsSince(tPhase));
 
     // Create main window (using Platform::Window)
@@ -2263,6 +2265,7 @@ bool EditorApplication::Initialize()
     };
     mainInput.onKeyPre = [this, mainCtxRaw](int key, int action, int mods) -> bool
     {
+        m_GameViewPointerLock->OnKey(key, action);
         if (key == Input::kKeyCode_Escape && action == Input::kKeyActionPress && m_PlayMode)
         {
             const auto state = m_PlayMode->GetState();
@@ -2504,6 +2507,7 @@ bool EditorApplication::Initialize()
     DeviceDesc desc{};
     desc.preferredAPI = LoadPreferredGraphicsApi();
     desc.enableSwapchain = true;
+    desc.persistPipelineCache = true;
     desc.applicationName = GetConfig().Name;
     if (Engine::Renderer::ShouldEnableVkValidation())
     {
@@ -3366,6 +3370,8 @@ bool EditorApplication::Initialize()
                             if (win && win->windowId == pointerWindowId && win->gameView)
                                 win->gameView->HandleGameUiPointer(false, 0.0f, 0.0f, false, 0);
                     pointerWindowId = nextId;
+                    if (destination && down)
+                        m_GameViewPointerLock->OnGameViewPressed();
                     if (destination)
                         destination->gameView->HandleGameUiPointer(true, x, y, down, mods);
                 });
@@ -3926,7 +3932,7 @@ bool EditorApplication::Initialize()
         // Defer to Update() so we never rebuild dockspace during native/menu callbacks.
         if (assetsPanel)
         {
-            assetsPanel->SetOnAddToBookmarks([this, bookmarksPanel](const std::vector<std::filesystem::path>& paths)
+            assetsPanel->SetOnAddToBookmarks([bookmarksPanel](const std::vector<std::filesystem::path>& paths)
             {
                 if (!bookmarksPanel || paths.empty())
                     return;
@@ -4840,10 +4846,10 @@ bool EditorApplication::Initialize()
                                 if (panelMgr && main)
                                     panelMgr->ShowOrActivateSettingsPanelToCategory(main, SettingsCategory::GridAndSnapping);
                             });
-                            // The auto-exposure toggle seeds Fixed EV100 (AE-lock); an open
+                            // A switch to Fixed exposure seeds Fixed EV100 (AE-lock); an open
                             // camera popup must pick up the seeded value or its stale field
                             // would clobber the seed.
-                            toolbar->SetOnPostFxAutoExposureToggled([sceneViewPanelPtr]() {
+                            toolbar->SetOnExposureModeChanged([sceneViewPanelPtr]() {
                                 if (sceneViewPanelPtr)
                                     sceneViewPanelPtr->SyncCameraSettingsPopupFromSettings();
                             });
@@ -7036,6 +7042,12 @@ void EditorApplication::Update(float64 deltaTime)
         if (!playingOrPaused && m_WasPlayModeActive && m_RuntimeInput)
             m_RuntimeInput->ClearRegistrations();
         m_WasPlayModeActive = playingOrPaused;
+
+        if (m_RuntimeInput)
+            m_GameViewPointerLock->Update(*m_RuntimeInput,
+                                          gameViewHost ? gameViewHost->window.get() : nullptr,
+                                          m_PlayMode &&
+                                              m_PlayMode->GetState() == GameEngine::Editor::PlayModeState::Play);
     }
 
     // Update runtime input before gameplay scripts tick.
@@ -7371,7 +7383,7 @@ bool EditorApplication::TryInterceptQuitForDirtyScene()
        Each step calls the next only when the user saves or discards. */
     auto doQuit = [this]() { RequestExit(); };
 
-    auto checkScript = [this, sePanel, scriptDirty, doQuit]()
+    auto checkScript = [sePanel, scriptDirty, doQuit]()
     {
         if (scriptDirty && sePanel)
             sePanel->PromptSaveBeforeQuit(doQuit);
@@ -8250,6 +8262,7 @@ void EditorApplication::Render()
             }
             if (win && win->window)
             {
+                m_GameViewPointerLock->ForgetWindow(win->window.get());
                 win->window->Destroy();
                 win->window.reset();
             }
@@ -8298,6 +8311,7 @@ WindowInputRouterConfig::PlaySurface EditorApplication::GetPlaySurface(Platform:
             return surface;
         surface.gameplaySink = m_RuntimeInput.get();
         surface.gameUi = win->gameView ? win->gameView->GetGameUI() : nullptr;
+        surface.pointerLocked = m_GameViewPointerLock->IsLockedTo(window);
         // The mapper maps from the context resolved here instead of finding the
         // window again. Holding it raw is safe because a surface is built and
         // spent inside one routing call (WindowInputRouter::RouteMouseMove), with
@@ -8416,7 +8430,7 @@ void EditorApplication::OnShutdown()
     // Stop centralized file watching BEFORE any teardown at all. Watcher
     // threads dispatch subscription callbacks that post into UI elements (the
     // Assets browser posts grid refreshes from file events) and into ECS
-    // systems (NavigationBuildSystem marks navigation assets dirty);
+    // systems (NavigationSurfaceSystem marks grid surfaces for a re-bake);
     // StopWatching joins those threads, so after this point no callback can
     // land on state the teardown below destroys. Debounced events make this
     // window real: files the editor itself writes at exit (.Editor state,
@@ -8989,8 +9003,8 @@ EditorApplication::RenderWindowFrameResult EditorApplication::RenderWindowFrame(
         // JobSystem; here (engine layer) it is backed by WorkStealingThreadPool::Run
         // + a participating Wait (never ParallelFor — §A2.4-D3). Inert unless
         // GE_PARALLEL_RECORD is set (RecordAndSubmit gates on the env kill switch).
-        // Native external waiters park while workers record the interiors;
-        // a host thread that cannot block participates in this tagged counter.
+        // The frame thread's Wait participates: it records interiors itself
+        // beside the workers until none is left to claim.
         frame.SetRecordParallel(
             [](uint32_t count, const std::function<void(uint32_t)>& body)
             {

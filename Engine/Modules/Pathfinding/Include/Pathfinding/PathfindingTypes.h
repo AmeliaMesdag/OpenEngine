@@ -2,6 +2,8 @@
 
 #include "Types/Types.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 
@@ -65,21 +67,40 @@ struct GridSettings
     float32 MaxStepHeight = 0.4f;
 };
 
+// The agent a navigation mesh is built for and its one resolution dial. Recast's other parameters
+// are derived from these (DetourNavMap.cpp, MakeRecastConfig): the cell height, the region and edge
+// limits and the detail sampling all scale with CellSize.
 struct NavMeshSettings
 {
-    float32 CellSize = 0.3f;
-    float32 CellHeight = 0.2f;
-    float32 AgentRadius = 0.6f;
-    float32 AgentHeight = 2.0f;
-    float32 AgentMaxClimb = 0.9f;
-    float32 AgentMaxSlope = 45.0f;
-    float32 RegionMinSize = 8.0f;
-    float32 RegionMergeSize = 20.0f;
-    float32 EdgeMaxLen = 12.0f;
-    float32 EdgeMaxError = 1.3f;
-    float32 DetailSampleDist = 6.0f;
-    float32 DetailSampleMaxError = 1.0f;
-    int32 VertsPerPoly = 6;
+    float32 CellSize = 0.5f;    // metres per voxel column side
+    float32 AgentRadius = 0.5f; // metres
+    float32 AgentHeight = 1.8f; // metres
+    float32 MaxSlope = 45.0f;   // degrees from horizontal
+    float32 StepHeight = 0.4f;  // metres an agent climbs without a slope
+};
+
+// The height an agent climbs between two points `distance` metres apart: a step up to stepHeight,
+// or the rise of a maxSlope slope over that distance, whichever is more. Max Slope governs slopes and
+// Step Height governs steps: a surface sampled at cells cannot tell a slope from a staircase of
+// cell-sized steps, so the climb between neighbouring cells has to allow the slope's rise.
+inline float32 WalkableClimb(float32 stepHeight, float32 maxSlopeDegrees, float32 distance)
+{
+    constexpr float32 kDegreesToRadians = 3.14159265358979323846f / 180.0f;
+    return std::max(stepHeight, std::tan(maxSlopeDegrees * kDegreesToRadians) * distance);
+}
+
+// Cells on a navigation mesh tile's side: a tile is kNavMeshTileCells x CellSize metres square.
+inline constexpr uint32 kNavMeshTileCells = 64;
+
+// How a navigation mesh is cut into Detour tiles: tile (0, 0)'s minimum corner in world metres and
+// the tile count along X and Z. OriginY is the lowest height any tile is built at.
+struct NavMeshTileLayout
+{
+    float32 OriginX = 0.0f;
+    float32 OriginY = 0.0f;
+    float32 OriginZ = 0.0f;
+    uint32 TilesX = 0;
+    uint32 TilesZ = 0;
 };
 
 struct NavMapHandle

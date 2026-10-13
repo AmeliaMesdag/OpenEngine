@@ -5,7 +5,10 @@
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/Handle.h"
 #include "Rendering/Sky/SkyRenderer.h"
+#include "Rendering/Sky/StarSparkleEnergy.h"
 
+#include <array>
+#include <limits>
 #include <string>
 #include <unordered_map>
 
@@ -39,6 +42,10 @@ class SkyRenderNode final : public IRenderPipelineNode
 
     Rendering::BufferHandle GetOrCreatePerViewSkyUBO(Rendering::IDevice* dev, uint32_t viewKey, uint32_t slot);
 
+    // The star's energy gains for the settings' Sparkle Points, Core Size and Glow Falloff,
+    // recomputed only when one of them changes (ComputeStarSparkleEnergy integrates numerically).
+    Rendering::StarSparkleEnergy StarSparkleEnergyFor(const Rendering::SkySettings& settings);
+
     std::string m_Id;
     std::string m_Json;
 
@@ -68,6 +75,12 @@ class SkyRenderNode final : public IRenderPipelineNode
     Rendering::DescriptorSetDesc m_SkyViewLutDSD;
     Rendering::DescriptorSetDesc m_SkyRenderDSD;
     Rendering::DescriptorSetDesc m_StarBillboardDSD;
+
+    // Inputs of the cached star energy gains; NaN until the first computation, so it never matches.
+    std::array<float, 3> m_StarSparkleEnergyInputs{std::numeric_limits<float>::quiet_NaN(),
+                                                 std::numeric_limits<float>::quiet_NaN(),
+                                                 std::numeric_limits<float>::quiet_NaN()};
+    Rendering::StarSparkleEnergy m_StarSparkleEnergy;
 };
 
 } // namespace GameEngine::Engine::Renderer::Pipeline::Nodes

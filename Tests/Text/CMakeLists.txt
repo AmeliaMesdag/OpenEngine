@@ -22,6 +22,15 @@ target_link_libraries(FontAtlasShapingTests
     GTest::gtest_main
 )
 
+# This suite calls FT_* directly. Engine forwards its modules' INTERFACE compile
+# definitions (so GE_HAVE_FREETYPE=1 arrives and the FreeType branch compiles)
+# but links those modules PRIVATE, so FreeType's import library does not come
+# with it. Same probe as the Text module: linked exactly when defined.
+find_package(Freetype CONFIG QUIET)
+if(TARGET Freetype::Freetype)
+    target_link_libraries(FontAtlasShapingTests PRIVATE Freetype::Freetype)
+endif()
+
 set_target_properties(FontAtlasShapingTests PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
