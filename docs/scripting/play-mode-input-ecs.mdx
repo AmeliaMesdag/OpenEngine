@@ -1,0 +1,209 @@
+---
+title: C# scripting with Play Mode, input and ECS
+description: How Play Mode calls C# code, reading input and actions, reading and writing ECS data, and how the editor gates input to the Game View.
+sidebar:
+  order: 6
+---
+
+This guide covers:
+- **How Play Mode calls your C# code**
+- **How to read input** (via `GameEngine.Input.ABI.dll`)
+- **How to read/write ECS** (via `GameEngine.ECS.ABI.dll`)
+- **How the Editor gates input** (only while the **Game View is the active tab**)
+
+## What the scripting API offers
+- **Play Mode lifecycle hooks**: `[PlayModeEnter]`, `[PlayModeTick]`, `[PlayModeExit]` on **static methods**
+- **Input ABI** (polling + user-defined actions/bindings), but **context gating is editor-owned**
+- **ECS ABI**:
+  - basic entity/name/transform helpers
+  - **runtime-defined "blob" components** (C# `unmanaged` structs stored as bytes)
+
+## Play Mode lifecycle in C#
+
+### Attributes
+These live in `GameEngine.Scripting.ABI`:
+- `GameEngine.Scripting.PlayModeEnterAttribute`
+- `GameEngine.Scripting.PlayModeTickAttribute`
+- `GameEngine.Scripting.PlayModeExitAttribute`
+
+Supported signatures:
+- `void OnEnter()` or `int OnEnter()`
+- `void Tick(float deltaSeconds)` or `int Tick(float deltaSeconds)`
+- `void OnExit()` or `int OnExit()`
+
+### Minimal example
+
+```csharp title="Play Mode hooks on static methods"
+using System;
+using GameEngine.Scripting;
+
+namespace GameScripts
+{
+    public static class MyGame
+    {
+        [PlayModeEnter]
+        public static void OnEnter()
+        {
+            Console.WriteLine("[Game] Enter");
+        }
+
+        [PlayModeTick]
+        public static void Tick(float dt)
+        {
+            // Called only while playing (not while paused).
+        }
+
+        [PlayModeExit]
+        public static void OnExit()
+        {
+            Console.WriteLine("[Game] Exit");
+        }
+    }
+}
+```
+
+## Input in C#
+
+Polling keys, buttons and the mouse, the mouse delta and pointer lock, from C++ and C#: [The input system](../input/input-system.mdx).
+
+### Editor-owned input gating
+The Editor enables gameplay input only when:
+- **Play Mode is playing or paused**, and
+- the **Game View is the active tab** of its window
+
+This is implemented via an editor-managed input context:
+- **context name**: `Editor.GameView`
+
+Your scripts should register actions under that context so they are automatically gated.
+
+### Creating actions and bindings
+Namespace: `GameEngine.Scripting` (assembly `GameEngine.Input.ABI.dll`)
+
+```csharp title="Register an action and bind a key"
+using GameEngine.Scripting;
+
+public static class Controls
+{
+    private const string Ctx = "Editor.GameView";
+
+    // You can also pre-hash names via InputIds.HashInput.
+    private const string ActionJump = "Game.Jump";
+
+    public static void Setup()
+    {
+        // isAxis: false for digital actions
+        Input.RegisterAction(Ctx, ActionJump, isAxis: false);
+
+        // Bind the space bar.
+        Input.Bind(Ctx, ActionJump, Input.DeviceType.Keyboard, code: KeyCode.Space);
+    }
+}
+```
+
+### Polling action state
+
+```csharp title="Poll an action"
+using GameEngine.Scripting;
+
+public static class Controls
+{
+    public static bool JumpPressedThisFrame()
+    {
+        Input.GetActionState("Game.Jump", out Input.ActionState s);
+        return s.justPressed != 0;
+    }
+}
+```
+
+Notes:
+- Polling returns `GE_Result_NotInitialized` if the native InputSystem is not available.
+- Context stack operations are intentionally **not exposed** to gameplay scripts; the Editor owns them.
+
+## ECS in C#
+
+Namespace: `GameEngine.ECS` (assembly `GameEngine.ECS.ABI.dll`)
+
+### Get the world
+
+```csharp title="Get the primary world"
+using GameEngine.ECS;
+
+WorldHandle world = Ecs.PrimaryWorld;
+```
+
+### Built-in helpers
+
+```csharp title="Entity, name and transform helpers"
+uint e = world.CreateEmptyEntity("My Entity");
+world.SetName(e, "Renamed");
+string name = world.GetName(e);
+
+// Transform as a 4x4 float matrix (column-major)
+float[] m = world.GetTransformMatrix(e);
+world.SetTransformMatrix(e, m);
+```
+
+### Custom ECS components from C#
+
+You can store an `unmanaged` C# struct as a runtime-defined component type.
+This is a **byte blob** component internally, but it participates in archetypes and queries.
+
+```csharp title="A custom component from C#"
+using System.Runtime.InteropServices;
+using GameEngine.ECS;
+
+[StructLayout(LayoutKind.Sequential)]
+public struct PlayerStats
+{
+    public int score;
+    public float health;
+}
+
+public static class Gameplay
+{
+    public static void SetStats(WorldHandle world, uint entity, PlayerStats stats)
+        => ComponentType<PlayerStats>.Set(in world, entity, in stats);
+
+    public static PlayerStats GetStats(WorldHandle world, uint entity)
+        => ComponentType<PlayerStats>.Get(in world, entity);
+}
+```
+
+### Iterate entities with a component
+
+Per-entity iteration is an `IEntitySystem`: a partial struct whose `Execute` method names the components it reads and writes, with the chunk iteration generated for it. See [C# ECS systems](./csharp-ecs-systems-architecture.mdx).
+
+## Making it work in the editor
+
+### Where scripts live
+The Editor's script compilation pipeline references all `GameEngine.*.ABI.dll` assemblies that are staged next to `Editor.exe`, including:
+- `GameEngine.Scripting.ABI.dll`
+- `GameEngine.Input.ABI.dll`
+- `GameEngine.ECS.ABI.dll`
+
+Place your gameplay scripts under the project `Assets/` folder (e.g. `Assets/MyGame.cs`).
+
+### How input gating works
+- Actions registered under context **`Editor.GameView`** only receive input when:
+  - Play Mode is playing or paused, and
+  - the Game View is the active tab of its window
+
+### Play Mode call order
+- Enter:
+  - world snapshot captured
+  - play-mode undo stack isolated
+  - runtime simulation systems enabled (physics/animation/audio emitter)
+  - C# `[PlayModeEnter]` invoked
+- Tick:
+  - C# `[PlayModeTick]` invoked (only while playing; paused does not tick)
+- Exit:
+  - C# `[PlayModeExit]` invoked
+  - audio stopped (`StopAllVoices`)
+  - runtime simulation systems disabled
+  - world snapshot restored
+  - edit-mode undo history restored
+  - **Change Review UI** (if user made undoable changes during Play)
+
+## Changelog
+
+- 2026-10-13: Converted from `docs/Scripting_PlayMode_Input_ECS_HowTo.md`; the handle query (`CreateQuery` / `TryNext`), removed from the ABI, gives way to `IEntitySystem`; `ComponentType<T>` used as the static class it is; the key binding uses `KeyCode.Space`; the V1 labels dropped; the input gate described as the code applies it (the Game View is the active tab, not focused).

@@ -28,7 +28,7 @@ MyGame/
     active/                       # loaded module copies
 ```
 
-Packages declare their own native modules. Each package module has a separate generated project, build directory and active directory in its writable derived cache. An Editor-kind module also links the EditorSDK. See the [package data model](../Packages/package-data-model.html) for module declarations and source ownership.
+Packages declare their own native modules. Each package module has a separate generated project, build directory and active directory in its writable derived cache. An Editor-kind module also links the EditorSDK. See the [package data model](../packages/package-data-model.mdx) for module declarations and source ownership.
 
 ## Your first component
 
@@ -135,15 +135,15 @@ User systems start when Play begins and stop when Play ends. `OnUpdate` runs bef
 
 ## Editor extensions
 
-Custom inspectors and gizmos use the editor's registries from an Editor-kind package module. A folder named `Editor` inside project scripts does not by itself declare a separate EditorSDK module. See [package module kinds](../Packages/package-data-model.html) and the [editor development guidelines](../EDITOR_DEV_GUIDELINES.md) before adding editor-only dependencies.
+Custom inspectors and gizmos use the editor's registries from an Editor-kind package module. A folder named `Editor` inside project scripts does not by itself declare a separate EditorSDK module. See [package module kinds](../packages/package-data-model.mdx) and the [editor development guidelines](../contributing/editor-dev-guidelines.mdx) before adding editor-only dependencies.
 
-For game UI, use the engine's UI API and authored UXML/CSS. See [game UI scaling](../game-ui-scaling.html) for the canvas and layout contract.
+For game UI, use the engine's UI API and authored UXML/CSS. See [game UI scaling](../ui/game-ui-scaling.mdx) for the canvas and layout contract.
 
 ## Shipping a Player build
 
-Export from the editor's [game publishing workflow](../GamePublishing.html). The export stages compatible prebuilt runtime modules and their load records; the shipped Player loads those modules without a compiler. Editor-kind modules do not ship.
+Export from the editor's [game publishing workflow](../publishing/game-publishing.mdx). The export stages compatible prebuilt runtime modules and their load records; the shipped Player loads those modules without a compiler. Editor-kind modules do not ship.
 
-The native gameplay module and the Player application have distinct source ownership. See [Desktop Player source ownership](../desktop-player-source-ownership.html) before adding a custom application entry point.
+The native gameplay module and the Player application have distinct source ownership. See [Desktop Player source ownership](../publishing/desktop-player-source-ownership.mdx) before adding a custom application entry point.
 
 ## IDE integration
 

@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-A `.gltf` or `.glb` file can declare how each of its animations plays, in a block the engine reads at import: the `clip` key of the animation's `extras`. The block sets the clip's loop and speed, its root motion bone, how its translation keys apply, and its events. It is the one key of an animation's extras the engine reads itself; every other key is the game's (see [Model extras](../Assets/model-extras.html)). The block applies to clips embedded in a model and to clip files alike.
+A `.gltf` or `.glb` file can declare how each of its animations plays, in a block the engine reads at import: the `clip` key of the animation's `extras`. The block sets the clip's loop and speed, its root motion bone, how its translation keys apply, and its events. It is the one key of an animation's extras the engine reads itself; every other key is the game's (see [Model extras](../assets/model-extras.mdx)). The block applies to clips embedded in a model and to clip files alike.
 
 ```json title="A clip block in an animation's extras"
 "animations": [{

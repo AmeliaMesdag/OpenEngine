@@ -15,7 +15,7 @@ namespace GameEngine { namespace Components { struct Transform; struct WorldTran
 namespace GameEngine { namespace Engine::Renderer {
 
 // Computes world-space transforms (WorldTransform) from local Transform + Parent
-// hierarchy. See docs/TransformHierarchySystem.md for the component contract.
+// hierarchy. See docs/scripting/transform-hierarchy.mdx for the component contract.
 //
 // Every pass opts back into disabled rows. A disabled entity keeps a world
 // transform — the editor draws its gizmo and the inspector shows its position,

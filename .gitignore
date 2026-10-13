@@ -77,7 +77,7 @@ packages/
 !Engine/Source/Assets/Packages/
 !Apps/Editor/Include/Packages/
 !Apps/Editor/Source/Packages/
-!docs/Packages/
+!docs/packages/
 *.nupkg
 *.snupkg
 project.lock.json

@@ -61,7 +61,7 @@ Press **Cmd+S** on macOS or **Ctrl+S** on Windows and Linux, or use the **Save S
 
 ## Export your game
 
-The editor exports a game for the platform it runs on: the macOS editor builds macOS games, the Windows editor Windows games. A native export from the Linux editor does not work yet: it looks only for `Player.exe`. For Linux, build a Steam Deck runtime with `build_deck.py`, as [Steam Deck iteration](../GamePublishing.html#steam-deck) describes. Publishing to Steam is in [Game builds and Steam publishing](../GamePublishing.html).
+The editor exports a game for the platform it runs on: the macOS editor builds macOS games, the Windows editor Windows games. A native export from the Linux editor does not work yet: it looks only for `Player.exe`. For Linux, build a Steam Deck runtime with `build_deck.py`, as [Steam Deck iteration](../publishing/game-publishing.mdx#steam-deck-iteration) describes. Publishing to Steam is in [Game builds and Steam publishing](../publishing/game-publishing.mdx).
 
 :::steps
 
@@ -79,7 +79,7 @@ The game goes to `Build Folder/<Platform>` inside the project, for example `Buil
 | macOS | `<Game name>.app`, with the game's content inside the bundle | Open the `.app` from Finder, or `open "Build Folder/Mac/<Game name>.app"` |
 | Windows | `<Game name>.exe`, `game.config` and the game's content | Run the `.exe` |
 
-A build replaces the previous output folder only when it has succeeded; until then the previous output is kept. When the folder cannot be replaced, for example because the previous game is still running, the build stops with an error that names the folder. [Game builds and Steam publishing](../GamePublishing.html) explains how the output is replaced, and how to prepare, verify and upload a release.
+A build replaces the previous output folder only when it has succeeded; until then the previous output is kept. When the folder cannot be replaced, for example because the previous game is still running, the build stops with an error that names the folder. [Game builds and Steam publishing](../publishing/game-publishing.mdx) explains how the output is replaced, and how to prepare, verify and upload a release.
 
 ## Changelog
 

@@ -434,13 +434,13 @@ Diagnostics warn about fields or layouts that cannot be exported in the schema;
 those fields are excluded from inspection, persistence, and migration.
 
 The older name-and-size-only `RegisterBlobComponent` path cannot perform this
-schema migration. Treat registration failures as errors; re-entering play mode is
+schema migration; it is to be removed, tracked by issue #3940. Treat registration failures as errors; re-entering play mode is
 not a general repair for an incompatible layout. Native built-in mirrors must
 continue to match their C++ definitions.
 
 ## Build pipeline (NativeAOT)
 
-Use the supported [game publishing workflow](../GamePublishing.html) for standalone
+Use the supported [game publishing workflow](../publishing/game-publishing.mdx) for standalone
 packaging. The runtime includes native entry points for managed-system dispatch,
 and generated registrations avoid relying solely on reflection discovery. An
 arbitrary `dotnet publish` command is not a complete engine packaging recipe.

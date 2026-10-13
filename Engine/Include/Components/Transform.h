@@ -22,7 +22,7 @@ namespace Components
 // Authoring/editor code should treat this as the local transform. World-space
 // consumers (rendering, bounds, physics, etc.) are expected to read from
 // WorldTransform, which is derived from Transform + Parent hierarchy by
-// TransformHierarchySystem (see docs/TransformHierarchySystem.md).
+// TransformHierarchySystem (see docs/scripting/transform-hierarchy.mdx).
 // @ge-no-add  every entity always has a Transform; not user-addable via the menu.
 struct Transform
 {

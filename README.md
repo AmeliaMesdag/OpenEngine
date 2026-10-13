@@ -65,7 +65,7 @@ Tests/                Integration tests (module unit tests live next to each mod
 ThirdParty/           Bundled third-party code, each with its own license
 cmake/                Build scripts, presets and ports
 mcp/                  The MCP server and CLI that drive a running editor
-docs/                 Documentation (start at docs/index.html)
+docs/                 Documentation (start at docs/README.md)
 Tools/                Developer tools and scripts
 dependencies/         Auto-provisioned vcpkg checkout (gitignored)
 build/                Build trees, one per preset (gitignored)

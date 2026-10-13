@@ -3,7 +3,7 @@
 Author: Augment Agent
 
 ## User guide
-For practical usage and API examples, see [docs/UI_API_GUIDE.md](../../../docs/UI_API_GUIDE.md).
+For practical usage and API examples, see [docs/ui/ui-api-guide.mdx](../../../docs/ui/ui-api-guide.mdx).
 
 ## Goals and scope
 - XML + CSS-driven UI that integrates with the engine’s AssetManager, Rendering (geometry + text), and input systems
