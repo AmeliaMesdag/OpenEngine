@@ -84,17 +84,20 @@ void main()
             float tStart = max(0.0, t0);
             float tEnd = t1;
 
-            // Clip the march to the ground if the ray hits the planet.
+            // Clip the march to the ground if the ray hits the planet: a downward ray that
+            // meets the sphere ahead. The lowest row's sample sits on the ground, where a
+            // downward ray meets it at once (t = 0).
             float tg0, tg1;
-            if (GE_RaySphereIntersect(samplePos, omega, planetCenter, uAtmos.planetRadius, tg0, tg1))
+            bool hitsGround = false;
+            if (omega.y < 0.0 &&
+                GE_RaySphereIntersect(samplePos, omega, planetCenter, uAtmos.planetRadius, tg0, tg1) &&
+                tg1 > 0.0)
             {
-                if (tg0 > 0.0) tEnd = min(tEnd, tg0);
+                tEnd = min(tEnd, max(tg0, 0.0));
+                hitsGround = true;
             }
 
-            if (tEnd <= tStart)
-                continue;
-
-            float dt = (tEnd - tStart) / float(kNumSteps);
+            float dt = max(tEnd - tStart, 0.0) / float(kNumSteps);
             float t = tStart + 0.5 * dt;
 
             vec3 pathTransmittance = vec3(1.0);
@@ -138,6 +141,21 @@ void main()
                 pathTransmittance *= stepTransmittance;
 
                 t += dt;
+            }
+
+            // The ground's bounce (Hillaire 2020, NewMultiScatCS): a ray that ends on the
+            // planet receives the sunlight the ground reflects back up it, Lambertian at the
+            // floor's albedo, through the path's transmittance. It is radiance arriving along
+            // omega, so it takes no phase here; the sphere integral below scatters it.
+            if (hitsGround)
+            {
+                vec3 groundPos = samplePos + omega * tEnd;
+                vec3 groundUp = normalize(groundPos - planetCenter);
+                float groundSunCos = dot(groundUp, sunDir);
+                vec3 groundTransToSun = GE_SkyTransmittanceToTop(uTransmittanceLUT, uAtmos.planetRadius,
+                                                                 groundSunCos, uAtmos.planetRadius,
+                                                                 uAtmos.atmosphereRadius);
+                L2 += pathTransmittance * groundTransToSun * max(groundSunCos, 0.0) * uAtmos.groundAlbedo / PI;
             }
         }
     }

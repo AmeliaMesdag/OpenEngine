@@ -1,6 +1,5 @@
 #version 450
 
-#include "Includes/tonemap_gt7.glsl"
 #include "Includes/tonemap_aces2.glsl"
 
 layout(location = 0) in vec2 vUV;
@@ -18,8 +17,8 @@ layout(set = 0, binding = 1, std430) readonly buffer ExposureHistory {
 
 layout(push_constant) uniform TonemapPC {
     float exposure;
-    int tonemapMode;  // 0=ACES, 1=Reinhard, 2=AgX, 3=Filmic, 4=Neutral, 5=Linear,
-                      // 6=Gran Turismo 7, 7=ACES 2
+    int look;         // 0=Neutral, 1=Filmic (ACES 2), 2=Photographic (AgX); 3=no look, the
+                      // debug arm a view selects (Passes::kTonemapNoLookArm), never a volume value
     int ditherMode;   // 98-99=debug views. This pass owns no dither at all — the terminal
                       // FinalSRGBEncode does — so no value here selects one.
     int outEncoding;  // 1=SDR display-referred linear (undithered — the terminal FinalSRGBEncode
@@ -39,77 +38,7 @@ const float kHdrPaperWhiteFloorNits = 80.0;
 
 #include "Includes/ictcp.glsl"
 
-// --- Tonemap operators ---
-
-// ACES filmic tonemap via the RRT+ODT polynomial fit with input/output colour matrices (Stephen
-// Hill's reference fit, no input pre-scale). The matrices tone-map in a shared working space and
-// restore hue far better than the cheap single-channel fit. They are written COLUMN-major for
-// GLSL; each row sums to 1 to within 1e-5 (kAcesOut's third row is 0.999990), so a neutral grey
-// stays neutral to well under a code. Reference
-// placement: exposed 0.18 lands at display-linear ~0.106. Brightness anchoring is the exposure
-// system's job (kDefaultAutoExposureBiasEv), never a scale hidden in the operator.
-// Adapted from ACESFitted/RRTAndODTFit in TheRealMJP/BakingLab ACES.hlsl (fit by Stephen Hill,
-// @self_shadow): Copyright (c) 2016 MJP, MIT License.
-// See ThirdParty/BakingLabAces/LICENSE.txt and UPSTREAM.md.
-vec3 TonemapACES(vec3 v)
-{
-    const mat3 kAcesIn = mat3(
-        0.59719, 0.07600, 0.02840,   // column 0
-        0.35458, 0.90834, 0.13383,   // column 1
-        0.04823, 0.01566, 0.83777);  // column 2
-    const mat3 kAcesOut = mat3(
-         1.60475, -0.10208, -0.00327,
-        -0.53108,  1.10813, -0.07276,
-        -0.07367, -0.00605,  1.07602);
-    v = kAcesIn * v;
-    // Upstream's numerator carries a -0.000090537 constant, which puts the curve BELOW ZERO for
-    // working-space values under 0.003253 — so the terminal clamp maps that whole span to a flat
-    // black floor, and near-black gradation is destroyed rather than compressed. A channel enters
-    // it in order of magnitude, so on a sky-lit shadow red floors out while green and blue are
-    // still resolving: the surface loses a channel instead of darkening. Dropping the constant is
-    // what removes the floor — the curve then passes exactly through the origin, stays strictly
-    // increasing, and is linear in the limit, so the darkest tones keep their ratios. It is the
-    // only term that decides the sign at zero and its influence decays as 1/v^2: mid-grey moves
-    // +0.25% (0.18 still lands at display-linear ~0.106) and a neutral ramp moves at most 2 codes.
-    vec3 num = v * (v + 0.0245786);
-    vec3 den = v * (0.983729 * v + 0.432951) + 0.238081;
-    v = kAcesOut * (num / den);
-    return clamp(v, 0.0, 1.0);
-}
-
-vec3 TonemapReinhard(vec3 v)
-{
-    return v / (v + vec3(1.0));
-}
-
-// Exact inverse of the terminal sRGB OETF (encode_srgb.frag LinearToSRGB / a
-// hardware-sRGB swapchain). Used to undo a display-referred curve baked into an
-// operator's output so it re-enters this pass's display-LINEAR contract.
-vec3 SrgbToLinear(vec3 c)
-{
-    vec3 low = c / 12.92;
-    vec3 high = pow((max(c, vec3(0.0)) + 0.055) / 1.055, vec3(2.4));
-    return mix(high, low, lessThanEqual(c, vec3(0.04045)));
-}
-
-// Jim Hejl / Richard Burgess-Dawson filmic curve. This SPECIFIC rational fit has
-// the sRGB OETF baked into its output BY DESIGN — it was published as "no gamma
-// correction needed," authored to go straight to an sRGB display. (NOT the
-// Uncharted 2 / Hable curve, which is different and returns linear — the
-// SrgbToLinear below is valid ONLY for this gamma-baking HBD fit; swapping in a
-// linear-output curve without removing it would double-UN-encode.) This pass's
-// contract is that every operator returns display-referred LINEAR and the single
-// terminal FinalSRGBEncode (or hardware sRGB) applies the OETF once;
-// ACES/Reinhard/AgX/Neutral/Linear all honor that. So we undo the baked curve
-// here (inverse sRGB) to return linear like the others — otherwise the terminal
-// pass encodes a second time and grey 0.18 lands at 189/255 instead of its
-// designed 130/255.
-vec3 TonemapFilmic(vec3 v)
-{
-    vec3 x = max(v - vec3(0.004), 0.0);
-    vec3 srgbEncoded = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
-    return SrgbToLinear(srgbEncoded);
-}
+// --- The looks ---
 
 // AgX display transform (Troy Sobotka's AgX, github.com/sobotka/AgX).
 // sRGB linear → AgX working space, log2 encoding, polynomial sigmoid.
@@ -174,9 +103,14 @@ vec3 TonemapNeutral(vec3 v)
     return mix(v, newPeak * vec3(1.0), g);
 }
 
-// Identity curve after exposure: no tone mapping at all, so values above 1.0 survive to
-// the output-range stage (differs from Neutral, which compresses highlights toward white).
-vec3 TonemapLinear(vec3 v)
+// The look values that select an arm by name (Components::Look; Neutral is the default arm).
+const int kLookFilmic = 1;
+
+// The no-look debug arm: identity after exposure, so values above 1.0 survive to the
+// output-range stage (differs from Neutral, which compresses highlights toward white).
+const int kNoLookArm = 3;
+
+vec3 NoLook(vec3 v)
 {
     return max(v, vec3(0.0));
 }
@@ -197,17 +131,12 @@ float Aces2TargetOutputMax()
 
 vec3 ApplyTonemap(vec3 hdr)
 {
-    switch (pc.tonemapMode)
+    switch (pc.look)
     {
-        case 0:  return TonemapACES(hdr);
-        case 1:  return TonemapReinhard(hdr);
-        case 2:  return TonemapAgX(hdr);
-        case 3:  return TonemapFilmic(hdr);
-        case 4:  return TonemapNeutral(hdr);
-        case 5:  return TonemapLinear(hdr);
-        case 6:  return TonemapGranTurismo7(hdr);
-        case 7:  return TonemapACES2(hdr, Aces2TargetOutputMax());
-        default: return TonemapACES(hdr);
+        case kLookFilmic: return TonemapACES2(hdr, Aces2TargetOutputMax());
+        case 2:           return TonemapAgX(hdr);
+        case kNoLookArm:  return NoLook(hdr);
+        default:          return TonemapNeutral(hdr);
     }
 }
 
@@ -240,10 +169,10 @@ vec3 ApplyHdrDisplayShoulder(vec3 sceneLinear)
 // Below the knee nothing moves. Above it the excess is expanded by the exact
 // inverse of a Reinhard shoulder: C1-continuous at the knee (slope 1, no visible
 // kink) and mapping operator 1.0 onto `outputMax` exactly. An operator that
-// clamps at 1.0 (ACES, GT7) therefore lands on the panel's peak
-// luminance, while one that only approaches it (Reinhard, Filmic, Neutral, and
-// AgX — whose polynomial sigmoid tops out at 0.9971) lands short. That is each
-// curve's own answer, and the right one. Note the slope near the top is
+// clamped at 1.0 would land on the panel's peak luminance; the two extended
+// looks only approach it (Neutral asymptotically, and AgX, whose polynomial
+// sigmoid tops out at 0.9971), so both land short. That is each curve's own
+// answer, and the right one. Note the slope near the top is
 // ((outputMax - knee) / (1 - knee))^2, so a small difference in an operator's
 // ceiling is a large difference in peak nits: AgX's 0.3% shortfall costs it 14%.
 //
@@ -276,24 +205,24 @@ vec3 ApplyOutputRangeTonemap(vec3 sceneLinear, vec3 sdrTonemapped)
     if (pc.outEncoding < 2 || pc.outEncoding > 4)
         return sdrTonemapped;
 
-    // Linear is the one mode with no colour rendering to preserve — it applies no
-    // curve at all — so it rolls the raw scene value into the headroom instead.
-    if (pc.tonemapMode == 5)
+    // No look has no colour rendering to preserve — it applies no curve at all —
+    // so it rolls the raw scene value into the headroom instead.
+    if (pc.look == kNoLookArm)
         return ApplyHdrDisplayShoulder(sceneLinear);
 
     float outputMax = HdrOutputMaxLinearValue();
     if (outputMax <= 1.001)
         return clamp(sdrTonemapped, vec3(0.0), vec3(1.0));
 
-    // ACES 2 is peak-parameterised: ApplyTonemap already produced
+    // Filmic (ACES 2) is peak-parameterised: ApplyTonemap already produced
     // display-referred output spanning [0, outputMax] from its tier ladder, so
-    // like Linear it bypasses the highlight extension — extending it would
+    // like no look it bypasses the highlight extension — extending it would
     // apply headroom twice. Clamp only.
-    if (pc.tonemapMode == 7)
+    if (pc.look == kLookFilmic)
         return min(sdrTonemapped, vec3(outputMax));
 
-    // Every other mode, present and future: extend what IT produced. A new
-    // operator needs no edit here, which is why this is not a switch.
+    // Every other look, present and future: extend what IT produced. A new
+    // look needs no edit here, which is why this is not a switch.
     return min(ApplyHdrHighlightExtension(sdrTonemapped, outputMax), vec3(outputMax));
 }
 

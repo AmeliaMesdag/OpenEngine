@@ -442,7 +442,7 @@ void UIManager::RebuildFocusWithinChain()
     // empty (nothing has :focus-within).
     UIElement* focused = nullptr;
     if (!m_FocusId.empty() && m_Root)
-        focused = m_Root->FindById(m_FocusId);
+        focused = m_Root->FindById(HashStringId(m_FocusId));
 
     // A control that is disabled while it holds focus loses it, and so does one
     // inside a container that is disabled — the focus a user cannot reach by Tab

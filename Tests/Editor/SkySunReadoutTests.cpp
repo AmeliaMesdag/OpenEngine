@@ -675,11 +675,11 @@ TEST(SkySunReadout, RestingThePointerOnALineOfTheCardShowsTheCardsTooltip)
     EXPECT_TRUE(hovered == noonLine || hovered == element) << "the pointer rests on the card";
 
     UIElement* uiRoot = fixture.Ui->GetRootElement();
-    const auto* bubbleText = dynamic_cast<const Label*>(uiRoot->FindById("ui-tooltip-text"));
+    const auto* bubbleText = dynamic_cast<const Label*>(uiRoot->FindById("ui-tooltip-text"_sid));
     ASSERT_NE(bubbleText, nullptr) << "no tooltip was brought up";
     EXPECT_EQ(bubbleText->GetText(), element->GetTooltip());
     EXPECT_NE(bubbleText->GetText().find("solar time"), std::string::npos);
-    const UIElement* bubble = uiRoot->FindById("ui-tooltip");
+    const UIElement* bubble = uiRoot->FindById("ui-tooltip"_sid);
     ASSERT_NE(bubble, nullptr);
     EXPECT_GE(bubble->GetLayoutX(), 0.0f) << "the bubble is on screen, not parked";
     EXPECT_GT(bubble->GetLayoutWidth(), 0.0f);

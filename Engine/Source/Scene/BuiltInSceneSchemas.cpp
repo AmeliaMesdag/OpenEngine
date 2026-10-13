@@ -5703,6 +5703,32 @@ class ValueCurveSchema final : public ISceneComponentSchema
     }
 };
 
+// A look by its name (Components::kLookNames), matched without regard to case.
+static bool ParseLook(std::string_view value, Components::Look& out, std::string* outError)
+{
+    const std::string lowered = ToLowerAscii(value);
+    for (int32_t i = 0; i < Components::kLookCount; ++i)
+    {
+        if (lowered == ToLowerAscii(Components::kLookNames[i]))
+        {
+            out = static_cast<Components::Look>(i);
+            return true;
+        }
+    }
+    if (outError)
+    {
+        // The technique beside each name, because a technique name (ACES, AgX) is the likeliest
+        // wrong value: the previous operator list showed them.
+        using Components::Look;
+        using Components::LookName;
+        *outError = "'" + std::string(value) + "' is not a look; rendering " + std::string(LookName(Look::Neutral)) +
+                    ". Valid looks: " + std::string(LookName(Look::Neutral)) + ", " +
+                    std::string(LookName(Look::Filmic)) + " (ACES 2), " + std::string(LookName(Look::Photographic)) +
+                    " (AgX).";
+    }
+    return false;
+}
+
 class PostProcessVolumeSchema final : public ISceneComponentSchema
 {
   public:
@@ -5716,7 +5742,7 @@ class PostProcessVolumeSchema final : public ISceneComponentSchema
         outLines.push_back(std::string("PostProcessVolume.weight = ") + FormatFloat(c->Weight));
         outLines.push_back(std::string("PostProcessVolume.priority = ") + std::to_string(c->Priority));
         outLines.push_back(std::string("PostProcessVolume.postProcessMask = ") + std::to_string(c->PostProcessMask));
-        outLines.push_back(std::string("PostProcessVolume.tonemap = ") + std::to_string(static_cast<int32_t>(c->Tonemap)));
+        outLines.push_back(std::string("PostProcessVolume.look = ") + std::string(Components::LookName(c->Look)));
         outLines.push_back(std::string("PostProcessVolume.ictcpChromaCompression = ") +
                            FormatFloat(c->IctcpChromaCompression));
         outLines.push_back(std::string("PostProcessVolume.isGlobal = ") + (c->IsGlobal ? "true" : "false"));
@@ -5746,15 +5772,6 @@ class PostProcessVolumeSchema final : public ISceneComponentSchema
         {
             if (!ParseU32(value, c.PostProcessMask, outError))
                 return false;
-        }
-        else if (property == "exposure" || property == "exposurecontrol" ||
-                 property == "manualexposureev" ||
-                 property == "aperture" || property == "shuttertime" || property == "iso" ||
-                 property == "autoexposurespeedup" || property == "autoexposurespeeddown")
-        {
-            // Exposure moved off the volume onto the camera (and the world default for camera-less
-            // views). Silently accept and drop the legacy owning-semantics keys so older scenes
-            // still load; the modifier-shaped keys below re-home onto ExposureAdjustmentEffect.
         }
         else if (property == "exposurecompensation" || property == "autoexposureminev" ||
                  property == "autoexposuremaxev")
@@ -5823,18 +5840,10 @@ class PostProcessVolumeSchema final : public ISceneComponentSchema
             world.AddComponentImmediate(entity, c);
             return true;
         }
-        else if (property == "tonemap")
+        else if (property == "look")
         {
-            int32_t v = 0;
-            if (!ParseI32(value, v, outError))
+            if (!ParseLook(value, c.Look, outError))
                 return false;
-            if (!Components::IsValidTonemapModeValue(v))
-            {
-                if (outError)
-                    *outError = "PostProcessVolume.tonemap out of range";
-                return false;
-            }
-            c.Tonemap = static_cast<Components::TonemapMode>(v);
         }
         else if (property == "ictcpchromacompression")
         {

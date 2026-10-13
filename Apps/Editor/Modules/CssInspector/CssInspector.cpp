@@ -289,9 +289,9 @@ void CssInspector::SetEnabled(bool on)
         UIElement* root = manager ? manager->GetRootElement() : nullptr;
         if (!root)
             continue;
-        if (UIElement* overlay = root->FindById("css-inspector-overlay"))
+        if (UIElement* overlay = root->FindById("css-inspector-overlay"_sid))
             overlay->Overrides().Set(Style::Display, DisplayMode::None);
-        if (UIElement* highlight = root->FindById("css-inspector-highlight"))
+        if (UIElement* highlight = root->FindById("css-inspector-highlight"_sid))
             highlight->Overrides().Set(Style::Display, DisplayMode::None);
     }
     m_ActiveManagers.clear();
@@ -313,8 +313,8 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
         m_ActiveManagers.emplace_back(ui);
     }
 
-    UIElement* overlay = root->FindById("css-inspector-overlay");
-    UIElement* highlight = root->FindById("css-inspector-highlight");
+    UIElement* overlay = root->FindById("css-inspector-overlay"_sid);
+    UIElement* highlight = root->FindById("css-inspector-highlight"_sid);
 
     UIElement* hovered = ui->GetHoveredElement();
     if (!hovered)

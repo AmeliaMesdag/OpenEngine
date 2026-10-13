@@ -1226,7 +1226,7 @@ void UIManager::DispatchEvents(UpdateContext& ctx)
                     if (!tgt && !m_CaptureId.empty())
                     {
                         if (auto* r = GetRootElement())
-                            tgt = r->FindById(m_CaptureId);
+                            tgt = r->FindById(HashStringId(m_CaptureId));
                     }
                 }
                 if (!tgt)
@@ -1254,7 +1254,7 @@ void UIManager::DispatchEvents(UpdateContext& ctx)
         {
             if (id.empty() || !GetRootElement())
                 return nullptr;
-            return GetRootElement()->FindById(id);
+            return GetRootElement()->FindById(HashStringId(id));
         };
 
         // The narrow bit-mask each transition passes to MarkPseudoStateScope:
@@ -1316,7 +1316,7 @@ void UIManager::NotifyFocusChange()
             DispatchFocusEvent(*prevEl, kEventFocusOut);
         if (!m_FocusId.empty() && GetRootElement())
         {
-            if (UIElement* newEl = GetRootElement()->FindById(m_FocusId))
+            if (UIElement* newEl = GetRootElement()->FindById(HashStringId(m_FocusId)))
             {
                 m_FocusNotifiedInstanceId = newEl->GetInstanceId();
                 DispatchFocusEvent(*newEl, kEventFocusIn);
@@ -1353,7 +1353,7 @@ void UIManager::ReleaseFocusInDoomedSubtree(const UIElement* doomedRoot)
     // subtree does not leave the id naming it.
     if (!m_FocusId.empty() && m_Root)
     {
-        const UIElement* focused = m_Root->FindById(m_FocusId);
+        const UIElement* focused = m_Root->FindById(HashStringId(m_FocusId));
         if (focused && IsInOwnedSubtree(focused, doomedRoot))
             m_FocusId.clear();
     }

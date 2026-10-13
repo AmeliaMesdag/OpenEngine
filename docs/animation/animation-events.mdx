@@ -49,7 +49,7 @@ The events belong to the Animator, not to the caller: two systems that poll one 
 
 :::caution
 
-`PollEvents` reads an Animator's events on the main thread only, as a system's update does: the animation wave writes them on worker threads. A call from another thread throws `InvalidOperationException`, as does a call for an entity that is gone or has no Animator.
+`PollEvents` reads an Animator's events on the engine's threads: call it from a system's update, on whichever thread the scheduler runs it (the main thread or a worker), which the animation wave that writes the events always precedes. A thread of your own (`Task.Run`, a timer) can run while the wave writes, so a call from one throws `InvalidOperationException` and logs once; post the poll to the main thread with [`MainThread.Post`](../scripting/main-thread-post.mdx). A call for an entity that is gone or has no Animator throws too.
 
 :::
 
@@ -95,10 +95,11 @@ GE_Result GE_Animator_PollEventsOnEntity(GE_Handle worldHandle, uint64_t entityI
                                          int32_t* outCount);
 ```
 
-`GE_AnimationEventRecord` (`Engine/Include/Scripting/AnimatorABI.h`) is the record above: 80 bytes, the name's id, its time, its length and its first 64 bytes. The export returns `GE_Result_InvalidArg` for a null `outCount`, a negative capacity or a null buffer with a capacity, `GE_Result_NotFound` for an entity that is gone or has no Animator, and `GE_Result_Fail` off the main thread.
+`GE_AnimationEventRecord` (`Engine/Include/Scripting/AnimatorABI.h`) is the record above: 80 bytes, the name's id, its time, its length and its first 64 bytes. The export returns `GE_Result_InvalidArg` for a null `outCount`, a negative capacity or a null buffer with a capacity, `GE_Result_NotFound` for an entity that is gone or has no Animator, and `GE_Result_Fail` on a thread the engine does not schedule (neither the main thread nor a job body).
 
 ## Changelog
 
+- 2026-10-13: `PollEvents` is admitted from a system's update on any engine thread, a worker included, and refused only on a thread the engine does not schedule, with a message naming `MainThread.Post`.
 - 2026-10-13: Converted from `docs/animation/animation-events.html`; the ABI version number dropped from the first line.
 - 2026-09-30: a frame longer than the whole clip fires each event once; the events belong to the Animator, so several listeners share one poll; a name cut inside a character ends in U+FFFD; an event at a seek's target fires in the next frame.
 - 2026-09-30: first version. Events fire on the clip path, in animation graphs and in montage slots; scripts poll them with `AnimatorApi.PollEvents`, engine systems read them with `GetFiredEvents`.

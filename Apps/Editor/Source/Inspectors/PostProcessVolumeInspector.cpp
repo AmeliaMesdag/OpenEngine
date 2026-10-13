@@ -5,7 +5,7 @@
 #include "Components/Rendering/PostProcessEffects/HeightFogEffect.h"
 #include "Components/Rendering/PostProcessEffects/VignetteEffect.h"
 #include "Components/Rendering/PostProcessVolume.h"
-#include "Components/Rendering/TonemapMode.h"
+#include "Components/Rendering/Look.h"
 #include "ECS/ComponentFactory.h"
 #include "ECS/World.h"
 #include "Editor/Entities/EditorComponentTraits.h"
@@ -38,18 +38,13 @@ namespace GameEngine
 namespace
 {
 
-using Components::TonemapMode;
+using Components::Look;
 using Components::PostProcessVolumeShape;
 
-static constexpr EnumEntry<TonemapMode> kTonemapModes[] = {
-    {TonemapMode::ACES,     "ACES"},
-    {TonemapMode::Reinhard, "Reinhard"},
-    {TonemapMode::AgX,      "AgX"},
-    {TonemapMode::Filmic,   "Filmic"},
-    {TonemapMode::Neutral,  "Khronos PBR Neutral"},
-    {TonemapMode::Linear,   "Linear"},
-    {TonemapMode::GranTurismo7, "ICtCp Tonemapper (2025, GT7)"},
-    {TonemapMode::ACES2,    "ACES 2"},
+static constexpr EnumEntry<Look> kLooks[] = {
+    {Look::Neutral,      Components::LookName(Look::Neutral).data()},
+    {Look::Filmic,       Components::LookName(Look::Filmic).data()},
+    {Look::Photographic, Components::LookName(Look::Photographic).data()},
 };
 
 static constexpr EnumEntry<PostProcessVolumeShape> kVolumeShapes[] = {
@@ -422,12 +417,13 @@ void RegisterPostProcessVolumeInspector()
         // --- Tonemapping ---
         InspectorUI::AddTextBlock(ctx.Parent, "Tonemapping", "inspector-section-subheader");
 
-        auto* tmField = InspectorUI::AddEnumRow(ctx.Parent, "Tonemap", kTonemapModes, vol->Tonemap,
-            "Tonemap operator: ACES (legacy RRT+ODT fit), Reinhard, AgX, Filmic, Khronos PBR Neutral, Linear, ICtCp Tonemapper (2025, GT7), or ACES 2. "
-            "In HDR, every operator except Linear extends its own output into the display's headroom above paper-white; Linear rolls the scene value directly.");
-        tmField->SetOnValueChanged([w, e, n, undo](TonemapMode v) {
-            CommitComponentWithUndo<PP>(w, e, n, undo, "Change Tonemap Mode",
-                [v](PP& u) { u.Tonemap = v; });
+        auto* lookField = InspectorUI::AddEnumRow(ctx.Parent, "Look", kLooks, vol->Look,
+            "The display transform. Neutral: colors stay as authored. Filmic: film contrast, bright colors "
+            "roll off to white with little hue shift. Photographic: gentle contrast, bright colors fade "
+            "toward white like film. Every look follows an HDR display's headroom.");
+        lookField->SetOnValueChanged([w, e, n, undo](Look v) {
+            CommitComponentWithUndo<PP>(w, e, n, undo, "Change Look",
+                [v](PP& u) { u.Look = v; });
         });
 
         AddComponentFloatRowWithDrag<PP>(ctx.Parent, "ICtCp Chroma Compression",

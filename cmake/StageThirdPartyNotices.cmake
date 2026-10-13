@@ -178,12 +178,6 @@ _ge_notice_copy(
 
 # Vendored notices whose code or compiled shaders can enter the desktop/SDK output.
 _ge_notice_copy(
-    "${GE_SOURCE_DIR}/ThirdParty/BakingLabAces/LICENSE.txt"
-    "${GE_NOTICES_DEST}/BakingLab-ACES/LICENSE.txt")
-_ge_notice_copy(
-    "${GE_SOURCE_DIR}/ThirdParty/BakingLabAces/UPSTREAM.md"
-    "${GE_NOTICES_DEST}/BakingLab-ACES/UPSTREAM.md")
-_ge_notice_copy(
     "${GE_SOURCE_DIR}/ThirdParty/KhronosPbrNeutral/LICENSE.txt"
     "${GE_NOTICES_DEST}/Khronos-PBR-Neutral/LICENSE.txt")
 _ge_notice_copy(
@@ -219,12 +213,6 @@ _ge_notice_copy(
 _ge_notice_copy(
     "${GE_SOURCE_DIR}/Engine/Modules/VolumetricClouds/ThirdParty/SebLague-Clouds/UPSTREAM.md"
     "${GE_NOTICES_DEST}/SebLague-Clouds/UPSTREAM.md")
-_ge_notice_copy(
-    "${GE_SOURCE_DIR}/ThirdParty/GT7ToneMapper/LICENSE.txt"
-    "${GE_NOTICES_DEST}/GT7-Tone-Mapper/LICENSE.txt")
-_ge_notice_copy(
-    "${GE_SOURCE_DIR}/ThirdParty/GT7ToneMapper/UPSTREAM.md"
-    "${GE_NOTICES_DEST}/GT7-Tone-Mapper/UPSTREAM.md")
 _ge_notice_copy(
     "${GE_SOURCE_DIR}/ThirdParty/GTAO/LICENSE.txt"
     "${GE_NOTICES_DEST}/GTAO/LICENSE.txt")

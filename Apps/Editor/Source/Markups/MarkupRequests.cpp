@@ -25,6 +25,7 @@
 #include "Mathematics/Vector3.h"
 #include "SceneView/SceneViewFraming.h"
 #include "SceneViewController.h"
+#include "UI/ContextMenuLabels.h"
 #include "UndoRedo/DuplicateEntitiesCommand.h"
 #include "UndoRedo/EntityComponentsEdit.h"
 #include "UndoRedo/GenericEditUndo.h"
@@ -231,15 +232,6 @@ json BuildRow(const MarkupRequestContext& context, ECS::EntityHandle entity)
     const MarkupECS::MarkupNotes* notes = MarkupService::Get().FindNotes(world, entity);
     const VolumeGeometry geometry = ReadGeometry(world, entity);
 
-    json tags = json::array();
-    if (notes)
-    {
-        for (const uint32 tag : notes->Tags)
-        {
-            if (tag != MarkupService::kInvalidTag)
-                tags.push_back(TagName(tag));
-        }
-    }
     const auto* name = world.GetComponent<Components::Name>(entity);
     const auto* sceneTag = world.GetComponent<Components::SceneEntityTag>(entity);
     Mathematics::Vector3 center = geometry.Center;
@@ -264,7 +256,7 @@ json BuildRow(const MarkupRequestContext& context, ECS::EntityHandle entity)
                 {"title", name ? std::string(name->View()) : std::string()},
                 {"kind", kind},
                 {"status", TagName(markup.Status)},
-                {"tags", tags},
+                {"tags", MarkupTagNames(world, entity)},
                 {"author", AuthorName(markup.Author)},
                 {"updatedBy", AuthorName(markup.UpdatedBy)},
                 {"created", Iso8601(markup.CreatedUnix)},
@@ -274,7 +266,8 @@ json BuildRow(const MarkupRequestContext& context, ECS::EntityHandle entity)
                 {"hasUpdate", context.Bridge->HasUnseenUpdate(world, entity)},
                 {"center", Vector3Json(center)},
                 {"radius", radius},
-                {"entryCount", ReadableEntryCount(notes)}};
+                {"entryCount", ReadableEntryCount(notes)},
+                {"color", ContextMenuLabels::ArgbToHexRGB(MarkupDisplayArgb(markup))}};
 }
 
 // The mark-up `params.entityId` names, or a refusal naming the fix.
@@ -1337,6 +1330,14 @@ json UpdateMarkup(const MarkupRequestContext& context, const json& params)
     return SceneRevision(world, json{{"markup", BuildRow(context, entity)}});
 }
 
+std::optional<json> ResolveMarkupRequest(const MarkupRequestContext& context, const json& params,
+                                         ECS::EntityHandle& outEntity)
+{
+    if (const auto refusal = CheckContext(context))
+        return refusal;
+    return ResolveMarkup(context, params, outEntity);
+}
+
 json CommentOnMarkup(const MarkupRequestContext& context, const json& params)
 {
     if (const auto refusal = CheckContext(context))
@@ -1427,6 +1428,17 @@ json ContainsInMarkup(const MarkupRequestContext& context, const json& params)
     return SceneRevision(world, json{{"inside", std::move(inside)}, {"insideCount", count}});
 }
 
+std::optional<MarkupWorldVolume> ReadMarkupFrameVolume(const MarkupRequestContext& context, ECS::EntityHandle markup)
+{
+    // The volume where it is in the world, as the Scene View draws it: a parented mark-up's
+    // local position is not where it stands.
+    if (context.World->GetComponent<MarkupRegion>(markup))
+        return RegionFrameVolume(*context.World, markup);
+    if (IsMarkupPath(*context.World, markup))
+        return PathFrameVolume(context, markup);
+    return ReadMarkupWorldVolume(*context.World, markup);
+}
+
 json FrameMarkup(const MarkupRequestContext& context, const json& params, SceneViewCameraPose& outPose)
 {
     if (const auto refusal = CheckContext(context))
@@ -1438,13 +1450,7 @@ json FrameMarkup(const MarkupRequestContext& context, const json& params, SceneV
     Mathematics::Vector3 direction(1.0f, -0.5f, 1.0f);
     if (params.contains("direction") && !ReadVector3(params["direction"], direction))
         return Refusal("direction must be [x, y, z], from the camera toward the mark-up");
-    // The volume where it is in the world, as the Scene View draws it: a parented mark-up's
-    // local position is not where it stands.
-    const std::optional<MarkupWorldVolume> volume = context.World->GetComponent<MarkupRegion>(entity)
-                                                        ? RegionFrameVolume(*context.World, entity)
-                                                    : IsMarkupPath(*context.World, entity)
-                                                        ? PathFrameVolume(context, entity)
-                                                        : ReadMarkupWorldVolume(*context.World, entity);
+    const std::optional<MarkupWorldVolume> volume = ReadMarkupFrameVolume(context, entity);
     if (!volume)
         return Refusal("The mark-up has no shape to frame; a region needs an outline of three points or more");
     float distance = MarkupFrameDistance(*volume, context.FrameTanHalfFov);

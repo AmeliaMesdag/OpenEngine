@@ -241,7 +241,7 @@ bool FullscreenShaderNode::Initialize(std::string nodeId, std::string nodeJson, 
             m_RequiredPackage = j["requiresPackage"].get<std::string>();
         }
 
-        // Parse push constant defaults: "pushConstants": { "exposure": 1.0, "tonemapMode": 5 }
+        // Parse push constant defaults: "pushConstants": { "exposure": 1.0, "ditherMode": 0 }
         if (j.contains("pushConstants") && j["pushConstants"].is_object())
         {
             for (auto it = j["pushConstants"].begin(); it != j["pushConstants"].end(); ++it)
@@ -923,7 +923,7 @@ void Detail::FullscreenShaderNodeRenderer::Declare(
         {
             settings.Exposure = 1.0f;
             settings.AutoExposureActive = false;
-            settings.TonemapMode = 5; // Linear: preserve the diagnostic values.
+            settings.ViewOutput = PostProcessViewOutput::NoLook; // preserve the diagnostic values
             settings.IctcpChromaCompression = 0.0f;
         }
     }
@@ -936,25 +936,13 @@ void Detail::FullscreenShaderNodeRenderer::Declare(
     if (!node.m_SkipWhenFields.empty())
     {
         bool skip = true;
-        if (node.m_Id == "Tonemap")
+        for (const auto& f : node.m_SkipWhenFields)
         {
-            // HDR display headroom is applied inside the pass body — in an
-            // HDR output mode Tonemap must run even when its skipWhen fields
-            // match (e.g. an explicit Linear volume), or the headroom is lost.
-            if (auto* dev = services->GetDevice();
-                dev && Rendering::IsHdrOutputModeActive(dev->GetActiveHdrOutputMode()))
-                skip = false;
-        }
-        if (skip)
-        {
-            for (const auto& f : node.m_SkipWhenFields)
+            float v = 0.0f;
+            if (!settings.TryReadField(f.Name, v) || std::abs(v - f.Value) > kSkipEpsilon)
             {
-                float v = 0.0f;
-                if (!settings.TryReadField(f.Name, v) || std::abs(v - f.Value) > kSkipEpsilon)
-                {
-                    skip = false; // unknown field or live effect: run
-                    break;
-                }
+                skip = false; // unknown field or live effect: run
+                break;
             }
         }
         if (skip)
@@ -1383,6 +1371,10 @@ void Detail::FullscreenShaderNodeRenderer::Declare(
                                                cubeLut, shaderAnimationTime);
                         if (node.m_Id == "Tonemap")
                         {
+                            // The view's output overrides the blended look after
+                            // the reflected write; no volume authors it.
+                            if (settings.ViewOutput == PostProcessViewOutput::NoLook)
+                                pcw.Add("look", Passes::kTonemapNoLookArm);
                             const HdrOutputMode mode = device->GetActiveHdrOutputMode();
                             const bool ictcpOutput = mode == HdrOutputMode::HDR10_PQ ||
                                                      mode == HdrOutputMode::HDR10Plus;

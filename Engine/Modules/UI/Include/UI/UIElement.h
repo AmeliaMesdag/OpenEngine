@@ -505,11 +505,13 @@ public:
     // intentional there and the Mount owns the re-attach timing.
     virtual std::unique_ptr<UIElement> TakeChild(UIElement* child);
 
-    /// Search this subtree, including Mount targets. Manager-owned trees use an
-    /// index for nonempty ids; duplicates select the first match in depth-first order.
-    /// Each element precedes its children, followed by its Mount target.
-    /// Trees without a manager and empty-id queries use depth-first traversal.
-    UIElement* FindById(std::string_view id);
+    /// Search this subtree, including Mount targets, for an id given as its StringId
+    /// ("panel-root"_sid, or HashStringId where the id is built at runtime). Manager-owned
+    /// trees use the manager's index; trees without a manager use depth-first traversal.
+    /// Duplicates select the first match in depth-first order: each element precedes its
+    /// children, followed by its Mount target. An empty id is never registered;
+    /// FindById(0) returns nullptr.
+    UIElement* FindById(StringId id);
 
     // Tooltip text shown on hover. Empty string means no tooltip.
     void SetTooltip(std::string text) { m_TooltipText = std::move(text); }

@@ -15,6 +15,15 @@
   /* Backdrop for anything framing a rendered image: graph node preview plates,
      texture drop slots, the shader graph's preview panel. */
   --ui_color_bg_plate: #2A2A2C;
+  /* MarkdownText in the editor (its rules are the UI module's default sheet): a code block sits
+     darker than the panel it is on, an inline code span lifts its words off the text around it. */
+  --ui_color_markdown_link: var(--ui_color_accent_blue_hover);
+  --ui_color_markdown_link_hover: #8CC0FF;
+  --ui_color_markdown_muted: var(--ui_color_text_dim);
+  --ui_color_markdown_code_inline: #3F3F3F;
+  --ui_color_markdown_code_block: #1A1A1A;
+  --ui_color_markdown_line: #4A4A4A;
+  --ui_color_markdown_table_header: var(--ui_color_bg_plate);
 
   --ui_color_border: #272727;
   --ui_color_border_subtle: #3A3A3A;

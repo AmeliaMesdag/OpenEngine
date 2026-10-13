@@ -271,7 +271,7 @@ void SceneViewPanel::ResetQuadViewSplits()
     ApplyQuadViewLayout();
     UpdateQuadViewButtonState();
 
-    if (UIElement* host = FindById("SceneViewViewportHost"))
+    if (UIElement* host = FindById("SceneViewViewportHost"_sid))
     {
         host->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
         host->RequestRelayout();
@@ -512,9 +512,9 @@ void SceneViewPanel::RefreshViewportRotationGizmos()
         const auto slot = static_cast<ViewportSlot>(i);
         ViewportRotationGizmo* gizmo = nullptr;
         if (UIElement* viewport = m_ViewportSlots[i])
-            gizmo = dynamic_cast<ViewportRotationGizmo*>(viewport->FindById(kRotationGizmoIds[i]));
+            gizmo = dynamic_cast<ViewportRotationGizmo*>(viewport->FindById(HashStringId(kRotationGizmoIds[i])));
         if (!gizmo)
-            gizmo = dynamic_cast<ViewportRotationGizmo*>(FindById(kRotationGizmoIds[i]));
+            gizmo = dynamic_cast<ViewportRotationGizmo*>(FindById(HashStringId(kRotationGizmoIds[i])));
         m_RotationGizmos[i] = gizmo;
         if (!gizmo)
             continue;
@@ -546,9 +546,9 @@ void SceneViewPanel::RefreshViewportRulerOverlays()
         const auto slot = static_cast<ViewportSlot>(i);
         SceneViewRulerOverlay* overlay = nullptr;
         if (UIElement* viewport = m_ViewportSlots[i])
-            overlay = dynamic_cast<SceneViewRulerOverlay*>(viewport->FindById(kRulerOverlayIds[i]));
+            overlay = dynamic_cast<SceneViewRulerOverlay*>(viewport->FindById(HashStringId(kRulerOverlayIds[i])));
         if (!overlay)
-            overlay = dynamic_cast<SceneViewRulerOverlay*>(FindById(kRulerOverlayIds[i]));
+            overlay = dynamic_cast<SceneViewRulerOverlay*>(FindById(HashStringId(kRulerOverlayIds[i])));
 
         m_RulerOverlays[i] = overlay;
         if (!overlay)
@@ -569,9 +569,9 @@ void SceneViewPanel::RefreshViewportMeasureOverlays()
         const auto slot = static_cast<ViewportSlot>(i);
         SceneViewMeasureOverlay* overlay = nullptr;
         if (UIElement* viewport = m_ViewportSlots[i])
-            overlay = dynamic_cast<SceneViewMeasureOverlay*>(viewport->FindById(kMeasureOverlayIds[i]));
+            overlay = dynamic_cast<SceneViewMeasureOverlay*>(viewport->FindById(HashStringId(kMeasureOverlayIds[i])));
         if (!overlay)
-            overlay = dynamic_cast<SceneViewMeasureOverlay*>(FindById(kMeasureOverlayIds[i]));
+            overlay = dynamic_cast<SceneViewMeasureOverlay*>(FindById(HashStringId(kMeasureOverlayIds[i])));
 
         m_MeasureOverlays[i] = overlay;
         if (!overlay)
@@ -594,7 +594,7 @@ UIElement* SceneViewPanel::FindViewportOverlayById(const char* id) const
 
     const auto findIn = [id](UIElement* root) -> UIElement*
     {
-        return root ? root->FindById(id) : nullptr;
+        return root ? root->FindById(HashStringId(id)) : nullptr;
     };
 
     if (UIElement* element = findIn(m_OverlayViewport))
@@ -617,7 +617,7 @@ UIElement* SceneViewPanel::FindViewportOverlayById(const char* id) const
             return element;
     }
 
-    return const_cast<SceneViewPanel*>(this)->FindById(id);
+    return const_cast<SceneViewPanel*>(this)->FindById(HashStringId(id));
 }
 
 bool SceneViewPanel::ViewportOverlaysNeedSync() const
@@ -710,7 +710,7 @@ void SceneViewPanel::SetQuadViewKind(ViewportSlot slot, QuadViewKind kind)
     }
     ApplyQuadViewKind(slot);
     SyncViewportOverlays();
-    if (UIElement* host = FindById("SceneViewViewportHost"))
+    if (UIElement* host = FindById("SceneViewViewportHost"_sid))
     {
         host->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
         host->RequestRelayout();
@@ -730,7 +730,7 @@ void SceneViewPanel::ResetQuadViewAssignments()
         ApplyQuadViewKind(static_cast<ViewportSlot>(i));
     SyncViewportOverlays();
 
-    if (UIElement* host = FindById("SceneViewViewportHost"))
+    if (UIElement* host = FindById("SceneViewViewportHost"_sid))
     {
         host->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
         host->RequestRelayout();
@@ -738,7 +738,7 @@ void SceneViewPanel::ResetQuadViewAssignments()
 }
 void SceneViewPanel::ApplyQuadViewLayout()
 {
-    UIElement* host = FindById("SceneViewViewportHost");
+    UIElement* host = FindById("SceneViewViewportHost"_sid);
     const float hostW = host ? std::max(1.0f, host->GetLayoutWidth()) : 1.0f;
     const float hostH = host ? std::max(1.0f, host->GetLayoutHeight()) : 1.0f;
     if (host)
@@ -833,7 +833,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
                  .Set(Style::PositionTop, StyleLength::Px(topY * hostH))
                  .Set(Style::Width, StyleLength::Px(kSplitHandleHitPx))
                  .Set(Style::Height, StyleLength::Px(std::max(0.0f, height * hostH)));
-            if (UIElement* line = handle->FindById(lineId))
+            if (UIElement* line = handle->FindById(HashStringId(lineId)))
             {
                 const float lineLeftPx = std::clamp(splitPx - leftPx, 0.0f, kSplitHandleHitPx - kSplitLinePx);
                 line->Overrides()
@@ -864,7 +864,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
                  .Set(Style::PositionTop, StyleLength::Px(topPx))
                  .Set(Style::Width, StyleLength::Percent(100.0f))
                  .Set(Style::Height, StyleLength::Px(kSplitHandleHitPx));
-            if (UIElement* line = handle->FindById("SceneViewQuadSplitHorizontalLine"))
+            if (UIElement* line = handle->FindById("SceneViewQuadSplitHorizontalLine"_sid))
             {
                 const float lineTopPx = std::clamp(splitPx - topPx, 0.0f, kSplitHandleHitPx - kSplitLinePx);
                 line->Overrides()
@@ -1389,7 +1389,7 @@ void SceneViewPanel::UpdateQuadSplitDrag(UIEvent& ev)
     if (m_QuadSplitDragAxis == QuadSplitDragAxis::None)
         return;
 
-    UIElement* host = FindById("SceneViewViewportHost");
+    UIElement* host = FindById("SceneViewViewportHost"_sid);
     if (!host)
         return;
 
@@ -1459,7 +1459,7 @@ std::vector<ContextMenuManipulator::Item> SceneViewPanel::BuildQuadViewMenuItems
 
 void SceneViewPanel::UpdateQuadViewButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("QuadViewToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("QuadViewToggle"_sid)))
     {
         if (m_QuadViewEnabled)
             btn->AddClass("icon-active");

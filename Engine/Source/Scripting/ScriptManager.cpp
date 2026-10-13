@@ -1,4 +1,5 @@
 #include "Scripting/ScriptManager.h"
+#include "Core/Engine.h"
 #include "JobSystem/JobChannel.h"
 #include "Scripting/ScriptTargetFramework.h"
 #include "Assets/Packages/PackageNativeCache.h"
@@ -46,6 +47,10 @@ namespace GameEngine
 
 namespace
 {
+// The managed MainThread.Post drain, installed once by Scripting.ABI (which lives in the
+// default context and never unloads) and shared by every ScriptManager of the process.
+std::atomic<ScriptManager::ManagedPostDrain> s_ManagedPostDrain{nullptr};
+
 // A compile that lost to a newer file change reports failure with a
 // "superseded" message (see HotReloadTasks / CompileProject); it is the
 // debounce working as designed and must not log as an error.
@@ -647,6 +652,17 @@ bool ScriptManager::RebindProjectScripts(const ScriptsConfig& newConfig)
 
 void ScriptManager::Shutdown()
 {
+    // Posts queued at quit are discarded, not run. EngineCore has already closed its post
+    // gate, so no post lands after this.
+    {
+        std::lock_guard<std::mutex> lock(m_MainThreadTasksMutex);
+        m_ManagedPostDrainRequested = false;
+    }
+    if (const ManagedPostDrain drain = s_ManagedPostDrain.load(std::memory_order_acquire))
+    {
+        drain(0);
+    }
+
     if (!m_Initialized)
     {
         return;
@@ -2129,6 +2145,22 @@ size_t ScriptManager::ProcessMainThreadTasks()
         return 0;
     }
 
+    // The MainThread.Post drain step: once per call, before the task loop and outside its cap,
+    // so a flood of posts is one batch and an action that posts itself runs once per pump.
+    // Inside the processing lock, so posted actions never run on two threads at once.
+    bool drainPosts = false;
+    {
+        std::lock_guard<std::mutex> lock(m_MainThreadTasksMutex);
+        drainPosts = std::exchange(m_ManagedPostDrainRequested, false);
+    }
+    if (drainPosts)
+    {
+        if (const ManagedPostDrain drain = s_ManagedPostDrain.load(std::memory_order_acquire))
+        {
+            drain(1);
+        }
+    }
+
     // RACE CONDITION FIX: Check if hot-reload is in progress and prioritize those tasks
     bool hotReloadInProgress = IsAsyncHotReloadInProgress();
 
@@ -2152,8 +2184,8 @@ size_t ScriptManager::ProcessMainThreadTasks()
             // in the editor/runtime it means thread-affine work may misbehave.
             // Deliberately checked before the first task runs so the warning is
             // in the log even if that task then deadlocks or crashes.
-            const std::thread::id mainThreadId = m_MainThreadId.load(std::memory_order_relaxed);
-            if (mainThreadId != std::thread::id{} && mainThreadId != std::this_thread::get_id() &&
+            const EngineCore& engine = EngineCore::GetInstance();
+            if (engine.HasEverInitialized() && !engine.IsMainThread() &&
                 !m_WarnedOffMainThreadPump.exchange(true))
             {
                 Logger::Log::Warning("ScriptManager: executing main-thread tasks on a non-main thread (fallback pump)");
@@ -2188,9 +2220,16 @@ size_t ScriptManager::ProcessMainThreadTasks()
     return tasksProcessed;
 }
 
-void ScriptManager::MarkMainThread()
+void ScriptManager::RequestManagedPostDrain()
 {
-    m_MainThreadId.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(m_MainThreadTasksMutex);
+    m_ManagedPostDrainRequested = true;
+}
+
+bool ScriptManager::InstallManagedPostDrain(ManagedPostDrain drain)
+{
+    ManagedPostDrain expected = nullptr;
+    return s_ManagedPostDrain.compare_exchange_strong(expected, drain, std::memory_order_acq_rel);
 }
 
 void ScriptManager::QueueMainThreadTask(std::function<void()> task)

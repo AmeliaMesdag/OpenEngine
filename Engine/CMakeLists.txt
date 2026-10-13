@@ -2045,6 +2045,7 @@ endif()
                 Tests/SortedTransparentRunTests.cpp
                 Tests/GPUSortTests.cpp
                 Tests/SortedTransparentDeciderTests.cpp
+                Tests/SortedTransparentBuildAllocationTests.cpp
                 Tests/SkinPaletteAtlasTests.cpp
                 Tests/SkinPaletteRefusalTests.cpp
                 Tests/SkeletonStoreRuntimeTests.cpp
@@ -2175,11 +2176,13 @@ endif()
                 Tests/SkyDiffuseConvolveChromaticityTests.cpp
                 Tests/SkyTransmittanceLutParityTests.cpp
                 Tests/SkyAtmosphereLutReferenceTests.cpp
+                Tests/SkyViewLutAltitudeTests.cpp
                 Tests/ParticleCoverageTests.cpp
                 Tests/ParticleNearFadeTests.cpp
                 Tests/SunDiscRadianceTests.cpp
                 Tests/SunDiscSizeTests.cpp
                 Tests/StarSparkleShapeTests.cpp
+                Tests/StarTwinkleRangeTests.cpp
                 Tests/IblEnvDataRingTests.cpp
                 Tests/IrradianceReadbackTests.cpp
                 Tests/LightContributionSortTests.cpp
@@ -2622,6 +2625,8 @@ endif()
 			        Tests/MeteringDepthDeclareTests.cpp
 			        # The height fog's sky colour: the fog pass reads the backdrop SkyRender publishes.
 			        Tests/HeightFogSkyBackdropDeclareTests.cpp
+			        # The view output reaches the Tonemap node: no look skips the blended look.
+			        Tests/TonemapViewOutputDeclareTests.cpp
 			        # The motion payload's reconstruction lanes, rendered: same
 			        # target because it needs the same staged-shader resolver and
 			        # the same Engine-level producer builder.

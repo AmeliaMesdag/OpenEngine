@@ -23,7 +23,7 @@ layout(set = 0, binding = GE_ATMOSPHERE_UBO_BINDING) uniform AtmosphereUBO
     float rayleighScaleHeight;
     float mieScaleHeight;
     vec3  betaRayleigh;   float pad0;
-    vec3  betaMie;        float mieG;
+    vec3  betaMie;        float pad1;
     vec3  groundAlbedo;
     float groundBrightness;
     vec3  groundNightColor;
@@ -67,6 +67,35 @@ GE_SkyMedium GE_SkyMediumAt(float h)
     m.extinction = m.scatterRayleigh + (uAtmos.betaMie + uAtmos.mieAbsorption) * mieDensity +
                    uAtmos.ozoneAbsorption * ozoneDensity;
     return m;
+}
+
+// The aerosol's phase function (per steradian, cosTheta between the view ray and the direction
+// toward the sun): a three-lobe Henyey-Greenstein fit to the Mie phase function of the OPAC
+// continental-average aerosol at 550 nm (Hess, Koepke and Schult 1998, BAMS 79(5), the
+// water-soluble, insoluble and soot components), asymmetry 0.62. The narrow lobe is the coarse
+// particles' diffraction peak, the sun's aureole: 14.5 per steradian at the sun against Mie's 14.3,
+// within 12 % out to 5 degrees. The broad lobes carry the side and back scatter: within 4 % from 85
+// to 95 degrees (0.026 at 90, where a single lobe at g 0.8 gives 0.008 to 0.014) and 20 % from 30
+// to 180, so haze lifts the horizon all around the sky. 5 to 30 degrees is the fit's worst: 30 %
+// over Mie at 10 degrees, and 0.416 of the scattered energy in that band against Mie's 0.362, which
+// three lobes cannot shape away; the tabulated Mie phase is the follow-up (#3959).
+float GE_SkyHenyeyGreenstein(float g, float cosTheta)
+{
+    float d = 1.0 + g * g - 2.0 * g * cosTheta;
+    return (1.0 - g * g) / (4.0 * 3.14159265359 * d * sqrt(d));
+}
+
+float GE_SkyAerosolPhase(float cosTheta)
+{
+    const float kPeakWeight = 0.0362;
+    const float kPeakG = 0.9795;
+    const float kForwardWeight = 0.9530;
+    const float kForwardG = 0.6503;
+    const float kBackwardWeight = 0.0108;
+    const float kBackwardG = -0.7055;
+    return kPeakWeight * GE_SkyHenyeyGreenstein(kPeakG, cosTheta) +
+           kForwardWeight * GE_SkyHenyeyGreenstein(kForwardG, cosTheta) +
+           kBackwardWeight * GE_SkyHenyeyGreenstein(kBackwardG, cosTheta);
 }
 
 #endif

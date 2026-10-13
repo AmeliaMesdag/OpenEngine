@@ -212,7 +212,7 @@ void EnableWindowDrag(UIElement& handle, UIElement& window, bool directTargetOnl
 // abandon the build rather than render half a modal.
 UIElement* RequireLayoutElement(UIElement& root, const char* elementId, bool& layoutComplete)
 {
-    UIElement* element = root.FindById(elementId);
+    UIElement* element = root.FindById(HashStringId(elementId));
     if (!element)
     {
         Logger::Log::Error("ProjectPicker: ProjectPicker.uxml has no element with id '{}'", elementId);
@@ -1415,7 +1415,7 @@ void ProjectFolderPickerModal::Hide()
         const std::string& focusId = manager->GetFocusedElementId();
         if (!focusId.empty())
         {
-            if (UIElement* focused = FindById(focusId))
+            if (UIElement* focused = FindById(HashStringId(focusId)))
             {
                 for (UIElement* p = focused; p; p = p->GetParent())
                 {
@@ -1855,7 +1855,7 @@ void ProjectFolderPickerModal::Update()
         m_LogoHueAnimationTime = std::fmod(
             m_LogoHueAnimationTime + dt * kLogoHueDegreesPerSecond, 360.0f);
 
-        if (UIElement* cubeIcon = FindById("cube-icon"))
+        if (UIElement* cubeIcon = FindById("cube-icon"_sid))
         {
             const float h = m_LogoHueAnimationTime;
             constexpr float s = 0.5f;

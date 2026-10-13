@@ -167,6 +167,21 @@
 	color: var(--ui_color_text);
 }
 
+/* A reply, drawn from its Markdown (MarkdownText): the text style every block of it inherits,
+   the same as a prompt's text (.agent-row-text). The control's own sheet adds only what
+   Markdown adds. */
+.agent-row-reply {
+	flex-grow: 0;
+	flex-shrink: 0;
+	min-width: 0;
+	padding: 4px 12px;
+	font-family: var(--ui_font_family);
+	font-size: 14px;
+	line-height: var(--script_line_height, 1.0);
+	text-align: left;
+	color: var(--ui_color_text);
+}
+
 /* A reply waiting for the user's answer on one of its calls: the card is framed in the
    waiting tier, so it is found in a long history. */
 .agent-row-asks {
@@ -654,6 +669,16 @@
 	flex-shrink: 0;
 	margin-left: auto;
 	gap: 8px;
+}
+
+/* The mark-ups a prompt names, one chip each under its text and inset as the text is; a chip
+   frames its mark-up. */
+.agent-row-markups {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 4px 12px 4px 12px;
 }
 
 .agent-row-retried {

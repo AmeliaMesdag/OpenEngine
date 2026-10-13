@@ -51,10 +51,9 @@ if (text.Length > 0)
 | The object has extras the model kept | The text |
 | The object has no extras, no object of that kind has the name, or the import did not keep them (see the bounds below) | An empty string |
 | No loaded model has the GUID | `InvalidOperationException`: a model's extras are readable while the model is loaded |
-| Called from a thread other than the main thread | `InvalidOperationException`, and one error in the log |
 | `kind` is not a `ModelObjectKind` | `ArgumentOutOfRangeException` |
 
-Call `GetExtras` from the main thread, as a system's update does: a hot reload replaces a model's extras there. Each call copies the text into a new string, so read once (at spawn, say) and keep what you parsed rather than reading every frame.
+`GetExtras` can be called from any thread while the engine runs: a system's update wherever the scheduler runs it, or a thread of your own that finishes its reads before the engine shuts down. A hot reload replaces a model's extras whole, so a call reads either the extras before the reload or the extras after it, never a mix. Each call copies the text into a new string, so read once (at spawn, say) and keep what you parsed rather than reading every frame.
 
 ## Bounds
 
@@ -80,11 +79,12 @@ GE_Result GE_Model_GetExtras(const uint8_t modelGuidBytes[16], uint32_t kind,
 - `modelGuidBytes` are the GUID's bytes in the order its text form writes them (in C#, `Guid.ToByteArray(bigEndian: true)`).
 - `kind` is a `GE_ModelObjectKind`: scene 0, node 1, mesh 2, material 3, animation 4.
 - The buffer contract is the one the element text exports use: it copies what fits, with no NUL terminator, and always reports the text's full length in `*outLen`, so a call with a null buffer and a zero length asks the length. `*outLen` is 0 when the model kept nothing for the object.
-- Main thread only: a call from another thread returns `GE_Result_Fail` and logs one error. A host that never marked a main thread (a standalone test host) accepts every thread.
+- Any thread: the model's extras are an immutable snapshot that a reload replaces whole, and the export reads the snapshot it found.
 - `GE_Result_NotFound` when no loaded model has the GUID. `GE_Result_InvalidArg`, checked before the model is looked up, for a kind past animation, a null GUID or `outLen`, a null name with a nonzero length, a negative `bufferLen`, or a null buffer with a nonzero `bufferLen`.
 
 ## Changelog
 
+- 2026-10-13: `GetExtras` is callable from any thread while the engine runs; the main-thread refusal is gone.
 - 2026-10-13: Converted from `docs/Assets/model-extras.html`; the ABI version note dropped.
 - 2026-09-30: the engine reads the `clip` key of an animation's extras (the glTF clip schema); a model keeps that block like any other.
 - 2026-09-30: first version. Scene, node, mesh, material and animation extras of glTF and GLB models, read with `ModelApi.GetExtras` on the main thread; 256 KiB per object and 1 MiB per model, names included.

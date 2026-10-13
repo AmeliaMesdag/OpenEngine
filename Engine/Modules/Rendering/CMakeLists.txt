@@ -785,7 +785,9 @@ set(RENDERING_CORE_SOURCES
     # Sky
     Source/Sky/AtmosphereTransmittance.cpp
     Source/Sky/SkyRenderer.cpp
+    Source/Sky/SkyViewLutAltitude.cpp
     Source/Sky/SolarPath.cpp
+    Source/Sky/StarCatalog.cpp
     Source/Sky/StarSparkleEnergy.cpp
 )
 
@@ -1732,9 +1734,12 @@ if(GTest_FOUND OR TARGET GTest::gtest)
     )
     add_test(NAME RenderingSolarPathTests COMMAND RenderingSolarPathTests)
 
-    # The star sparkle's energy gain (Rendering/Sky/StarSparkleEnergy.h): pure CPU maths.
-    add_executable(RenderingStarSparkleEnergyTests Tests/StarSparkleEnergyTests.cpp)
+    # The night-sky stars' CPU side: the sparkle's energy gains (Rendering/Sky/StarSparkleEnergy.h)
+    # and the star catalog (Rendering/Sky/StarCatalog.h). Pure CPU, no device.
+    add_executable(RenderingStarSparkleEnergyTests Tests/StarSparkleEnergyTests.cpp Tests/StarCatalogTests.cpp)
     set_target_properties(RenderingStarSparkleEnergyTests PROPERTIES FOLDER "Rendering/Tests")
+    # StarCatalogTests includes the module's private Source/Sky/StarCatalog.h.
+    target_include_directories(RenderingStarSparkleEnergyTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(RenderingStarSparkleEnergyTests PRIVATE
         GameEngineRendering
         FileSystemObjects

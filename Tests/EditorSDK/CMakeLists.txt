@@ -21,6 +21,7 @@ add_executable(EditorSdkRegistryTests
     EditorSdkPanelRegistryTests.cpp
     EditorSdkMenuRegistryTests.cpp
     EditorSdkSceneCommandsTests.cpp
+    EditorSdkMarkupRequestsTests.cpp
     EditorSdkSettingsRegistryTests.cpp
     # Link the shared SDK registry, as the Build panel and package modules do.
     BuildExporterRegistryTests.cpp

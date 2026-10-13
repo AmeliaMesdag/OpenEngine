@@ -3,6 +3,7 @@
 #include "Rendering/Core/Device.h"
 #include "Rendering/Sky/SkySettings.h"
 #include "Rendering/Sky/SkySystem.h"
+#include "Rendering/Sky/StarCatalog.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -21,7 +22,7 @@ struct AtmosphereParametersGPU
     float betaRayleigh[3];
     float pad0;
     float betaMie[3];
-    float mieG;
+    float pad1;
     float groundAlbedo[3];
     float groundBrightness;
     float groundNightColor[3];
@@ -124,12 +125,6 @@ static_assert(offsetof(SkyUBOGPU, fallingStarShapeParams) == 256, "SkyUBO fallin
 static_assert(offsetof(SkyUBOGPU, gradientSkyTop) == 272, "SkyUBO gradientSkyTop offset mismatch");
 static_assert(offsetof(SkyUBOGPU, gradientSkyHorizon) == 288, "SkyUBO gradientSkyHorizon offset mismatch");
 static_assert(offsetof(SkyUBOGPU, gradientSkyBottom) == 304, "SkyUBO gradientSkyBottom offset mismatch");
-
-struct StarInstanceGPU
-{
-    float dirAndBrightness[4];
-    float properties[4];
-};
 
 // Engine-owned moon art, relative to the install assets root. The Editor's and Player's
 // asset staging copy the repo's Engine/Assets/Textures tree next to the executable, so this is a
@@ -264,8 +259,9 @@ class SkyRenderer
     void MarkTransmittanceComputed() { m_TransmittanceComputed = true; }
 
     // Sky-view LUT dirty tracking. The LUT is a function of SkySettings
-    // only (sun direction, atmosphere, etc. — NOT camera). The pipeline
-    // node computes a digest of the relevant settings each frame and
+    // (sun direction, atmosphere, etc.) and of the camera's altitude band
+    // (Rendering/Sky/SkyViewLutAltitude.h), never of the raw camera. The pipeline
+    // node computes a digest of those inputs each frame and
     // calls IsSkyViewLutCurrentFor() in its activation predicate; if the
     // digest matches the last-computed value, the dispatch is skipped.
     // MarkSkyViewLutComputed() is called from the execute lambda after
@@ -289,9 +285,9 @@ class SkyRenderer
         return m_SkyViewLutComputedOnce ? m_SkyViewLutInputDigest : 0;
     }
 
-    // Multiscatter LUT dirty tracking. Shares the sky-view input digest (the
-    // multiscatter LUT is a function of the same atmosphere + sun-zenith
-    // parameterization). Gated independently so the three-pass chain
+    // Multiscatter LUT dirty tracking. Takes the sky-view LUT's settings digest
+    // without the altitude band (the multiscatter LUT is a function of the same
+    // atmosphere + sun-zenith parameterization, over every height). Gated independently so the three-pass chain
     // (transmittance -> multiscatter -> sky-view) re-runs together on a change.
     bool IsMultiscatterCurrentFor(uint64_t inputDigest) const
     {

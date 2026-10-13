@@ -231,17 +231,21 @@ target_link_libraries(NativeScriptManagerTests PRIVATE
 target_include_directories(NativeScriptManagerTests PRIVATE
     ${CMAKE_SOURCE_DIR}/Engine/Include
     # GltfTestFiles.h: in-memory glTF clips for AnimatorEventsAbiTests.
-    ${CMAKE_SOURCE_DIR}/Engine/Tests)
+    ${CMAKE_SOURCE_DIR}/Engine/Tests
+    # TestTempDir.h.
+    ${CMAKE_SOURCE_DIR}/Tests)
 
 # D1: blob (C#) components registered with a field schema through the scripting ABI —
 # scene round-trip, hot-reload layout migration, snapshot round-trip. The ABI entry points
 # are exported by GameEngine.Native (not Engine), so this piece needs the scripting shim;
 # both DLLs link Engine SHARED, so they operate on the same process-wide registries.
 # EnableStateAbiTests drives the component switch the managed EntityCommands.SetEnabled uses,
-# through the same exports; AnimatorEventsAbiTests the event poll AnimatorApi.PollEvents uses.
+# through the same exports; AnimatorEventsAbiTests the event poll AnimatorApi.PollEvents uses;
+# UiElementTypeThreadRuleAbiTests the UI element-type registry's thread rules, in a binary that
+# starts no CLR, so the element-type callbacks it installs are the first and only ones.
 if(TARGET GameEngine.Native)
     target_sources(NativeScriptManagerTests PRIVATE BlobComponentSchemaAbiTests.cpp EnableStateAbiTests.cpp
-        AnimatorEventsAbiTests.cpp AnimatorInputAbiTests.cpp)
+        AnimatorEventsAbiTests.cpp AnimatorInputAbiTests.cpp UiElementTypeThreadRuleAbiTests.cpp)
     target_link_libraries(NativeScriptManagerTests PRIVATE GameEngine.Native)
 endif()
 

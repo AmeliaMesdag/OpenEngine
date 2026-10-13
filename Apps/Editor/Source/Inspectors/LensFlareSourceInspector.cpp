@@ -359,7 +359,7 @@ void RenderFlareAtlasSpriteGhost(const UI::Interaction::DragPayload& dragPayload
         return;
 
     constexpr const char* kPreviewId = "flare-atlas-sprite-drag-ghost";
-    auto* preview = dynamic_cast<FlareElementPreview*>(icon.FindById(kPreviewId));
+    auto* preview = dynamic_cast<FlareElementPreview*>(icon.FindById(HashStringId(kPreviewId)));
     if (!preview)
     {
         auto ownedPreview = std::make_unique<FlareElementPreview>();

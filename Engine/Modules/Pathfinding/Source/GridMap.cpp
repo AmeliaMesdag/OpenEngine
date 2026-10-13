@@ -6,12 +6,51 @@
 #include "Pathfinding/PathBuffer.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <queue>
 
 namespace GameEngine::Pathfinding
 {
+
+namespace
+{
+
+// One path-solve window on one map for the scope; closed on every exit, a
+// solve that throws included.
+class ScopedPathSolveWindow
+{
+public:
+    explicit ScopedPathSolveWindow(const GridMap& map)
+        : m_Map(map)
+    {
+        m_Map.OpenPathSolveWindow();
+    }
+
+    ~ScopedPathSolveWindow()
+    {
+        m_Map.ClosePathSolveWindow();
+    }
+
+    ScopedPathSolveWindow(const ScopedPathSolveWindow&) = delete;
+    ScopedPathSolveWindow& operator=(const ScopedPathSolveWindow&) = delete;
+
+private:
+    const GridMap& m_Map;
+};
+
+} // namespace
+
+GridMap::ReadView::ReadView(const GridMap& map)
+    : m_Settings(map.m_Settings)
+    , m_Costs(map.m_Costs.data())
+    , m_Heights(map.m_Heights.data())
+    , m_Blocked(map.m_Blocked.data())
+    , m_DynamicBlocked(map.m_DynamicBlocked.data())
+    , m_Reservations(map.m_Reservations.data())
+{
+}
 
 GridMap::GridMap(const GridSettings& settings)
     : m_Settings(settings)
@@ -50,6 +89,41 @@ GridMap::GridMap(const GridSettings& settings)
     m_Reservations.resize(cellCount);
 }
 
+void GridMap::OpenPathSolveWindow() const
+{
+    m_ReservationMutex.lock_shared();
+    m_PathSolveWindows.fetch_add(1, std::memory_order_relaxed);
+}
+
+void GridMap::ClosePathSolveWindow() const
+{
+    m_PathSolveWindows.fetch_sub(1, std::memory_order_relaxed);
+    m_ReservationMutex.unlock_shared();
+}
+
+GridMap::ReadView GridMap::View() const
+{
+    assert(m_PathSolveWindows.load(std::memory_order_relaxed) != 0 &&
+           "GridMap: a read view was taken outside a path-solve window; open one with OpenPathSolveWindow "
+           "(GridMap::FindPath and NavigationWorld::SolveGridPaths do)");
+    return ReadView(*this);
+}
+
+// Every writer calls this before it takes the reservation lock, so in an
+// asserting build a write inside a window fails here before it could block on
+// the window's shared lock. No test in such a build can therefore observe that
+// the window takes the lock or that a solve takes none. Both hold by
+// construction: a solve reads only through a ReadView, which has no locking
+// member, and the thread that opened the window runs only its own
+// ParallelFor units before it parks, so no other job takes a second shared
+// lock on that thread.
+void GridMap::AssertNoPathSolveWindow() const
+{
+    assert(m_PathSolveWindows.load(std::memory_order_relaxed) == 0 &&
+           "GridMap: a grid map was written while path solves read it (NavigationWorld::SolveGridPaths); "
+           "write maps outside NavigationPathfindingSystem's update");
+}
+
 const GridSettings& GridMap::GetSettings() const
 {
     return m_Settings;
@@ -57,7 +131,7 @@ const GridSettings& GridMap::GetSettings() const
 
 uint32 GridMap::GetCellCount() const
 {
-    return m_Settings.Width * m_Settings.Depth;
+    return ReadView(*this).GetCellCount();
 }
 
 uint32 GridMap::GetTopologyVersion() const
@@ -67,29 +141,27 @@ uint32 GridMap::GetTopologyVersion() const
 
 uint32 GridMap::CellIndex(uint32 cellX, uint32 cellZ) const
 {
-    return cellZ * m_Settings.Width + cellX;
+    return ReadView(*this).CellIndex(cellX, cellZ);
 }
 
 void GridMap::CellFromIndex(uint32 index, uint32& outCellX, uint32& outCellZ) const
 {
-    outCellX = index % m_Settings.Width;
-    outCellZ = index / m_Settings.Width;
+    ReadView(*this).CellFromIndex(index, outCellX, outCellZ);
 }
 
 bool GridMap::IsValidCell(uint32 cellX, uint32 cellZ) const
 {
-    return cellX < m_Settings.Width && cellZ < m_Settings.Depth;
+    return ReadView(*this).IsValidCell(cellX, cellZ);
 }
 
 float32 GridMap::GetCellCost(uint32 cellX, uint32 cellZ) const
 {
-    if (!IsValidCell(cellX, cellZ))
-        return 1.0f;
-    return m_Costs[CellIndex(cellX, cellZ)];
+    return ReadView(*this).GetCellCost(cellX, cellZ);
 }
 
 void GridMap::SetCellCost(uint32 cellX, uint32 cellZ, float32 cost)
 {
+    AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
     m_Costs[CellIndex(cellX, cellZ)] = cost;
@@ -98,14 +170,12 @@ void GridMap::SetCellCost(uint32 cellX, uint32 cellZ, float32 cost)
 
 bool GridMap::IsCellBlocked(uint32 cellX, uint32 cellZ) const
 {
-    if (!IsValidCell(cellX, cellZ))
-        return true;
-    uint32 idx = CellIndex(cellX, cellZ);
-    return m_Blocked[idx] != 0 || m_DynamicBlocked[idx] != 0;
+    return ReadView(*this).IsCellBlocked(cellX, cellZ);
 }
 
 void GridMap::SetCellBlocked(uint32 cellX, uint32 cellZ, bool blocked)
 {
+    AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
     m_Blocked[CellIndex(cellX, cellZ)] = blocked ? 1 : 0;
@@ -114,13 +184,12 @@ void GridMap::SetCellBlocked(uint32 cellX, uint32 cellZ, bool blocked)
 
 float32 GridMap::GetCellHeight(uint32 cellX, uint32 cellZ) const
 {
-    if (!IsValidCell(cellX, cellZ))
-        return 0.0f;
-    return m_Heights[CellIndex(cellX, cellZ)];
+    return ReadView(*this).GetCellHeight(cellX, cellZ);
 }
 
 void GridMap::SetCellHeight(uint32 cellX, uint32 cellZ, float32 height)
 {
+    AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
     m_Heights[CellIndex(cellX, cellZ)] = height;
@@ -129,6 +198,7 @@ void GridMap::SetCellHeight(uint32 cellX, uint32 cellZ, float32 height)
 
 void GridMap::SetCellDynamicBlocked(uint32 cellX, uint32 cellZ, bool blocked)
 {
+    AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
     m_DynamicBlocked[CellIndex(cellX, cellZ)] = blocked ? 1 : 0;
@@ -136,6 +206,7 @@ void GridMap::SetCellDynamicBlocked(uint32 cellX, uint32 cellZ, bool blocked)
 
 void GridMap::ClearAllDynamicBlocked()
 {
+    AssertNoPathSolveWindow();
     std::memset(m_DynamicBlocked.data(), 0, m_DynamicBlocked.size());
 }
 
@@ -149,6 +220,7 @@ bool GridMap::IsCellDynamicBlocked(uint32 cellX, uint32 cellZ) const
 void GridMap::ReserveCell(uint32 cellX, uint32 cellZ, uint32 agentId, float32 expirationTime,
                           bool occupancy)
 {
+    AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
     std::unique_lock lock(m_ReservationMutex);
@@ -171,6 +243,7 @@ void GridMap::ReserveCell(uint32 cellX, uint32 cellZ, uint32 agentId, float32 ex
 
 void GridMap::ClearCellReservation(uint32 cellX, uint32 cellZ)
 {
+    AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
     std::unique_lock lock(m_ReservationMutex);
@@ -182,14 +255,13 @@ void GridMap::ClearCellReservation(uint32 cellX, uint32 cellZ)
 
 CellReservation GridMap::GetCellReservation(uint32 cellX, uint32 cellZ) const
 {
-    if (!IsValidCell(cellX, cellZ))
-        return CellReservation{};
     std::shared_lock lock(m_ReservationMutex);
-    return m_Reservations[CellIndex(cellX, cellZ)];
+    return ReadView(*this).Reservation(cellX, cellZ);
 }
 
 void GridMap::ClearReservationsForAgent(uint32 agentId)
 {
+    AssertNoPathSolveWindow();
     if (agentId == 0)
         return;
     std::unique_lock lock(m_ReservationMutex);
@@ -210,6 +282,7 @@ void GridMap::ClearReservationsForAgent(uint32 agentId)
 
 void GridMap::ClearExpiredReservations(float32 currentTime)
 {
+    AssertNoPathSolveWindow();
     std::unique_lock lock(m_ReservationMutex);
     for (auto it = m_AgentCells.begin(); it != m_AgentCells.end();)
     {
@@ -267,7 +340,7 @@ uint32 GridMap::GetReservedAgentCount() const
     return static_cast<uint32>(m_AgentCells.size());
 }
 
-bool GridMap::WorldToCell(float32 worldX, float32 worldZ, uint32& outCellX, uint32& outCellZ) const
+bool GridMap::ReadView::WorldToCell(float32 worldX, float32 worldZ, uint32& outCellX, uint32& outCellZ) const
 {
     if (m_Settings.Type == GridType::Square)
     {
@@ -308,7 +381,7 @@ bool GridMap::WorldToCell(float32 worldX, float32 worldZ, uint32& outCellX, uint
     }
 }
 
-void GridMap::CellToWorld(uint32 cellX, uint32 cellZ, float32& outWorldX, float32& outWorldZ) const
+void GridMap::ReadView::CellToWorld(uint32 cellX, uint32 cellZ, float32& outWorldX, float32& outWorldZ) const
 {
     if (m_Settings.Type == GridType::Square)
     {
@@ -320,6 +393,16 @@ void GridMap::CellToWorld(uint32 cellX, uint32 cellZ, float32& outWorldX, float3
         HexGrid::HexToWorld(cellX, cellZ, m_Settings.CellSize,
                             m_Settings.OriginX, m_Settings.OriginZ, outWorldX, outWorldZ);
     }
+}
+
+bool GridMap::WorldToCell(float32 worldX, float32 worldZ, uint32& outCellX, uint32& outCellZ) const
+{
+    return ReadView(*this).WorldToCell(worldX, worldZ, outCellX, outCellZ);
+}
+
+void GridMap::CellToWorld(uint32 cellX, uint32 cellZ, float32& outWorldX, float32& outWorldZ) const
+{
+    ReadView(*this).CellToWorld(cellX, cellZ, outWorldX, outWorldZ);
 }
 
 uint32 GridMap::FootprintRadiusInCells(float32 agentRadius) const
@@ -373,52 +456,66 @@ uint32 GridMap::GetNeighborCells(uint32 cellX, uint32 cellZ,
 
 PathStatus GridMap::FindPath(const PathRequest& request, PathBuffer& pathBuffer, PathHandle& outPath) const
 {
+    std::vector<PathPoint> worldPoints;
+    PathStatus status = PathStatus::Failed;
+    {
+        const ScopedPathSolveWindow window(*this);
+        status = FindPathPoints(request, worldPoints);
+    }
+    if (status == PathStatus::Complete)
+        outPath = pathBuffer.AllocatePath(worldPoints.data(), static_cast<uint32>(worldPoints.size()));
+    return status;
+}
+
+PathStatus GridMap::FindPathPoints(const PathRequest& request, std::vector<PathPoint>& outPoints) const
+{
+    outPoints.clear();
+    const ReadView view = View();
     uint32 startCellX = 0, startCellZ = 0;
     uint32 endCellX = 0, endCellZ = 0;
 
-    if (!WorldToCell(request.StartX, request.StartZ, startCellX, startCellZ))
+    if (!view.WorldToCell(request.StartX, request.StartZ, startCellX, startCellZ))
         return PathStatus::Failed;
-    if (!WorldToCell(request.EndX, request.EndZ, endCellX, endCellZ))
+    if (!view.WorldToCell(request.EndX, request.EndZ, endCellX, endCellZ))
         return PathStatus::Failed;
 
-    const uint32 startIndex = CellIndex(startCellX, startCellZ);
-    const uint32 endIndex = CellIndex(endCellX, endCellZ);
+    const uint32 startIndex = view.CellIndex(startCellX, startCellZ);
+    const uint32 endIndex = view.CellIndex(endCellX, endCellZ);
 
     uint32 agentCellRadius = 0;
-    if (request.AgentRadius > m_Settings.CellSize * 0.5f)
+    const float32 cellSize = view.GetSettings().CellSize;
+    if (request.AgentRadius > cellSize * 0.5f)
     {
-        agentCellRadius = static_cast<uint32>(std::ceil(request.AgentRadius / m_Settings.CellSize));
+        agentCellRadius = static_cast<uint32>(std::ceil(request.AgentRadius / cellSize));
     }
 
     AStarSolver solver;
     std::vector<uint32> cellPath;
-    if (!solver.Solve(*this, startIndex, endIndex, request.ExcludeAgentId, request.CurrentTime, agentCellRadius, cellPath))
+    if (!solver.Solve(view, startIndex, endIndex, request.ExcludeAgentId, request.CurrentTime, agentCellRadius, cellPath))
         return PathStatus::Failed;
 
-    std::vector<PathPoint> worldPoints;
-    worldPoints.reserve(cellPath.size());
+    outPoints.reserve(cellPath.size());
 
     for (uint32 cellIndex : cellPath)
     {
         uint32 cx = 0, cz = 0;
-        CellFromIndex(cellIndex, cx, cz);
+        view.CellFromIndex(cellIndex, cx, cz);
 
         float32 worldX = 0.0f, worldZ = 0.0f;
-        CellToWorld(cx, cz, worldX, worldZ);
+        view.CellToWorld(cx, cz, worldX, worldZ);
 
         PathPoint point;
         point.X = worldX;
-        point.Y = GetCellHeight(cx, cz);
+        point.Y = view.GetCellHeight(cx, cz);
         point.Z = worldZ;
-        worldPoints.push_back(point);
+        outPoints.push_back(point);
     }
 
-    if (request.SmoothPath && worldPoints.size() > 2)
+    if (request.SmoothPath && outPoints.size() > 2)
     {
-        PathSmoother::Smooth(*this, worldPoints);
+        PathSmoother::Smooth(view, outPoints);
     }
 
-    outPath = pathBuffer.AllocatePath(worldPoints.data(), static_cast<uint32>(worldPoints.size()));
     return PathStatus::Complete;
 }
 
@@ -545,9 +642,17 @@ bool GridMap::GetClosestNavigablePoint(float32 x, float32 /*y*/, float32 z,
     return false;
 }
 
+// Reads only the blocked and height arrays, which no writer touches inside a
+// path-solve window, so it needs no window of its own.
 bool GridMap::Raycast(float32 startX, float32 /*startY*/, float32 startZ,
                       float32 endX, float32 /*endY*/, float32 endZ,
                       float32& hitX, float32& hitY, float32& hitZ) const
+{
+    return ReadView(*this).Raycast(startX, startZ, endX, endZ, hitX, hitY, hitZ);
+}
+
+bool GridMap::ReadView::Raycast(float32 startX, float32 startZ, float32 endX, float32 endZ,
+                                float32& hitX, float32& hitY, float32& hitZ) const
 {
     uint32 startCellX = 0, startCellZ = 0;
     uint32 endCellX = 0, endCellZ = 0;

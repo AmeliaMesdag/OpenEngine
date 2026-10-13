@@ -86,9 +86,8 @@ private:
                             Pathfinding::GridMap& grid);
 
     // Rasterizes NavigationObstacle footprints into every grid surface's dynamic-blocked cells
-    // (clear + reapply). Lives here, not in NavigationMovementSystem, because dynamic-blocked is an
-    // unsynchronized field read by in-flight path jobs — every write to it must sit behind this
-    // system's job-free gate.
+    // (clear + reapply). Lives here, with the other map writes behind this system's
+    // HasActivePathJobs gate: dynamic-blocked is an unsynchronized field that path solves read.
     void ApplyDynamicObstacles(ECS::World& world);
 
     // Keeps the .navgrid watch pointed at the current project asset root, re-subscribing when the
@@ -97,9 +96,9 @@ private:
     // and retries on the next mount or rebind.
     void UpdateAuthoredCellsWatch();
 
-    // Consecutive frames the job-free gate has deferred map mutation. Triggers persist, so deferral
-    // delays work rather than losing it — but a long streak means surfaces are not updating and is
-    // logged once per streak.
+    // Consecutive frames the HasActivePathJobs gate has deferred map mutation. Triggers persist, so
+    // deferral delays work rather than losing it — but a long streak means surfaces are not updating
+    // and is logged once per streak.
     uint32 m_GateDeferredFrames = 0;
     uint64 m_UpdateIndex = 0;
 

@@ -40,7 +40,7 @@ DockspaceElement* FindMainDockspace(FloatingFrameHost::EditorWindowContext* ctx)
     UIElement* root = ctx->ui->GetRootElement();
     if (!root)
         return nullptr;
-    return dynamic_cast<DockspaceElement*>(root->FindById("dock"));
+    return dynamic_cast<DockspaceElement*>(root->FindById("dock"_sid));
 }
 
 void ApplyDockDrop(DockingManager& docking, const DockDropTarget& target, const std::string& panelId)
@@ -85,7 +85,7 @@ DockDropTarget HitTestDockDrop(DockspaceElement* dock, float mouseX, float mouse
 // through the mount that holds them.
 UIElement* FindPanelLeaf(UIElement& root, const std::string& panelId)
 {
-    if (UIElement* tabEl = root.FindById(std::string("tab:") + panelId))
+    if (UIElement* tabEl = root.FindById(HashStringId(std::string("tab:") + panelId)))
     {
         UIElement* p = tabEl;
         while (p && !p->HasClass("dock-leaf"))
@@ -93,7 +93,7 @@ UIElement* FindPanelLeaf(UIElement& root, const std::string& panelId)
         if (p)
             return p;
     }
-    if (UIElement* mount = root.FindById(std::string("mount:") + panelId))
+    if (UIElement* mount = root.FindById(HashStringId(std::string("mount:") + panelId)))
     {
         UIElement* content = mount->GetParent();
         return content ? content->GetParent() : nullptr;

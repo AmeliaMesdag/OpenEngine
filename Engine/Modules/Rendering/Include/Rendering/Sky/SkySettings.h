@@ -24,6 +24,11 @@ enum class SkyBelowHorizonMode : uint32_t
 // The sun's apparent angular RADIUS from Earth: half its ~0.533 degree apparent diameter, radians.
 inline constexpr float kSunAngularRadiusRad = 0.004651f;
 
+/// The planet floor's default reflectance, neutral: typical land (grass about 0.25, bare soil 0.17,
+/// concrete 0.3 to 0.45). The sky's ground albedo keys, its settings and its default atmosphere
+/// all start from it.
+inline constexpr float kDefaultGroundAlbedo = 0.3f;
+
 // High-level sky configuration for a frame.
 // For now we keep this tightly focused on a primary sun and exposure; we
 // will extend it with more detailed atmospheric parameters as we move to
@@ -129,7 +134,7 @@ struct SkySettings
     float gradientSkyBottomColor[3]  = {0.0f, 0.0f, 0.0f};
 
     /// Matches `SkyEnvironment.GroundAlbedo`; used for the procedural sky below-horizon blend (`sky_render.frag`).
-    float groundAlbedo[3] = {0.3f, 0.3f, 0.3f};
+    float groundAlbedo[3] = {kDefaultGroundAlbedo, kDefaultGroundAlbedo, kDefaultGroundAlbedo};
     /// Scene-linear below-horizon ground tint used at night.
     float groundNightColor[3] = {0.025f, 0.025f, 0.035f};
     /// Multiplier on `groundAlbedo` for the below-horizon tint (legacy default 0.8).

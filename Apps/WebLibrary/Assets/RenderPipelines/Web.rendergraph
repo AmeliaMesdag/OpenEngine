@@ -758,7 +758,6 @@
         "exposure": 1.0,
         "outEncoding": 0,
         "paperWhiteNits": 350.0,
-        "tonemapMode": 4,
         "useAutoExposure": 0
       },
       "samplers": {

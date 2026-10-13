@@ -274,6 +274,7 @@ add_executable(AgentProviderTests
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/AgentSessionStateTests.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/CliSessionFilesTests.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/AssistantAttachmentTests.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/ReplyTextBlocksTests.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AssistantAttachment.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AssistantMode.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AssistantTools.cpp
@@ -287,6 +288,7 @@ add_executable(AgentProviderTests
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/CliSessionProvider.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/ClaudeSessionProvider.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/CodexSessionProvider.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/ReplyTextBlocks.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/CliSessionFiles.cpp)
 target_include_directories(AgentProviderTests PRIVATE
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor)
@@ -319,6 +321,7 @@ add_custom_command(TARGET AgentProviderTests POST_BUILD
 add_executable(AiAssistantPanelTests
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/AiAssistantPanelTests.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/AssistantGateTests.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Tests/MarkupContextTests.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AssistantGate.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AssistantActionLedger.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AssistantTurnUndo.cpp
@@ -341,6 +344,12 @@ add_executable(AiAssistantPanelTests
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AgentConversationRowModel.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AgentConversationRow.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AgentReplyActions.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AiAssistantPanelService.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/MarkupActions.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/MarkupChips.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/MarkupTokenPicker.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/MarkupContext.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/MarkupSearchProvider.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Conversation.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/AgentStatusMessages.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/TurnMailbox.cpp
@@ -354,6 +363,7 @@ add_executable(AiAssistantPanelTests
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/CliSessionProvider.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/ClaudeSessionProvider.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/CodexSessionProvider.cpp
+    ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/ReplyTextBlocks.cpp
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor/Providers/CliSessionFiles.cpp)
 target_include_directories(AiAssistantPanelTests PRIVATE
     ${CMAKE_SOURCE_DIR}/Packages/ai-assistant/Editor

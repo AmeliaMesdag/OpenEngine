@@ -248,7 +248,7 @@ TEST_P(SharedStylesheetReloadTests, ManagersObserveOneCommitAndKeepCachedRulesAl
     }
     first.Update(0.0f, true);
     second.Update(0.0f, true);
-    auto* sample = first.GetRootElement()->FindById("sample");
+    auto* sample = first.GetRootElement()->FindById("sample"_sid);
     ASSERT_NE(sample, nullptr);
     first.OnMouseMove(10.0f, 10.0f);
     first.Update(0.0f, true);
@@ -323,13 +323,13 @@ TEST_P(StylesheetCascadeReloadTests, SnapshotAdoptionPreservesImportOrderAndDeta
     ASSERT_TRUE(UIParsing::XMLParser::ParseLayoutFromString(
         "<uielement id='root'><uielement id='sample' class='sample'/><uielement id='direct' class='sample'/></uielement>", root));
     ui.SetRoot(std::move(root));
-    auto* sample = ui.GetRootElement()->FindById("sample");
+    auto* sample = ui.GetRootElement()->FindById("sample"_sid);
     ASSERT_NE(sample, nullptr);
     // The manager's own sheets (the module default) lead its global list.
     const size_t leadingSheets = GetParam() ? 0 : ui.GetStylesheets().size();
     if (GetParam()) ASSERT_TRUE(ui.AttachStyleToSubtreeFromAsset(sample, *style));
     else ASSERT_TRUE(ui.AttachStyleFromAsset(*style));
-    auto* direct = ui.GetRootElement()->FindById("direct");
+    auto* direct = ui.GetRootElement()->FindById("direct"_sid);
     ASSERT_NE(direct, nullptr);
     ASSERT_TRUE(ui.AttachStyleToSubtreeFromAsset(direct, *static_cast<UIStyleAsset*>(leaf.get())));
     auto overrideSheet = std::make_shared<Stylesheet>();
@@ -823,7 +823,7 @@ TEST(UIHotReloadTests, AssetModifiedEventReloadsLayoutAndReconcilesOnNextUpdate)
 
     UIElement* liveRoot = ui.GetRootElement();
     ASSERT_NE(liveRoot, nullptr);
-    auto* lbl0 = dynamic_cast<Label*>(liveRoot->FindById("lbl"));
+    auto* lbl0 = dynamic_cast<Label*>(liveRoot->FindById("lbl"_sid));
     ASSERT_NE(lbl0, nullptr);
     EXPECT_EQ(lbl0->GetText(), "Hello");
 
@@ -860,7 +860,7 @@ TEST(UIHotReloadTests, AssetModifiedEventReloadsLayoutAndReconcilesOnNextUpdate)
 
     UIElement* liveRoot2 = ui.GetRootElement();
     ASSERT_NE(liveRoot2, nullptr);
-    auto* lbl1 = dynamic_cast<Label*>(liveRoot2->FindById("lbl"));
+    auto* lbl1 = dynamic_cast<Label*>(liveRoot2->FindById("lbl"_sid));
     ASSERT_NE(lbl1, nullptr);
     EXPECT_EQ(lbl1->GetText(), "World");
     EXPECT_EQ(firstReconciles, 1);
@@ -1163,7 +1163,7 @@ TEST(UIHotReloadTests, FoldoutExpandedSurvivesLayoutReload)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    auto* fold0 = dynamic_cast<Foldout*>(ui.GetRootElement()->FindById("fold"));
+    auto* fold0 = dynamic_cast<Foldout*>(ui.GetRootElement()->FindById("fold"_sid));
     ASSERT_NE(fold0, nullptr);
     EXPECT_FALSE(fold0->IsExpanded()); // initial XML state
     fold0->SetExpanded(true);          // simulate user toggle
@@ -1182,7 +1182,7 @@ TEST(UIHotReloadTests, FoldoutExpandedSurvivesLayoutReload)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    auto* fold1 = dynamic_cast<Foldout*>(ui.GetRootElement()->FindById("fold"));
+    auto* fold1 = dynamic_cast<Foldout*>(ui.GetRootElement()->FindById("fold"_sid));
     ASSERT_NE(fold1, nullptr);
     EXPECT_TRUE(fold1->IsExpanded())
         << "Runtime-set expanded=true must survive layout reload "
@@ -1227,7 +1227,7 @@ TEST(UIHotReloadTests, AccordionItemExpandedSurvivesLayoutReload)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    auto* item0 = dynamic_cast<AccordionItem*>(ui.GetRootElement()->FindById("item"));
+    auto* item0 = dynamic_cast<AccordionItem*>(ui.GetRootElement()->FindById("item"_sid));
     ASSERT_NE(item0, nullptr);
     EXPECT_FALSE(item0->IsExpanded());
     item0->SetExpanded(true);
@@ -1245,7 +1245,7 @@ TEST(UIHotReloadTests, AccordionItemExpandedSurvivesLayoutReload)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    auto* item1 = dynamic_cast<AccordionItem*>(ui.GetRootElement()->FindById("item"));
+    auto* item1 = dynamic_cast<AccordionItem*>(ui.GetRootElement()->FindById("item"_sid));
     ASSERT_NE(item1, nullptr);
     EXPECT_TRUE(item1->IsExpanded());
 }
@@ -1287,7 +1287,7 @@ TEST(UIHotReloadTests, TextFieldValueSurvivesLayoutReload)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    auto* tf0 = dynamic_cast<TextField*>(ui.GetRootElement()->FindById("tf"));
+    auto* tf0 = dynamic_cast<TextField*>(ui.GetRootElement()->FindById("tf"_sid));
     ASSERT_NE(tf0, nullptr);
     EXPECT_EQ(tf0->GetValue(), "initial");
     tf0->SetValue("user-typed");
@@ -1306,7 +1306,7 @@ TEST(UIHotReloadTests, TextFieldValueSurvivesLayoutReload)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    auto* tf1 = dynamic_cast<TextField*>(ui.GetRootElement()->FindById("tf"));
+    auto* tf1 = dynamic_cast<TextField*>(ui.GetRootElement()->FindById("tf"_sid));
     ASSERT_NE(tf1, nullptr);
     EXPECT_EQ(tf1->GetValue(), "user-typed")
         << "TextField runtime value must survive layout reload";
@@ -1392,7 +1392,7 @@ TEST(UIHotReloadTests, ReconcileReplacesWhenOnlyTheTagDiffers)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    UIElement* before = ui.GetRootElement()->FindById("slot");
+    UIElement* before = ui.GetRootElement()->FindById("slot"_sid);
     ASSERT_NE(before, nullptr);
     const uint64_t idBefore = before->GetInstanceId();
     auto& factories = UIRegistration::ElementFactoryRegistry::Instance();
@@ -1409,7 +1409,7 @@ TEST(UIHotReloadTests, ReconcileReplacesWhenOnlyTheTagDiffers)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    UIElement* after = ui.GetRootElement()->FindById("slot");
+    UIElement* after = ui.GetRootElement()->FindById("slot"_sid);
     ASSERT_NE(after, nullptr);
     // Instance ids are never reused, so a different id is proof the element was rebuilt
     // rather than adopted. Under RTTI identity both tags are ReconcileProxy, the reconciler
@@ -1460,10 +1460,10 @@ TEST(UIHotReloadTests, ReconcilePreservesAnElementWhoseTagIsUnchanged)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    UIElement* before = ui.GetRootElement()->FindById("slot");
+    UIElement* before = ui.GetRootElement()->FindById("slot"_sid);
     ASSERT_NE(before, nullptr);
     const uint64_t idBefore = before->GetInstanceId();
-    UIElement* kidBefore = ui.GetRootElement()->FindById("kid");
+    UIElement* kidBefore = ui.GetRootElement()->FindById("kid"_sid);
     ASSERT_NE(kidBefore, nullptr);
     const uint64_t kidIdBefore = kidBefore->GetInstanceId();
 
@@ -1480,13 +1480,13 @@ TEST(UIHotReloadTests, ReconcilePreservesAnElementWhoseTagIsUnchanged)
     ui.Update(0.0f, /*interactive=*/false);
     DriveUiRender(ui, rg);
 
-    UIElement* after = ui.GetRootElement()->FindById("slot");
+    UIElement* after = ui.GetRootElement()->FindById("slot"_sid);
     ASSERT_NE(after, nullptr);
     // Before the tag became the identity, an unknown tag matched nothing, so every reload
     // rebuilt the element and threw its subtree away.
     EXPECT_EQ(after->GetInstanceId(), idBefore)
         << "an element whose tag did not change must be preserved across a reload";
-    UIElement* kidAfter = ui.GetRootElement()->FindById("kid");
+    UIElement* kidAfter = ui.GetRootElement()->FindById("kid"_sid);
     ASSERT_NE(kidAfter, nullptr);
     EXPECT_EQ(kidAfter->GetInstanceId(), kidIdBefore);
 }
@@ -1561,10 +1561,10 @@ TEST(UIHotReloadTests, ReconcileAnnouncesToTheBoundTargetAfterReplacingElements)
                                 {
                                     EXPECT_EQ(e.Target, panel);
                                     ++reconciles;
-                                    keep = UIElement::MakeWeakRef(dynamic_cast<Button*>(panel->FindById("keep")));
-                                    gone = UIElement::MakeWeakRef(panel->FindById("gone"));
-                                    renamed = UIElement::MakeWeakRef(panel->FindById("renamed"));
-                                    slot = UIElement::MakeWeakRef(panel->FindById("slot"));
+                                    keep = UIElement::MakeWeakRef(dynamic_cast<Button*>(panel->FindById("keep"_sid)));
+                                    gone = UIElement::MakeWeakRef(panel->FindById("gone"_sid));
+                                    renamed = UIElement::MakeWeakRef(panel->FindById("renamed"_sid));
+                                    slot = UIElement::MakeWeakRef(panel->FindById("slot"_sid));
                                     Button* button = keep.Get();
                                     if (!button || button == wiredKeep.Get())
                                         return;

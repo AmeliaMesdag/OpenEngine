@@ -1193,7 +1193,7 @@ bool ModelAsset::LoadGLTF(const Vector<uint8>& data, const FbxLoaderOptions& loa
         return false;
     }
     ReportIgnoredGltfExtensions(*gltf, GetPath());
-    m_Extras = RetainGltfExtras(*gltf, GetPath());
+    SetExtras(std::make_shared<const ModelExtras>(RetainGltfExtras(*gltf, GetPath())));
 
     // An index or attribute accessor without data (AccessorHasData) is skipped. UnpackAccessorFloats and
     // UnpackAccessorIntegers report a buffer that holds no data; OpenGltfDocument bounded the count of an

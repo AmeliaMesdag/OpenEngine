@@ -1,6 +1,6 @@
 ---
 title: HDR post-processing
-description: Setting up tonemapping and bloom with Post Process Volumes and the render pipeline inspector, blending volumes, the tonemap modes and the debug modes.
+description: Setting up tonemapping and bloom with Post Process Volumes and the render pipeline inspector, blending volumes, the looks and the debug modes.
 ---
 
 This guide covers how to use the HDR post-processing system in the Editor: setting up tonemapping and bloom through PostProcessVolume components and the render pipeline inspector. Exposure is set on the Camera, not on a volume.
@@ -11,7 +11,7 @@ This guide covers how to use the HDR post-processing system in the Editor: setti
 2. In the Inspector, click **Add Component** and choose **Post Process Volume**
 3. Adjust the settings:
    - **Bloom**: add a **Bloom Effect** component to the same entity; its **Threshold** and **Intensity** control glow on bright areas
-   - **Tonemap Mode**: choose between Khronos PBR Neutral (the default), ACES, Reinhard, AgX, Filmic, Linear, ICtCp Tonemapper (2025, GT7), or ACES 2
+   - **Look**: choose Neutral (the default), Filmic or Photographic
 
 Changes take effect immediately in the viewport.
 
@@ -25,7 +25,7 @@ The PostProcessVolume is an ECS component that controls how the final image look
 |----------|---------|-------|-------------|
 | **Priority** | 0 | any int | Higher priority volumes override lower ones |
 | **Weight** | 1.0 | 0.0 - 1.0 | Blend strength when overriding lower-priority volumes |
-| **Tonemap Mode** | Khronos PBR Neutral | dropdown | Which tonemapping curve to use |
+| **Look** | Neutral | Neutral, Filmic, Photographic | The display transform the image is rendered with |
 
 Bloom is not a volume property: it is set on a **Bloom Effect** component on the same entity (see [Bloom Controls](#bloom-controls)). Exposure is not a volume property either: it lives on the **Camera** component (the Scene View sets its own exposure: [The Scene View's exposure](exposure.mdx#the-scene-views-exposure)). A volume can add an **Exposure Adjustment** effect, which offsets the camera's exposure in stops. How the camera meters a scene is in [Exposure](exposure.mdx).
 
@@ -36,20 +36,19 @@ You can have multiple PostProcessVolume entities in a scene. They are blended by
 - Volumes are sorted by **Priority** (lowest first, highest last)
 - Each volume blends into the accumulated result using its **Weight**
 - Float properties are linearly interpolated
-- Enum properties (tonemap mode) use the highest-priority volume's value
+- The look uses the highest-priority volume's value; it never crossfades
 
-**Example**: A "base" volume at priority 0 with ACES tonemapping, and a "cinematic" volume at priority 10 with AgX and an Exposure Adjustment effect at -1 stop. When the cinematic volume is enabled, it overrides the base.
+**Example**: A "base" volume at priority 0 with the Neutral look, and a "cinematic" volume at priority 10 with the Filmic look and an Exposure Adjustment effect at -1 stop. When the cinematic volume is enabled, it overrides the base.
 
-## Tonemap modes
+## Looks
 
-| Mode | Best For | Character |
-|------|----------|-----------|
-| **Khronos PBR Neutral** | General purpose (**default**) | Compresses highlights toward white while preserving hue and material albedo. Least stylized |
-| **ACES** | Filmic grade | Warm, filmic look with good contrast. Industry standard |
-| **Reinhard** | Soft, natural look | Simple, preserves color ratios. Can look washed out |
-| **AgX** | High contrast scenes | Excellent hue preservation. Similar to Blender's default |
-| **Filmic** | Cinematic look | Strong contrast, deep blacks. Uncharted 2 style |
-| **Linear** | Debugging | No curve at all. Shows raw values |
+| Look | What it does | Pick it for |
+|---|---|---|
+| **Neutral** (default) | Colors stay as authored; only the brightest highlights are compressed toward white. No added contrast. | product shots, stylized and painted art, converted content |
+| **Filmic** | Film contrast: upper mid-tones sit lower and bright, saturated colors roll off to white with little change in hue. Upper mid-tones sit lower than Neutral's; raise the exposure compensation if a scene reads dark. | cinematic and realistic scenes, cutscenes |
+| **Photographic** | Gentle contrast; bright colors fade toward white the way film stock does, shifting slightly in hue. | natural, photographic daylight |
+
+A scene stores the look by name: `PostProcessVolume.look = Filmic`.
 
 ## Bloom controls
 

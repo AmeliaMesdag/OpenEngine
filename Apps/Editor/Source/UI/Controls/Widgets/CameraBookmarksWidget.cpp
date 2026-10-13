@@ -782,7 +782,7 @@ Button* CameraBookmarksWidget::ResolveActivePreviewButton()
 {
     if (!m_Row || m_ActivePreviewButtonId.empty())
         return nullptr;
-    UIElement* el = m_Row->FindById(m_ActivePreviewButtonId);
+    UIElement* el = m_Row->FindById(HashStringId(m_ActivePreviewButtonId));
     return dynamic_cast<Button*>(el);
 }
 

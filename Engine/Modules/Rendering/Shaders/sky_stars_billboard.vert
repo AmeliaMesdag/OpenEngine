@@ -1,5 +1,7 @@
 #version 450
 
+#include "Includes/star_sparkle.glsl"
+
 struct StarInstance {
     vec4 dirAndBrightness;
     vec4 properties;
@@ -38,6 +40,7 @@ layout(location = 2) flat out float vTwinklePhase;
 layout(location = 3) flat out float vRotAngle;
 layout(location = 4) flat out float vSizeScale;
 layout(location = 5) flat out float vColorTemp;
+layout(location = 6) flat out vec2 vTwinkleRange;
 
 const float PI = 3.14159265359;
 
@@ -93,6 +96,7 @@ void main()
         vRotAngle = 0.0;
         vSizeScale = 0.0;
         vColorTemp = 0.0;
+        vTwinkleRange = vec2(0.0);
         return;
     }
 
@@ -170,6 +174,7 @@ void main()
     // The twinkle's phase in [0, 1]; its mean over a period is 0.4244 (kTwinklePhaseMean in
     // sky_stars_billboard.frag, which turns it into light).
     vTwinklePhase = pow(s, 1.5);
+    vTwinkleRange = GE_StarTwinkleRange(starIdx);
 
     vBrightness = brightness * (isOrtho ? 1.0 : horizonFade) * nightAmount * moonVisibility;
     vRotAngle = rotAngle;

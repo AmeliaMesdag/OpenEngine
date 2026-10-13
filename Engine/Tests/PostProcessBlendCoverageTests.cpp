@@ -12,9 +12,10 @@
 #include "Components/Rendering/PostProcessEffects/HeightFogEffect.h"
 #include "Components/Rendering/PostProcessEffects/ScreenSpaceReflectionsEffect.h"
 #include "Components/Rendering/PostProcessEffects/VolumetricFogEffect.h"
-#include "Components/Rendering/TonemapMode.h"
+#include "Components/Rendering/Look.h"
 #include "Engine/Rendering/ColorGradeParamsUBO.h"
 #include "Rendering/Core/NamedPushConstantWriter.h"
+#include "Rendering/Passes/TonemapPass.h"
 #include "Rendering/Materials/ShaderMeta.h"
 #include "ECS/ComponentFactory.h"
 #include "ECS/ECSTemplates.h"
@@ -41,6 +42,7 @@
 
 using GameEngine::Engine::Renderer::BlendPostProcessSettings;
 using GameEngine::Engine::Renderer::PostProcessSettings;
+using GameEngine::Engine::Renderer::PostProcessViewOutput;
 using GameEngine::Engine::Renderer::SettingsBlendGroupMask;
 
 namespace
@@ -188,7 +190,7 @@ TEST(PostProcessSettingsWrite, ReadableFieldNamesMatchGoldenSet)
     "fogGlowThreshold", "fogGlowKnee", "fogGlowAntiFlicker", "fogGlowOctaves",
     "fogGlowScatter", "fogGlowFadeStart", "fogGlowFadeEnd", "fogGlowTintR",
     "fogGlowTintG", "fogGlowTintB", "halationIntensity", "halationRadius",
-    "halationTintR", "halationTintG", "halationTintB", "tonemapMode",
+    "halationTintR", "halationTintG", "halationTintB", "look",
     "ictcpChromaCompression", "chromaticAberrationIntensity", "chromaticAberrationStartOffset", "chromaticAberrationSaturation",
     "chromaticAberrationLongitudinal", "chromaticAberrationComa", "dofIntensity", "dofMaxRadius",
     "dofSamplingQuality", "dofDebugMode", "dofDebugAlpha", "dofFocusDistance",
@@ -1262,20 +1264,19 @@ TEST(PostProcessAtmosphericCloudControls, AuthoredColorOwnsHueAndOpacityControls
         << "Beer-Lambert transmittance must not be alpha-composited a second time";
 }
 
-TEST(PostProcessTonemapControls, ExposesReferenceOperators)
+TEST(PostProcessTonemapControls, ExposesTheThreeLooks)
 {
-    using GameEngine::Components::TonemapMode;
-    EXPECT_EQ(static_cast<int32_t>(TonemapMode::GranTurismo7), 6);
-    EXPECT_EQ(static_cast<int32_t>(TonemapMode::ACES2), 7);
-    EXPECT_EQ(GameEngine::Components::kTonemapModeCount, 8);
-    // Display names carry the operator's published provenance, so the label is
-    // the pinned surface: the enumerator names stay bare (Neutral,
-    // GranTurismo7) and only what the inspector shows spells out the source.
-    EXPECT_STREQ(GameEngine::Components::kTonemapModeNames[4], "Khronos PBR Neutral");
-    EXPECT_STREQ(GameEngine::Components::kTonemapModeNames[6], "ICtCp Tonemapper (2025, GT7)");
-    EXPECT_STREQ(GameEngine::Components::kTonemapModeNames[7], "ACES 2");
-    EXPECT_TRUE(GameEngine::Components::IsValidTonemapModeValue(6));
-    EXPECT_TRUE(GameEngine::Components::IsValidTonemapModeValue(7));
+    using GameEngine::Components::Look;
+    EXPECT_EQ(static_cast<int32_t>(Look::Neutral), 0);
+    EXPECT_EQ(static_cast<int32_t>(Look::Filmic), 1);
+    EXPECT_EQ(static_cast<int32_t>(Look::Photographic), 2);
+    EXPECT_EQ(GameEngine::Components::kLookCount, 3);
+    // The names are the scene format and the inspector's labels: no label names a technique.
+    EXPECT_EQ(GameEngine::Components::LookName(Look::Neutral), "Neutral");
+    EXPECT_EQ(GameEngine::Components::LookName(Look::Filmic), "Filmic");
+    EXPECT_EQ(GameEngine::Components::LookName(Look::Photographic), "Photographic");
+    EXPECT_EQ(GameEngine::Rendering::Passes::kTonemapNoLookArm, GameEngine::Components::kLookCount)
+        << "the no-look debug arm sits past the looks, so no volume value can select it";
 
     const std::filesystem::path shaderRoot =
         std::filesystem::path(GE_RENDERER_REPO_ROOT) /
@@ -1288,25 +1289,18 @@ TEST(PostProcessTonemapControls, ExposesReferenceOperators)
     };
 
     const std::string tonemap = readText(shaderRoot / "tonemap.frag");
-    const std::string gt7 = readText(shaderRoot / "Includes/tonemap_gt7.glsl");
     const std::string aces2 = readText(shaderRoot / "Includes/tonemap_aces2.glsl");
     const std::string aces2Tables =
         readText(shaderRoot / "Includes/tonemap_aces2_tables.glsl");
 
-    EXPECT_NE(tonemap.find("case 6:  return TonemapGranTurismo7(hdr)"),
+    EXPECT_NE(tonemap.find("case kLookFilmic: return TonemapACES2(hdr, Aces2TargetOutputMax())"),
               std::string::npos);
-    EXPECT_NE(tonemap.find("case 7:  return TonemapACES2(hdr, Aces2TargetOutputMax())"),
-              std::string::npos);
-    // ACES 2 is peak-parameterised: it routes display-referred (clamped, never
-    // extended) so its tier ladder owns the headroom rendering.
-    EXPECT_NE(tonemap.find("if (pc.tonemapMode == 7)\n        return min(sdrTonemapped, vec3(outputMax))"),
-              std::string::npos);
-    // GT7 must remain the published 2025 ICtCp operator, not the older GT Sport
-    // curve commonly distributed online under the generic Gran Turismo name.
-    EXPECT_NE(gt7.find("GT7RgbToICtCp"), std::string::npos);
-    EXPECT_NE(gt7.find("sourceICtCp.yz * chromaScale"), std::string::npos);
-    EXPECT_NE(gt7.find("mix(skewedRgb, scaledRgb, 0.6)"), std::string::npos);
-    EXPECT_NE(gt7.find("Copyright (c) 2025 Polyphony Digital Inc."),
+    EXPECT_NE(tonemap.find("case 2:           return TonemapAgX(hdr)"), std::string::npos);
+    EXPECT_NE(tonemap.find("const int kLookFilmic = 1;"), std::string::npos);
+    EXPECT_NE(tonemap.find("const int kNoLookArm = 3;"), std::string::npos);
+    // Filmic (ACES 2) is peak-parameterised: it routes display-referred (clamped,
+    // never extended) so its tier ladder owns the headroom rendering.
+    EXPECT_NE(tonemap.find("if (pc.look == kLookFilmic)\n        return min(sdrTonemapped, vec3(outputMax))"),
               std::string::npos);
 
     // ACES 2's reference transform includes CAM/JMh tone scaling, chroma
@@ -1711,7 +1705,7 @@ using GameEngine::uint64;
     X(HalationTintR) \
     X(HalationTintG) \
     X(HalationTintB) \
-    X(TonemapMode) \
+    X(Look) \
     X(IctcpChromaCompression) \
     X(ChromaticAberrationIntensity) \
     X(ChromaticAberrationStartOffset) \
@@ -2093,7 +2087,8 @@ using GameEngine::uint64;
     X(ExposureCompensationEv) \
     X(ExposureClampMinEv) \
     X(ExposureClampMaxEv) \
-    X(BloomOctaveBlend)
+    X(BloomOctaveBlend) \
+    X(ViewOutput)
 
 // Keep this inventory order stable when extending it: randomized input values
 // depend on ordinal, so appending fields preserves existing per-field goldens.
@@ -2106,7 +2101,7 @@ constexpr std::size_t kFieldCount = 0 PP_BLEND_LOCK_FIELDS(PP_LOCK_COUNT);
 constexpr std::size_t kExactFieldCount = 0 PP_BLEND_LOCK_EXACT_FIELDS(PP_LOCK_COUNT);
 constexpr std::size_t kToleranceFieldCount = 0 PP_BLEND_LOCK_TOLERANCE_FIELDS(PP_LOCK_COUNT);
 #undef PP_LOCK_COUNT
-static_assert(kFieldCount == 420, "PostProcessSettings member count moved: regenerate PP_BLEND_LOCK_FIELDS");
+static_assert(kFieldCount == 421, "PostProcessSettings member count moved: regenerate PP_BLEND_LOCK_FIELDS");
 static_assert(kToleranceFieldCount == 1, "the ULP-pinned set is Exposure alone");
 static_assert(kExactFieldCount + kToleranceFieldCount == kFieldCount,
               "the lock partition must cover every member exactly once");
@@ -2135,7 +2130,7 @@ constexpr std::size_t kTailPad = sizeof(PostProcessSettings) -
 // member appended after the anchor it is measured from.
 static_assert(kPadAfterAutoExposureActive == 3, "layout moved: re-derive the pad pins");
 static_assert(kPadBeforeBloomDirtGuid == 0, "layout moved: re-derive the pad pins");
-static_assert(kPadBeforeLutGuid == 0, "layout moved: re-derive the pad pins");
+static_assert(kPadBeforeLutGuid == 4, "layout moved: re-derive the pad pins");
 // The current layout ends on its 8-byte boundary (the 8-aligned GUID word arrays
 // set the struct's alignment), so the tail pad is 0. Pinning it still ensures an
 // appended member cannot be silently absorbed by an ABI alignment hole.
@@ -2180,6 +2175,10 @@ inline void FillValue(float32& v, LockRng& r)
 }
 inline void FillValue(int32& v, LockRng& r) { v = static_cast<int32>(r.Next() % 9u) - 4; }
 inline void FillValue(bool& v, LockRng& r) { v = (r.Next() & 1u) != 0u; }
+inline void FillValue(PostProcessViewOutput& v, LockRng& r)
+{
+    v = static_cast<PostProcessViewOutput>(r.Next() & 1u);
+}
 inline void FillValue(uint64 (&v)[2], LockRng& r)
 {
     v[0] = (static_cast<uint64>(r.Next()) << 32) | r.Next();
@@ -2616,7 +2615,7 @@ PostProcessSettings BlendReference(
     out.ExposureClampMaxEv     = lerp(a.ExposureClampMaxEv, b.ExposureClampMaxEv, w);
     // Discrete settings: use B when weight >= 0.5 (highest priority wins)
     out.AutoExposureActive = (w >= 0.5f) ? b.AutoExposureActive : a.AutoExposureActive;
-    out.TonemapMode    = (w >= 0.5f) ? b.TonemapMode : a.TonemapMode;
+    out.Look           = (w >= 0.5f) ? b.Look : a.Look;
     out.IctcpChromaCompression = lerp(a.IctcpChromaCompression, b.IctcpChromaCompression, w);
     out.ChromaticAberrationIntensity = lerp(a.ChromaticAberrationIntensity, b.ChromaticAberrationIntensity, w);
     out.ChromaticAberrationStartOffset = lerp(a.ChromaticAberrationStartOffset, b.ChromaticAberrationStartOffset, w);
@@ -3443,6 +3442,12 @@ bool BlendsExactly(int32 out, int32 x, int32 y, float, int32 dflt)
 }
 
 bool BlendsExactly(bool out, bool x, bool y, float, bool dflt)
+{
+    return out == x || out == y || out == dflt;
+}
+
+bool BlendsExactly(PostProcessViewOutput out, PostProcessViewOutput x, PostProcessViewOutput y, float,
+                   PostProcessViewOutput dflt)
 {
     return out == x || out == y || out == dflt;
 }

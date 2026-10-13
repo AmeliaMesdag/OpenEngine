@@ -1260,8 +1260,10 @@ public:
                 PushPrimitiveDataDirty(el);
         }
     }
-    // Internal hint: UIElements call into this when their tree structure changes
-    // (children added/removed, Mount target swapped). This is used to detect
+    // Internal hint, called on a structural tree change: a child added, inserted,
+    // removed or taken; a Mount target set, adopted into this manager or destroyed;
+    // a root replacement; a display:none flip in the layout pass. Dock tab activation
+    // (Mount::SwapTargetForActivation) calls nothing. This is used to detect
     // mid-frame mutations without guessing based on "pending action" counts.
     void NotifyTreeStructureChanged()
     {
@@ -1271,9 +1273,10 @@ public:
         m_ResolvedStylesDirty.store(true, std::memory_order_release);
     }
 
-    // Monotonic generation bumped by every structural tree change (child add/remove,
-    // Mount swap). Lets callers gate "re-resolve an element by id" work on whether the
-    // tree could have changed since they last looked, instead of walking every time.
+    // Monotonic generation bumped by NotifyTreeStructureChanged. Lets callers gate
+    // "re-resolve an element by id" work on whether the tree could have changed since
+    // they last looked. Dock tab activation (Mount::SwapTargetForActivation) does not
+    // move it, so a result kept on it must not depend on which tab a Mount shows.
     uint64_t GetTreeStructureGeneration() const
     {
         return m_TreeStructureGeneration.load(std::memory_order_relaxed);

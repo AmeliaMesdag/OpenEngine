@@ -1054,12 +1054,14 @@ void MainThreadSwapTask::Execute()
             Logger::Log::Info("[HotReload] Waiting for main thread assembly swap to complete...");
             bool finished = m_Cancellation->WaitForOrCancel(kMainThreadSwapTimeout, isSwapDone);
 
-            if (!finished && !m_Cancellation->IsCancelled() && !scriptManager.HasMarkedMainThread())
+            const bool noFrameLoop = !engine.HasEverInitialized() || engine.IsStandaloneHosted();
+            if (!finished && !m_Cancellation->IsCancelled() && noFrameLoop)
             {
-                // Standalone host without a frame loop (gtest hosting): no
-                // main thread ever pumps the queue — and none ticks managed
+                // A host without a frame loop (no engine initialized, as in gtest
+                // hosting, or one the scripting ABI bootstrapped for dotnet test):
+                // no main thread ever pumps the queue, and none ticks managed
                 // code either, so pumping inline here is deadlock-free.
-                Logger::Log::Warning("[HotReload] Stage 4: No marked main thread - pumping queue inline (standalone host)");
+                Logger::Log::Warning("[HotReload] Stage 4: No frame loop - pumping queue inline (standalone host)");
                 try
                 {
                     size_t tasksProcessed = scriptManager.ProcessMainThreadTasks();

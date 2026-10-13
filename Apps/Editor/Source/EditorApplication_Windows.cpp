@@ -177,7 +177,7 @@ void EditorApplication::UndockToFloatingWindow(const std::string& panelId)
                 // Prefer the leaf size that the tab lived in. This works even when
                 // the tab is not currently active (so no mount exists).
                 UIElement* leaf = nullptr;
-                if (UIElement* tabEl = rootEl->FindById(std::string("tab:") + panelId))
+                if (UIElement* tabEl = rootEl->FindById(HashStringId(std::string("tab:") + panelId)))
                 {
                     UIElement* p = tabEl;
                     while (p && !p->HasClass("dock-leaf"))
@@ -187,7 +187,7 @@ void EditorApplication::UndockToFloatingWindow(const std::string& panelId)
                 if (!leaf)
                 {
                     // Fallback to the active mount path (works when the panel is active).
-                    if (UIElement* mount = rootEl->FindById(std::string("mount:") + panelId))
+                    if (UIElement* mount = rootEl->FindById(HashStringId(std::string("mount:") + panelId)))
                     {
                         UIElement* content = mount->GetParent();
                         leaf = content ? content->GetParent() : nullptr;
@@ -534,7 +534,7 @@ void EditorApplication::UndockToFloatingWindow(const std::string& panelId)
     if (auto* rootEl = ctx->ui->GetRootElement())
     {
         rootEl->AddClass("floating");
-        if (auto* el = rootEl->FindById("dock"))
+        if (auto* el = rootEl->FindById("dock"_sid))
         {
             if (auto* ds = dynamic_cast<DockspaceElement*>(el))
             {

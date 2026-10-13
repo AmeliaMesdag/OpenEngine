@@ -117,7 +117,7 @@ UIElement* UIManager::ResolveButtonTarget() const
         {
             if (UIElement* r = GetRootElement())
             {
-                if (UIElement* byId = r->FindById(m_CaptureId))
+                if (UIElement* byId = r->FindById(HashStringId(m_CaptureId)))
                     return byId;
             }
         }
@@ -178,12 +178,12 @@ void UIManager::MarkPseudoStateForSyncTransition(uint64_t activeBeforeInstanceId
     constexpr unsigned kFocusFlags = UIElement::StyleDirty | UIElement::VisualDirty;
     if (!focusIdBefore.empty())
     {
-        if (UIElement* prevEl = root->FindById(focusIdBefore))
+        if (UIElement* prevEl = root->FindById(HashStringId(focusIdBefore)))
             prevEl->MarkDirtySubtree(kFocusFlags);
     }
     if (!m_FocusId.empty())
     {
-        if (UIElement* newEl = root->FindById(m_FocusId))
+        if (UIElement* newEl = root->FindById(HashStringId(m_FocusId)))
             newEl->MarkDirtySubtree(kFocusFlags);
     }
 }
@@ -367,7 +367,7 @@ bool UIManager::DispatchMouseButtonRelease()
         if (!capturedResolved && !capturedIdForFocus.empty())
         {
             if (UIElement* root = GetRootElement())
-                capturedResolved = root->FindById(capturedIdForFocus);
+                capturedResolved = root->FindById(HashStringId(capturedIdForFocus));
         }
         if (capturedResolved)
             preserveFocus = capturedResolved->IsFocusTargetForId(m_FocusId);
@@ -391,7 +391,7 @@ bool UIManager::DispatchMouseButtonRelease()
         if (!released && !capturedIdForFocus.empty())
         {
             if (UIElement* root = GetRootElement())
-                released = root->FindById(capturedIdForFocus);
+                released = root->FindById(HashStringId(capturedIdForFocus));
         }
         if (released && !(released->ResolveFocusTarget() && released->ResolveFocusTarget()->IsFocusable()))
             released = nullptr;
@@ -499,7 +499,7 @@ bool UIManager::BubbleEventFrom(UIElement* target, UIEvent& ev)
 bool UIManager::DispatchInputEvent(UIEvent& ev, bool allowHoveredFallback)
 {
     UIElement* root = GetRootElement();
-    UIElement* focusedEl = (root && !m_FocusId.empty()) ? root->FindById(m_FocusId) : nullptr;
+    UIElement* focusedEl = (root && !m_FocusId.empty()) ? root->FindById(HashStringId(m_FocusId)) : nullptr;
     UIElement* hoveredEl =
         (allowHoveredFallback && m_HoveredInstanceId != 0) ? FindElementByInstanceId(m_HoveredInstanceId) : nullptr;
     // Keys and text never reach a disabled subtree, whether by focus (a control disabled while it
@@ -766,7 +766,7 @@ bool UIManager::OnKey(int key, int action, int mods)
         // ancestor carrying the "panel" class (added by DockPanel); when focus is
         // not inside a panel we fall back to the global order.
         UIElement* root = GetRootElement();
-        UIElement* focusedEl = (root && !m_FocusId.empty()) ? root->FindById(m_FocusId) : nullptr;
+        UIElement* focusedEl = (root && !m_FocusId.empty()) ? root->FindById(HashStringId(m_FocusId)) : nullptr;
         UIElement* scope = nullptr;
         for (UIElement* p = focusedEl; p; p = p->GetParent())
         {
@@ -789,7 +789,7 @@ bool UIManager::OnKey(int key, int action, int mods)
             };
             for (const std::string& id : m_FocusOrder)
             {
-                UIElement* e = root->FindById(id);
+                UIElement* e = root->FindById(HashStringId(id));
                 if (e && isWithin(e, scope))
                     scopedOrder.push_back(id);
             }
@@ -822,9 +822,9 @@ bool UIManager::OnKey(int key, int action, int mods)
         if (root)
         {
             if (!prevFocusId.empty())
-                if (UIElement* prevEl = root->FindById(prevFocusId))
+                if (UIElement* prevEl = root->FindById(HashStringId(prevFocusId)))
                     prevEl->MarkDirtySubtree(UIElement::StyleDirty | UIElement::VisualDirty);
-            if (UIElement* newEl = root->FindById(m_FocusId))
+            if (UIElement* newEl = root->FindById(HashStringId(m_FocusId)))
                 newEl->MarkDirtySubtree(UIElement::StyleDirty | UIElement::VisualDirty);
         }
         return true;
@@ -928,7 +928,7 @@ void UIManager::SetFocusById(const std::string& id)
     // request leaves focus where it was. An id that does not resolve yet is kept, as before.
     if (!id.empty() && GetRootElement())
     {
-        if (const UIElement* el = GetRootElement()->FindById(id); el && !ReceivesInput(el))
+        if (const UIElement* el = GetRootElement()->FindById(HashStringId(id)); el && !ReceivesInput(el))
             return;
     }
     m_FocusId = id;
@@ -940,7 +940,7 @@ void UIManager::SetFocusById(const std::string& id)
     // Mark style dirty so :focus pseudo-class updates on the target element.
     if (!id.empty() && GetRootElement())
     {
-        if (auto* el = GetRootElement()->FindById(id))
+        if (auto* el = GetRootElement()->FindById(HashStringId(id)))
             el->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     }
 }
@@ -997,14 +997,14 @@ bool UIManager::OnScroll(float xoffset, float yoffset)
         {
             if (UIElement* root = GetRootElement())
             {
-                target = root->FindById(m_FocusId);
+                target = root->FindById(HashStringId(m_FocusId));
             }
         }
         if (!target && m_FocusId.empty() && !m_FocusOrder.empty())
         {
             if (UIElement* root = GetRootElement())
             {
-                target = root->FindById(m_FocusOrder[0]);
+                target = root->FindById(HashStringId(m_FocusOrder[0]));
             }
         }
     }

@@ -15,7 +15,7 @@
 //     (successor of the PP_SHARED_FIELDS X-macro) consumed by TryWriteField /
 //     TryReadField / ReadableFieldNames, and — since Phase 2 — by the
 //     BlendPostProcessSettings fold (each entry carries its blend rule and
-//     contributes-group). Volume-core names (exposure, tonemapMode,
+//     contributes-group). Volume-core names (exposure, look,
 //     ictcpChromaCompression) and the fog-glow group shared by both fog effects stay in
 //     PostProcessSettings.cpp appendices.
 //   - Gates: the computed "<effect>Active" skipWhen names this effect alone
@@ -395,9 +395,6 @@ constexpr EffectFieldIO kColorGradeIO[]{
      .ClampMin = -Engine::Renderer::kColorGradeTemperatureTintRange,
      .ClampMax = Engine::Renderer::kColorGradeTemperatureTintRange},
 };
-// Pre-unification single-range keys: the 3-way model that replaced them has no
-// equivalent, so stray scenes that still carry them load with the keys dropped.
-constexpr std::string_view kColorGradeDroppedKeys[]{"brightness", "gamma", "hue"};
 
 // DebugMode/DebugAlpha are legacy load-only keys (focus visualization moved to
 // Camera): accepted from older scenes, never serialized. DebugMode's 0..1 clamp
@@ -1556,7 +1553,6 @@ void RegisterBuiltInPostProcessEffectDescriptors()
         .Description = "Three-way HDR color corrector (shadows / midtones / highlights) before tonemap",
         .IconPath = "Icons/PostFX/ColorGrade.svg",
         .FieldIO = kColorGradeIO,
-        .DroppedLegacyKeys = kColorGradeDroppedKeys,
         .SettingsFields = kColorGradeSettings,
         .Gates = kColorGradeGates,
         .Extract =

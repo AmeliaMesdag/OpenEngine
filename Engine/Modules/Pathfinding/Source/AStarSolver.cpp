@@ -1,6 +1,5 @@
 #include "AStarSolver.h"
 #include "HexGridHelpers.h"
-#include "Pathfinding/GridMap.h"
 
 #include <algorithm>
 #include <cmath>
@@ -28,7 +27,7 @@ struct NodeCompare
     bool operator()(const AStarNode& a, const AStarNode& b) const { return a.FCost > b.FCost; }
 };
 
-bool AStarSolver::Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
+bool AStarSolver::Solve(const GridMap::ReadView& grid, uint32 startIndex, uint32 endIndex,
                          uint32 excludeAgentId, float32 currentTime,
                          uint32 agentCellRadius,
                          std::vector<uint32>& outPathCellIndices)
@@ -161,7 +160,7 @@ bool AStarSolver::Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
 
             float32 moveCost = baseCosts[i] * grid.GetCellCost(nx, nz);
 
-            const CellReservation& reservation = grid.GetCellReservation(nx, nz);
+            const CellReservation reservation = grid.Reservation(nx, nz);
             if (reservation.IsActive(currentTime) && reservation.AgentId != excludeAgentId)
             {
                 // Occupancy is a tax, not a wall. Movement still refuses
@@ -185,7 +184,7 @@ bool AStarSolver::Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
     return false;
 }
 
-void AStarSolver::GetNeighbors(const GridMap& grid, uint32 cellIndex,
+void AStarSolver::GetNeighbors(const GridMap::ReadView& grid, uint32 cellIndex,
                                 uint32* outNeighbors, float32* outBaseCosts, uint32& outCount) const
 {
     outCount = 0;
@@ -265,7 +264,7 @@ void AStarSolver::GetNeighbors(const GridMap& grid, uint32 cellIndex,
     }
 }
 
-float32 AStarSolver::Heuristic(const GridMap& grid, uint32 from, uint32 to) const
+float32 AStarSolver::Heuristic(const GridMap::ReadView& grid, uint32 from, uint32 to) const
 {
     uint32 fx = 0, fz = 0, tx = 0, tz = 0;
     grid.CellFromIndex(from, fx, fz);

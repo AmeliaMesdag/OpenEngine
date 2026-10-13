@@ -30,6 +30,7 @@ class World;
 
 namespace GameEngine::Editor
 {
+class UndoRedoService;
 
 // The editor side of world mark-ups: the one subscriber to the editor's change
 // notifications for them, who stamps an edit to a mark-up with its author and time
@@ -153,9 +154,9 @@ public:
     void SetPlayModeProvider(PlayModeProvider provider) { m_PlayModeProvider = std::move(provider); }
     bool IsInPlayMode() const { return m_PlayModeProvider && m_PlayModeProvider(); }
     // Selects the entity as a click in the Scene View would (the Inspector and the Hierarchy
-    // follow): a mark-up, or any entity a comment links to (the chip's click and its frame glyph). A mark-up's updates are marked
-    // seen. `frame` also frames it: a mark-up's volume, else the entity.
-    void SelectMarkup(ECS::World& world, ECS::EntityHandle entity, bool frame);
+    // follow): a mark-up, or any entity a comment links to. A mark-up's updates are marked seen.
+    // Framing is FrameMarkupInSceneView's.
+    void SelectMarkup(ECS::World& world, ECS::EntityHandle entity);
     // A Mark-ups panel row's or a comment's entity link's hover: outlines the entity as a
     // Hierarchy hover does and, for a mark-up, highlights its volume; an invalid handle clears
     // both.
@@ -169,6 +170,10 @@ public:
     MarkupHighlightState GetHighlight() const;
     // The main window's Scene View, or null (no view yet, or tests).
     SceneViewController* GetSceneView() const { return m_SceneViewProvider ? m_SceneViewProvider() : nullptr; }
+    // The editor's undo history, which the mark-up requests record their steps in; null in
+    // hosts without one (tests).
+    void SetUndoService(UndoRedoService* undo) { m_Undo = undo; }
+    UndoRedoService* GetUndoService() const { return m_Undo; }
     // The displays of `world`'s regions, shared by every Scene View; a reset world (a scene
     // closed or opened) starts with none. A cache, not viewer state: drawing fills it.
     MarkupECS::MarkupRegionDisplayCache& RegionDisplaysOf(const ECS::World& world) const
@@ -278,6 +283,7 @@ private:
     mutable std::size_t m_UnseenCount = 0;
     SceneViewProvider m_SceneViewProvider;
     PlayModeProvider m_PlayModeProvider;
+    UndoRedoService* m_Undo = nullptr;
     ECS::EntityHandle m_HoveredRow{};
 };
 

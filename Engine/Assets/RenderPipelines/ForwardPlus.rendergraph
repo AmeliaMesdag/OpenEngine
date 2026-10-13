@@ -1543,19 +1543,12 @@
         "ditherMode": 0,
         "exposure": 1.0,
         "ictcpChromaCompression": 0.0,
-        "tonemapMode": 4,
         "useAutoExposure": 0
       },
       "samplers": {
         "uHDRColor": "LinearClamp"
       },
       "shaderPkg": "Shaders/tonemap.shaderpkg",
-      "skipWhen": {
-        "tonemapMode": 5.0,
-        "exposure": 1.0,
-        "ictcpChromaCompression": 0.0,
-        "useAutoExposure": 0.0
-      },
       "type": "FullscreenShader"
     },
     {

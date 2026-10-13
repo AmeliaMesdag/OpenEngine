@@ -229,9 +229,10 @@ void NavigationMovementSystem::Update(ECS::World& world, float32 deltaTime)
     }
 
     // Dynamic-obstacle application lives in NavigationSurfaceSystem: dynamic-blocked
-    // is an unsynchronized GridMap field read by in-flight path jobs, so its
-    // writes must sit behind that system's job-free gate. This system only reads
-    // map content (Raycast / IsCellBlocked) and takes the reservation lock.
+    // is an unsynchronized GridMap field that path solves read, so its writes
+    // sit behind that system's HasActivePathJobs gate. This system only reads
+    // map content (Raycast / IsCellBlocked) and writes reservations, after the
+    // pathfinding system's solves have finished.
 
     // Manage crowd agent lifecycle for navmesh-based agents
     if (crowd.IsInitialized())

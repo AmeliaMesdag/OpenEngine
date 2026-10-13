@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -480,7 +481,7 @@ TEST(OccupancySnapshotTest, AnInlinePoolHasNoSlots) {
 TEST(CurrentJobContextTest, LanePopsRunAsTheirLanesClass) {
     WorkStealingThreadPool pool(2);
     pool.SetSpinConfigForTest(0, 0);
-    EXPECT_EQ(CurrentJob(), "");
+    EXPECT_FALSE(WorkStealingThreadPool::IsExecutingJob());
 
     Seen normal;
     Seen background;
@@ -597,7 +598,7 @@ TEST(CurrentJobContextTest, AChannelJobRunsAsItsChannel) {
     pool->Shutdown();
     channel->Enqueue([&] { seen.Record(); });
     EXPECT_EQ(seen.Jobs(), (std::vector<std::string>{kChannelName, kChannelName, kChannelName}));
-    EXPECT_EQ(CurrentJob(), "") << "the caller's context is restored after the refused job";
+    EXPECT_FALSE(WorkStealingThreadPool::IsExecutingJob()) << "the caller's context is restored after the refused job";
     channel.reset();
 }
 
@@ -624,7 +625,7 @@ TEST(CurrentJobContextTest, AnInlinePoolRunsEachJobAsTheClassGivenAtPublish) {
 
     EXPECT_EQ(seen.Jobs(), (std::vector<std::string>{"Normal", "Background", "Background", "Normal", kChannelName,
                                                      "Background", "Normal", "Background"}));
-    EXPECT_EQ(CurrentJob(), "");
+    EXPECT_FALSE(WorkStealingThreadPool::IsExecutingJob());
 }
 
 namespace {
@@ -651,7 +652,7 @@ TEST(CurrentJobContextTest, AnInlineJobDeferredAtTheDepthBoundRunsAsTheClassGive
     Seen innermost;
     PublishNestedBackground(pool, kLevels, innermost);
     EXPECT_EQ(innermost.Jobs(), (std::vector<std::string>{"Background"}));
-    EXPECT_EQ(CurrentJob(), "");
+    EXPECT_FALSE(WorkStealingThreadPool::IsExecutingJob());
 }
 
 // A cap-1 channel's running job holds the only blocking thread while an
@@ -735,13 +736,44 @@ TEST(CurrentJobContextTest, AParticipatingWaitRunsTaggedJobsAsTheWaitersClass) {
     EXPECT_EQ(seen.Jobs(), (std::vector<std::string>(4, "Background")));
 }
 
+// A ParallelFor unit is a job body whichever thread runs it: from a thread
+// that is not a worker (the frame thread's case), the units the caller claims
+// itself and the units its helpers run all read IsExecutingJob() true, and
+// the caller reads false again once the fork returns. Each unit waits until
+// both the caller and a helper have run one, so both paths are exercised.
+TEST(CurrentJobContextTest, AForkUnitIsAJobBodyOnEveryThread) {
+    constexpr size_t kUnits = 64;
+    WorkStealingThreadPool pool(4);
+    ASSERT_FALSE(WorkStealingThreadPool::IsExecutingJob());
+
+    const std::thread::id caller = std::this_thread::get_id();
+    std::vector<int> inBody(kUnits, -1);
+    std::atomic<bool> callerRan{false};
+    std::atomic<bool> helperRan{false};
+    const auto deadline = SteadyClock::now() + kDeadline;
+    ParallelFor(&pool, kUnits, [&](size_t unit) {
+        inBody[unit] = WorkStealingThreadPool::IsExecutingJob() ? 1 : 0;
+        (std::this_thread::get_id() == caller ? callerRan : helperRan).store(true, std::memory_order_release);
+        while (!(callerRan.load(std::memory_order_acquire) && helperRan.load(std::memory_order_acquire)) &&
+               SteadyClock::now() < deadline) {
+            std::this_thread::yield();
+        }
+    });
+
+    EXPECT_FALSE(WorkStealingThreadPool::IsExecutingJob());
+    ASSERT_TRUE(callerRan.load() && helperRan.load()) << "the caller and a helper each run a unit";
+    EXPECT_EQ(std::count(inBody.begin(), inBody.end(), 1), static_cast<std::ptrdiff_t>(kUnits))
+        << "every unit, on the caller and on the helpers, runs as a job body";
+}
+
 // A completion callback is not a body: it runs after the context of the job
 // that completed has ended, on the worker and on a blocking thread.
 TEST(CurrentJobContextTest, CompletionCallbacksRunOutsideTheBody) {
     WorkStealingThreadPool pool(1);
     JobChannel channel(pool, {.Name = kChannelName, .MaxRunning = 1});
     Seen bodies;
-    Seen callbacks;
+    // -1 until the callback has run, then whether it ran as a job body.
+    std::atomic<int> callbackInBody[2] = {-1, -1};
     for (int i = 0; i < 2; ++i) {
         Gate gate;
         GateOpener opener{gate};
@@ -753,13 +785,14 @@ TEST(CurrentJobContextTest, CompletionCallbacksRunOutsideTheBody) {
                                          gate.Wait();
                                          bodies.Record();
                                      });
-        handle.OnComplete([&] { callbacks.Record(); });
+        handle.OnComplete([&callbackInBody, i] { callbackInBody[i].store(WorkStealingThreadPool::IsExecutingJob() ? 1 : 0); });
         gate.Open();
         handle.Wait();
-        ASSERT_TRUE(WaitUntil([&] { return callbacks.Count() == static_cast<size_t>(i + 1); }));
+        ASSERT_TRUE(WaitUntil([&] { return callbackInBody[i].load() != -1; }));
     }
     EXPECT_EQ(bodies.Jobs(), (std::vector<std::string>{"Normal", kChannelName}));
-    EXPECT_EQ(callbacks.Jobs(), (std::vector<std::string>{"", ""}));
+    EXPECT_EQ(callbackInBody[0].load(), 0);
+    EXPECT_EQ(callbackInBody[1].load(), 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 #include "Markups/MarkupRegionPort.h"
 #include "Markups/MarkupTool.h"
 #include "Markups/MarkupsPanelRows.h"
+#include "Markups/MarkupActionMenuItems.h"
 
 #include "Components/Markup/Markup.h"
 #include "Components/Name.h"
@@ -18,6 +19,7 @@
 #include "Components/Transform.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
+#include "Editor/Registries/MarkupActionRegistry.h"
 #include "EditorChangeNotifications.h"
 #include "InspectorRegistry.h"
 #include "MarkupECS/MarkupRegionOutline.h"
@@ -41,6 +43,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -595,4 +598,83 @@ TEST(MarkupLasso, AFigureEightLassoIsRefused)
     const std::vector<Vector2> knots = Editor::SimplifyLassoStroke(stroke);
     ASSERT_GE(knots.size(), 4u);
     EXPECT_TRUE(MarkupECS::CheckRegionOutline(knots).has_value()) << "a crossing lasso made a region";
+}
+
+// With no action registered on mark-ups the Mark-up section has no actions row and the panel row no
+// menu; an action a module registers is then a button in the section and a row of the menu, each
+// running it on that mark-up, and one that says why it cannot run is shown disabled. This is the
+// only EditorTests test that registers actions, and the registry has no unregister, so "test.ask",
+// "test.off" and "test.follow" stay registered for the rest of the process: later sections show
+// their buttons.
+TEST_F(MarkupRegionInspectorTest, AnActionShowsInTheSectionAndTheRowMenuOnceRegistered)
+{
+    const ECS::EntityHandle forest = CreateRegion(kForest);
+    ASSERT_TRUE(Editor::MarkupActionRegistry::Get().GetActions().empty());
+    EXPECT_FALSE(HasClassBelow(*BuildSection<Components::Markup>(forest), "markup-actions"));
+    EXPECT_TRUE(Editor::BuildMarkupActionMenuItems(World, forest).empty());
+
+    static std::vector<ECS::EntityHandle> s_Asked;
+    s_Asked.clear();
+    Editor::MarkupActionRegistry::Get().Register(
+        {"test.ask", "Ask about it", "", [](const ECS::World&, ECS::EntityHandle entity) { s_Asked.push_back(entity); }});
+
+    const std::unique_ptr<UIElement> section = BuildSection<Components::Markup>(forest);
+    Button* ask = nullptr;
+    for (Button* button : FindAll<Button>(*section))
+    {
+        if (button->HasClass("markup-action") && button->GetText() == "Ask about it")
+            ask = button;
+    }
+    ASSERT_NE(ask, nullptr);
+    ask->TriggerClick();
+
+    const std::vector<ContextMenuManipulator::Item> menu = Editor::BuildMarkupActionMenuItems(World, forest);
+    const auto row = std::find_if(menu.begin(), menu.end(),
+                                  [](const ContextMenuManipulator::Item& item) { return item.Path == "Ask about it"; });
+    ASSERT_NE(row, menu.end());
+    row->OnActivate();
+    EXPECT_EQ(s_Asked, (std::vector<ECS::EntityHandle>{forest, forest}));
+
+    // An action that says why it cannot run is a disabled button with the reason as its tooltip and a
+    // disabled menu row. "test.off" stays registered too.
+    Editor::MarkupActionRegistry::Get().Register(
+        {"test.off", "Not now", "", [](const ECS::World&, ECS::EntityHandle) {},
+         [](const ECS::World&, ECS::EntityHandle) { return std::string("Give it a title, then ask"); }});
+    const std::unique_ptr<UIElement> offSection = BuildSection<Components::Markup>(forest);
+    Button* off = nullptr;
+    for (Button* button : FindAll<Button>(*offSection))
+    {
+        if (button->GetText() == "Not now")
+            off = button;
+    }
+    ASSERT_NE(off, nullptr);
+    EXPECT_FALSE(off->IsEnabled());
+    EXPECT_EQ(off->GetTooltip(), "Give it a title, then ask");
+    const std::vector<ContextMenuManipulator::Item> offMenu = Editor::BuildMarkupActionMenuItems(World, forest);
+    const auto offRow = std::find_if(offMenu.begin(), offMenu.end(),
+                                     [](const ContextMenuManipulator::Item& item) { return item.Path == "Not now"; });
+    ASSERT_NE(offRow, offMenu.end());
+    EXPECT_EQ(offRow->Flags & MenuItemFlag_Disabled, MenuItemFlag_Disabled);
+
+    // The reason is checked again each frame, so an edit the section is not rebuilt for (a title
+    // typed in the header) turns the button on. "test.follow" stays registered too.
+    static bool s_Named = false;
+    Editor::MarkupActionRegistry::Get().Register(
+        {"test.follow", "Follow", "", [](const ECS::World&, ECS::EntityHandle) {},
+         [](const ECS::World&, ECS::EntityHandle) { return s_Named ? std::string() : std::string("Name it first"); }});
+    std::vector<std::function<void()>> frameCallbacks;
+    const std::unique_ptr<UIElement> followSection = BuildSection<Components::Markup>(forest, &frameCallbacks);
+    Button* follow = nullptr;
+    for (Button* button : FindAll<Button>(*followSection))
+    {
+        if (button->GetText() == "Follow")
+            follow = button;
+    }
+    ASSERT_NE(follow, nullptr);
+    EXPECT_FALSE(follow->IsEnabled());
+    s_Named = true;
+    for (const std::function<void()>& callback : frameCallbacks)
+        callback();
+    EXPECT_TRUE(follow->IsEnabled());
+    EXPECT_EQ(follow->GetTooltip(), "");
 }

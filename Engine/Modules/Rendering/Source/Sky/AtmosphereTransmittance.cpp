@@ -11,7 +11,7 @@ namespace {
 
 // Steps of the optical-depth quadrature. Mirrors kSteps in sky_transmittance_lut.comp: the CPU
 // colour and the GPU LUT are the same integral, so they must also be the same approximation of it.
-constexpr int kOpticalDepthSteps = 256;
+constexpr int kOpticalDepthSteps = 512;
 
 // Path length from the planet surface along a ray of zenith cosine `mu`. The evaluator sits ON the
 // surface (r == planetRadius), so both intersections are closed-form. Do not replace this with a

@@ -44,6 +44,8 @@ set(UI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSValueParsers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSVarResolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSStylesheetParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/MarkdownParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/MarkdownInlineParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Layout/YogaLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Label.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/BaseField.cpp
@@ -69,6 +71,7 @@ set(UI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/AxisHeaderBar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/TableView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/EnableDot.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/MarkdownText.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Toggle.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Checkbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Dropdown.cpp
@@ -506,6 +509,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/StyleUtilTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/StyleOverrideCustomColorTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/FloatingPanelTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/MarkdownTextLayoutTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIManagerPseudoInvalidationTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/StructuralPseudoRestyleTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/RuleCacheValidatorTests.cpp
@@ -608,7 +612,9 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/SearchDialogTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CaretBlinkTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CaretForceVisibleDeadlineTests.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ItemResizeGestureTests.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ItemResizeGestureTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/MarkdownParserTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/MarkdownTextTests.cpp)
 
     # The UI core the rest sits on: event dispatch and handler tables, element
     # registration and lifecycle, attach/detach, UIManager ordering and input

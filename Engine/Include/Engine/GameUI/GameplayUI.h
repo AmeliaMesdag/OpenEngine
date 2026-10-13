@@ -1,8 +1,9 @@
 #pragma once
 
+#include "Types/StringId.h"
+
 #include <cstdint>
 #include <functional>
-#include <string_view>
 
 namespace GameEngine {
 
@@ -31,15 +32,16 @@ UIManager* GetUIManager();
 // bound on the gameplay host.
 UIElement* FindDocumentRoot(uint64_t entityId);
 
-UIElement* FindElementById(uint64_t entityId, std::string_view id);
+// Element `id` ("hp-label"_sid, or HashStringId of a runtime id) inside that
+// document's mounted subtree, or nullptr.
+UIElement* FindElementById(uint64_t entityId, StringId id);
 
 // On a match, outOwnerEntityId (if non-null) receives the owning UIDocument
 // entity so the caller can pin later lookups to that one subtree. Untouched
 // when nothing matches.
 //
-// An EMPTY id matches the first element that has no id, which is most of a tree
-// — callers taking an id from outside must reject empty before calling.
-UIElement* FindElementByIdAny(std::string_view id, uint64_t* outOwnerEntityId = nullptr);
+// An empty id is never registered; FindElementByIdAny(0) returns nullptr.
+UIElement* FindElementByIdAny(StringId id, uint64_t* outOwnerEntityId = nullptr);
 
 // Bumps when a document layout binds, a subtree is removed, or a .uxml hot
 // reload reconciles a bound subtree. A bump does not imply the old elements

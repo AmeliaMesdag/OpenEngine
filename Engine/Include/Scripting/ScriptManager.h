@@ -191,29 +191,24 @@ class ScriptManager
     size_t ProcessMainThreadTasks();
 
     /**
-     * @brief Record the calling thread as the main thread. Used to diagnose
-     *        main-thread tasks executing on a fallback thread.
+     * @brief Have the next ProcessMainThreadTasks call run the managed
+     *        MainThread.Post queue, once, before its task loop and outside its
+     *        per-call task cap. Reached through EngineCore's post gate
+     *        (EngineCore::RequestManagedPostDrain).
      */
-    void MarkMainThread();
+    void RequestManagedPostDrain();
+
+    /// The managed MainThread.Post drain: runs the queued batch in order when
+    /// `run` is nonzero, discards it otherwise.
+    using ManagedPostDrain = void (*)(int32_t run);
 
     /**
-     * @brief True once MarkMainThread ran, i.e. a live frame loop owns the
-     *        main-thread task queue. Standalone hosts (gtest, dotnet-test)
-     *        never mark one and must pump the queue themselves.
+     * @brief Install the managed drain, process-wide and first-wins (a later
+     *        installation is refused: replacing a live pointer would free it
+     *        under a pump that is calling it).
+     * @return false when a drain was already installed.
      */
-    bool HasMarkedMainThread() const { return m_MainThreadId.load(std::memory_order_relaxed) != std::thread::id{}; }
-
-    /**
-     * @brief True when the calling thread is the marked main thread. False both
-     *        off-main and when no main thread has been marked at all, so a
-     *        caller that treats "no frame loop" as permissive must ask
-     *        HasMarkedMainThread() as well.
-     */
-    bool IsMainThread() const
-    {
-        const std::thread::id marked = m_MainThreadId.load(std::memory_order_relaxed);
-        return marked != std::thread::id{} && marked == std::this_thread::get_id();
-    }
+    static bool InstallManagedPostDrain(ManagedPostDrain drain);
 
     /**
      * @brief Queue a task for execution on the main thread
@@ -545,9 +540,10 @@ class ScriptManager
     // the same thread; consumers try-lock and bail if another thread is pumping
     // (rationale in ProcessMainThreadTasks). Producers use the queue mutex above.
     std::recursive_mutex m_MainThreadTaskProcessingMutex;
-    // Set once by MarkMainThread; empty id means unknown (standalone test hosts).
-    std::atomic<std::thread::id> m_MainThreadId{};
     std::atomic<bool> m_WarnedOffMainThreadPump{false};
+    // A MainThread.Post landed since the last pump's drain step. Guarded by
+    // m_MainThreadTasksMutex, so it lives and dies with this queue.
+    bool m_ManagedPostDrainRequested = false;
 
     // One-shot deferred initial build scheduling (when startup must not block)
     std::atomic<bool> m_DeferredInitialBuildQueued{false};

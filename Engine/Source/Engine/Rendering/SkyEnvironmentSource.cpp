@@ -277,8 +277,9 @@ uint64_t SkyEnvironmentSource::InputDigest() const
     // steady sky bakes once.
     //
     // The capture SAMPLES the atmospheric sky-view LUT, which is a function of
-    // the sun + the full atmosphere block (see ComputeSkyViewLutInputDigest in
-    // SkyRenderNode). Folding the same atmosphere fields here means the IBL
+    // the sun + the full atmosphere block (see ComputeSkyLutSettingsDigest in
+    // SkyRenderNode) and of the camera's altitude band, which reaches this
+    // digest through MaterializedLutDigest. Folding the same atmosphere fields here means the IBL
     // re-bakes exactly once whenever the sky-view LUT (and therefore the sky the
     // user sees) changes — sun motion, atmosphere edits, ground/night/horizon
     // tweaks — and never on a frame where the sky is steady. nightSkyBlend +

@@ -94,7 +94,7 @@ void SceneViewToolbar::OnPostLayout()
 
 void SceneViewToolbar::UpdateGizmoButtonState()
 {
-    if (auto* gizmoBtn = dynamic_cast<Button*>(FindById("GizmoToggle")))
+    if (auto* gizmoBtn = dynamic_cast<Button*>(FindById("GizmoToggle"_sid)))
     {
         if (m_Controller && m_Controller->AreGizmosVisible())
         {
@@ -109,7 +109,7 @@ void SceneViewToolbar::UpdateGizmoButtonState()
 
 void SceneViewToolbar::UpdateGridButtonState()
 {
-    if (auto* gridBtn = dynamic_cast<Button*>(FindById("GridToggle")))
+    if (auto* gridBtn = dynamic_cast<Button*>(FindById("GridToggle"_sid)))
     {
         if (m_Controller && m_Controller->IsGridVisible())
             gridBtn->AddClass("icon-active");
@@ -120,7 +120,7 @@ void SceneViewToolbar::UpdateGridButtonState()
 
 void SceneViewToolbar::UpdateSnapButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("SnapToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("SnapToggle"_sid)))
     {
         if (m_Controller && m_Controller->IsGridSnapEnabled())
             btn->AddClass("icon-active");
@@ -131,7 +131,7 @@ void SceneViewToolbar::UpdateSnapButtonState()
 
 void SceneViewToolbar::UpdateView2DButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("View2DToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("View2DToggle"_sid)))
     {
         if (m_Controller && m_Controller->Is2DTarget())
             btn->AddClass("icon-active");
@@ -142,7 +142,7 @@ void SceneViewToolbar::UpdateView2DButtonState()
 
 void SceneViewToolbar::UpdatePickModeButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("PickModeToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("PickModeToggle"_sid)))
     {
         if (Editor::SceneViewSettings::Get().GetExactPickMode())
             btn->AddClass("icon-active");
@@ -153,7 +153,7 @@ void SceneViewToolbar::UpdatePickModeButtonState()
 
 void SceneViewToolbar::UpdatePostProcessButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("PostProcessToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("PostProcessToggle"_sid)))
     {
         if (m_Controller && m_Controller->IsPostProcessingEnabled())
             btn->AddClass("icon-active");
@@ -164,7 +164,7 @@ void SceneViewToolbar::UpdatePostProcessButtonState()
 
 void SceneViewToolbar::UpdateProjectionButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("ProjectionToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("ProjectionToggle"_sid)))
     {
         if (m_Controller && m_Controller->IsOrthographic())
             btn->AddClass("icon-active");
@@ -175,7 +175,7 @@ void SceneViewToolbar::UpdateProjectionButtonState()
 
 void SceneViewToolbar::UpdateRotationGizmoButtonState()
 {
-    if (auto* btn = dynamic_cast<Button*>(FindById("RotationGizmoToggle")))
+    if (auto* btn = dynamic_cast<Button*>(FindById("RotationGizmoToggle"_sid)))
     {
         if (Editor::SceneViewSettings::Get().GetShowRotationGizmo())
             btn->AddClass("icon-active");
@@ -302,7 +302,7 @@ Button* SceneViewToolbar::AcquireUnwiredButton(std::string_view id)
         // First time any pass has asked for this id. Register it and resolve it on its
         // own; the batch walk covers it from the next pass on. Learning the wanted set
         // from the call sites is what keeps it from drifting out of step with them.
-        m_WiredButtons.push_back(WiredButton{key, 0, dynamic_cast<Button*>(FindById(id))});
+        m_WiredButtons.push_back(WiredButton{key, 0, dynamic_cast<Button*>(FindById(HashStringId(id)))});
         wired = &m_WiredButtons.back();
         if (!wired->Resolved)
             m_WiringAllResolved = false;
@@ -693,8 +693,8 @@ void SceneViewToolbar::WireControls()
                 panel = panel->GetParent();
             if (!panel)
                 return;
-            auto* overlay = panel->FindById("SceneToolOverlay");
-            auto* inlineButtons = FindById("InlineToolButtons");
+            auto* overlay = panel->FindById("SceneToolOverlay"_sid);
+            auto* inlineButtons = FindById("InlineToolButtons"_sid);
             bool isActive = b.HasClass("icon-active");
             if (isActive)
             {

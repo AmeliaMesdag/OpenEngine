@@ -19,6 +19,7 @@ class AgentConversationController;
 class AgentConversationRow;
 class AgentModelPopover;
 class AgentSessionPicker;
+class MarkupTokenPicker;
 class Button;
 class Dropdown;
 class Label;
@@ -58,7 +59,10 @@ private:
     /// `selected` chosen, without reporting a change.
     void ShowModeLabels(int selected);
     void RefreshContinuedRow();
-    void RunReplyAction(const AgentReplyAction& action, size_t messageIndex);
+    // Runs `action` on the reply at `messageIndex`; whether it acted (AgentReplyOutcome::Acted).
+    bool RunReplyAction(const AgentReplyAction& action, size_t messageIndex);
+    /// Adds the text AiAssistantPanelService holds to the end of the prompt and focuses it.
+    void TakePrefill();
     void AnswerCall(uint64_t requestId, AssistantAnswer answer);
     bool FocusWaitingAnswer();
     AgentConversationRowModel RowModelAt(size_t messageIndex) const;
@@ -111,6 +115,7 @@ private:
     // The model control's popover, a child of the panel; it owns the button's behavior.
     AgentModelPopover* m_ModelPopover = nullptr;
     std::unique_ptr<AgentSessionPicker> m_SessionPicker;
+    std::unique_ptr<MarkupTokenPicker> m_MarkupPicker;
     // The first row of a conversation that continues a chosen session; hidden otherwise.
     Label* m_ContinuedRow = nullptr;
     // The session m_ContinuedRow describes and the text it shows; both empty while

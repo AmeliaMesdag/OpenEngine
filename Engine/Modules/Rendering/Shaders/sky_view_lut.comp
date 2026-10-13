@@ -76,11 +76,19 @@ void main()
     // seamless (the notch was widened into a visible band by the elevation warp).
     // PlanetGround folds the same way: the LUT stores pure aerial-perspective haze
     // below the horizon, and the lit floor is composited per-pixel in the render pass.
+    // The horizon is the planet's: level for a camera on the ground, dipping below the
+    // horizontal as the camera climbs (10 degrees at 100 km), with the sky down to it.
+    float horizonSin = -sqrt(max(0.0, 1.0 - (uAtmos.planetRadius / camHeight) * (uAtmos.planetRadius / camHeight)));
+    float foldSin = horizonSin + 0.002;
     if ((uAtmos.belowHorizonMode == kBelowHorizonContinue ||
-         uAtmos.belowHorizonMode == kBelowHorizonPlanetGround) && local.y < 0.002)
+         uAtmos.belowHorizonMode == kBelowHorizonPlanetGround) && local.y < foldSin)
     {
-        local.y = 0.002;
-        local = normalize(local);
+        // Keep the texel's azimuth and raise it to the fold's elevation. (Setting y and
+        // renormalising would turn the texels near the nadir, whose horizontal part is
+        // tiny, toward the zenith or, at altitude, the nadir.)
+        vec2 azimuth = length(local.xz) > 1e-6 ? normalize(local.xz) : vec2(1.0, 0.0);
+        float foldCos = sqrt(1.0 - foldSin * foldSin);
+        local = vec3(azimuth.x * foldCos, foldSin, azimuth.y * foldCos);
     }
 
     vec3 rayDir = normalize(local.x * east + local.y * up + local.z * north);
@@ -102,15 +110,22 @@ void main()
         tEnd = min(tEnd, tg0);
     }
 
+    // Steps grow quadratically along the ray (Hillaire 2020's variable sample distribution): short
+    // where the ray leaves the camera through the dense aerosol near the ground, long in the thin air
+    // above. Even steps put a low ray's whole first kilometres of haze into one step.
     const int kNumSteps = 64;
-    float dt = (tEnd - tStart) / float(kNumSteps);
-    float t = tStart + 0.5 * dt;
-    
+    float span = tEnd - tStart;
+
     vec3 accumScattering = vec3(0.0);
     vec3 accumTransmittance = vec3(1.0);
     
     for (int i = 0; i < kNumSteps; i++)
     {
+        float u0 = float(i) / float(kNumSteps);
+        float u1 = float(i + 1) / float(kNumSteps);
+        float t0 = tStart + span * u0 * u0;
+        float dt = span * (u1 * u1 - u0 * u0);
+        float t = t0 + 0.5 * dt;
         vec3 p = camPos + rayDir * t;
         float r = length(p - planetCenter);
         float h = r - uAtmos.planetRadius;
@@ -136,8 +151,7 @@ void main()
         // Phase Functions
         float mu = dot(rayDir, sunDir);
         float phaseRay = 3.0 / (16.0 * PI) * (1.0 + mu * mu);
-        float g = uAtmos.mieG;
-        float phaseMie = 3.0 / (8.0 * PI) * ((1.0 - g*g) * (1.0 + mu*mu)) / ((2.0 + g*g) * pow(1.0 + g*g - 2.0*g*mu, 1.5));
+        float phaseMie = GE_SkyAerosolPhase(mu);
         
         vec3 S = (sigmaS_Ray * phaseRay + sigmaS_Mie * phaseMie) * transToSun * uSky.sunColor * uSky.sunIntensity;
 
@@ -156,13 +170,11 @@ void main()
         // constant over the step and integrated against the transmittance from the
         // step's start, integral_0^dt exp(-sigmaE s) ds = (1 - stepTrans) / sigmaE, then
         // the path transmittance advances. Weighting by the transmittance after the step
-        // instead darkens the long horizon steps (17.7 km at 64 steps, blue optical depth
+        // instead darkens long steps (17.7 km for an even 64-step horizon ray, blue optical depth
         // 0.63 on the first one).
         vec3 inScatter = S + multiScatter;
         accumScattering += accumTransmittance * (inScatter - inScatter * stepTrans) / max(sigmaE, vec3(1e-9));
         accumTransmittance *= stepTrans;
-
-        t += dt;
     }
 
     imageStore(oSkyViewLUT, pixel, vec4(accumScattering, 1.0));

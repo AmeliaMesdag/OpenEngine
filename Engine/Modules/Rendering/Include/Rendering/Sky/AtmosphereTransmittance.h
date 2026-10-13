@@ -24,7 +24,7 @@ const AtmosphereParametersGPU& ScatteringAtmosphere();
 /// air mass, and that is what this returns.
 ///
 /// The extinction is the optical-depth integral `sky_transmittance_lut.comp` bakes — same
-/// Rayleigh/Mie densities, Mie absorption and ozone, same 256-step midpoint quadrature — evaluated on the CPU at the planet
+/// Rayleigh/Mie densities, Mie absorption and ozone, same 512-step midpoint quadrature — evaluated on the CPU at the planet
 /// surface, because a directional light's colour is decided long before that LUT is sampled.
 ///
 /// It is meaningful ABOVE the horizon, where it is the integral the LUT stores (the LUT maps mu
@@ -55,8 +55,8 @@ void EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
 /// reason), so above the atmosphere it is that value over the zenith transmittance: the reciprocal
 /// of the Rec.709 luminance of the zenith transmittance, the same optical-depth integral
 /// `sky_transmittance_lut.comp` bakes. A white source of the lifted irradiance then delivers the
-/// light's illuminance through an overhead sky, in luminance. About 1.15 for the shipped Earth
-/// atmosphere, which transmits (0.915, 0.869, 0.763) at the zenith.
+/// light's illuminance through an overhead sky, in luminance. About 1.21 for the shipped Earth
+/// atmosphere on a crisp clear day, which transmits (0.881, 0.823, 0.704) at the zenith.
 float SkySourceIlluminanceScale(const AtmosphereParametersGPU& atmosphere);
 
 /// The two celestial bodies' ground-level colours, each extinguished at its OWN elevation, and how

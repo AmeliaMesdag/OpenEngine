@@ -223,23 +223,22 @@ void NavigationSurfaceSystem::Update(ECS::World& world, float32 /*deltaTime*/)
     if (!navWorld)
         return;
 
-    // Async path jobs read maps unlocked (NavigationWorld's thread-safety contract), so every map
+    // Path solves read maps unlocked (NavigationWorld's thread-safety contract), so every map
     // mutation this system makes — creating, re-baking, applying tiles and dynamic obstacles — must
-    // wait for a job-free window. Every trigger (BakeRequested, a pending bake, a mesh bake's
+    // wait until no solve runs. Every trigger (BakeRequested, a pending bake, a mesh bake's
     // finished tiles) persists across frames, so a deferred frame retries on the next one.
     //
-    // This gate cannot fire as the engine currently stands: NavigationWorld::SetJobSystem has no
-    // runtime caller, so no path job is ever submitted and HasActivePathJobs() is permanently false.
-    // The check stands because it is the correct guard the moment a job system is wired — at which
-    // point NavGridBrushTool's ungated grid writes become a concurrent-mutation hazard too, and must
-    // be gated in the same change.
+    // Solves run only inside NavigationPathfindingSystem's exclusive Update
+    // (NavigationWorld::SolveGridPaths), which finishes them before it returns, so
+    // HasActivePathJobs() is false whenever this system runs and the gate never fires in the
+    // engine's own schedule. It stays the guard for a caller that could overlap a solve.
     if (navWorld->HasActivePathJobs())
     {
         ++m_GateDeferredFrames;
         if (m_GateDeferredFrames == kGateStarvationWarnFrames)
         {
             Logger::Log::Warning("[PathfindingECS] NavigationSurfaceSystem: map updates deferred for {} consecutive "
-                                 "frames by in-flight path jobs; surfaces are not baking or applying obstacles",
+                                 "frames by running path solves; surfaces are not baking or applying obstacles",
                                  kGateStarvationWarnFrames);
         }
         return;

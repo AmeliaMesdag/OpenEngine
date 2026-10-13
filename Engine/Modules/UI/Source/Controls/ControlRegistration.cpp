@@ -2,6 +2,7 @@
 #include "UI/Controls/FloatField.h"
 #include "UI/Controls/IntField.h"
 #include "UI/Controls/Label.h"
+#include "UI/Controls/MarkdownText.h"
 #include "UI/Controls/TextField.h"
 #include "UI/Controls/Vector3Field.h"
 #include "UI/Registration/ElementRegistration.h"
@@ -115,6 +116,9 @@ void DefineBuiltInControls()
     Register<TextArea>("textarea")
         .Attr("value", &BaseField::SetValue)
         .Attr("readonly", &TextArea::SetReadOnly);
+
+    // Read-only Markdown; its text is set from code (SetMarkdown), never from the layout file.
+    Register<MarkdownText>("MarkdownText");
 
     RegisterWithFactory<Scrollbar>("scrollbar", []()
                                    { return std::make_unique<Scrollbar>(Scrollbar::Orientation::Vertical); });

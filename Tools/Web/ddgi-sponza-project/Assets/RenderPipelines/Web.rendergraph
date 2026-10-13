@@ -166,8 +166,7 @@
                 "ditherMode": 0,
                 "exposure": 1.0,
                 "outEncoding": 0,
-                "paperWhiteNits": 350.0,
-                "tonemapMode": 0
+                "paperWhiteNits": 350.0
             },
             "samplers": {
                 "uHDRColor": "LinearClamp"

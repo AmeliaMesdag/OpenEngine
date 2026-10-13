@@ -273,6 +273,9 @@ TEST(SkySunDrive, TheSkyFollowsTheCurvesNoon)
     EXPECT_NEAR(noonDelivered, curveNoon, curveNoon * 1e-5f);
 
     // Continuous across the 1.15-degree floor: on 21 December the noon sun crosses it near 65.4 N.
+    // A low sun's extinction is steep through haze: near the floor, 0.022 stops per 0.01 degree of
+    // latitude through the default crisp day's and 0.054 through a typical day's (optical depth 0.15),
+    // against a jump of whole stops if the floor broke continuity.
     Components::SkyEnvironment polar = sky;
     polar.SunIlluminanceCurve = FlatCurve(10000.0f);
     float previous = 0.0f;
@@ -282,7 +285,7 @@ TEST(SkySunDrive, TheSkyFollowsTheCurvesNoon)
         const float r = SunDrive::NoonReferenceLux(polar);
         if (previous > 0.0f)
         {
-            EXPECT_LT(std::abs(std::log2(r / previous)), 0.05f) << "latitude " << latitude;
+            EXPECT_LT(std::abs(std::log2(r / previous)), 0.08f) << "latitude " << latitude;
         }
         previous = r;
     }

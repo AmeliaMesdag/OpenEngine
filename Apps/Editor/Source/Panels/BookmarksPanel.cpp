@@ -1152,7 +1152,7 @@ void BookmarksPanel::SetDropPreview(const UI::Interaction::DropPreviewState& sta
                                       : (m_Bookmarks.empty() ? 0 : m_Bookmarks.size() - 1);
     const bool lineBelowRow = (insertIndex >= static_cast<int>(m_Bookmarks.size()) && !m_Bookmarks.empty());
 
-    UIElement* row = m_ListContainer->FindById("bookmark-row-" + std::to_string(rowToHighlight));
+    UIElement* row = m_ListContainer->FindById(HashStringId("bookmark-row-" + std::to_string(rowToHighlight)));
     if (!row)
     {
         if (m_InsertionIndicator)
@@ -1706,7 +1706,7 @@ void BookmarksPanel::UpdateBookmarkIcon(UIElement* iconEl, const Bookmark& bookm
                         }
                         else if (!iconId.empty())
                         {
-                            iconEl = FindById(iconId);
+                            iconEl = FindById(HashStringId(iconId));
                         }
                         
                         // Verify element is still valid.
@@ -2141,7 +2141,7 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
                                           : (m_Bookmarks.empty() ? 0 : m_Bookmarks.size() - 1);
                 const bool lineBelowRow = (insertIndex >= static_cast<int>(m_Bookmarks.size()) && !m_Bookmarks.empty());
 
-                UIElement* row = m_ListContainer->FindById("bookmark-row-" + std::to_string(rowIdx));
+                UIElement* row = m_ListContainer->FindById(HashStringId("bookmark-row-" + std::to_string(rowIdx)));
                 if (row)
                 {
                     UI::Interaction::DropRequest req{};

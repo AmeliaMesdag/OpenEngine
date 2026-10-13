@@ -2069,7 +2069,7 @@ void SettingsPanel::ApplyAccentColorToUI()
     // Forward accent color to dock overlays
     if (auto* root = ui->GetRootElement())
     {
-        if (auto* ds = dynamic_cast<DockspaceElement*>(root->FindById("dock")))
+        if (auto* ds = dynamic_cast<DockspaceElement*>(root->FindById("dock"_sid)))
             ds->SetAccentColor(m_UIAccentColor);
     }
 
@@ -2465,7 +2465,7 @@ void SettingsPanel::ApplySavedNodeGraphHeaderAlignmentStyle(UIManager* ui)
     if (!root)
         return;
 
-    auto* canvas = root->FindById("NodeGraphCanvas");
+    auto* canvas = root->FindById("NodeGraphCanvas"_sid);
     if (!canvas)
         return;
 
@@ -8780,9 +8780,9 @@ void SettingsPanel::SyncCameraSettingsControls()
     const Editor::SceneViewSettings& settings = Editor::SceneViewSettings::Get();
     auto sync = [this](const char* idPrefix, float value)
     {
-        if (auto* slider = dynamic_cast<Slider*>(FindById(std::string(idPrefix) + "Slider")))
+        if (auto* slider = dynamic_cast<Slider*>(FindById(HashStringId(std::string(idPrefix) + "Slider"))))
             slider->SetValueWithoutNotify(value);
-        if (auto* field = dynamic_cast<FloatField*>(FindById(std::string(idPrefix) + "Field")))
+        if (auto* field = dynamic_cast<FloatField*>(FindById(HashStringId(std::string(idPrefix) + "Field"))))
             field->SetValueWithoutNotify(value);
     };
 

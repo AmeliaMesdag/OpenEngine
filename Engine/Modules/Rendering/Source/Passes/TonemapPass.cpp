@@ -281,7 +281,7 @@ RenderGraph::RGPass AddTonemapPassRG(RenderGraph::RGFrame& frame, RenderGraph::R
 	if (pcw.IsValid())
 	{
 		pcw.Add("exposure", params.exposure);
-		pcw.Add("tonemapMode", params.tonemapMode);
+		pcw.Add("look", params.look);
 		pcw.Add("outEncoding", params.outEncoding);
 		pcw.Add("paperWhiteNits", params.paperWhiteNits);
 		pcw.Add("maxOutputNits", params.maxOutputNits);

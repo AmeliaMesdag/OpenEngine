@@ -287,6 +287,12 @@ TEST(StarSparkleSourceContract, StarsAndFallingStarHeadsDrawTheSharedSparkle)
 
     for (const std::string* source : {&stars, &sky})
         EXPECT_NE(source->find("#include \"Includes/star_sparkle.glsl\""), std::string::npos);
+    const std::string starsVertex = LoadShaderSource("sky_stars_billboard.vert");
+    ASSERT_FALSE(starsVertex.empty()) << "sky_stars_billboard.vert was not readable (GE_RENDERER_REPO_ROOT)";
+    EXPECT_NE(starsVertex.find("vTwinkleRange = GE_StarTwinkleRange(starIdx)"), std::string::npos)
+        << "the star billboard's vertex stage no longer writes each star's twinkle range";
+    EXPECT_NE(stars.find("GE_StarTwinkleBrightness(vTwinkleRange, vTwinklePhase)"), std::string::npos)
+        << "the star billboard no longer dims the star by its twinkle range";
     EXPECT_NE(stars.find("GE_StarSparkleFiltered("), std::string::npos)
         << "the star billboard no longer draws the shared, pixel-filtered sparkle";
     EXPECT_NE(sky.find("GE_StarSparkleFiltered("), std::string::npos)

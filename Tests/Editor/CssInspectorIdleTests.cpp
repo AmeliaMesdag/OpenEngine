@@ -27,13 +27,13 @@ void InstallOverlays(UIManager& manager)
 void SetOverlayDisplay(UIManager& manager, DisplayMode display)
 {
     for (const char* id : {"css-inspector-overlay", "css-inspector-highlight"})
-        manager.GetRootElement()->FindById(id)->Overrides().Set(Style::Display, display);
+        manager.GetRootElement()->FindById(HashStringId(id))->Overrides().Set(Style::Display, display);
 }
 
 void ExpectOverlayDisplay(UIManager& manager, DisplayMode display)
 {
     for (const char* id : {"css-inspector-overlay", "css-inspector-highlight"})
-        EXPECT_EQ(manager.GetRootElement()->FindById(id)->Overrides().Get(Style::Display), display);
+        EXPECT_EQ(manager.GetRootElement()->FindById(HashStringId(id))->Overrides().Get(Style::Display), display);
 }
 
 } // namespace

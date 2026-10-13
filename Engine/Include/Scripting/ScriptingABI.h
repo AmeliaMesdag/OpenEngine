@@ -533,8 +533,8 @@ GE_API GE_Result GE_CDECL GE_UI_RequestTypeRegistrationWindow(void);
 // the engine or to another context — and that is GE_Result_Ok, not an error: one bad tag
 // among many must not fail the whole registration pass.
 //
-// MAIN THREAD ONLY: call it from inside the performRegistrations callback. Off-main the whole
-// batch is refused (every *outTagId 0) and the refusal is logged.
+// REGISTRATION WINDOW ONLY: call it from inside the performRegistrations callback. Anywhere
+// else, on any thread, the whole batch is refused (every *outTagId 0) and the refusal is logged.
 GE_API GE_Result GE_CDECL GE_UI_RegisterElementType(uint64_t owner, const char* tagName, uint64_t* outTagId);
 // The owner's context is unloading. Releases its instances, marks its elements Pending and
 // unregisters its tags. *outOrphaned receives how many elements went Pending.
@@ -542,8 +542,28 @@ GE_API GE_Result GE_CDECL GE_UI_OrphanElementTypes(uint64_t owner, uint64_t* out
 // A reload finished: whatever of this owner's elements did not come back is now Faulted
 // rather than merely waiting. Call it while the owner is STILL LIVE, then release the id.
 //
-// MAIN THREAD ONLY, and after the batch — same window, same call, registrations first.
+// REGISTRATION WINDOW ONLY, and after the batch — same window, same call, registrations first.
 GE_API GE_Result GE_CDECL GE_UI_NotifyReloadCompleted(uint64_t owner);
+
+// -------- The main thread, from a script's own thread (MainThread.Post) --------
+// The managed MainThread.Post queue lives in Scripting.ABI; these two exports are its native half.
+
+// What GE_MainThread_RequestPump answered.
+typedef enum GE_MainThreadPost {
+    GE_MainThreadPost_Queued = 0,    // the main-thread pump drains the queue at the end of a frame
+    GE_MainThreadPost_RunInline = 1, // no queue to wait for (no engine initialized, a standalone-hosted one, or
+                                     // one with scripting off): run it now
+    GE_MainThreadPost_Dropped = 2    // the engine shut down or its Initialize failed: drop it; logged here, once per process
+} GE_MainThreadPost;
+
+// Install the managed drain, process-wide and first-wins: the main-thread pump calls it once per
+// pump that a request preceded, with run = 1, and ScriptManager's shutdown calls it with run = 0 to
+// discard the batch. GE_Result_Fail when a drain was already installed. Never initializes the engine.
+GE_API GE_Result GE_CDECL GE_MainThread_SetDrain(void (GE_CDECL* drain)(int32_t run));
+// Ask the next main-thread pump to call the drain. Callable from any thread; the caller holds its
+// queue's lock across this call and its append. Never initializes the engine and never constructs
+// a ScriptManager. Returns a GE_MainThreadPost.
+GE_API int32_t GE_CDECL GE_MainThread_RequestPump(void);
 
 // -------- Domains (AssemblyLoadContext) --------
 // NOTE: Deprecated in favor of GE_ScriptsDomainCreateFromPackage. Reserved for future implementation.

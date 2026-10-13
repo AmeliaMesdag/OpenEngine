@@ -1,5 +1,7 @@
 #include "Rendering/Sky/SkyRenderer.h"
 
+#include "StarCatalog.h"
+
 #include "Rendering/Common/Utils.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/PipelineDescTranslator.h"
@@ -16,7 +18,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <random>
 #include <vector>
 
 namespace GameEngine
@@ -512,50 +513,7 @@ bool SkyRenderer::CreatePipelines()
 
 void SkyRenderer::GenerateStarCatalog()
 {
-    const uint32_t maxStars = m_Config.maxStars;
-    std::vector<StarInstanceGPU> stars;
-    stars.reserve(maxStars);
-
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
-
-    static constexpr float kPi = 3.14159265358979f;
-    static constexpr float kTwoPi = 2.0f * kPi;
-    static constexpr float kStarRotationJitterRadians = 0.2f;
-
-    for (uint32_t i = 0; i < maxStars; ++i)
-    {
-        float u = dist01(rng);
-        float v = dist01(rng);
-        float theta = kTwoPi * u;
-        float phi = std::acos(2.0f * v - 1.0f);
-
-        float sinPhi = std::sin(phi);
-        float x = sinPhi * std::cos(theta);
-        float y = std::cos(phi);
-        float z = sinPhi * std::sin(theta);
-
-        float brightness = 0.3f + 0.7f * dist01(rng);
-        float sizeScale = 0.6f + 1.2f * dist01(rng);
-        // The sparkle's points stay within about 11 degrees of the screen's axes: a four-pointed
-        // star a few pixels across with its points on the pixel grid's diagonals reads as a
-        // square (star_sparkle.glsl).
-        float rotAngle = kStarRotationJitterRadians * (2.0f * dist01(rng) - 1.0f);
-        float twinkleSeed = dist01(rng);
-        float colorTemp = dist01(rng);
-
-        StarInstanceGPU star{};
-        star.dirAndBrightness[0] = x;
-        star.dirAndBrightness[1] = y;
-        star.dirAndBrightness[2] = z;
-        star.dirAndBrightness[3] = brightness;
-        star.properties[0] = sizeScale;
-        star.properties[1] = rotAngle;
-        star.properties[2] = twinkleSeed;
-        star.properties[3] = colorTemp;
-        stars.push_back(star);
-    }
-
+    const std::vector<StarInstanceGPU> stars = BuildStarCatalog(m_Config.maxStars);
     m_StarCount = static_cast<uint32_t>(stars.size());
 
     BufferDesc bd{};
@@ -593,9 +551,14 @@ void SkyRenderer::SetCamera(const CameraState& camera)
     m_Camera = camera;
 }
 
-// Earth's clear-sky atmosphere as Hillaire 2020 gives it ("A Scalable and Production Ready Sky and
-// Atmosphere Rendering Technique", table 1, after Bruneton's reference): per-metre coefficients at
-// sea level, scale heights in metres, ozone as a tent between 10 and 40 km.
+// Earth's atmosphere on a crisp clear day: Hillaire 2020's Earth ("A Scalable and Production Ready
+// Sky and Atmosphere Rendering Technique", table 1, after Bruneton's reference) with the aerosol of
+// a crisp clear day, optical depth 0.06 at 550 nm, in place of the paper's pristine 0.0053: a deep
+// blue zenith over a light haze at the horizon. The hazier days are the presets an aerosol setting
+// will carry: a generic clear day at 0.10 and the satellite record's typical day at 0.15 (its
+// multiannual global mean is 0.13 to 0.14 over the oceans and 0.19 over land; MODIS, Remer et al.
+// 2008, JGR 113, D14S07). Per-metre coefficients at sea level, scale heights in metres, ozone as a
+// tent between 10 and 40 km.
 void SkyRenderer::FillDefaultAtmosphere(AtmosphereParametersGPU& atmo)
 {
     atmo.planetRadius = 6360.0e3f;
@@ -605,14 +568,17 @@ void SkyRenderer::FillDefaultAtmosphere(AtmosphereParametersGPU& atmo)
     atmo.betaRayleigh[0] = 5.802e-6f;
     atmo.betaRayleigh[1] = 13.558e-6f;
     atmo.betaRayleigh[2] = 33.100e-6f;
-    atmo.betaMie[0] = 3.996e-6f;
-    atmo.betaMie[1] = 3.996e-6f;
-    atmo.betaMie[2] = 3.996e-6f;
-    // Mie extinction 4.440e-6 per metre: absorption is the extinction less the scattering.
-    atmo.mieAbsorption[0] = 0.444e-6f;
-    atmo.mieAbsorption[1] = 0.444e-6f;
-    atmo.mieAbsorption[2] = 0.444e-6f;
-    atmo.mieG = 0.8f;
+    // Mie extinction 0.06 / 1200 m = 5e-5 per metre at 550 nm, at the paper's single-scattering
+    // albedo, 0.9 (absorption is the extinction less the scattering), and falling with wavelength as
+    // (lambda / 550 nm)^-1.6, the Angstrom exponent of an aerosol of mostly fine particles, sampled at
+    // the 680, 550 and 440 nm the Rayleigh coefficients are given at. A grey aerosol greys the sky:
+    // this one scatters blue 43 % more than green, red 29 % less.
+    atmo.betaMie[0] = 3.20463e-5f;
+    atmo.betaMie[1] = 4.5e-5f;
+    atmo.betaMie[2] = 6.43085e-5f;
+    atmo.mieAbsorption[0] = 3.56071e-6f;
+    atmo.mieAbsorption[1] = 5.0e-6f;
+    atmo.mieAbsorption[2] = 7.14539e-6f;
     // Ozone per linear-sRGB channel. The paper samples the cross section at 680, 550 and 440 nm
     // (0.650, 1.881, 0.085)e-6, but the Chappuis band peaks at 600 nm, between the red and green
     // samples, so that under-weights red and turns the twilight zenith violet. These are the same
@@ -625,9 +591,9 @@ void SkyRenderer::FillDefaultAtmosphere(AtmosphereParametersGPU& atmo)
     atmo.ozoneAbsorption[2] = 0.0f;
     atmo.ozoneCenterHeight = 25.0e3f;
     atmo.ozoneHalfWidth = 15.0e3f;
-    atmo.groundAlbedo[0] = 0.3f;
-    atmo.groundAlbedo[1] = 0.3f;
-    atmo.groundAlbedo[2] = 0.3f;
+    atmo.groundAlbedo[0] = kDefaultGroundAlbedo;
+    atmo.groundAlbedo[1] = kDefaultGroundAlbedo;
+    atmo.groundAlbedo[2] = kDefaultGroundAlbedo;
     atmo.groundBrightness = 0.8f;
     atmo.groundNightColor[0] = 0.025f;
     atmo.groundNightColor[1] = 0.025f;

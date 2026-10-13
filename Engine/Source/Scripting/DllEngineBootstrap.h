@@ -83,6 +83,9 @@ inline GE_Result EnsureEngineInitialized()
         return GE_Result_NotInitialized;
 
     ApplicationConfig cfg;
+    // Nothing else in this process drives the engine: no frame loop, no pump. The caller is the
+    // only thread, so the thread predicates answer yes and MainThread.Post runs inline.
+    cfg.StandaloneHosted = true;
     if (const char* nativeDirEnv = std::getenv("GE_NATIVE_DIR"); nativeDirEnv && nativeDirEnv[0] != '\0')
     {
         std::filesystem::path nativeDir(nativeDirEnv);

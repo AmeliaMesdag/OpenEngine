@@ -79,7 +79,7 @@ void EditorPanelManager::RebuildDockspace(EditorWindowContext* ctx)
         return;
     if (auto* rootEl = ctx->ui->GetRootElement())
     {
-        if (auto* el = rootEl->FindById("dock"))
+        if (auto* el = rootEl->FindById("dock"_sid))
         {
             if (auto* ds = dynamic_cast<DockspaceElement*>(el))
             {
@@ -96,7 +96,7 @@ void EditorPanelManager::RebuildDockspaceNow(EditorWindowContext* ctx, DockingMa
     UIElement* rootEl = ctx->ui->GetRootElement();
     if (!rootEl)
         return;
-    auto* dockspace = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"));
+    auto* dockspace = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid));
     if (!dockspace)
         return;
 
@@ -258,7 +258,7 @@ void EditorPanelManager::ShowOrActivatePanel(EditorWindowContext* ctx, const std
         {
             if (auto* rootEl = ctx->ui->GetRootElement())
             {
-                if (auto* el = rootEl->FindById("dock"))
+                if (auto* el = rootEl->FindById("dock"_sid))
                 {
                     if (auto* ds = dynamic_cast<DockspaceElement*>(el))
                         patched = ds->RequestActivationPatch(panelId);
@@ -592,7 +592,7 @@ void EditorPanelManager::CloseActiveTabOrWindow(EditorWindowContext* ctx)
                         if (tabId.empty())
                             continue;
                         UIElement* panel = ctx->docking->GetPanel(tabId);
-                        if (panel && panel->FindById(focusId))
+                        if (panel && panel->FindById(HashStringId(focusId)))
                         {
                             outPanelId = tabId;
                             return true;

@@ -2063,14 +2063,14 @@ void InspectorPanel::EnsureInspectorTabLockMounted()
         m_LockButton = nullptr;
         return;
     }
-    UIElement* tab = root->FindById("tab:" + m_DockTabPanelId);
+    UIElement* tab = root->FindById(HashStringId("tab:" + m_DockTabPanelId));
     if (!tab)
     {
         m_LockButton = nullptr;
         return;
     }
 
-    if (UIElement* existing = tab->FindById("inspector-tab-lock"))
+    if (UIElement* existing = tab->FindById("inspector-tab-lock"_sid))
     {
         m_LockButton = existing;
         m_LockButton->AddClass("icon-button");
@@ -2898,7 +2898,7 @@ void InspectorPanel::ApplyAssetIconToHeader(UIElement* iconHost, const std::file
                 return;
             post.Post([this, iconId, rel, applyThumb]()
                              {
-                if (UIElement* host = this->FindById(iconId))
+                if (UIElement* host = this->FindById(HashStringId(iconId)))
                 {
                     applyThumb(host, rel);
                     host->AddClass("has-thumbnail");

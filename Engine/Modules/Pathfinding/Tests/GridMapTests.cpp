@@ -3,8 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <memory>
+#include <thread>
 
 using namespace GameEngine;
 using namespace GameEngine::Pathfinding;
@@ -399,3 +402,69 @@ TEST_F(GridMapTest, TopologyVersionIncrements)
 
     EXPECT_EQ(v3, v0 + 3u);
 }
+
+TEST_F(GridMapTest, ReadViewReadsTheMapsCells)
+{
+    m_Map->SetCellCost(2, 3, 4.0f);
+    m_Map->SetCellHeight(2, 3, 0.25f);
+    m_Map->SetCellBlocked(5, 6, true);
+    m_Map->SetCellDynamicBlocked(7, 8, true);
+    m_Map->ReserveCell(2, 3, 42, 100.0f, true);
+
+    m_Map->OpenPathSolveWindow();
+    const GridMap::ReadView view = m_Map->View();
+    EXPECT_FLOAT_EQ(view.GetCellCost(2, 3), 4.0f);
+    EXPECT_FLOAT_EQ(view.GetCellHeight(2, 3), 0.25f);
+    EXPECT_TRUE(view.IsCellBlocked(5, 6));
+    EXPECT_TRUE(view.IsCellBlocked(7, 8));
+    EXPECT_FALSE(view.IsCellBlocked(2, 3));
+    const CellReservation reservation = view.Reservation(2, 3);
+    EXPECT_EQ(reservation.AgentId, 42u);
+    EXPECT_FLOAT_EQ(reservation.ExpirationTime, 100.0f);
+    EXPECT_EQ(reservation.Occupancy, 1u);
+    m_Map->ClosePathSolveWindow();
+}
+
+#if !defined(NDEBUG)
+TEST(GridMapReadView, WriterAssertsWhileViewOpen)
+{
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    GridMap map(MakeDefaultSettings());
+    EXPECT_DEATH(
+        {
+            map.OpenPathSolveWindow();
+            const GridMap::ReadView view = map.View();
+            map.SetCellBlocked(1, 1, !view.IsCellBlocked(1, 1));
+        },
+        "while path solves read it");
+    EXPECT_DEATH(
+        {
+            map.OpenPathSolveWindow();
+            const GridMap::ReadView view = map.View();
+            map.ReserveCell(1, 1, view.Reservation(1, 1).AgentId + 1, 10.0f);
+        },
+        "while path solves read it");
+    EXPECT_DEATH(static_cast<void>(map.View()), "outside a path-solve window");
+}
+#endif
+
+#if defined(NDEBUG)
+// Release only: in asserting builds every writer asserts before it locks, so only Release can
+// show that an open path-solve window holds the reservation lock a writer waits on.
+TEST_F(GridMapTest, ReservationWriterWaitsForAnOpenPathSolveWindow)
+{
+    GridMap& map = *m_Map;
+    map.OpenPathSolveWindow();
+    std::atomic<bool> wrote{false};
+    std::thread writer([&] {
+        map.ReserveCell(1, 1, 7, 100.0f, false);
+        wrote.store(true);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const bool wroteInsideWindow = wrote.load();
+    map.ClosePathSolveWindow();
+    writer.join();
+    EXPECT_FALSE(wroteInsideWindow) << "a reservation write landed while a path-solve window was open";
+    EXPECT_TRUE(wrote.load());
+}
+#endif

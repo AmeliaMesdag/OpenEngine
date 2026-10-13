@@ -378,7 +378,7 @@ TEST(UIManagerRenderRGTests, DrainDoesNotCompoundElementOpacity)
         for (int i = 0; i < 3; ++i)
             pump();
 
-        UIElement* panel = ui->GetRootElement()->FindById("panel");
+        UIElement* panel = ui->GetRootElement()->FindById("panel"_sid);
         ASSERT_NE(panel, nullptr);
         const UI::UIPrimitive* p = ui->PeekPrimitiveForTesting(*panel, 0);
         ASSERT_NE(p, nullptr);

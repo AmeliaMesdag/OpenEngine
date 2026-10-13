@@ -473,6 +473,7 @@ set(EDITOR_SOURCES
 	Source/Markups/MarkupTool.cpp
 	Source/Markups/MarkupsPanel.cpp
 	Source/Markups/MarkupsPanelRows.cpp
+	Source/Markups/MarkupActionMenuItems.h
 	Source/SceneView/SceneViewToolStrip.cpp
 	Source/SceneView/SceneViewToolStripRegistry.cpp
 	Source/SceneView/BuiltInSceneViewTools.cpp
@@ -492,6 +493,7 @@ set(EDITOR_SOURCES
 	Source/SceneView/SceneViewOverlaysRG.cpp
 	Source/SceneView/SelectionOutlineContributors.cpp
 	Source/SceneView/SceneViewRenderCoordinator.cpp
+	Source/SceneView/MountedViewPanels.cpp
 	Source/SceneView/ViewPresentationSnapshot.cpp
 	Source/SceneView/ViewSnapshotTexture.cpp
 	# Spline placement (tiles and fences along a spline, conformed via the editor raycast).
@@ -836,6 +838,7 @@ set(EDITOR_HEADERS
 	Include/SceneView/SceneViewDropPlacement.h
 	Include/SceneView/SceneViewNoticeOverlay.h
 	Include/SceneView/SceneViewRenderCoordinator.h
+	Include/SceneView/MountedViewPanels.h
 	Include/SceneView/ViewPresentationSnapshot.h
 	Include/SceneView/ViewSnapshotTexture.h
 	Include/SceneView/ReflectionProbeGizmo.h
@@ -887,6 +890,10 @@ set(EDITOR_SDK_SOURCES
 	Source/Editor/Registries/EditorPanelRegistry.cpp
 	Source/Editor/Registries/EditorMenuRegistry.cpp
 	Source/Editor/Registries/EditorSceneCommands.cpp
+	# The mark-up requests and actions package modules reach mark-ups through; the editor
+	# installs the requests (Markups/MarkupEditorSurfaces) and renders the actions.
+	Source/Editor/Registries/EditorMarkupRequests.cpp
+	Source/Editor/Registries/MarkupActionRegistry.cpp
 	Source/Editor/Settings/EditorSettingsRegistry.cpp
 	# Info-card look (background/outline/shadow/visibility): in the SDK because
 	# UI/InfoCard.h reads it, and package modules build cards through that.
@@ -2191,8 +2198,6 @@ list(APPEND _GE_STAGE_INPUTS
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/GPUFogParticles/ThirdParty/MirzaBeig-GPU-Fog-Particles/UPSTREAM.md"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/Ocean/NOTICE"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/Graph/ThirdParty/visual-shader-upstream/UPSTREAM.md"
-	"${CMAKE_SOURCE_DIR}/ThirdParty/BakingLabAces/LICENSE.txt"
-	"${CMAKE_SOURCE_DIR}/ThirdParty/BakingLabAces/UPSTREAM.md"
 	"${CMAKE_SOURCE_DIR}/ThirdParty/KhronosPbrNeutral/LICENSE.txt"
 	"${CMAKE_SOURCE_DIR}/ThirdParty/KhronosPbrNeutral/UPSTREAM.md"
 	"${CMAKE_SOURCE_DIR}/ThirdParty/MinimalAgX/LICENSE.txt"
@@ -2205,8 +2210,6 @@ list(APPEND _GE_STAGE_INPUTS
 	"${CMAKE_SOURCE_DIR}/Engine/Source/ThirdParty/miniz/VENDORED.md"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/VolumetricClouds/ThirdParty/SebLague-Clouds/LICENSE"
 	"${CMAKE_SOURCE_DIR}/Engine/Modules/VolumetricClouds/ThirdParty/SebLague-Clouds/UPSTREAM.md"
-	"${CMAKE_SOURCE_DIR}/ThirdParty/GT7ToneMapper/LICENSE.txt"
-	"${CMAKE_SOURCE_DIR}/ThirdParty/GT7ToneMapper/UPSTREAM.md"
 	"${CMAKE_SOURCE_DIR}/ThirdParty/GTAO/LICENSE.txt"
 	"${CMAKE_SOURCE_DIR}/ThirdParty/GTAO/UPSTREAM.md"
 	"${CMAKE_SOURCE_DIR}/ThirdParty/metal-cpp/LICENSE.txt"

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Types/Types.h"
-#include "Components/Rendering/TonemapMode.h"
+#include "Components/Rendering/Look.h"
 
 namespace GameEngine {
 namespace Components {
@@ -57,8 +57,9 @@ struct PostProcessVolume {
     // composable modifiers (± stop compensation, narrow-only adaptation clamps) that stack on the
     // camera's result, never replace it.
 
-    // Tonemapping
-    TonemapMode Tonemap {TonemapMode::Neutral};
+    // The display transform. Dominant across volumes: a local volume's look applies wherever it
+    // dominates and never crossfades.
+    Components::Look Look {Components::Look::Neutral};
     // HDR10/HDR10+ only: perceptually compress highlight chroma in ICtCp after
     // tonemapping and before UI composition / the terminal PQ encode. Zero is
     // an exact pass-through and keeps the feature opt-in.

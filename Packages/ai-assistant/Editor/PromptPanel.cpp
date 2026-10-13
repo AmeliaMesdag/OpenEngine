@@ -10,10 +10,15 @@
 #include "AgentStatusMessages.h"
 #include "AiAssistantSettings.h"
 #include "AssistantMode.h"
+#include "AiAssistantPanelService.h"
+#include "MarkupChips.h"
+#include "MarkupContext.h"
+#include "MarkupTokenPicker.h"
 #include "PromptTextArea.h"
 #include "ModeControlFit.h"
 #include "Providers/IAgentProvider.h"
 
+#include "Editor/Registries/EditorMarkupRequests.h"
 #include "Input/InputSystem.h"
 #include "Input/KeyCodes.h"
 #include "Logger/Logger.h"
@@ -30,13 +35,16 @@
 #include "UI/UIStyle.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <ctime>
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <span>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace GameEngine
@@ -145,6 +153,18 @@ float MinWidthPx(const UIElement& element)
 auto s_PromptTextAreaRegistration =
     UIRegistration::RegisterWithFactory<PromptTextArea>(
         "PromptTextArea", []() { return std::make_unique<PromptTextArea>(); });
+
+// The ids of the registered reply actions a reply to `prompt` offers, in registration order.
+std::vector<std::string> ReplyActionsFor(const ConversationMessage& prompt)
+{
+    std::vector<std::string> ids;
+    for (const AgentReplyAction& action : AgentReplyActions::All())
+    {
+        if (!action.ShownFor || action.ShownFor(prompt))
+            ids.push_back(action.Id);
+    }
+    return ids;
+}
 } // namespace
 
 PromptPanel::PromptPanel()
@@ -163,29 +183,29 @@ PromptPanel::~PromptPanel()
 
 void PromptPanel::OnLayoutBound()
 {
-    auto findElement = [this](const char* id) { return FindById(id); };
-    auto findButton = [this](const char* id) { return dynamic_cast<Button*>(FindById(id)); };
-    auto findDropdown = [this](const char* id) { return dynamic_cast<Dropdown*>(FindById(id)); };
+    auto findElement = [this](StringId id) { return FindById(id); };
+    auto findButton = [this](StringId id) { return dynamic_cast<Button*>(FindById(id)); };
+    auto findDropdown = [this](StringId id) { return dynamic_cast<Dropdown*>(FindById(id)); };
 
-    UIElement* providerSettings = findElement("PromptProviderSettings");
-    m_ProviderDropdown = findDropdown("PromptProviderDropdown");
-    m_ModeDropdown = findDropdown("PromptModeDropdown");
+    UIElement* providerSettings = findElement("PromptProviderSettings"_sid);
+    m_ProviderDropdown = findDropdown("PromptProviderDropdown"_sid);
+    m_ModeDropdown = findDropdown("PromptModeDropdown"_sid);
 
-    m_HistoryScroll = dynamic_cast<ScrollView*>(findElement("PromptHistoryScroll"));
-    m_HistoryList = findElement("PromptHistoryList");
-    m_HistoryEmpty = dynamic_cast<Label*>(findElement("PromptHistoryEmpty"));
-    m_InputPane = findElement("PromptInputPane");
-    m_InputRow = findElement("PromptInputRow");
-    m_InputControls = findElement("PromptInputControls");
-    m_PromptInputScroll = dynamic_cast<ScrollView*>(findElement("PromptInputScroll"));
-    m_PromptText = dynamic_cast<PromptTextArea*>(findElement("PromptInputText"));
-    m_ClearPromptButton = findButton("PromptInputClear");
-    m_PromptPlaceholder = dynamic_cast<Label*>(findElement("PromptInputPlaceholder"));
-    m_SendButton = findButton("PromptSendButton");
-    m_StatusLabel = dynamic_cast<Label*>(findElement("PromptStatusLabel"));
-    m_SessionButton = findButton("PromptSessionButton");
-    m_ModelButton = findButton("PromptModelButton");
-    m_ContinuedRow = dynamic_cast<Label*>(findElement("PromptContinuedSession"));
+    m_HistoryScroll = dynamic_cast<ScrollView*>(findElement("PromptHistoryScroll"_sid));
+    m_HistoryList = findElement("PromptHistoryList"_sid);
+    m_HistoryEmpty = dynamic_cast<Label*>(findElement("PromptHistoryEmpty"_sid));
+    m_InputPane = findElement("PromptInputPane"_sid);
+    m_InputRow = findElement("PromptInputRow"_sid);
+    m_InputControls = findElement("PromptInputControls"_sid);
+    m_PromptInputScroll = dynamic_cast<ScrollView*>(findElement("PromptInputScroll"_sid));
+    m_PromptText = dynamic_cast<PromptTextArea*>(findElement("PromptInputText"_sid));
+    m_ClearPromptButton = findButton("PromptInputClear"_sid);
+    m_PromptPlaceholder = dynamic_cast<Label*>(findElement("PromptInputPlaceholder"_sid));
+    m_SendButton = findButton("PromptSendButton"_sid);
+    m_StatusLabel = dynamic_cast<Label*>(findElement("PromptStatusLabel"_sid));
+    m_SessionButton = findButton("PromptSessionButton"_sid);
+    m_ModelButton = findButton("PromptModelButton"_sid);
+    m_ContinuedRow = dynamic_cast<Label*>(findElement("PromptContinuedSession"_sid));
 
     const bool hasRequiredControls = providerSettings && m_ProviderDropdown && m_HistoryScroll &&
         m_HistoryList && m_HistoryEmpty && m_InputPane && m_InputRow && m_InputControls && m_PromptInputScroll &&
@@ -257,7 +277,7 @@ void PromptPanel::OnLayoutBound()
                                    "environment: set it before starting the editor");
     m_ProviderDropdown->SetTooltipPlacement(UIElement::TooltipPlacement::Right);
 
-    if (Button* settings = findButton("PromptSettingsToggle"))
+    if (Button* settings = findButton("PromptSettingsToggle"_sid))
     {
         settings->SetTooltip("Prompt settings");
         settings->SetOnClick([providerSettings](UIEvent&)
@@ -268,7 +288,7 @@ void PromptPanel::OnLayoutBound()
                 providerSettings->AddClass("hidden");
         });
     }
-    if (Button* clearSession = findButton("PromptClearSession"))
+    if (Button* clearSession = findButton("PromptClearSession"_sid))
     {
         clearSession->SetTooltip("Start a new conversation");
         clearSession->SetOnClick([this](UIEvent&) { ClearSession(); });
@@ -285,7 +305,7 @@ void PromptPanel::OnLayoutBound()
     m_HistoryList->SetFocusable(true);
     m_HistoryList->RegisterEventHandler(kEventKeyDown, [this](UIEvent& event) { OnHistoryKeyDown(event); });
 
-    UIElement* splitter = findElement("PromptPanelInputSplitter");
+    UIElement* splitter = findElement("PromptPanelInputSplitter"_sid);
     if (splitter)
     {
         splitter->RegisterEventHandler(kEventMouseDown, [this, splitter](UIEvent& event)
@@ -345,7 +365,11 @@ void PromptPanel::OnLayoutBound()
         AutoSizePromptInputPane();
         updatePromptInputScroll();
         UpdatePromptPlaceholderVisibility(value);
+        if (m_MarkupPicker)
+            m_MarkupPicker->OnPromptChanged(value);
     });
+    m_MarkupPicker =
+        std::make_unique<MarkupTokenPicker>(*m_PromptText, [this](const std::string& text) { SetStatus(text); });
     m_PromptText->SetKeyFilter([this](UIEvent& event)
     {
         if (event.Key == Input::kKeyCode_Escape)
@@ -500,6 +524,7 @@ void PromptPanel::UpdateConversation()
         FollowProvider(AiAssistantSettings::Provider());
     }
 
+    TakePrefill();
     m_Controller->Update();
     SyncModeControl();
     if (m_SessionPicker)
@@ -720,11 +745,17 @@ void PromptPanel::SubmitPrompt()
     // A prompt over the cap is refused whole and stays in the field to be shortened.
     const std::string providerId = AiAssistantSettings::Provider();
     FollowProvider(providerId);
-    if (!m_Controller->Send(prompt, AiAssistantSettings::Model(providerId), AiAssistantSettings::Effort(providerId)))
+    // The mark-ups the prompt names are read now, as they are when it is sent.
+    MarkupTurnContext markups = MarkupContext::ForPrompt(prompt, Editor::EditorMarkupRequests::Get());
+    if (!m_Controller->Send(prompt, SentMarkups{std::move(markups.Text), std::move(markups.Mentions)},
+                            AiAssistantSettings::Model(providerId),
+                            AiAssistantSettings::Effort(providerId)))
     {
         SetStatus(PromptTooLongStatus(prompt.size()));
         return;
     }
+    if (!markups.Notice.empty())
+        SetStatus(markups.Notice);
 
     if (m_PromptRecall.empty() || m_PromptRecall.back() != prompt)
         m_PromptRecall.push_back(prompt);
@@ -776,8 +807,13 @@ bool PromptPanel::FocusWaitingAnswer()
 AgentConversationRowModel PromptPanel::RowModelAt(size_t messageIndex) const
 {
     const Conversation& conversation = m_Controller->GetConversation();
-    return AgentConversationRowModel::From(conversation.Messages()[messageIndex], m_Controller->Actions(),
-                                           conversation.TurnOf(messageIndex), m_Controller->UndoHistory());
+    const std::span<const ConversationMessage> messages = conversation.Messages();
+    AgentConversationRowModel row = AgentConversationRowModel::From(
+        messages[messageIndex], m_Controller->Actions(), conversation.TurnOf(messageIndex), m_Controller->UndoHistory());
+    // A reply offers the actions shown for the prompt it answers.
+    if (messageIndex > 0 && row.ShowsReplyActions)
+        row.ReplyActions = ReplyActionsFor(messages[messageIndex - 1]);
+    return row;
 }
 
 void PromptPanel::ClearSession()
@@ -802,14 +838,36 @@ void PromptPanel::OnSessionChosen(const AgentSessionChoice& choice)
     UpdateConversation();
 }
 
-void PromptPanel::RunReplyAction(const AgentReplyAction& action, size_t messageIndex)
+bool PromptPanel::RunReplyAction(const AgentReplyAction& action, size_t messageIndex)
 {
     const auto messages = m_Controller->GetConversation().Messages();
     if (messageIndex >= messages.size())
+        return false;
+    if (messageIndex == 0)
+        return false;
+    const AgentReplyOutcome outcome = action.Run(messages[messageIndex], messages[messageIndex - 1]);
+    if (!outcome.Status.empty())
+        SetStatus(outcome.Status);
+    return outcome.Acted;
+}
+
+void PromptPanel::TakePrefill()
+{
+    // Left waiting until the layout is bound: a panel the action opens is laid out before then.
+    if (!m_PromptText)
         return;
-    const std::string feedback = action.Run(messages[messageIndex]);
-    if (!feedback.empty())
-        SetStatus(feedback);
+    const std::string text = AiAssistantPanelService::TakePrefill();
+    if (text.empty())
+        return;
+    std::string value = m_PromptText->GetValue();
+    if (!value.empty() && !std::isspace(static_cast<unsigned char>(value.back())))
+        value += ' ';
+    value += text;
+    m_PromptText->SetValue(value);
+    const int caret = static_cast<int>(value.size());
+    m_PromptText->SetSelection(caret, caret);
+    if (UIManager* ui = GetOwnerManager())
+        ui->FocusElement(m_PromptText);
 }
 
 void PromptPanel::RemoveRows()
@@ -846,9 +904,10 @@ void PromptPanel::SyncRows()
         const size_t index = m_Rows.size();
         auto row = std::make_unique<AgentConversationRow>(
             index, [this] { StopTurns(); }, [this, index] { RetryTurn(index); },
-            [this, index](const AgentReplyAction& action) { RunReplyAction(action, index); },
+            [this, index](const AgentReplyAction& action) { return RunReplyAction(action, index); },
             [this](uint64_t requestId, AssistantAnswer answer) { AnswerCall(requestId, answer); },
-            [this, index] { m_Controller->UndoTurn(m_Controller->GetConversation().TurnOf(index)); });
+            [this, index] { m_Controller->UndoTurn(m_Controller->GetConversation().TurnOf(index)); },
+            [this](const std::string& token) { SetStatus(FrameMarkupChip(token)); });
         if (!row->Build(*ui))
             break;
         row->SetCallsStacked(m_HistoryNarrow);

@@ -29,6 +29,7 @@
 #include <cgltf.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -42,6 +43,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -116,7 +118,7 @@ ModelLoad LoadModel(std::string_view json, const std::filesystem::path& name)
         result.Loaded = ModelAssetFbxTestAccess::LoadGltf(asset, Bytes(json), FbxLoaderOptions{});
         Logger::Log::Flush();
     }
-    result.Extras = asset.GetExtras();
+    result.Extras = *asset.GetExtras();
     return result;
 }
 
@@ -2126,16 +2128,64 @@ TEST(GltfImport, ReloadAdoptionReplacesTheExtrasAndUnloadClearsThem)
                                                   FbxLoaderOptions{}));
     auto staged = std::make_shared<ModelAsset>(GUID::Generate(), std::filesystem::path("extras_reload.gltf"));
     ASSERT_TRUE(ModelAssetFbxTestAccess::LoadGltf(*staged, Bytes(NodesWithExtras({R"({"v": 2})"})), FbxLoaderOptions{}));
-    ASSERT_EQ(live.GetExtras().Find(ModelObjectKind::Node, "Block1"), R"({"v": 1})");
+    ASSERT_EQ(live.GetExtras()->Find(ModelObjectKind::Node, "Block1"), R"({"v": 1})");
 
     ASSERT_TRUE(live.AdoptReload(*staged));
-    EXPECT_EQ(live.GetExtras().Find(ModelObjectKind::Node, "Block1"), R"({"v": 2})") << "the reload's text is read";
-    EXPECT_TRUE(live.GetExtras().Find(ModelObjectKind::Node, "Block2").empty()) << "a block the reload dropped is gone";
-    EXPECT_EQ(staged->GetExtras().Find(ModelObjectKind::Node, "Block1"), R"({"v": 1})") << "staged holds the old payload";
+    EXPECT_EQ(live.GetExtras()->Find(ModelObjectKind::Node, "Block1"), R"({"v": 2})") << "the reload's text is read";
+    EXPECT_TRUE(live.GetExtras()->Find(ModelObjectKind::Node, "Block2").empty()) << "a block the reload dropped is gone";
+    EXPECT_EQ(staged->GetExtras()->Find(ModelObjectKind::Node, "Block1"), R"({"v": 1})") << "staged holds the old payload";
 
     staged.reset();
     live.Unload();
-    EXPECT_TRUE(live.GetExtras().Find(ModelObjectKind::Node, "Block1").empty()) << "Unload clears the table";
+    EXPECT_TRUE(live.GetExtras()->Find(ModelObjectKind::Node, "Block1").empty()) << "Unload clears the table";
+}
+
+// A script reads a model's extras from any thread (ModelApi.GetExtras), so a reader races the reload's adoption and
+// the unload on the main thread, and the initial load on the loader's thread. Each replaces the extras whole under the
+// asset's mutex: a reader sees one table or another, never a torn one. Run under ASan to see a use after free.
+TEST(GltfImport, GetExtrasRacesNoReloadSwap)
+{
+    constexpr int kSwaps = 10000;
+    constexpr int kInitialLoads = 1000;
+    const Vector<uint8> first = Bytes(NodesWithExtras({R"({"v": 1})"}));
+    const Vector<uint8> second = Bytes(NodesWithExtras({R"({"v": 2})"}));
+    std::atomic<bool> stop{false};
+    std::atomic<int> torn{0};
+    const auto readUntilStopped = [&](const ModelAsset& asset) {
+        while (!stop.load(std::memory_order_relaxed))
+        {
+            const std::shared_ptr<const ModelExtras> extras = asset.GetExtras();
+            const std::string_view text = extras->Find(ModelObjectKind::Node, "Block1");
+            if (!text.empty() && text != R"({"v": 1})" && text != R"({"v": 2})")
+                torn.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    ModelAsset live(GUID::Generate(), std::filesystem::path("extras_race.gltf"));
+    ASSERT_TRUE(ModelAssetFbxTestAccess::LoadGltf(live, first, FbxLoaderOptions{}));
+    std::thread reader(readUntilStopped, std::cref(live));
+    for (int i = 0; i < kSwaps; ++i)
+    {
+        ModelAsset staged(GUID::Generate(), std::filesystem::path("extras_race.gltf"));
+        ASSERT_TRUE(ModelAssetFbxTestAccess::LoadGltf(staged, (i % 2 == 0) ? second : first, FbxLoaderOptions{}));
+        ASSERT_TRUE(live.AdoptReload(staged));
+        if (i % 100 == 99)
+            live.Unload();
+    }
+    stop.store(true);
+    reader.join();
+
+    for (int i = 0; i < kInitialLoads; ++i)
+    {
+        ModelAsset loading(GUID::Generate(), std::filesystem::path("extras_race_load.gltf"));
+        stop.store(false);
+        std::thread loadReader(readUntilStopped, std::cref(loading));
+        std::thread loader([&] { EXPECT_TRUE(ModelAssetFbxTestAccess::LoadGltf(loading, first, FbxLoaderOptions{})); });
+        loader.join();
+        stop.store(true);
+        loadReader.join();
+    }
+    EXPECT_EQ(torn.load(), 0);
 }
 
 TEST(GltfImport, WeightsChannelIsSkippedNotMappedToTranslation)

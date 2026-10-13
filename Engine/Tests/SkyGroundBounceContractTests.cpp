@@ -214,12 +214,12 @@ TEST(SkyGroundBounceContract, LowerHemisphereDarkeningIsOffByDefault)
         << "darkening the lower hemisphere by default subtracts the baked ground bounce";
 }
 
-// The ground albedo is the measured stand-in for the scene's own floor: the largest neutral
-// grey whose baked lower hemisphere stays at or below a whole-scene probe capture of the
-// default scene's floor at noon. Neutral, because the model knows nothing of the ground's
-// colour; the same at every key, because a ground does not change colour with the hour (the
-// bounce's brightness already follows the sun, the sky and GroundBrightnessKeys).
-TEST(SkyGroundBounceContract, GroundAlbedoIsTheMeasuredNeutralGreyAtEveryHour)
+// The ground albedo stands in for the scene's own floor, in the IBL's lower hemisphere and in
+// the light the ground reflects into the sky: typical land, 0.3. Neutral, because the model
+// knows nothing of the ground's colour; the same at every key, because a ground does not change
+// colour with the hour (the bounce's brightness already follows the sun, the sky and
+// GroundBrightnessKeys).
+TEST(SkyGroundBounceContract, GroundAlbedoIsTypicalLandAtEveryHour)
 {
     const GameEngine::Components::SkyEnvironment sky{};
     const auto& keys = sky.GroundAlbedoKeys;
@@ -227,7 +227,7 @@ TEST(SkyGroundBounceContract, GroundAlbedoIsTheMeasuredNeutralGreyAtEveryHour)
                                      std::pair{"midday", keys.Midday}, std::pair{"sunset", keys.Sunset}})
     {
         SCOPED_TRACE(name);
-        EXPECT_FLOAT_EQ(key[0], 0.59f);
+        EXPECT_FLOAT_EQ(key[0], 0.3f);
         EXPECT_FLOAT_EQ(key[1], key[0]) << "the default ground carries no hue of its own";
         EXPECT_FLOAT_EQ(key[2], key[0]) << "the default ground carries no hue of its own";
     }

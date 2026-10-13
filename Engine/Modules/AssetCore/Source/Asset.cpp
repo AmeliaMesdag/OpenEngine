@@ -113,7 +113,7 @@ bool Asset::AdoptReload(Asset& staged) {
 }
 
 bool Asset::NeedsReload() const {
-    if (!Exists() || m_State != AssetState::Loaded) {
+    if (!Exists() || GetState() != AssetState::Loaded) {
         return false;
     }
 

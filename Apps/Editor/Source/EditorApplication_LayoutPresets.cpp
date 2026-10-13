@@ -562,7 +562,7 @@ void EditorApplication::SyncLayoutPresetToolbar()
     if (!root)
         return;
 
-    auto* toolbar = dynamic_cast<LayoutPresetToolbar*>(root->FindById("LayoutButtonContainer"));
+    auto* toolbar = dynamic_cast<LayoutPresetToolbar*>(root->FindById("LayoutButtonContainer"_sid));
     if (!toolbar)
         return;
 
@@ -710,7 +710,7 @@ void EditorApplication::SaveCurrentLayoutAsPreset(const std::string& name)
     {
         if (UIElement* rootEl = m_Windows[0]->ui->GetRootElement())
         {
-            if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock")))
+            if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid)))
                 ds->SyncSplitRatiosFromUI();
         }
     }
@@ -771,7 +771,7 @@ void EditorApplication::OverwriteLayoutPreset(int index)
     {
         if (UIElement* rootEl = m_Windows[0]->ui->GetRootElement())
         {
-            if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock")))
+            if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid)))
                 ds->SyncSplitRatiosFromUI();
         }
     }

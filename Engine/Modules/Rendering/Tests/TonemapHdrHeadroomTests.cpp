@@ -54,26 +54,18 @@
 //   M7  drop the outEncoding guard (extend SDR too)  RED: 0, 3, 4, 6, 7
 //
 // Every test in the file goes RED under at least one mutation, including the
-// instrument-premise test (M7 breaks it by extending Linear's SDR arm). M1 does
-// NOT turn 3 red, because the historical defect was two separate faults — the
-// crossfade for six modes AND Neutral's hard clamp — and M3 is the second one.
+// instrument-premise test (M7 breaks it by extending Photographic's SDR
+// output). M1 does NOT turn 3 red, because the historical defect was two
+// separate faults — the crossfade AND Neutral's hard clamp — and M3 is the
+// second one.
 //
-// Tests 9-11 (the ACES near-black span) were added later and measured the same
-// way — .spv deleted and confirmed ABSENT, rebuilt, hash confirmed to differ from
-// both the baseline and the other mutation, suite re-run:
-//
-//   M8  restore upstream's -0.000090537 numerator constant   RED: 9, 10
-//   M9  reintroduce the rejected "gamut floor" (pin every
-//       colour's min channel to 0.10 * its own luminance)    RED: 11
-//
-// M9 is deliberately kept in the table: it is the shape that was tried first and
-// rejected, and test 11 exists to keep it out. Under M9 saturated green returns
-// (0.025900, 0.350473, 0.039238) against the shipped (0.0, 0.367173, 0.0).
-//
-// The mutation table was measured before the ACES 2 peak-luminance tier ladder.
-// ACES2 has since been excluded from tests 2 and 7(b) (recorded decision at
-// those tests) and gained its own contract test (8, outside the table); the
-// RED columns for the remaining modes are unaffected.
+// M2 to M7 were measured on the three looks: each mutant applied to
+// tonemap.frag, the .spv deleted, rebuilt (its hash differing from the
+// baseline's) and the suite re-run, and each matched its row above. M1's row was
+// measured on the eight-operator shader the looks replaced; the crossfade it
+// restores is not reproduced on the looks. Filmic (ACES 2) is excluded from
+// tests 2 and 7(b) by recorded decision (at those tests) and has its own
+// contract test (8, outside the table).
 //
 // Numbers in the failure messages are shader units where 1.0 == paper white.
 // At the fixture's 203-nit paper white / 1000-nit panel, outputMax == 4.9261.
@@ -103,31 +95,24 @@ using namespace GameEngine::Rendering;
 namespace
 {
 
-// tonemap.frag's `tonemapMode` push constant.
+// tonemap.frag's `look` push constant: the three looks (Components::Look) and
+// the no-look debug arm a view selects (Passes::kTonemapNoLookArm).
 enum class Mode : int
 {
-    ACES = 0,
-    Reinhard = 1,
-    AgX = 2,
-    Filmic = 3,
-    Neutral = 4,
-    Linear = 5,
-    GranTurismo7 = 6,
-    ACES2 = 7,
+    Neutral = 0,
+    Filmic = 1,       // ACES 2
+    Photographic = 2, // AgX
+    NoLook = 3,
 };
 
 const char* ModeName(Mode m)
 {
     switch (m)
     {
-        case Mode::ACES: return "ACES";
-        case Mode::Reinhard: return "Reinhard";
-        case Mode::AgX: return "AgX";
-        case Mode::Filmic: return "Filmic";
         case Mode::Neutral: return "Neutral";
-        case Mode::Linear: return "Linear";
-        case Mode::GranTurismo7: return "GranTurismo7";
-        case Mode::ACES2: return "ACES2";
+        case Mode::Filmic: return "Filmic";
+        case Mode::Photographic: return "Photographic";
+        case Mode::NoLook: return "NoLook";
     }
     return "?";
 }
@@ -137,7 +122,7 @@ const char* ModeName(Mode m)
 // The SDR arm is 1, NOT 0. Both take the same branch out of
 // ApplyOutputRangeTonemap, but 0 is the hardware-sRGB swapchain path and falls
 // through to this pass's Bayer dither, which biases a 1x1 probe by a fixed
-// -0.492 LSB (measured: 0.001183 at ACES/scene-0.18, exactly
+// -0.492 LSB (measured: 0.001183 at ACES 1/scene-0.18, exactly
 // 0.4921875 * lsbInLinear at Bayer8x8(0,0)). Comparing that against an
 // undithered HDR result makes every "unchanged" assertion fail on a difference
 // this suite is not about. Encoding 1 emits undithered display-referred linear
@@ -169,7 +154,7 @@ std::string Fmt(const Rgb& c)
 struct TonemapParams
 {
     float Exposure = 1.0f;
-    Mode TonemapMode = Mode::ACES;
+    Mode Look = Mode::Neutral;
     int DitherMode = 0;
     int OutEncoding = kEncodingHdrLinear;
     float PaperWhiteNits = kPaperWhiteNits;
@@ -195,7 +180,7 @@ bool BuildPushConstants(const PushConstantRangeMeta& pcr, const TonemapParams& p
         {"maxOutputNits", p.MaxOutputNits, false},
     };
     IntField ints[] = {
-        {"tonemapMode", static_cast<int32_t>(p.TonemapMode), false},
+        {"look", static_cast<int32_t>(p.Look), false},
         {"ditherMode", p.DitherMode, false},
         {"outEncoding", p.OutEncoding, false},
         {"preserveAlpha", p.PreserveAlpha, false},
@@ -650,7 +635,7 @@ protected:
     static Rgb Hdr(const Rgb& scene, Mode mode)
     {
         TonemapParams p{};
-        p.TonemapMode = mode;
+        p.Look = mode;
         p.OutEncoding = kEncodingHdrLinear;
         return Rig().Run(scene, p);
     }
@@ -658,19 +643,17 @@ protected:
     static Rgb Sdr(const Rgb& scene, Mode mode)
     {
         TonemapParams p{};
-        p.TonemapMode = mode;
+        p.Look = mode;
         p.OutEncoding = kEncodingSdrLinear;
         return Rig().Run(scene, p);
     }
 };
 
-// The six operators that the removed crossfade collapsed onto one curve. Linear
-// (5) is excluded by design: it performs no colour rendering, so it keeps the
-// scene-derived shoulder. Neutral (4) is here too — it was the opposite failure
-// (hard clamp at paper white) and now extends like the rest.
-constexpr Mode kColourRenderingModes[] = {Mode::ACES,    Mode::Reinhard,     Mode::AgX,
-                                          Mode::Filmic,  Mode::Neutral,      Mode::GranTurismo7,
-                                          Mode::ACES2};
+// The looks: every arm that renders colour. The no-look arm is excluded by
+// design: it performs no colour rendering, so it keeps the scene-derived
+// shoulder. Neutral was the opposite failure of the removed crossfade (hard
+// clamp at paper white) and now extends like Photographic.
+constexpr Mode kColourRenderingModes[] = {Mode::Neutral, Mode::Filmic, Mode::Photographic};
 
 // --- 0. Instrument premise -------------------------------------------------
 //
@@ -681,26 +664,27 @@ TEST_F(TonemapHdrHeadroom, HdrHeadroomIsActuallyAvailable)
 {
     ASSERT_GT(kOutputMax, 2.0f) << "fixture headroom too small to distinguish the shaders";
 
-    // Linear under HDR is the pass's own report of the headroom: it rolls the raw
-    // scene value to at most outputMax and is unaffected by this change. Its
-    // shoulder only APPROACHES outputMax, so the probe has to be far above it.
-    const Rgb veryBright = Hdr({4096.0f, 4096.0f, 4096.0f}, Mode::Linear);
+    // No look under HDR is the pass's own report of the headroom: it rolls the raw
+    // scene value to at most outputMax. Its shoulder only APPROACHES outputMax, so
+    // the probe has to be far above it.
+    const Rgb veryBright = Hdr({4096.0f, 4096.0f, 4096.0f}, Mode::NoLook);
     EXPECT_NEAR(veryBright.Peak(), kOutputMax, 0.05f)
-        << "Linear/HDR should saturate at outputMax " << kOutputMax << ", got " << Fmt(veryBright)
+        << "NoLook/HDR should saturate at outputMax " << kOutputMax << ", got " << Fmt(veryBright)
         << " — the push constants are not reaching the shader, or paper-white plumbing changed";
 
     // And the SDR path must NOT have headroom, or the HDR assertions prove nothing.
-    const Rgb sdr = Sdr({64.0f, 64.0f, 64.0f}, Mode::ACES);
-    EXPECT_LE(sdr.Peak(), 1.0001f) << "SDR ACES exceeded paper white: " << Fmt(sdr);
+    // Photographic, not Filmic: Filmic bypasses the highlight extension, so only an
+    // extended look can show the SDR arm gaining headroom (mutant M7).
+    const Rgb sdr = Sdr({64.0f, 64.0f, 64.0f}, Mode::Photographic);
+    EXPECT_LE(sdr.Peak(), 1.0001f) << "SDR Photographic exceeded paper white: " << Fmt(sdr);
 }
 
 // --- 1. THE REGRESSION GATE ------------------------------------------------
 //
 // Above the old crossfade's upper edge (peak >= min(outputMax, 4)) the result was
 // 100% a scene-derived shoulder and 0% the selected operator, so every operator
-// returned the same pixel. Pre-registered failure against the unmodified shader:
-// all six of ACES/Reinhard/AgX/Filmic/GT7/ACES2 return (3.515329, 3.515329,
-// 3.515329) at scene 8.0.
+// returned the same pixel (3.515329 on every channel at scene 8.0, measured on
+// the eight-operator shader the looks replaced).
 TEST_F(TonemapHdrHeadroom, OperatorsRemainDistinctAboveHeadroomThreshold)
 {
     const Rgb scene{8.0f, 8.0f, 8.0f};
@@ -715,8 +699,7 @@ TEST_F(TonemapHdrHeadroom, OperatorsRemainDistinctAboveHeadroomThreshold)
     // Pairwise distinctness. The collapse this gates makes the separation exactly
     // zero, so the margin only has to clear readback noise — the target is
     // R32G32B32A32_FLOAT, so that is ~1e-7. 0.002 (0.4 nits) is three orders above
-    // it and still below the smallest true separation at this probe, which is
-    // Reinhard (1.041) vs ACES 2 (1.027).
+    // it and far below the smallest true separation between the looks at this probe.
     constexpr float kMinSeparation = 0.002f;
     int collapsed = 0;
     for (size_t i = 0; i < results.size(); ++i)
@@ -743,7 +726,7 @@ TEST_F(TonemapHdrHeadroom, OperatorsRemainDistinctAboveHeadroomThreshold)
         hi = std::max(hi, c.Peak());
     }
     EXPECT_GT(hi - lo, 1.0f) << "the operators span only " << (hi - lo)
-                             << " at scene 8.0 — they are rendering one curve, not eight";
+                             << " at scene 8.0 — they are rendering one curve, not three";
 }
 
 // --- 2. The colour rendering survives --------------------------------------
@@ -764,13 +747,13 @@ TEST_F(TonemapHdrHeadroom, SaturatedHighlightKeepsOperatorColourRendering)
     };
     const Rgb sceneChroma = normalize(scene);
 
-    // ACES2 is deliberately absent — RECORDED DECISION (2026-08-04): mode 7 is
-    // peak-parameterised and bypasses the extension. Its HDR arm runs the
+    // Filmic (ACES 2) is deliberately absent — RECORDED DECISION (2026-08-04): it
+    // is peak-parameterised and bypasses the extension. Its HDR arm runs the
     // Academy output transform matched to the panel's headroom, which performs
     // its own colour rendering at that peak; the SDR arm's chromaticity is a
     // different peak's answer, not this contract. Its HDR behaviour is pinned
     // in Aces2PeakParameterisedContract instead.
-    for (Mode m : {Mode::ACES, Mode::AgX, Mode::Neutral})
+    for (Mode m : {Mode::Photographic, Mode::Neutral})
     {
         const Rgb sdr = Sdr(scene, m);
         const Rgb hdr = Hdr(scene, m);
@@ -796,7 +779,7 @@ TEST_F(TonemapHdrHeadroom, SaturatedHighlightKeepsOperatorColourRendering)
 
 // --- 3. Neutral is no longer the opposite failure --------------------------
 //
-// Mode 4 took `default: return sdrTonemapped` and hard-clamped at paper white
+// Neutral took `default: return sdrTonemapped` and hard-clamped at paper white
 // (~203 nits) on a 1000-nit panel. Pre-registered failure against the unmodified
 // shader: peak == 0.869 at scene 8.0, i.e. below 1.0.
 TEST_F(TonemapHdrHeadroom, NeutralGainsHdrHeadroom)
@@ -817,20 +800,19 @@ TEST_F(TonemapHdrHeadroom, NeutralGainsHdrHeadroom)
 // HDR highlights" the removed blend existed to produce. An operator that only
 // approaches 1.0 lands short, which is its own curve's answer and the correct one.
 //
-// Which operators are in which group is MEASURED here, not hardcoded: the SDR arm
-// at the same scene value IS the operator's ceiling, and the HDR arm must be that
-// ceiling put through the extension. Measured ceilings at scene 4096:
+// Which looks are in which group is MEASURED here, not hardcoded: the SDR arm
+// at the same scene value IS the look's ceiling, and the HDR arm must be that
+// ceiling put through the extension (Filmic's tier ladder lands at the same
+// place for a ceiling of 1.0). Measured ceilings at scene 4096:
 //
-//   ACES     1.000000 -> 4.9261 (1000 nits) — clamps
-//   ACES 2   1.000000 -> 4.9261 (1000 nits) — clamps (min(vec3(1.)))
-//   GT7      1.000000 -> 4.9261 (1000 nits) — clamps
-//   AgX      0.997119 -> 4.2443 ( 862 nits) — does NOT reach 1.0; its 6th-order
-//            polynomial sigmoid tops out ~0.14% short, and near the top the
-//            extension's slope is ((outputMax-knee)/(1-knee))^2 ~ 279, so that
+//   Filmic (ACES 2)     1.000000 -> 4.9261 (1000 nits) — clamps (min(vec3(1.)))
+//   Photographic (AgX)  0.997119 -> 4.2443 ( 862 nits) — does NOT reach 1.0; its
+//            6th-order polynomial sigmoid tops out ~0.14% short, and near the top
+//            the extension's slope is ((outputMax-knee)/(1-knee))^2 ~ 279, so that
 //            0.3% shortfall costs 14% of peak luminance. Inherent to the
-//            published fit, not an engine defect — but it is why AgX's brightest
-//            possible pixel is dimmer than ACES's, and it belongs on the record.
-//   Reinhard/Filmic/Neutral — asymptotic by construction, land short by design.
+//            published fit, not an engine defect — but it is why Photographic's
+//            brightest possible pixel is dimmer than Filmic's.
+//   Neutral — asymptotic by construction, lands short by design.
 TEST_F(TonemapHdrHeadroom, OperatorCeilingsMapOntoTheDisplay)
 {
     // The contract the shader implements, stated independently here. This is not
@@ -870,9 +852,9 @@ TEST_F(TonemapHdrHeadroom, OperatorCeilingsMapOntoTheDisplay)
                 << " (" << hdr.Peak() * kPaperWhiteNits << " nits, expected " << kPanelPeakNits << ")";
         }
     }
-    // Without this the clause above is vacuous if every operator stopped clamping.
-    EXPECT_GE(reachedPanelPeak, 2) << "no operator reached the panel's peak luminance — the whole "
-                                   << "point of the extension is that the clamping ones do";
+    // Without this the clause above is vacuous if every look stopped clamping.
+    EXPECT_GE(reachedPanelPeak, 1) << "no look reached the panel's peak luminance — Filmic "
+                                   << "clamps at 1.0 and must land on it";
 }
 
 // --- 5. Knee pinned from below ---------------------------------------------
@@ -880,8 +862,9 @@ TEST_F(TonemapHdrHeadroom, OperatorCeilingsMapOntoTheDisplay)
 // The knee is the operator-output level where the extension starts. Set it too
 // low and diffuse white — the operator's own rendering of scene 1.0 — is pushed
 // above BT.2408 reference white, so the whole image glares. Neutral is the binding
-// operator: it renders scene 1.0 at 0.869, the highest of the seven extended operators (Linear maps 1.0 to 1.0). At knee 0.75
-// that lands at 196 nits; at knee 0.70 it lands at 214 nits and this test goes RED.
+// look: it renders scene 1.0 at 0.869, the highest of the looks (no look maps 1.0
+// to 1.0). At knee 0.75 that lands at 196 nits; at knee 0.70 it lands at 214 nits
+// and this test goes RED.
 TEST_F(TonemapHdrHeadroom, DiffuseWhiteStaysAtOrBelowPaperWhite)
 {
     for (Mode m : kColourRenderingModes)
@@ -897,11 +880,12 @@ TEST_F(TonemapHdrHeadroom, DiffuseWhiteStaysAtOrBelowPaperWhite)
 //
 // Set the knee too high and the extension only fires on pixels that already
 // saturate the operator, so ordinary specular highlights get no headroom at all
-// and the HDR display shows an SDR image. ACES renders scene 4.0 at 0.909, which
-// is above a 0.75 knee and below a 0.95 one.
+// and the HDR display shows an SDR image. Photographic renders scene 4.0 above a
+// 0.75 knee and below a 0.95 one (asserted below); Neutral renders it above 0.95,
+// and Filmic bypasses the extension.
 TEST_F(TonemapHdrHeadroom, HighlightsAboveKneeAreExtended)
 {
-    for (Mode m : {Mode::ACES, Mode::AgX, Mode::Filmic})
+    for (Mode m : {Mode::Photographic})
     {
         const Rgb sdr = Sdr({4.0f, 4.0f, 4.0f}, m);
         const Rgb hdr = Hdr({4.0f, 4.0f, 4.0f}, m);
@@ -923,7 +907,7 @@ TEST_F(TonemapHdrHeadroom, HighlightsAboveKneeAreExtended)
 // --- 7. Paths that must not move -------------------------------------------
 //
 // SDR output is byte-identical to the operator (no extension, no clamp change),
-// Linear keeps its scene-derived shoulder, and an HDR surface with no headroom
+// no look keeps its scene-derived shoulder, and an HDR surface with no headroom
 // (max nits == paper white) collapses to the SDR result.
 TEST_F(TonemapHdrHeadroom, UnchangedPathsStayUnchanged)
 {
@@ -942,8 +926,8 @@ TEST_F(TonemapHdrHeadroom, UnchangedPathsStayUnchanged)
     }
 
     // (b) Midtones below the knee are identical on both paths for the EXTENDED
-    //     operators — the extension is strictly a highlight operation. ACES2 is
-    //     deliberately absent — RECORDED DECISION (2026-08-04): peak-matched
+    //     looks — the extension is strictly a highlight operation. Filmic (ACES 2)
+    //     is deliberately absent — RECORDED DECISION (2026-08-04): peak-matched
     //     ACES 2 output transforms lift mid-grey by Academy design, and the
     //     paper-white-relative ladder
     //     gives this fixture's 203-nit-paper-white/1000-nit panel the ~493-nit
@@ -951,7 +935,7 @@ TEST_F(TonemapHdrHeadroom, UnchangedPathsStayUnchanged)
     //     bounded by Aces2PeakParameterisedContract.
     for (Mode m : kColourRenderingModes)
     {
-        if (m == Mode::ACES2)
+        if (m == Mode::Filmic)
             continue;
         const Rgb sdr = Sdr({0.18f, 0.18f, 0.18f}, m);
         const Rgb hdr = Hdr({0.18f, 0.18f, 0.18f}, m);
@@ -961,21 +945,20 @@ TEST_F(TonemapHdrHeadroom, UnchangedPathsStayUnchanged)
         EXPECT_NEAR(hdr.B, sdr.B, 1e-5f) << ModeName(m);
     }
 
-    // (c) Linear keeps the scene-derived shoulder: unlike the colour-rendering
-    //     operators it never compressed anything, so there is nothing to preserve.
-    //     Its scene-1.0 output stays at 1.0 (the shoulder's start), which no
-    //     extended operator does.
-    const Rgb linear1 = Hdr({1.0f, 1.0f, 1.0f}, Mode::Linear);
-    EXPECT_NEAR(linear1.Peak(), 1.0f, 1e-3f) << "Linear/HDR at scene 1.0: " << Fmt(linear1);
-    const Rgb linear4 = Hdr({4.0f, 4.0f, 4.0f}, Mode::Linear);
-    EXPECT_GT(linear4.Peak(), 2.0f) << "Linear/HDR lost its shoulder: " << Fmt(linear4);
+    // (c) No look keeps the scene-derived shoulder: unlike the looks it never
+    //     compressed anything, so there is nothing to preserve. Its scene-1.0
+    //     output stays at 1.0 (the shoulder's start), which no extended look does.
+    const Rgb noLook1 = Hdr({1.0f, 1.0f, 1.0f}, Mode::NoLook);
+    EXPECT_NEAR(noLook1.Peak(), 1.0f, 1e-3f) << "NoLook/HDR at scene 1.0: " << Fmt(noLook1);
+    const Rgb noLook4 = Hdr({4.0f, 4.0f, 4.0f}, Mode::NoLook);
+    EXPECT_GT(noLook4.Peak(), 2.0f) << "NoLook/HDR lost its shoulder: " << Fmt(noLook4);
 
-    // (d) An HDR surface with no headroom must equal the SDR result. ACES2 is
+    // (d) An HDR surface with no headroom must equal the SDR result. Filmic is
     //     included: outputMax == 1.0 selects tier 0 at t = 0 exactly.
-    for (Mode m : {Mode::ACES, Mode::Neutral, Mode::AgX, Mode::ACES2})
+    for (Mode m : {Mode::Neutral, Mode::Photographic, Mode::Filmic})
     {
         TonemapParams p{};
-        p.TonemapMode = m;
+        p.Look = m;
         p.OutEncoding = kEncodingHdrLinear;
         p.MaxOutputNits = kPaperWhiteNits; // outputMax == 1.0
         const Rgb flat = Rig().Run({8.0f, 8.0f, 8.0f}, p);
@@ -986,7 +969,7 @@ TEST_F(TonemapHdrHeadroom, UnchangedPathsStayUnchanged)
 
 // --- 8. ACES 2's peak-parameterised contract --------------------------------
 //
-// Mode 7 bypasses the highlight extension: its tier ladder produces
+// Filmic (ACES 2) bypasses the highlight extension: its tier ladder produces
 // display-referred output for the panel's headroom directly, and the routing
 // only clamps it. RECORDED DECISION (2026-08-04): mid-grey moves with peak by
 // Academy design — the paper-white-relative ladder gives this fixture the
@@ -996,8 +979,8 @@ TEST_F(TonemapHdrHeadroom, UnchangedPathsStayUnchanged)
 TEST_F(TonemapHdrHeadroom, Aces2PeakParameterisedContract)
 {
     // SDR: tier 0 exactly — clamped at paper white, deterministic to the byte.
-    const Rgb sdrMidA = Sdr({0.18f, 0.18f, 0.18f}, Mode::ACES2);
-    const Rgb sdrMidB = Sdr({0.18f, 0.18f, 0.18f}, Mode::ACES2);
+    const Rgb sdrMidA = Sdr({0.18f, 0.18f, 0.18f}, Mode::Filmic);
+    const Rgb sdrMidB = Sdr({0.18f, 0.18f, 0.18f}, Mode::Filmic);
     EXPECT_EQ(sdrMidA.R, sdrMidB.R) << "SDR ACES2 is not deterministic";
     EXPECT_EQ(sdrMidA.G, sdrMidB.G) << "SDR ACES2 is not deterministic";
     EXPECT_EQ(sdrMidA.B, sdrMidB.B) << "SDR ACES2 is not deterministic";
@@ -1005,11 +988,11 @@ TEST_F(TonemapHdrHeadroom, Aces2PeakParameterisedContract)
     // (0.100 paper-white-relative) — the Academy's stated anchor.
     EXPECT_NEAR(sdrMidA.Peak(), 0.1000f, 2e-3f)
         << "SDR ACES2 mid-grey left the 100-nit tier: " << Fmt(sdrMidA);
-    const Rgb sdrBright = Sdr({4096.0f, 4096.0f, 4096.0f}, Mode::ACES2);
+    const Rgb sdrBright = Sdr({4096.0f, 4096.0f, 4096.0f}, Mode::Filmic);
     EXPECT_LE(sdrBright.Peak(), 1.0001f) << "SDR ACES2 gained headroom: " << Fmt(sdrBright);
 
     // HDR: output never exceeds the display's max linear value.
-    const Rgb hdrBright = Hdr({4096.0f, 4096.0f, 4096.0f}, Mode::ACES2);
+    const Rgb hdrBright = Hdr({4096.0f, 4096.0f, 4096.0f}, Mode::Filmic);
     EXPECT_LE(hdrBright.Peak(), kOutputMax + 1e-3f)
         << "HDR ACES2 exceeded outputMax: " << Fmt(hdrBright);
 
@@ -1020,7 +1003,7 @@ TEST_F(TonemapHdrHeadroom, Aces2PeakParameterisedContract)
     // measured at <= 5e-5; the 2e-3 tolerance covers driver transcendental
     // variance without admitting the SDR value (0.100) or a runaway tier.
     constexpr float kMidGreyAtFixturePeak = 0.131735f;
-    const Rgb hdrMid = Hdr({0.18f, 0.18f, 0.18f}, Mode::ACES2);
+    const Rgb hdrMid = Hdr({0.18f, 0.18f, 0.18f}, Mode::Filmic);
     EXPECT_NEAR(hdrMid.Peak(), kMidGreyAtFixturePeak, 2e-3f)
         << "ACES2 mid-grey is not the peak-matched transform's value: " << Fmt(hdrMid)
         << " (tier 0 would be 0.100; the " << kPanelPeakNits << "-nit fixture expects "
@@ -1030,126 +1013,13 @@ TEST_F(TonemapHdrHeadroom, Aces2PeakParameterisedContract)
 
     // Zero headroom == the SDR result to the byte (tier 0, t = 0, same clamp).
     TonemapParams p{};
-    p.TonemapMode = Mode::ACES2;
+    p.Look = Mode::Filmic;
     p.OutEncoding = kEncodingHdrLinear;
     p.MaxOutputNits = kPaperWhiteNits;
     const Rgb flat = Rig().Run({0.18f, 0.18f, 0.18f}, p);
     EXPECT_EQ(flat.R, sdrMidA.R) << "zero-headroom HDR ACES2 != SDR: " << Fmt(flat);
     EXPECT_EQ(flat.G, sdrMidA.G);
     EXPECT_EQ(flat.B, sdrMidA.B);
-}
-
-// --- 9. ACES near-black: gradation, not a floor ----------------------------
-//
-// The RRT/ODT fit's numerator constant put the curve below zero for working-space
-// values under 0.003253, so the terminal clamp collapsed that whole span onto a
-// single value. Two consequences, one test each: the span stops resolving at all
-// (here), and a channel that enters the span while its neighbours have not is
-// deleted rather than darkened (test 10).
-//
-// Grey is deliberate: kAcesIn/kAcesOut are row-normalised, so a grey scene value
-// passes the matrices unchanged and this probes the CURVE alone, with no
-// colour-mixing confound.
-TEST_F(TonemapHdrHeadroom, AcesNearBlackKeepsGradationInsteadOfFlooring)
-{
-    // Every step is below the old zero-crossing, so the pre-fix shader returns
-    // exactly 0 for all five and BOTH assertions below fail on it.
-    constexpr float kRamp[] = {2.0e-3f, 1.0e-3f, 5.0e-4f, 2.5e-4f, 1.25e-4f};
-
-    float previous = std::numeric_limits<float>::max();
-    for (float scene : kRamp)
-    {
-        const Rgb sdr = Sdr({scene, scene, scene}, Mode::ACES);
-
-        EXPECT_GT(sdr.Peak(), 0.0f)
-            << "ACES floored scene " << scene << " to black: " << Fmt(sdr)
-            << " — the near-black span is not resolving, so shadow detail is discarded";
-        EXPECT_LT(sdr.Peak(), previous)
-            << "ACES is not strictly decreasing across the near-black ramp at scene " << scene
-            << " (" << Fmt(sdr) << ", previous step " << previous << ") — two distinct scene "
-            << "values are rendering to the same pixel";
-        previous = sdr.Peak();
-    }
-}
-
-// --- 10. ACES near-black: no channel is deleted ----------------------------
-//
-// A sky-lit shadow reaches the curve's negative span in order of channel
-// magnitude, so red arrives while green and blue are still resolving. Under the
-// old constant this pixel returned red EXACTLY zero with both neighbours alive —
-// the surface lost a channel and rotated toward cyan instead of darkening. This
-// scene value is that case: a measured sky-lit shadow ratio scaled into the span.
-TEST_F(TonemapHdrHeadroom, AcesDoesNotDropAChannelWhileOthersResolve)
-{
-    const Rgb scene{0.00213f, 0.008863f, 0.01053f};
-    const Rgb sdr = Sdr(scene, Mode::ACES);
-
-    // Premise: the neighbours must actually be resolving, or "red survived" is
-    // vacuous — it would only mean the whole pixel sits above the span.
-    ASSERT_GT(sdr.G, 0.0f) << "probe is not in the near-black span: " << Fmt(sdr);
-    ASSERT_GT(sdr.B, 0.0f) << "probe is not in the near-black span: " << Fmt(sdr);
-
-    EXPECT_GT(sdr.R, 0.0f)
-        << "ACES deleted the red channel while green and blue resolved: " << Fmt(sdr)
-        << " — a shadow lit by a blue sky loses red entirely instead of darkening";
-
-    // Deleted-vs-darkened, not merely nonzero: the output ratio should track the
-    // input's rather than collapsing. Input R/B is 0.202; a per-channel curve
-    // compresses the small channel harder, so the band is wide and only catches
-    // near-annihilation.
-    EXPECT_GT(sdr.R / sdr.B, 0.05f)
-        << "red survived only as a rounding artefact: " << Fmt(sdr) << " (input R/B "
-        << (scene.R / scene.B) << ")";
-}
-
-// --- 11. ACES saturated colours are not desaturated ------------------------
-//
-// REGRESSION GUARD aimed at a specific rejected shape. An earlier attempt at
-// test 10's defect added a "gamut floor" that pinned every colour's minimum
-// channel to 10% of its own luminance. That fires on saturated colours deep
-// inside the gamut, where nothing is being deleted: pure saturated green gained
-// 45 codes of red and 56 of blue. Any fix for the near-black span must leave
-// saturated mid-tones alone, so this pins them.
-//
-// The tolerance discriminates rather than merely passing: the legitimate
-// near-black correction moves these by at most 3.7e-4, while a 10%-of-luminance
-// floor moves saturated green's red by 2.6e-2 — 70x the tolerance.
-TEST_F(TonemapHdrHeadroom, AcesSaturatedColoursAreNotDesaturated)
-{
-    constexpr float kTol = 2.0e-3f;
-    struct Pin
-    {
-        const char* Name;
-        Rgb Scene;
-        Rgb Expected;
-    };
-    // Measured on the shipped operator; unchanged to within kTol by the
-    // near-black correction.
-    const Pin kPins[] = {
-        {"saturated green", {0.0f, 0.5f, 0.0f}, {0.0f, 0.367173f, 0.0f}},
-        {"pure blue", {0.0f, 0.0f, 0.5f}, {0.0f, 0.0f, 0.337519f}},
-        {"pure red", {0.5f, 0.0f, 0.0f}, {0.335191f, 0.0f, 0.001055f}},
-        {"foliage green", {0.05f, 0.40f, 0.05f}, {0.014155f, 0.291092f, 0.023609f}},
-        {"deep saturated blue", {0.02f, 0.05f, 0.6f}, {0.0f, 0.014845f, 0.409069f}},
-        {"mid grey", {0.18f, 0.18f, 0.18f}, {0.105851f, 0.105851f, 0.105851f}},
-    };
-
-    for (const Pin& pin : kPins)
-    {
-        const Rgb sdr = Sdr(pin.Scene, Mode::ACES);
-        EXPECT_NEAR(sdr.R, pin.Expected.R, kTol) << pin.Name << " red moved: " << Fmt(sdr);
-        EXPECT_NEAR(sdr.G, pin.Expected.G, kTol) << pin.Name << " green moved: " << Fmt(sdr);
-        EXPECT_NEAR(sdr.B, pin.Expected.B, kTol) << pin.Name << " blue moved: " << Fmt(sdr);
-    }
-
-    // The rejected shape's fingerprint, asserted directly: it drove every colour
-    // to the SAME min/luminance ratio. A saturated primary must stay saturated.
-    const Rgb green = Sdr({0.0f, 0.5f, 0.0f}, Mode::ACES);
-    const float greenLuma = 0.2126f * green.R + 0.7152f * green.G + 0.0722f * green.B;
-    ASSERT_GT(greenLuma, 0.0f);
-    EXPECT_LT(std::min(green.R, std::min(green.G, green.B)) / greenLuma, 0.01f)
-        << "saturated green's minimum channel was lifted toward its luminance: " << Fmt(green)
-        << " — a saturation ceiling has been reintroduced";
 }
 
 } // namespace

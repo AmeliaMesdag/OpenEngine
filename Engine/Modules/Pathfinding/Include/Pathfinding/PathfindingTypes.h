@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 namespace GameEngine::Pathfinding
 {
@@ -37,12 +38,6 @@ struct PathHandle
     uint32 Index = 0;
     uint32 Generation = 0;
     bool IsValid() const { return Generation != 0; }
-};
-
-struct PathResult
-{
-    PathStatus Status = PathStatus::Invalid;
-    PathHandle Path;
 };
 
 struct PathRequest
@@ -145,6 +140,16 @@ struct CellReservation
     // it (except dest stand-off). 0 = lookahead tax only.
     uint8 Occupancy = 0;
     bool IsActive(float32 currentTime) const { return AgentId != 0 && ExpirationTime > currentTime; }
+};
+
+// One grid path solve for SolveGridPaths: the map and request it reads, and the
+// result it writes, its status and, for a Complete path, its points.
+struct GridPathSolve
+{
+    NavMapHandle Map;
+    PathRequest Request;
+    PathStatus Status = PathStatus::Invalid;
+    std::vector<PathPoint> Points;
 };
 
 } // namespace GameEngine::Pathfinding

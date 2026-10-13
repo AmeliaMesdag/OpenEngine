@@ -1,13 +1,12 @@
 #pragma once
 
+#include "Pathfinding/GridMap.h"
 #include "Types/Types.h"
 
 #include <vector>
 
 namespace GameEngine::Pathfinding
 {
-
-class GridMap;
 
 // A* solver with reusable scratch memory. Each instance owns its own working
 // buffers, so concurrent solves on different AStarSolver instances are safe.
@@ -16,17 +15,18 @@ class GridMap;
 class AStarSolver
 {
 public:
-    // Solves A* on the grid. Working memory is owned by this solver instance.
-    // Thread-safe as long as each thread uses its own AStarSolver.
-    bool Solve(const GridMap& grid, uint32 startIndex, uint32 endIndex,
+    // Solves A* on the grid through a view taken inside a path-solve window.
+    // Working memory is owned by this solver instance. Thread-safe as long as
+    // each thread uses its own AStarSolver.
+    bool Solve(const GridMap::ReadView& grid, uint32 startIndex, uint32 endIndex,
                uint32 excludeAgentId, float32 currentTime,
                uint32 agentCellRadius,
                std::vector<uint32>& outPathCellIndices);
 
 private:
-    void GetNeighbors(const GridMap& grid, uint32 cellIndex,
+    void GetNeighbors(const GridMap::ReadView& grid, uint32 cellIndex,
                       uint32* outNeighbors, float32* outBaseCosts, uint32& outCount) const;
-    float32 Heuristic(const GridMap& grid, uint32 from, uint32 to) const;
+    float32 Heuristic(const GridMap::ReadView& grid, uint32 from, uint32 to) const;
 
     // Reusable working buffers (grow to high-water mark, never shrink).
     // OpenList is stack-local in Solve() since it's cleared each call.

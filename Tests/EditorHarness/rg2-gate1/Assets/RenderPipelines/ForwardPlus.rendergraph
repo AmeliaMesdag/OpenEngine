@@ -329,17 +329,12 @@
       "ppOverrides": true,
       "pushConstants": {
         "ditherMode": 0,
-        "exposure": 1.0,
-        "tonemapMode": 0
+        "exposure": 1.0
       },
       "samplers": {
         "uHDRColor": "LinearClamp"
       },
       "shaderPkg": "Shaders/tonemap.shaderpkg",
-      "skipWhen": {
-        "tonemapMode": 5.0,
-        "exposure": 1.0
-      },
       "type": "FullscreenShader"
     },
     {

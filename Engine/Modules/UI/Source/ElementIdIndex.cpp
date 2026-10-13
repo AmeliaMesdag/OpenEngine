@@ -1,8 +1,10 @@
 #include "UI/Internal/ElementIdIndex.h"
 
+#include "Logger/Logger.h"
 #include "UI/UIElement.h"
 
 #include <algorithm>
+#include <cassert>
 
 namespace GameEngine::UI
 {
@@ -48,6 +50,24 @@ bool PrecedesInLookupOrder(const UIElement& first, const UIElement& second)
     return false;
 }
 
+bool IsInSubtree(const UIElement& element, const UIElement& subtree)
+{
+    for (const UIElement* ancestor = &element; ancestor; ancestor = ancestor->GetDfsParent())
+    {
+        if (ancestor == &subtree)
+            return true;
+    }
+    return false;
+}
+
+void ReportIdCollision(const UIElement& registered, const UIElement& refused)
+{
+    Logger::Log::Error("UI ids '{}' and '{}' have the same StringId; '{}' is not findable by id. Rename one of them.",
+                       registered.GetId(), refused.GetId(), refused.GetId());
+    Logger::Log::Flush();
+    assert(false && "two UI ids have the same StringId; rename one of them");
+}
+
 } // namespace
 
 void ElementIdIndex::Register(UIElement& element)
@@ -55,6 +75,14 @@ void ElementIdIndex::Register(UIElement& element)
     if (element.GetId().empty())
         return;
     auto& matches = m_Elements[element.GetIdHash()];
+    // Every registered candidate carries the same id string, so the first one stands
+    // for all of them: the same string is a duplicate id (allowed), a different one a
+    // collision.
+    if (!matches.empty() && matches.front()->GetId() != element.GetId())
+    {
+        ReportIdCollision(*matches.front(), element);
+        return;
+    }
     if (std::find(matches.begin(), matches.end(), &element) == matches.end())
         matches.push_back(&element);
 }
@@ -71,30 +99,24 @@ void ElementIdIndex::Unregister(UIElement& element)
         m_Elements.erase(entry);
 }
 
-UIElement* ElementIdIndex::Find(const UIElement& subtree, std::string_view id) const
+UIElement* ElementIdIndex::Find(const UIElement& subtree, StringId id) const
 {
-    const auto entry = m_Elements.find(HashStringId(id));
+    if (id == 0)
+        return nullptr;
+    const auto entry = m_Elements.find(id);
     if (entry == m_Elements.end())
         return nullptr;
     UIElement* firstMatch = nullptr;
     for (UIElement* element : entry->second)
     {
-        // StringId collisions must not alias unrelated authored ids.
-        if (element->GetId() != id)
-            continue;
         // Ownership outlives a dock tab's mount. The current parent chain excludes
         // inactive targets immediately, without rebuilding an index on tab switches.
-        for (const UIElement* ancestor = element; ancestor; ancestor = ancestor->GetDfsParent())
-        {
-            if (ancestor == &subtree)
-            {
-                if (element == &subtree)
-                    return element;
-                if (!firstMatch || PrecedesInLookupOrder(*element, *firstMatch))
-                    firstMatch = element;
-                break;
-            }
-        }
+        if (!IsInSubtree(*element, subtree))
+            continue;
+        if (element == &subtree)
+            return element;
+        if (!firstMatch || PrecedesInLookupOrder(*element, *firstMatch))
+            firstMatch = element;
     }
     return firstMatch;
 }

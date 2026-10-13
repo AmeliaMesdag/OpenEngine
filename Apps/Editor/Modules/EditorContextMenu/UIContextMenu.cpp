@@ -720,7 +720,7 @@ UIContextMenu::UIContextMenu() = default;
             // container), and the accent ring blinks off with it.
             if (manager)
                 if (UIElement* root = manager->GetRootElement())
-                    if (UIElement* input = root->FindById(kSearchFieldId))
+                    if (UIElement* input = root->FindById(HashStringId(kSearchFieldId)))
                         manager->FocusElement(input);
             e.Stop();
         });
@@ -728,7 +728,7 @@ UIContextMenu::UIContextMenu() = default;
         {
             if (manager)
                 if (UIElement* root = manager->GetRootElement())
-                    if (UIElement* input = root->FindById(kSearchFieldId))
+                    if (UIElement* input = root->FindById(HashStringId(kSearchFieldId)))
                         manager->FocusElement(input);
             e.Stop();
         });

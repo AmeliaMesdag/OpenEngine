@@ -227,6 +227,12 @@ struct ApplicationConfig {
     // instead of running as fast as the CPU allows. For dedicated servers and
     // simulation runs; the host brings up no window or device of its own either.
     bool Headless = false;
+    // Set only by the scripting ABI's bootstrap (DllBootstrap::EnsureEngineInitialized),
+    // which initializes an engine for a host that has no frame loop of its own (a
+    // `dotnet test` process): the caller is the only thread that drives the engine,
+    // nothing ever pumps the main-thread queue, and an export that asks for the main
+    // thread answers yes on every thread. No native host sets it.
+    bool StandaloneHosted = false;
 };
 
 /**

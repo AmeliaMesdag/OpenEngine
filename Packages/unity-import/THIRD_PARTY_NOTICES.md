@@ -3,7 +3,7 @@
 ## Scene converter
 
 `Tools/UnityConverter.dll` is built from
-[OpenEngine-Unity-Scene-Converter, commit 520790ec52331832f69f983d57c31ec18be96ab0](https://github.com/Game-Crafters-Guild/OpenEngine-Unity-Scene-Converter/tree/520790ec52331832f69f983d57c31ec18be96ab0).
+[OpenEngine-Unity-Scene-Converter, commit eb14acb935f08c300df61ca61e060141e81dd941](https://github.com/Game-Crafters-Guild/OpenEngine-Unity-Scene-Converter/tree/eb14acb935f08c300df61ca61e060141e81dd941).
 The source revision, SDK, build command and binary SHA-256 are recorded in
 [`Tools/UnityConverter.dll.source`](Tools/UnityConverter.dll.source).
 

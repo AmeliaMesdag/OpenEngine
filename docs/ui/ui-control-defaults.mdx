@@ -1,6 +1,6 @@
 ---
 title: UI control defaults
-description: The default stylesheet under every UI document, why your rules always win, its color properties, the slider track, selected text and the resize gesture.
+description: The default stylesheet under every UI document, why your rules always win, its color properties, the slider track, selected text, Markdown text and the resize gesture.
 sidebar:
   order: 3
 ---
@@ -76,9 +76,57 @@ Every text control (a `<textinput>`, a `<textarea>` and the controls built on th
 
 A control draws the color at 40% of its alpha while it has the focus, so the text stays legible over it. A text area keeps its selection after it loses the focus and draws it at 27%; a single-line field hides its selection until it has the focus again. An `rgba()` color is scaled the same way. Without a stylesheet the selection is `#3A8FFF`; the editor theme sets it to its accent.
 
+## Markdown text
+
+A `<MarkdownText>` element shows read-only text written in Markdown, the way a chat reply or a patch note is written: paragraphs, headings, bold and italic, inline code, code blocks, bulleted and numbered lists (nested one level), quotes, rules, tables and links. A web link (`http` or `https`) opens in the player's browser when clicked; a link to any other address shows as its text. Markdown it does not know, and a delimiter that never closes (`**bold` without its end), shows as the characters written.
+
+The element takes its font, size, line height and color from your stylesheet like any text, and every block inherits them; the default sheet adds only what Markdown changes: bold and italic faces, the monospace face for code (`--ui_font_mono` when your theme defines it, else the system's monospace font), heading sizes (130% and 115% for the first two levels), the list indent and the code tint. A code block keeps its lines and scrolls sideways; a vertical wheel over it scrolls the page around it.
+
+```xml title="A patch notes panel"
+<MarkdownText id="PatchNotes" class="patch-notes" />
+```
+
+:::::tabs
+::::tab[C++]
+
+```cpp title="UI/Controls/MarkdownText.h"
+void SetMarkdown(std::string_view markdown);
+```
+
+```cpp title="Show the patch notes"
+using namespace GameEngine;
+
+if (auto* notes = dynamic_cast<MarkdownText*>(ui.GetRootElement()->FindById("PatchNotes")))
+    notes->SetMarkdown("## 1.2\n- **Lanterns** light the gate\n- Fixed `F` framing");
+```
+
+Setting text that only grows at its end rebuilds only its last block, so text that arrives piece by piece can be set again on every piece.
+
+::::
+::::tab[C#]
+
+:::caution[C# binding pending]
+No managed call yet; tracked as [OpenEngine issue #24](https://github.com/Game-Crafters-Guild/OpenEngine/issues/24). The native call is `MarkdownText::SetMarkdown`.
+:::
+
+::::
+:::::
+
+Recolor it through these properties, like the other controls:
+
+| Property | Default | What it colors |
+|---|---|---|
+| `--ui_color_markdown_link` | `#4C9AFF` | A web link's words and its underline (`.markdown-link`) |
+| `--ui_color_markdown_link_hover` | `#8CC0FF` | A web link's words and underline while the pointer is on the link |
+| `--ui_color_markdown_muted` | `#9A9A9A` | List markers and quoted text |
+| `--ui_color_markdown_code_inline` | `rgba(128, 128, 128, 0.2)` | The tint behind inline code (`.markdown-code`) |
+| `--ui_color_markdown_code_block` | `rgba(0, 0, 0, 0.25)` | A code block's background (`.markdown-code-block`) |
+| `--ui_color_markdown_line` | `rgba(128, 128, 128, 0.4)` | Rules, a quote's bar and table borders |
+| `--ui_color_markdown_table_header` | `rgba(128, 128, 128, 0.12)` | A table's header row |
+
 ## The editor theme
 
-The editor does not rely on the default sheet's colors: its theme defines its own slider tokens (`--ui_color_slider_track_fill`, `--ui_color_slider_track`, `--ui_color_slider_tick` in `Apps/Editor/Assets/UI/theme/tokens.css`) and maps them onto the track properties, so changing the game defaults never recolors editor sliders. The editor's item size sliders set their own neutral gray track the same way.
+The editor does not rely on the default sheet's colors: its theme defines its own slider tokens (`--ui_color_slider_track_fill`, `--ui_color_slider_track`, `--ui_color_slider_tick` in `Apps/Editor/Assets/UI/theme/tokens.css`) and maps them onto the track properties, so changing the game defaults never recolors editor sliders. The editor's item size sliders set their own neutral gray track the same way. The theme maps the Markdown text properties onto its tokens too: links in its accent, code blocks darker than the panel.
 
 ## Resizing items with the scroll wheel
 
@@ -88,6 +136,7 @@ A game UI grid view resizes its icons with the same gesture. In a shipped game i
 
 ## Changelog
 
+- 2026-10-13: Markdown text: the `<MarkdownText>` element, what it renders and its color properties.
 - 2026-10-13: Converted from `docs/ui-control-defaults.html`; the color swatches dropped (the table keeps the values).
 - 2026-10-08: The `selection-color` property.
 - 2026-09-24: The track properties take every color form; where a `var()` resolves.

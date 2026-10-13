@@ -38,7 +38,7 @@ struct HpBarSystem : GameEngine::ECS::SystemBase
     static void ApplyHp(uint64_t entityId, int hp)
     {
         using namespace GameEngine;
-        if (UIElement* fill = GameUI::FindElementById(entityId, "hp-fill"))
+        if (UIElement* fill = GameUI::FindElementById(entityId, "hp-fill"_sid))
         {
             fill->Overrides().Set(Style::Width, StyleLength::Percent(static_cast<float>(hp)));
             // State goes on as a CSS class; the stylesheet owns what it looks like.
@@ -47,7 +47,7 @@ struct HpBarSystem : GameEngine::ECS::SystemBase
             else
                 fill->RemoveClass("low-health");
         }
-        if (auto* label = dynamic_cast<Label*>(GameUI::FindElementById(entityId, "hp-label")))
+        if (auto* label = dynamic_cast<Label*>(GameUI::FindElementById(entityId, "hp-label"_sid)))
             label->SetText(std::to_string(hp) + " / 100");
     }
 
@@ -56,7 +56,7 @@ struct HpBarSystem : GameEngine::ECS::SystemBase
         using namespace GameEngine;
         if (m_ButtonInstanceId != 0)
         {
-            UIElement* button = GameUI::FindElementById(m_EntityId, "damage-btn");
+            UIElement* button = GameUI::FindElementById(m_EntityId, "damage-btn"_sid);
             // The id can resolve to a REPLACEMENT button, which never saw this token.
             if (button && button->GetInstanceId() == m_ButtonInstanceId)
                 button->UnregisterEventHandler(m_Token);
@@ -95,7 +95,7 @@ struct HpBarSystem : GameEngine::ECS::SystemBase
         // a subscription left on the destroyed button invisible until someone clicks.
         if (m_ButtonInstanceId != 0)
         {
-            UIElement* wired = GameUI::FindElementById(m_EntityId, "damage-btn");
+            UIElement* wired = GameUI::FindElementById(m_EntityId, "damage-btn"_sid);
             if (wired && wired->GetInstanceId() == m_ButtonInstanceId)
                 return;
             Unwire();
@@ -105,7 +105,7 @@ struct HpBarSystem : GameEngine::ECS::SystemBase
             [&](ECS::EntityHandle e, const Components::UIDocument&) {
             if (m_ButtonInstanceId != 0)
                 return;
-            UIElement* button = GameUI::FindElementById(e.id, "damage-btn");
+            UIElement* button = GameUI::FindElementById(e.id, "damage-btn"_sid);
             if (!button)
                 return;
             m_EntityId = e.id;

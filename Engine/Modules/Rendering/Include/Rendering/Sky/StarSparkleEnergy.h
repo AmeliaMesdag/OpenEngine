@@ -15,8 +15,9 @@ inline constexpr float kStarGlowFalloff = 3.0f;
 
 /// Gains that give a night-sky star's two light terms the integrated light of a diamond star
 /// with the same Sparkle Points (StarDiamondShape), Core Size and Glow Falloff (the same round
-/// core under four points on the convex |x| + |y| metric), so Star Brightness keeps its
-/// calibration.
+/// core under four points on the convex |x| + |y| metric), so the sparkle's shape does not change
+/// a star's light. Each star's twinkle range then scales that light (star_sparkle.glsl,
+/// GE_StarTwinkleRange): 0.25 of it on average over the catalog and a twinkle period.
 struct StarSparkleEnergy
 {
     /// Multiplies the four-pointed sparkle (GE_StarSparkle), whose concave points cover less of

@@ -376,13 +376,13 @@ class WorkStealingThreadPool
      * queue, never an arbitrary drain of the pool queues), so a waiter never
      * runs a job that could wait on the waiter itself, and waiting on a
      * worker is deadlock-free. A tagged task the waiter runs is a job body of
-     * the waiter's own current context (Normal outside a body). A waiter that
-     * finds no tagged task (the rest are running on other threads, or the
-     * counter is a barrier for bare chunks with no tagged queue) parks on the
-     * counter's condvar and is woken by the last decrement or by a new
-     * tagged publish. A thread that cannot block
-     * (Platform::CanBlockCurrentThread() is false) parks in 10 s slices and
-     * reports each one on stderr.
+     * the waiter's own current context (IsExecutingJob() is true inside it;
+     * Normal outside a body). A waiter that finds no tagged task (the rest
+     * are running on other threads, or the counter is a barrier for bare
+     * chunks with no tagged queue) parks on the counter's condvar and is
+     * woken by the last decrement or by a new tagged publish. A thread that
+     * cannot block (Platform::CanBlockCurrentThread() is false) parks in
+     * 10 s slices and reports each one on stderr.
      *
      * A participating waiter is neither a spinner nor a sleeper of the pool:
      * it never touches the pool's wake protocol or its queued-task counters
@@ -602,6 +602,16 @@ class WorkStealingThreadPool
       private:
         uint32* m_Enclosing;
     };
+
+    /**
+     * @brief Whether the calling thread is inside a job body, on any thread
+     * and of any pool: a compute job, a channel job, a tagged job a
+     * participating Wait runs, or a ParallelFor unit, whether a helper or the
+     * forking caller runs it. False outside a body, completion callbacks
+     * included (they run after the body's context has ended). Consumers: the
+     * scripting ABI's engine-thread predicates.
+     */
+    static bool IsExecutingJob();
 
     /**
      * @brief Test hook: what the calling thread is executing as a job body:

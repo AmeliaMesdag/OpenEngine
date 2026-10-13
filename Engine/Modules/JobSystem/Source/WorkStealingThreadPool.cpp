@@ -189,6 +189,10 @@ WorkStealingThreadPool::JobContext WorkStealingThreadPool::CallerContext() {
     return state.Depth > 0 ? state.Context : ComputeContext(JobPriority::Normal);
 }
 
+bool WorkStealingThreadPool::IsExecutingJob() {
+    return CurrentJobState().Depth > 0;
+}
+
 const char* WorkStealingThreadPool::GetCurrentJobForTests() {
     const ThreadJobState& state = CurrentJobState();
     return state.Depth > 0 ? JobName(state.Context) : nullptr;

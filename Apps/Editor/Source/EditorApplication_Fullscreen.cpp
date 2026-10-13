@@ -22,7 +22,7 @@ void ScheduleGameViewViewportFocus(UIManager* ui, Platform::Window* window, int 
 
     if (UIElement* rootEl = ui->GetRootElement())
     {
-        if (rootEl->FindById(EditorPanelIds::GameViewViewport))
+        if (rootEl->FindById(HashStringId(EditorPanelIds::GameViewViewport)))
             ui->SetFocusById(EditorPanelIds::GameViewViewport);
 
         rootEl->PostAction([ui, window, remainingAttempts]()
@@ -59,7 +59,7 @@ void EditorApplication::EnterPlayFullscreen()
         {
             if (UIElement* rootEl = main->ui->GetRootElement())
             {
-                if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock")))
+                if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid)))
                     ds->RequestRebuildFromModel();
                 rootEl->AddClass("play-fullscreen-gameview");
             }
@@ -89,7 +89,7 @@ void EditorApplication::ExitPlayFullscreen()
         {
             if (UIElement* rootEl = main->ui->GetRootElement())
             {
-                if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock")))
+                if (auto* ds = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid)))
                     ds->RequestRebuildFromModel();
                 rootEl->RemoveClass("play-fullscreen-gameview");
             }

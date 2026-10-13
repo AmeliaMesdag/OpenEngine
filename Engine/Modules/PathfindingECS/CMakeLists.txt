@@ -62,7 +62,7 @@ if(BUILD_TESTING)
         Tests/NavigationComprehensiveTests.cpp
         Tests/NavigationRepathingTests.cpp
         Tests/NavigationSolveBudgetTests.cpp
-        Tests/NavigationRequestReplacementTests.cpp
+        Tests/NavigationParallelSolveTests.cpp
         Tests/NavigationInitialOccupancyTests.cpp
         Tests/NavigationOccupiedStartTests.cpp
         Tests/AssetSerializationTests.cpp

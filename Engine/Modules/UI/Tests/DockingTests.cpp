@@ -110,15 +110,15 @@ TEST(Docking, ActivationPatchSwapsTabWithoutFullRebuild) {
     EXPECT_EQ(dm.GetRoot()->GetActivePanelId(), "B");
 
     // Verify the mount target was swapped
-    UIElement* mountEl = dock.FindById("mount:B");
+    UIElement* mountEl = dock.FindById("mount:B"_sid);
     ASSERT_NE(mountEl, nullptr);
     auto* mount = dynamic_cast<Mount*>(mountEl);
     ASSERT_NE(mount, nullptr);
     EXPECT_EQ(mount->GetTarget(), &panelB);
 
     // Verify tab active classes were updated
-    UIElement* tabA = dock.FindById("tab:A");
-    UIElement* tabB = dock.FindById("tab:B");
+    UIElement* tabA = dock.FindById("tab:A"_sid);
+    UIElement* tabB = dock.FindById("tab:B"_sid);
     ASSERT_NE(tabA, nullptr);
     ASSERT_NE(tabB, nullptr);
     EXPECT_FALSE(tabA->HasClass("active"));

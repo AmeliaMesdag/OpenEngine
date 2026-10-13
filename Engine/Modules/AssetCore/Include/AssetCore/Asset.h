@@ -4,6 +4,7 @@
 #include "AssetCore/GUID.h"
 #include "AssetCore/AssetTypes.h"
 #include "AssetCore/AssetTypeId.h"
+#include <atomic>
 #include <filesystem>
 #include <utility>
 
@@ -79,7 +80,7 @@ public:
      * @brief Get asset loading state
      * @return The current loading state of this asset
      */
-    AssetState GetState() const { return m_State; }
+    AssetState GetState() const { return m_State.load(std::memory_order_relaxed); }
 
     /**
      * @brief Get asset name (filename without extension)
@@ -201,19 +202,19 @@ public:
      * @brief Check if asset is loaded
      * @return true if the asset is in the Loaded state
      */
-    bool IsLoaded() const { return m_State == AssetState::Loaded; }
+    bool IsLoaded() const { return GetState() == AssetState::Loaded; }
 
     /**
      * @brief Check if asset is loading
      * @return true if the asset is in the Loading state
      */
-    bool IsLoading() const { return m_State == AssetState::Loading; }
+    bool IsLoading() const { return GetState() == AssetState::Loading; }
 
     /**
      * @brief Check if asset failed to load
      * @return true if the asset is in the Failed state
      */
-    bool HasFailed() const { return m_State == AssetState::Failed; }
+    bool HasFailed() const { return GetState() == AssetState::Failed; }
 
 protected:
     /**
@@ -244,7 +245,7 @@ protected:
      * @brief Set the loading state of the asset
      * @param state The new state to set
      */
-    void SetState(AssetState state) { m_State = state; }
+    void SetState(AssetState state) { m_State.store(state, std::memory_order_relaxed); }
 
     /**
      * @brief Update the last modified time cache
@@ -264,7 +265,9 @@ private:
     AssetTypeId m_TypeId = 0;                                      ///< Programmable type id hash
     String m_TypeIdString;                                         ///< Programmable type id string
     std::filesystem::path m_Path;                                  ///< File path
-    AssetState m_State;                                            ///< Loading state
+    // Relaxed atomic: a script reads IsLoaded from any thread while a loader thread sets it.
+    // It orders nothing; what a loaded asset holds is published by its own synchronization.
+    std::atomic<AssetState> m_State;                               ///< Loading state
     mutable std::filesystem::file_time_type m_LastChecked;        ///< Last time we checked for modifications
     mutable std::filesystem::file_time_type m_LastModified;       ///< Last modification time of the file
 

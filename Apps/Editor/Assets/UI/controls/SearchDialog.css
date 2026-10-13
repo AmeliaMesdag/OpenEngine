@@ -265,6 +265,12 @@ button.search-dialog-result-view-toggle,
 	background-position: 50% 50%;
 }
 
+/* A row's color swatch (SearchIcon::SwatchArgb): a dot half the icon's size, centered in its slot. */
+.search-result-swatch {
+	border-radius: 50%;
+	align-self: center;
+}
+
 .search-result-icon.has-thumb {
 	background-color: transparent;
 }

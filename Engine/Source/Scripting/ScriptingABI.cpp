@@ -364,6 +364,17 @@ static void EnsureHotReloadCallbacksResolved()
         g_cbGetCompilerStats = reinterpret_cast<int (*)()>(GetManagedCallbackPtr(GE_CB_GetCompilerStats));
 }
 
+// A post the gate dropped is reported once per process: a script that posts in a loop after the
+// engine shut down would otherwise write a line per post.
+static void ReportMainThreadPostDropped()
+{
+    static std::atomic<bool> s_Reported{false};
+    if (s_Reported.exchange(true))
+        return;
+    Logger::Log::Warning("MainThread.Post: the engine has shut down, or its Initialize failed, so nothing pumps the "
+                         "main thread; posted actions are dropped until an engine initializes (reported once).");
+}
+
 extern "C"
 {
 
@@ -1869,6 +1880,36 @@ extern "C"
         catch (...)
         {
             return GE_Result_Fail;
+        }
+    }
+
+    GE_API GE_Result GE_CDECL GE_MainThread_SetDrain(void (GE_CDECL* drain)(int32_t run))
+    {
+        if (!drain)
+            return GE_Result_InvalidArg;
+        return GameEngine::ScriptManager::InstallManagedPostDrain(drain) ? GE_Result_Ok : GE_Result_Fail;
+    }
+
+    GE_API int32_t GE_CDECL GE_MainThread_RequestPump(void)
+    {
+        try
+        {
+            using MainThreadPost = GameEngine::EngineCore::MainThreadPost;
+            switch (GameEngine::EngineCore::GetInstance().RequestManagedPostDrain())
+            {
+            case MainThreadPost::Queued:
+                return GE_MainThreadPost_Queued;
+            case MainThreadPost::RunInline:
+                return GE_MainThreadPost_RunInline;
+            case MainThreadPost::Dropped:
+                break;
+            }
+            ReportMainThreadPostDropped();
+            return GE_MainThreadPost_Dropped;
+        }
+        catch (...)
+        {
+            return GE_MainThreadPost_Dropped;
         }
     }
 

@@ -2,6 +2,8 @@
 #include "Pathfinding/NavigationWorld.h"
 #include "JobSystem/WorkStealingThreadPool.h"
 
+#include <vector>
+
 using namespace GameEngine;
 using namespace GameEngine::Pathfinding;
 
@@ -233,30 +235,44 @@ TEST_F(NavigationWorldTest, CrossMapPathfindingViaNavLinks)
     EXPECT_EQ(retrieved->TargetMap, mapB);
 }
 
-TEST(NavigationWorldTests, RequestPathWithoutJobSystemReturnsInvalid)
+TEST_F(NavigationWorldTest, FindPathAcrossLinksJoinsTheSegments)
 {
-    NavigationWorld world;
-    GridSettings settings;
-    settings.Width = 10; settings.Depth = 10; settings.CellSize = 1.0f;
-    NavMapHandle handle = world.AddGridMap(settings);
-    ASSERT_TRUE(handle.IsValid());
+    GridSettings settingsA;
+    settingsA.Width = 8; settingsA.Depth = 8; settingsA.CellSize = 1.0f;
+    GridSettings settingsB = settingsA;
+    settingsB.OriginX = 8.0f;
+    const NavMapHandle mapA = m_World.AddGridMap(settingsA);
+    const NavMapHandle mapB = m_World.AddGridMap(settingsB);
+
+    NavLink link;
+    link.SourceMap = mapA;
+    link.SourceX = 7.5f; link.SourceZ = 4.5f;
+    link.TargetMap = mapB;
+    link.TargetX = 8.5f; link.TargetZ = 4.5f;
+    const NavLinkId linkId = m_World.AddNavLink(link);
+    ASSERT_TRUE(linkId.IsValid());
 
     PathRequest request;
-    request.StartX = 0.5f; request.StartZ = 0.5f;
-    request.EndX = 9.5f; request.EndZ = 9.5f;
+    request.StartX = 1.5f; request.StartZ = 4.5f;
+    request.EndX = 14.5f; request.EndZ = 4.5f;
+    PathHandle path;
+    ASSERT_EQ(m_World.FindPathAcrossLinks(request, path), PathStatus::Complete);
+    const PathBuffer& buffer = m_World.GetPathBuffer();
+    const uint32 count = buffer.GetPointCount(path);
+    ASSERT_GE(count, 2u);
+    EXPECT_FLOAT_EQ(buffer.GetPoint(path, 0).X, 1.5f);
+    EXPECT_FLOAT_EQ(buffer.GetPoint(path, count - 1).X, 14.5f);
+    // Map A's segment ends at the link's source; map B's starts at its target
+    // and drops that first point when the segments are joined.
+    bool reachesTheLink = false;
+    for (uint32 i = 0; i < count; ++i)
+        reachesTheLink = reachesTheLink || buffer.GetPoint(path, i).X == 7.5f;
+    EXPECT_TRUE(reachesTheLink) << "the path does not leave map A at the link's source";
 
-    // No JobSystem set — should return invalid handle
-    auto asyncHandle = world.RequestPath(handle, request);
-    EXPECT_FALSE(asyncHandle.IsValid());
-
-    // Sync fallback still works
-    PathHandle outPath;
-    PathStatus status = world.FindPath(handle, request, outPath);
-    EXPECT_EQ(status, PathStatus::Complete);
+    m_World.RemoveNavLink(linkId);
+    PathHandle unlinked;
+    EXPECT_EQ(m_World.FindPathAcrossLinks(request, unlinked), PathStatus::Failed);
 }
-
-// TODO: Test RequestPathAcrossLinks end-to-end requires a WorkStealingThreadPool.
-// The synchronous cross-map FindPath is tested in CrossMapPathfindingViaNavLinks.
 
 TEST_F(NavigationWorldTest, AutoGenerateBoundaryLinksCreatesLinks)
 {
@@ -288,41 +304,53 @@ TEST_F(NavigationWorldTest, AutoGenerateBoundaryLinksCreatesLinks)
     EXPECT_TRUE(foundValidLink);
 }
 
-TEST(NavigationWorldTests, HasActivePathJobsLifecycle)
+// SolveGridPaths solves every request before it returns, on a pool or on the
+// caller, writes each solve's points without touching the PathBuffer, and
+// leaves HasActivePathJobs false.
+TEST(NavigationWorldTests, SolveGridPathsMatchesFindPathAndLeavesNoActiveJobs)
 {
     NavigationWorld world;
-    EXPECT_FALSE(world.HasActivePathJobs());
-
     GridSettings settings;
-    settings.Width = 10; settings.Depth = 10; settings.CellSize = 1.0f;
-    NavMapHandle handle = world.AddGridMap(settings);
-    ASSERT_TRUE(handle.IsValid());
+    settings.Width = 24; settings.Depth = 24; settings.CellSize = 1.0f;
+    const NavMapHandle handle = world.AddGridMap(settings);
+    for (uint32 z = 2; z < 22; ++z)
+        world.GetGridMap(handle)->SetCellBlocked(12, z, true);
 
-    PathRequest request;
-    request.StartX = 0.5f; request.StartZ = 0.5f;
-    request.EndX = 9.5f; request.EndZ = 9.5f;
+    std::vector<GridPathSolve> solves(6);
+    for (uint32 i = 0; i < solves.size(); ++i)
+    {
+        solves[i].Map = handle;
+        solves[i].Request.StartX = 1.5f; solves[i].Request.StartZ = 1.5f + 4.0f * static_cast<float32>(i);
+        solves[i].Request.EndX = 22.5f; solves[i].Request.EndZ = 22.5f - 4.0f * static_cast<float32>(i);
+    }
+    solves.back().Map = NavMapHandle{};
 
-    // No JobSystem set: RequestPath declines before registering a job.
-    auto declined = world.RequestPath(handle, request);
-    EXPECT_FALSE(declined.IsValid());
-    EXPECT_FALSE(world.HasActivePathJobs());
-
-    JobSystem::WorkStealingThreadPool pool(2);
-    world.SetJobSystem(&pool);
-
-    auto asyncHandle = world.RequestPath(handle, request);
-    ASSERT_TRUE(asyncHandle.IsValid());
-    asyncHandle.Wait();
-
-    // The job's release decrement is sequenced before its terminal status
-    // flip, which Wait() observed with acquire semantics — a completed job
-    // must leave the mutation gate open.
-    EXPECT_FALSE(world.HasActivePathJobs());
-
-    Pathfinding::PathResult result;
-    ASSERT_TRUE(asyncHandle.TryGetResult(result));
-    EXPECT_EQ(result.Status, PathStatus::Complete);
-    world.SetJobSystem(nullptr);
+    JobSystem::WorkStealingThreadPool pool(4);
+    for (JobSystem::WorkStealingThreadPool* poolArm : {static_cast<JobSystem::WorkStealingThreadPool*>(nullptr), &pool})
+    {
+        EXPECT_FALSE(world.HasActivePathJobs());
+        world.SolveGridPaths(poolArm, solves);
+        EXPECT_FALSE(world.HasActivePathJobs());
+        EXPECT_EQ(world.GetPathBuffer().GetPointCount({0, 1}), 0u) << "a solve allocated in the PathBuffer";
+        for (uint32 i = 0; i + 1 < solves.size(); ++i)
+        {
+            PathHandle expected;
+            ASSERT_EQ(world.FindPath(handle, solves[i].Request, expected), PathStatus::Complete);
+            ASSERT_EQ(solves[i].Status, PathStatus::Complete) << "solve " << i;
+            std::vector<PathPoint> points(world.GetPathBuffer().GetPointCount(expected));
+            world.GetPathBuffer().CopyPoints(expected, points.data(), static_cast<uint32>(points.size()));
+            world.GetPathBuffer().FreePath(expected);
+            ASSERT_EQ(solves[i].Points.size(), points.size()) << "solve " << i;
+            for (std::size_t p = 0; p < points.size(); ++p)
+            {
+                EXPECT_EQ(solves[i].Points[p].X, points[p].X);
+                EXPECT_EQ(solves[i].Points[p].Z, points[p].Z);
+            }
+        }
+        EXPECT_EQ(solves.back().Status, PathStatus::Failed) << "a handle naming no grid map solves to Failed";
+        EXPECT_TRUE(solves.back().Points.empty());
+    }
+    pool.Shutdown();
 }
 
 TEST(NavigationWorldTests, MapHandlesNeverAliasAcrossInstances)

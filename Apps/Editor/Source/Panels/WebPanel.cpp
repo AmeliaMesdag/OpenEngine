@@ -285,11 +285,11 @@ void WebPanel::LoadBindAttachLayoutAndStyle()
 
 void WebPanel::RefreshElementPointers()
 {
-    m_Container = FindById("WebContainer");
-    m_URLField = dynamic_cast<TextField*>(FindById("WebURLField"));
-    m_TabBar = FindById("WebTabBar");
-    m_WebViewContainer = FindById("WebViewContainer");
-    m_ErrorLabel = dynamic_cast<Label*>(FindById("WebErrorLabel"));
+    m_Container = FindById("WebContainer"_sid);
+    m_URLField = dynamic_cast<TextField*>(FindById("WebURLField"_sid));
+    m_TabBar = FindById("WebTabBar"_sid);
+    m_WebViewContainer = FindById("WebViewContainer"_sid);
+    m_ErrorLabel = dynamic_cast<Label*>(FindById("WebErrorLabel"_sid));
 
     if (m_WebViewContainer && !m_WebViewContainer->HasClass("web-asset-drop-initialized"))
     {
@@ -374,7 +374,7 @@ void WebPanel::RefreshElementPointers()
         });
     }
 
-    if (auto* newTabButton = dynamic_cast<Button*>(FindById("WebNewTabButton")))
+    if (auto* newTabButton = dynamic_cast<Button*>(FindById("WebNewTabButton"_sid)))
     {
         newTabButton->SetTooltip("New tab");
         newTabButton->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) { OpenBlankTab(); });

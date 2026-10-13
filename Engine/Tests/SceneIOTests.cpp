@@ -2788,6 +2788,143 @@ TEST(SceneIO, SaveThenLoad_RoundTripIctcpChromaCompression)
     EXPECT_FLOAT_EQ(loaded->IctcpChromaCompression, 0.65f);
 }
 
+// The volume's look is stored by name, so reordering the enum cannot change what a saved scene
+// means; every look round-trips.
+TEST(SceneIO, PostProcessVolumeLookIsSavedAndLoadedByName)
+{
+    for (const Components::Look look : {Components::Look::Neutral, Components::Look::Filmic,
+                                        Components::Look::Photographic})
+    {
+        const std::string name(Components::LookName(look));
+        const auto scenePath = MakeTempPath(("volume_look_" + name + ".scene").c_str());
+        ECS::World w1;
+        const ECS::EntityHandle e = w1.CreateEntity();
+        ASSERT_TRUE(e.IsValid());
+        w1.AddComponentImmediate(e, Components::SceneEntityTag{{'l', 'o', 'k', '\0'}});
+        Components::PostProcessVolume volume{};
+        volume.Look = look;
+        w1.AddComponentImmediate(e, volume);
+        ASSERT_TRUE(Scene::SaveSceneToFile(w1, scenePath, Scene::SaveOptions{}));
+
+        std::string saved;
+        ASSERT_TRUE(ReadFile(scenePath, saved));
+        EXPECT_NE(saved.find("PostProcessVolume.look = " + name + "\n"), std::string::npos) << saved;
+        EXPECT_EQ(saved.find("PostProcessVolume.tonemap"), std::string::npos) << saved;
+
+        ECS::World w2;
+        Scene::SceneLoadDegradation degradation;
+        Scene::LoadOptions opts{Scene::LoadMode::Replace};
+        opts.outDegradation = &degradation;
+        ASSERT_TRUE(Scene::LoadSceneFromFile(w2, scenePath, opts));
+        EXPECT_TRUE(degradation.skips.empty()) << name << ": " << degradation.skips.size() << " skip(s)";
+        const auto e2 = FindByTag(w2, "lok");
+        ASSERT_TRUE(e2.IsValid());
+        const auto* loaded = w2.GetComponent<Components::PostProcessVolume>(e2);
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(loaded->Look, look) << name;
+    }
+}
+
+// A look the engine does not have (Reinhard was an operator, never a look) keeps the default and
+// records one skip whose message names the valid looks and the fix; the authored text is kept for
+// the next save. The volume's other properties still apply.
+TEST(SceneIO, PostProcessVolumeUnknownLookLoadsAsNeutralWithOneSkip)
+{
+    const auto scenePath = MakeTempPath("volume_look_unknown.scene");
+    ASSERT_TRUE(WriteFile(scenePath,
+                          "[scene name=\"UnknownLook\" version=1]\n\n"
+                          "[entity id=\"ppv\"]\n"
+                          "PostProcessVolume.priority = 3\n"
+                          "PostProcessVolume.look = Reinhard\n"));
+    ECS::World world;
+    Scene::SceneLoadDegradation degradation;
+    Scene::LoadOptions opts{Scene::LoadMode::Replace};
+    opts.outDegradation = &degradation;
+    ASSERT_TRUE(Scene::LoadSceneFromFile(world, scenePath, opts));
+
+    ASSERT_EQ(degradation.skips.size(), 1u);
+    const Scene::SceneLoadSkip& skip = degradation.skips[0];
+    EXPECT_EQ(skip.component, "PostProcessVolume");
+    EXPECT_EQ(skip.field, "look");
+    EXPECT_EQ(skip.message,
+              "'Reinhard' is not a look; rendering Neutral. Valid looks: Neutral, Filmic (ACES 2), Photographic (AgX).");
+    EXPECT_TRUE(skip.preserved) << "the authored line must survive a save";
+
+    const auto e = FindByTag(world, "ppv");
+    ASSERT_TRUE(e.IsValid());
+    const auto* volume = world.GetComponent<Components::PostProcessVolume>(e);
+    ASSERT_NE(volume, nullptr);
+    EXPECT_EQ(volume->Look, Components::Look::Neutral);
+    EXPECT_EQ(volume->Priority, 3);
+}
+
+// The numbered `tonemap` property no longer exists: a scene that still carries it takes the
+// loader's ordinary unknown-property skip and renders with the default look.
+TEST(SceneIO, PostProcessVolumeNumberedTonemapLoadsAsNeutralWithOneSkip)
+{
+    const auto scenePath = MakeTempPath("volume_numbered_tonemap.scene");
+    ASSERT_TRUE(WriteFile(scenePath,
+                          "[scene name=\"NumberedTonemap\" version=1]\n\n"
+                          "[entity id=\"ppv\"]\n"
+                          "PostProcessVolume.priority = 2\n"
+                          "PostProcessVolume.tonemap = 0\n"));
+    ECS::World world;
+    Scene::SceneLoadDegradation degradation;
+    Scene::LoadOptions opts{Scene::LoadMode::Replace};
+    opts.outDegradation = &degradation;
+    ASSERT_TRUE(Scene::LoadSceneFromFile(world, scenePath, opts));
+
+    ASSERT_EQ(degradation.skips.size(), 1u);
+    EXPECT_EQ(degradation.skips[0].component, "PostProcessVolume");
+    EXPECT_EQ(degradation.skips[0].field, "tonemap");
+    EXPECT_FALSE(degradation.skips[0].message.empty());
+    EXPECT_FALSE(degradation.skips[0].preserved)
+        << "no property is written for an unknown key, so the next save drops the line";
+
+    const auto e = FindByTag(world, "ppv");
+    ASSERT_TRUE(e.IsValid());
+    const auto* volume = world.GetComponent<Components::PostProcessVolume>(e);
+    ASSERT_NE(volume, nullptr);
+    EXPECT_EQ(volume->Look, Components::Look::Neutral);
+    EXPECT_EQ(volume->Priority, 2);
+}
+
+// Exposure belongs to the camera: the volume's old exposure keys are not properties of the
+// volume, so each takes the ordinary skip instead of being accepted and dropped in silence.
+TEST(SceneIO, PostProcessVolumeExposureKeysAreRecordedSkips)
+{
+    constexpr const char* kKeys[] = {"exposure",   "exposureControl", "manualExposureEV",
+                                     "aperture",   "shutterTime",     "iso",
+                                     "autoExposureSpeedUp", "autoExposureSpeedDown"};
+    std::string text = "[scene name=\"VolumeExposureKeys\" version=1]\n\n[entity id=\"ppv\"]\n"
+                       "PostProcessVolume.priority = 5\n";
+    for (const char* key : kKeys)
+        text += std::string("PostProcessVolume.") + key + " = 1\n";
+    const auto scenePath = MakeTempPath("volume_exposure_keys.scene");
+    ASSERT_TRUE(WriteFile(scenePath, text));
+
+    ECS::World world;
+    Scene::SceneLoadDegradation degradation;
+    Scene::LoadOptions opts{Scene::LoadMode::Replace};
+    opts.outDegradation = &degradation;
+    ASSERT_TRUE(Scene::LoadSceneFromFile(world, scenePath, opts));
+
+    ASSERT_EQ(degradation.skips.size(), std::size(kKeys));
+    for (std::size_t i = 0; i < std::size(kKeys); ++i)
+    {
+        EXPECT_EQ(degradation.skips[i].component, "PostProcessVolume");
+        EXPECT_EQ(degradation.skips[i].field, kKeys[i]);
+    }
+    const auto e = FindByTag(world, "ppv");
+    ASSERT_TRUE(e.IsValid());
+    const auto* volume = world.GetComponent<Components::PostProcessVolume>(e);
+    ASSERT_NE(volume, nullptr);
+    EXPECT_EQ(volume->Priority, 5) << "the volume's own properties still apply";
+    EXPECT_EQ(world.GetComponent<Components::ExposureAdjustmentEffect>(e), nullptr)
+        << "none of these keys authors an exposure adjustment";
+}
+
+
 // VignetteEffect round-trips every authored field (URP-exact optical falloff parameters).
 TEST(SceneIO, SaveThenLoad_RoundTripVignetteEffect)
 {
@@ -4469,7 +4606,6 @@ TEST(SceneIO, LoadLegacyVolumeExposure_RevivesAsExposureAdjustment)
                 oss << "PostProcessVolume.exposureCompensation = -2\n";
                 oss << "PostProcessVolume.autoExposureMinEv = 4\n";
                 oss << "PostProcessVolume.autoExposureMaxEv = 12\n";
-                oss << "PostProcessVolume.manualExposureEV = 9\n"; // owning-semantics key: dropped
                 injected = true;
             }
         }
@@ -5106,25 +5242,49 @@ TEST(SceneIO, PostProcessSchemaCollapse_ShadowSettingsEffectReflectionParity)
         });
 }
 
-// ColorGrade's retired pre-unification keys (brightness/gamma/hue) load as
-// silent no-ops through the descriptor's dropped-keys list — no error, no
-// state change — matching the hand schema's consume-and-drop.
-TEST(SceneIO, PostProcessSchemaCollapse_ColorGradeDropsRetiredKeysSilently)
+// ColorGrade's pre-unification keys (brightness, gamma, hue) are not properties of the three-way
+// grade: a scene that still carries them loads with the reflected schema's unknown-field warning
+// naming all three, and the grade's own properties still apply. A reflected schema reports unknown
+// keys through that warning, not through the load's skip census.
+TEST(SceneIO, ColorGradeRetiredKeysAreReportedAsUnknownFields)
 {
-    const ECS::ComponentTypeId typeId = ECS::ComponentFieldRegistry::FindByName("ColorGradeEffect");
-    ASSERT_NE(typeId, 0u);
-    const Scene::ReflectionSceneSchema reflection(typeId, "ColorGradeEffect");
-    ECS::World w;
-    const ECS::EntityHandle e = w.CreateEntity();
+    const auto scenePath = MakeTempPath("color_grade_retired_keys.scene");
+    ASSERT_TRUE(WriteFile(scenePath,
+                          "[scene name=\"ColorGradeRetiredKeys\" version=1]\n\n"
+                          "[entity id=\"grade\"]\n"
+                          "PostProcessVolume.priority = 1\n"
+                          "ColorGradeEffect.brightness = 0.5\n"
+                          "ColorGradeEffect.gamma = 1.2\n"
+                          "ColorGradeEffect.hue = 0.1\n"
+                          "ColorGradeEffect.contrast = 1.25\n"));
+
+    std::vector<std::string> logLines;
+    TestLog::ScopedEngineLogCapture capture(&logLines);
+    Logger::Log::Warning("SceneIO retired-keys capture self test");
+    Logger::Log::Flush();
+    ASSERT_EQ(TestLog::CountLinesContaining(logLines, "SceneIO retired-keys capture self test"), 1u)
+        << "the log capture is not receiving engine warnings; the reads below would be false";
+    logLines.clear();
+
+    ECS::World world;
+    Scene::SceneLoadDegradation degradation;
+    Scene::LoadOptions opts{Scene::LoadMode::Replace};
+    opts.outDegradation = &degradation;
+    ASSERT_TRUE(Scene::LoadSceneFromFile(world, scenePath, opts));
+    Logger::Log::Flush();
+
+    const std::string warning = TestLog::FirstLineContaining(logLines, "'ColorGradeEffect' has no reflected field named");
+    ASSERT_FALSE(warning.empty()) << "the retired keys were dropped without a word";
+    for (const char* key : {"'brightness'", "'gamma'", "'hue'"})
+        EXPECT_NE(warning.find(key), std::string::npos) << key << " missing from: " << warning;
+    EXPECT_EQ(warning.find("'contrast'"), std::string::npos) << warning;
+    EXPECT_TRUE(degradation.skips.empty()) << "a reflected schema reports unknown keys by warning only";
+
+    const auto e = FindByTag(world, "grade");
     ASSERT_TRUE(e.IsValid());
-    const std::vector<std::pair<std::string_view, std::string_view>> props{
-        {"brightness", "0.5"}, {"gamma", "1.2"}, {"hue", "0.1"}, {"contrast", "1.25"}};
-    Scene::SceneLoadContext ctx{};
-    std::string err;
-    ASSERT_TRUE(reflection.ApplyProperties(w, e, ctx, props, &err, nullptr)) << err;
-    const auto* grade = w.GetComponent<Components::ColorGradeEffect>(e);
+    const auto* grade = world.GetComponent<Components::ColorGradeEffect>(e);
     ASSERT_NE(grade, nullptr);
-    EXPECT_FLOAT_EQ(grade->Contrast, 1.25f); // the live key still applies
+    EXPECT_FLOAT_EQ(grade->Contrast, 1.25f) << "the grade's own property still applies";
 }
 
 // The reflection path applies the descriptor-registered load clamps (the hand
@@ -9207,6 +9367,38 @@ TEST(SceneIO, AuthoredProjectScenesCarryNoRetiredTerrainModifierBlock)
     EXPECT_FLOAT_EQ(noise->Amplitude, 5.0f);
     EXPECT_LT(flatten->StackOrder, noise->StackOrder);
     EXPECT_FLOAT_EQ(noise->ErosionStrength, 0.0f);
+}
+
+// The committed scenes carry the look by name: the project scene that stored ACES 1 renders with
+// Filmic and loads with no skip.
+TEST(SceneIO, CommittedProjectSceneCarriesItsLookByName)
+{
+    const auto scenesDir = ResolveStagedFixturePath("Tests/Projects/Biggles/Assets/Scenes");
+    const auto landscape = CopySceneToTemp(scenesDir / "Lanscape.scene", "biggles_look.scene");
+    ASSERT_FALSE(landscape.empty());
+    Scene::EnsureTerrainSceneSchemasRegistered();
+
+    ECS::World world;
+    Scene::SceneLoadDegradation degradation;
+    Scene::LoadOptions opts{Scene::LoadMode::Replace};
+    opts.assetRootOverride = landscape.parent_path();
+    opts.outDegradation = &degradation;
+    ASSERT_TRUE(Scene::LoadSceneFromFile(world, landscape, opts)) << Scene::GetLastSceneIOError().message;
+    for (const auto& skip : degradation.skips)
+    {
+        if (skip.component == "PostProcessVolume")
+            ADD_FAILURE() << skip.component << "." << skip.field << ": " << skip.message;
+    }
+
+    int volumes = 0;
+    auto query = world.Query<ECS::Read<Components::PostProcessVolume>>();
+    query.Each(
+        [&](ECS::EntityHandle, const Components::PostProcessVolume& volume)
+        {
+            ++volumes;
+            EXPECT_EQ(volume.Look, Components::Look::Filmic);
+        });
+    EXPECT_EQ(volumes, 1);
 }
 
 TEST(SceneIO, SaveThenLoad_RoundTripTerrainNoiseErosionFields)

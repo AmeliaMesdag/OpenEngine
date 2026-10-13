@@ -90,11 +90,11 @@ void TooltipOverlay::EnsureElements(UIElement* root)
     if (m_Wrapper)
         return;
 
-    if (UIElement* existing = root->FindById("ui-tooltip-wrapper"))
+    if (UIElement* existing = root->FindById("ui-tooltip-wrapper"_sid))
     {
         m_Wrapper = existing;
-        m_Tooltip = m_Wrapper->FindById("ui-tooltip");
-        m_Label   = dynamic_cast<Label*>(m_Wrapper->FindById("ui-tooltip-text"));
+        m_Tooltip = m_Wrapper->FindById("ui-tooltip"_sid);
+        m_Label   = dynamic_cast<Label*>(m_Wrapper->FindById("ui-tooltip-text"_sid));
     }
     else
     {

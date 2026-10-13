@@ -152,7 +152,7 @@ struct BadgeStripFixture
             root->AddChild(std::move(strip));
         }
         Kept.Populate(*stripPtr, placement, Registry, RegisteredToolStripActions{});
-        Badge = dynamic_cast<Label*>(stripPtr->FindById(GameEngine::Editor::RegisteredToolBadgeCountId(placement, kEntryId)));
+        Badge = dynamic_cast<Label*>(stripPtr->FindById(GameEngine::HashStringId(GameEngine::Editor::RegisteredToolBadgeCountId(placement, kEntryId))));
         Ui->SetRoot(std::move(root));
         return true;
     }

@@ -350,6 +350,8 @@ class EngineCore::InitializeTransaction
         m_Engine.DiscardAudioInitAfterFailedInitialize();
         m_Engine.m_StartupChannel.reset();
         m_Engine.m_ShaderHookState.reset();
+        // The manager this Initialize may have opened the gate on is never pumped.
+        m_Engine.SetPostGate(PostGate::ShutDown);
         m_Engine.m_InitializingThread.store(std::thread::id{}, std::memory_order_release);
         m_Engine.m_Lifecycle.store(EngineLifecycleState::Uninitialized, std::memory_order_release);
     }
@@ -367,6 +369,50 @@ class EngineCore::InitializeTransaction
 };
 
 EngineCore* EngineCore::s_Instance = nullptr;
+
+void EngineCore::SetPostGate(PostGate state)
+{
+    std::lock_guard<std::mutex> lock(m_PostGateMutex);
+    m_PostGate = state;
+}
+
+EngineCore::MainThreadPost EngineCore::PostMainThreadTask(std::function<void()> task)
+{
+    MainThreadPost answer = MainThreadPost::Dropped;
+    {
+        std::lock_guard<std::mutex> lock(m_PostGateMutex);
+        if (m_PostGate == PostGate::NoQueue || (m_PostGate == PostGate::Live && IsStandaloneHosted()))
+        {
+            answer = MainThreadPost::RunInline;
+        }
+        else if (m_PostGate == PostGate::Live)
+        {
+            m_ScriptManager->QueueMainThreadTask(std::move(task));
+            return MainThreadPost::Queued;
+        }
+    }
+    // Outside the gate: the task may itself reach the main thread.
+    if (answer == MainThreadPost::RunInline)
+    {
+        task();
+    }
+    return answer;
+}
+
+EngineCore::MainThreadPost EngineCore::RequestManagedPostDrain()
+{
+    std::lock_guard<std::mutex> lock(m_PostGateMutex);
+    if (m_PostGate == PostGate::NoQueue || (m_PostGate == PostGate::Live && IsStandaloneHosted()))
+    {
+        return MainThreadPost::RunInline;
+    }
+    if (m_PostGate == PostGate::ShutDown)
+    {
+        return MainThreadPost::Dropped;
+    }
+    m_ScriptManager->RequestManagedPostDrain();
+    return MainThreadPost::Queued;
+}
 
 EngineCore::EngineCore()
 {
@@ -425,6 +471,10 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
         return false;
     }
     m_InitializingThread.store(std::this_thread::get_id(), std::memory_order_release);
+    // The frames run on this thread, whatever the configuration. Recorded before anything
+    // that can run a script, so the scripting ABI's thread predicates answer from the start.
+    m_MainThreadId.store(std::this_thread::get_id(), std::memory_order_release);
+    m_StandaloneHosted.store(config.StandaloneHosted, std::memory_order_release);
     InitializeTransaction transaction(*this);
 
     // Unreachable by construction: Shutdown() and the Initialize rollback both join
@@ -761,7 +811,9 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
 
     // If scripting is effectively disabled by config, skip ScriptManager initialization entirely.
     // This keeps headless tools/tests fast and avoids unnecessary file watcher + hot reload pipeline setup.
+    // A NativeAOT Player runs scripts with the CLR off, and keeps the manager for its main-thread queue.
     const bool scriptingFullyDisabled =
+        !scriptsConfig.nativeAot &&
         scriptsConfig.disableClr &&
         !scriptsConfig.enableHotReload &&
         !scriptsConfig.enableAsyncHotReload &&
@@ -777,9 +829,9 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
         {
             m_ScriptManager = MakeUnique<ScriptManager>();
         }
-        // Engine init and Update run on this thread; record it so off-main-thread
-        // pumping of main-thread tasks gets diagnosed instead of passing silently.
-        m_ScriptManager->MarkMainThread();
+        // Before the manager initializes: the CLR's initial load can post to the main thread,
+        // and the pump inside ScriptManager::Initialize runs what it posted.
+        SetPostGate(PostGate::Live);
 
         if (!scriptsNativeDllPath.empty())
         {
@@ -822,9 +874,11 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
     }
     else
     {
+        SetPostGate(PostGate::NoQueue);
         Logger::Log::Info("ScriptManager disabled by config; skipping ScriptManager initialization");
     }
 #else
+    SetPostGate(PostGate::NoQueue);
     // Even when scripting is compiled out, we still want asset hot
     // reloading (e.g., UI CSS/layout, textures, shaders) to work when
     // requested via ScriptsConfig. Honor the engine-level scripts config
@@ -1051,7 +1105,9 @@ void EngineCore::Shutdown()
         PhysicsECS::PhysicsWorldService::Shutdown();
     }
 
-    // Shutdown subsystems in reverse order
+    // Shutdown subsystems in reverse order. The gate closes first, so a request that races
+    // this teardown is dropped instead of reaching the manager the reset below frees.
+    SetPostGate(PostGate::ShutDown);
     if (m_ScriptManager)
     {
         m_ScriptManager->Shutdown();

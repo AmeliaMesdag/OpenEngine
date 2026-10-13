@@ -8,6 +8,7 @@ layout(location = 2) flat in float vTwinklePhase;
 layout(location = 3) flat in float vRotAngle;
 layout(location = 4) flat in float vSizeScale;
 layout(location = 5) flat in float vColorTemp;
+layout(location = 6) flat in vec2 vTwinkleRange;
 
 layout(location = 0) out vec4 oColor;
 
@@ -67,13 +68,13 @@ void main()
     vec3 coolTint = vec3(0.7, 0.85, 1.0);
     vec3 starColor = mix(warmTint, coolTint, vColorTemp);
 
-    // The twinkle brightens the star's glow, not the sparkle: a clipped sparkle whose brightness
-    // twinkled reads as a core growing and shrinking. The star's mean light is a diamond star's
-    // times the mean of its twinkle range (Twinkle Intensity to starTwinkleAmp.y, clamped as the
-    // range always was); the sparkle carries a steady (1 - kGlowShare) of it and the glow the
-    // rest, scaled by the twinkle's phase over its mean, so the mean is unchanged.
-    // starTwinkleAmp.w and .z scale each term to a diamond star's light
-    // (ComputeStarSparkleEnergy).
+    // The star's full light is a diamond star's (starTwinkleAmp.w and .z scale the sparkle and the
+    // glow to it: ComputeStarSparkleEnergy) times the mean of the twinkle range (Twinkle Intensity
+    // to starTwinkleAmp.y, clamped as the range always was). Of that, the sparkle carries a steady
+    // (1 - kGlowShare) and the glow the rest, scaled by the twinkle's phase over its mean, so the
+    // glow brightens with the twinkle and the sparkle's shape stays put. The star's own range then
+    // scales the whole star (below): 0.25 of the full light on average over the catalog and a
+    // twinkle period.
     const float kTwinklePhaseMean = 0.4244; // mean of ((1 + sin)/2)^1.5 over a period
     const float kGlowShare = 0.5;
     float twinkleFloor = clamp(uSky.starTwinkleAmp.x, 0.0, 2.0);
@@ -82,7 +83,12 @@ void main()
     float glow = GE_StarGlowFiltered(rotPos / pointFrac, toStar * quadDx, toStar * quadDy);
     float sparkleLight = (1.0 - kGlowShare) * uSky.starTwinkleAmp.w * shape;
     float glowLight = kGlowShare * (vTwinklePhase / kTwinklePhaseMean) * uSky.starTwinkleAmp.z * glow;
-    float intensity = vBrightness * starBrightnessSetting * meanTwinkle * (sparkleLight + glowLight);
+    // The twinkle also dims the whole star at its low phase, by the star's own range
+    // (GE_StarTwinkleRange): a brightness change on the additive star, which on a dark sky reads
+    // exactly as a fade.
+    float twinkleBrightness = GE_StarTwinkleBrightness(vTwinkleRange, vTwinklePhase);
+    float intensity = vBrightness * starBrightnessSetting * meanTwinkle * twinkleBrightness *
+                      (sparkleLight + glowLight);
 
     oColor = vec4(starColor * intensity, 0.0);
 }

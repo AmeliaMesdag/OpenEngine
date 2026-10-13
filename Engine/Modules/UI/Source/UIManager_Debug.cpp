@@ -146,7 +146,7 @@ void UIManager::EmitDebugCapture()
         m_DebugCaptureOut << "\"id\":";
         writeString(probeId ? probeId : "");
 
-        UIElement* el = (m_Root && probeId) ? m_Root->FindById(probeId) : nullptr;
+        UIElement* el = (m_Root && probeId) ? m_Root->FindById(HashStringId(probeId)) : nullptr;
         m_DebugCaptureOut << ",\"exists\":";
         writeBool(el != nullptr);
         if (el)
@@ -216,8 +216,8 @@ void UIManager::EmitDebugCapture()
         }
     }
 
-    UIElement* colorPickerDialog = m_Root ? m_Root->FindById("colorpicker-dialog-picker") : nullptr;
-    UIElement* colorPickerPalette = m_Root ? m_Root->FindById("colorpicker-palette") : nullptr;
+    UIElement* colorPickerDialog = m_Root ? m_Root->FindById("colorpicker-dialog-picker"_sid) : nullptr;
+    UIElement* colorPickerPalette = m_Root ? m_Root->FindById("colorpicker-palette"_sid) : nullptr;
     const size_t paletteSwatchCount = colorPickerPalette ? colorPickerPalette->GetChildren().size() : 0u;
 
     static constexpr const char* kColorPickerProbeIds[] =

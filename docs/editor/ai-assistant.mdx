@@ -29,6 +29,8 @@ Open the panel from the **Panels** button at the right end of the top toolbar an
 
 Each message is a row: your prompt under **You**, and the reply under the provider and model that wrote it, with the time. A Claude (local session) reply names the exact model that answered (**Opus 5.5** when you chose Opus) and the effort it asked for. The reply streams into its row as the provider writes it; the line under it says where it stands and, once it ends, any note and the provider's own cost estimate and token counts (shown, never added up).
 
+A reply shows the Markdown the model writes: headings, bold and italic, inline code, code blocks (a long line scrolls sideways rather than wrapping), bulleted and numbered lists, quotes, tables and links (a web link opens in your browser). Anything else shows as the characters the model wrote. Your prompt is shown as you typed it, and Copy copies a reply's Markdown.
+
 | You do | What happens |
 |---|---|
 | Enter (or the send button) | Sends the prompt. Shift+Enter starts a new line; Up and Down recall earlier prompts. |
@@ -52,6 +54,46 @@ The choice is yours, not the project's: it is kept in your editor settings and a
 A message holds at most 64 KB of text. A prompt longer than that is not sent: the status line gives its size, and the prompt stays in the field for you to shorten. A reply longer than that keeps its first 64 KB: its text ends with an ellipsis, the line under it reads **Reply truncated at 64 KB**, Copy copies those 64 KB and says so, and later prompts to Claude (API) carry those 64 KB as the reply.
 
 A reply runs on a thread of the panel's own, so a reply that takes minutes never holds up the editor's other work; closing the panel stops it.
+
+## Mark-ups in the conversation
+
+A prompt can name [world mark-ups](world-markups.mdx): the places, areas and paths you and the agent mark in the scene. Name one with a token, `@markup:<tag>` or `@markup:"<title>"`, and the prompt's turn carries what the mark-up is, so the agent reads its shape, notes and thread without asking the editor first. In a quoted title, `\"` stands for a quote and `\\` for a backslash; the list and Ask the AI Assistant write them for you. A mark-up's tag is the first of the tags its inspector's **Tags** row lists. The list and Ask the AI Assistant name a mark-up by its tag when no other mark-up's first tag is the same and the tag holds no space; otherwise by its title when no other mark-up has that title; otherwise not at all, and they say what to change.
+
+| You do | What happens |
+|---|---|
+| Type `@` at the start of a word | A list of the scene's mark-ups opens under the prompt: each row is its title (its tag for an untitled one; "Untitled mark-up" for one with neither, which no token can name) with a dot in the color it draws in, over its status, its kind and its tag. What you type next searches titles and tags. No row is highlighted until you type or press an arrow key, so an Enter right after the `@` closes the list. Choosing a row puts its token where the `@` was. Esc, Enter with nothing highlighted, or a click outside the list closes it and puts what you typed in its search field after the `@`, so a token typed by hand reaches the prompt whole. Choosing a row no token can name says why and what to change, with its entity id: "2 mark-ups are titled Meadow: give this one (entity 1048585) a tag or another title to name it". |
+| **Ask the AI Assistant** on a mark-up (a button in its inspector section, or the right-click menu of its row in the Mark-ups panel) | Opens this panel with the mark-up's token at the end of the prompt. A mark-up no token can name has the button off. Its tooltip reads "Give this mark-up a title or a tag to ask the AI Assistant about it" when it has neither, or what the list says when you choose it: the shared title or tag and the fix. |
+| Send a prompt that names mark-ups | Each mark-up is read as it is when you send: one block per mark-up follows the prompt in what the provider receives. Your row shows the prompt as you typed it, with a chip per mark-up under it, named by the mark-up's title when you sent the prompt; a chip's click selects the mark-up and frames it in the Scene View as a double-click on its Mark-ups panel row does: its whole shape (a region's outline and height, a path's line), along the view's heading, looking down at least 30 degrees. A token that names no mark-up is sent as `[unknown mark-up @markup:…]` and the status line says so. When two mark-ups share a title, a title token names the one changed most recently. In play mode mark-ups are not read: the turn says why for each token. |
+| **Comment on mark-up** on a reply to a prompt that named mark-ups | Adds the reply to the thread of each named mark-up as your comment, introduced as "From the assistant (Claude (local session) · Opus 5.5 · High):" (the reply's own header) and cut after 2,000 characters, so it shows in the Mark-ups panel's Activity tab like any comment. Only on your click, and once: after it the button is off. A reply is never added on its own. |
+
+### What the agent receives for a mark-up
+
+Each named mark-up becomes one block after the prompt. Its `tags` are the mark-up's tags, the ones its inspector's **Tags** row edits, in that order: each in double quotes (written `&quot;` inside the attribute), separated by spaces, a quote or a backslash in a tag written `\"` or `\\` as in a quoted title; empty when it has none. A member's `tags` are the same. These are the user's tags, the first of which a token names. The mark-up tools' `tag` field (`markup_list`, `markup_get`, a member given by tag to `markup_create` or `markup_update`) is something else: the entity's scene id, until it is renamed (#3992).
+
+```xml title="What a turn carries for a region with a sphere excluded, and for the sphere"
+<markup tags="&quot;meadow-main&quot; &quot;grass&quot;" title="Meadow" status="Proposed" kind="region" outline="0,0 30,0 40,10 45,25 40,40 30,48 15,50 0,45 -10,35 -12,20 -8,8 -3,2" area="2284" netArea="2234" bounds="-12,0 45,50" extrudeHeight="8">
+Keep it open grass; no trees.
+<member mode="exclude" kind="volume" title="Pond" tags="" center="15,20" radius="4"/>
+Agent 2026-10-13T06:10:01Z created
+User 2026-10-13T06:10:09Z Could the north edge follow the stream?
+</markup>
+<markup tags="" title="Pond" status="Proposed" kind="volume" shape="sphere" center="15,0,20" halfExtents="4,4,4" rotation="0,0,0,1">
+Agent 2026-10-13T06:10:01Z created
+</markup>
+```
+
+A path's block reads `kind="path" points="0,2,0 40,3,10 80,3,30" length="91.2"` in place of the region's shape.
+
+**Coordinates and numbers.** Positions, extents, heights and lengths are in meters, in world space: left-handed, +X right, +Y up, +Z forward. A point's or a tuple's numbers are separated by commas and points by spaces: `x,y,z` for a point in space, `x,z` for a point on the ground plane, `x,y,z,w` for a rotation. Outlines, path points and bounds are written to a tenth of a meter (the outline's own tolerance); a volume's center and extents, a circle and heights and lengths to a centimeter; a rotation's components to four decimals; an area to the square meter. Numbers are written the same way whatever the system's language settings.
+
+- **A volume** (a box or a sphere) carries its `shape`, `center`, `halfExtents` and `rotation` (a unit quaternion, x,y,z,w).
+- **A region** carries its `outline`, the area's edge (the ring `markup_get` returns) cut to at most 64 points by keeping the points that carry the shape, so a corner or the tip of a spit stays; its `area`, the square meters the outline encloses (what the inspector's Outline area shows); its `netArea`, that area with its members applied (an excluded pond taken out, an included field added); its `bounds` (the lowest x,z then the highest); and its `extrudeHeight`. Each member is a `<member>` line: its mode, kind, title and tags and its footprint, an `outline` cut the same way or a `center` and `radius`; a deleted member reads `deleted="true"`. A region whose points cannot enclose an area (fewer than three, or edges that cross) carries its `knots` and a `problem` that names the fix in place of the outline and the area.
+- **A path** carries its `points` (x,y,z, at most 64, the same rule) and its `length` along the ground.
+- Then the description, the members and the newest ten thread entries: each entry is one line, its author, its time (ISO 8601, UTC) and its text (or what it did: `created`, `status Requested`, `edit`), cut at 500 bytes of what was written (before escaping, so a cut never splits an escaped character).
+
+**Escaping.** Attribute values escape `&`, `<`, `>` and `"` as XML does, and a line break in one becomes a space. The description and the thread entries escape `&`, `<` and `>`, so nothing written in a mark-up, a quoted block included, can close its block or start another.
+
+**Caps.** A block holds at most 8 KB. The shape and the members keep their room; the description is cut first, then the thread, and a last line says what was left out: `[not shown, the 8 KB block cap: the description's last 1200 bytes, 4 entries]`. A turn's context, unknown-token lines included, holds at most 32 KB; the mark-ups past that are counted on one line, `[3 more mark-ups not included: the 32 KB per-turn cap]`. To read more, the agent calls `markup_get`.
 
 ## Local sessions: Claude Code and Codex
 
@@ -228,3 +270,4 @@ An AI client that runs outside the editor, such as Claude Code, Cursor or Claude
 - 2026-10-10: the model button: the model and, for Claude (local session), the effort, chosen in the panel and applied from the next prompt; a reply names the model that answered and the effort it asked for; the choices are model families and effort levels, Opus at High to start, and the button names the version once a reply has; Haiku and the Claude session effort setting.
 - 2026-10-12: Where to start; screenshots of the panel, the provider dropdown, a reply that acts in the editor and the settings page; Connecting an AI client to the editor, linking the MCP setup page.
 - 2026-10-12: Converted from `docs/Editor/ai-assistant.html`.
+- 2026-10-13: mark-ups in the conversation: `@markup` tokens, the `@` list, Ask the AI Assistant on a mark-up, the chips that frame a named mark-up, Comment on mark-up, and the block the agent receives for a volume, a region and a path.

@@ -299,21 +299,20 @@ struct SkyEnvironment {
     };
 
     /// Reflectance of the planet floor (midnight / dawn / midday / sunset). Drives the
-    /// ground bounce baked into the IBL (the lower hemisphere a surface receives) and the
+    /// ground bounce baked into the IBL (the lower hemisphere a surface receives), the
+    /// sunlight the ground reflects back into the sky (the multiple-scattering LUT), and the
     /// visible below-horizon ground in the PlanetGround and StylizedGround modes.
     ///
-    /// Every key is the same neutral grey, chosen by measurement: the sky model stands in
-    /// for the ground the scene actually has, and in the default scene (a light floor,
-    /// noon) 0.59 is the largest neutral albedo whose baked -Y irradiance and -Y
-    /// prefilter faces stay at or below those of a whole-scene probe capture on every
-    /// channel; blue reaches the probe first, because the floor is lit by the blue sky.
-    /// The ground's colour does not change with the hour; its brightness follows the sun
-    /// (N.L and transmittance) and the sky's mean radiance.
+    /// Every key is the same neutral Rendering::kDefaultGroundAlbedo, 0.3, typical land (sand,
+    /// about 0.4, and snow are the bright exceptions). A brighter ground also brightens and greys
+    /// the sky it lights from below. The ground's
+    /// colour does not change with the hour; its brightness follows the sun (N.L and
+    /// transmittance) and the sky's mean radiance.
     SkyVec3DayKeys GroundAlbedoKeys{
-        {0.59f, 0.59f, 0.59f},
-        {0.59f, 0.59f, 0.59f},
-        {0.59f, 0.59f, 0.59f},
-        {0.59f, 0.59f, 0.59f},
+        {Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo},
+        {Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo},
+        {Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo},
+        {Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo, Rendering::kDefaultGroundAlbedo},
     };
     SkyVec3DayKeys GroundNightColorKeys{
         {0.03f, 0.032f, 0.045f},

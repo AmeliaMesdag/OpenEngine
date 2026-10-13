@@ -248,7 +248,7 @@ Options are typically supplied from code via the field API:
 // After layout has been loaded
 if (UIElement* root = ui->GetRootElement())
 {
-	    if (auto* el = root->FindById("QualityDropdown"))
+	    if (auto* el = root->FindById("QualityDropdown"_sid))
 	    {
 		        if (auto* dd = dynamic_cast<Dropdown*>(el))
 		        {

@@ -10,8 +10,8 @@ namespace GameEngine::PathfindingECS
 {
 // The NavigationWorld map a NavigationSurface names is a runtime resource owned by the component
 // that created it, stamped with the creating world. Every reader and publisher goes through these
-// functions; nothing else writes the binding. Main thread only, and never while path jobs are in
-// flight: NavigationWorld maps are not synchronized.
+// functions; nothing else writes the binding. Main thread only, and never while path solves run
+// (HasActivePathJobs): NavigationWorld maps are not synchronized.
 //
 // The map a surface owns keeps its handle across re-bakes (the grid is reset in place, the mesh
 // re-initialized in place), so an agent bound to the handle stays bound and an undo that restores
@@ -29,7 +29,7 @@ Pathfinding::DetourNavMap* ResolveNavigationSurfaceMesh(const ECS::World& world,
     const Components::NavigationSurface& surface);
 
 // Creates an empty map of the surface's Mode in the current service and binds it to `world`.
-// Returns an invalid handle when the service is absent, path jobs are active, or `surface` already
+// Returns an invalid handle when the service is absent, path solves are running, or `surface` already
 // resolves to a live map in `world`. A stale binding is overwritten without releasing whatever it
 // named.
 Pathfinding::NavMapHandle CreateNavigationSurfaceMap(const ECS::World& world,

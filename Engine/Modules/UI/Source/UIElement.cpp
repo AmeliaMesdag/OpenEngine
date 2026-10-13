@@ -1153,13 +1153,15 @@ void UIElement::SetId(const std::string& id)
         InvalidateRuleCacheFollowingSiblings();
 }
 
-UIElement* UIElement::FindById(std::string_view id) {
-    if (m_OwnerManager && !id.empty())
+UIElement* UIElement::FindById(StringId id) {
+    if (id == 0)
+        return nullptr;
+    if (m_OwnerManager)
         return m_OwnerManager->m_ElementIdIndex.Find(*this, id);
 
     // Offline trees have no manager index; preserve their construction-time lookup.
     // Treat id and name as aliases (name is folded into m_Id during parsing).
-    if (m_Id == id) return this;
+    if (m_IdHash == id) return this;
     for (auto& c : m_Children) {
         if (auto* f = c->FindById(id)) return f;
     }

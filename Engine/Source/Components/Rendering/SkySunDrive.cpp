@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 namespace GameEngine::Components::SkySunDrive
 {
@@ -137,33 +138,35 @@ float LuminanceOfGround(const float source[3], float upDot)
 // 1 Smooth).
 constexpr float kDefaultSunIlluminanceKeys[][3] = {
     {0.0f, 0.001f, 0.0f},
-    {5.58333349f, 0.0161f, 0.0f},
-    {5.5999999f, 0.0283f, 0.0f},
-    {5.73333311f, 2.64f, 0.0f},
-    {5.86666679f, 274.0f, 0.0f},
-    {5.9333334f, 2600.0f, 0.0f},
-    {6.0f, 2600.0f, 0.0f},
-    {6.0666666f, 7140.0f, 0.0f},
-    {6.13333321f, 12900.0f, 0.0f},
-    {6.33333349f, 31500.0f, 1.0f},
-    {6.66666651f, 54600.0f, 1.0f},
-    {7.33333349f, 77200.0f, 1.0f},
-    {8.33333302f, 90300.0f, 1.0f},
-    {9.66666698f, 97000.0f, 1.0f},
+    {5.86666679f, 0.001f, 0.0f},
+    {5.9000001f, 0.0248f, 0.0f},
+    {5.9333334f, 2.52f, 0.0f},
+    {5.94999981f, 26.6f, 0.0f},
+    {5.9666667f, 67.3f, 0.0f},
+    {6.0f, 67.3f, 0.0f},
+    {6.0333333f, 406.0f, 0.0f},
+    {6.0666666f, 1190.0f, 0.0f},
+    {6.13333321f, 4170.0f, 0.0f},
+    {6.33333349f, 19000.0f, 1.0f},
+    {6.66666651f, 42900.0f, 1.0f},
+    {7.33333349f, 69800.0f, 1.0f},
+    {8.33333302f, 86800.0f, 1.0f},
+    {9.66666698f, 95900.0f, 1.0f},
     {12.0f, 100000.0f, 1.0f},
-    {14.333333f, 97000.0f, 1.0f},
-    {15.666667f, 90300.0f, 1.0f},
-    {16.666666f, 77200.0f, 1.0f},
-    {17.333334f, 54600.0f, 1.0f},
-    {17.666666f, 31500.0f, 0.0f},
-    {17.8666668f, 12900.0f, 0.0f},
-    {17.9333324f, 7140.0f, 0.0f},
-    {18.0f, 2600.0f, 0.0f},
-    {18.0666676f, 2600.0f, 0.0f},
-    {18.1333332f, 274.0f, 0.0f},
-    {18.2666664f, 2.64f, 0.0f},
-    {18.3999996f, 0.0283f, 0.0f},
-    {18.416666f, 0.0161f, 0.0f},
+    {14.333333f, 95900.0f, 1.0f},
+    {15.666667f, 86800.0f, 1.0f},
+    {16.666666f, 69800.0f, 1.0f},
+    {17.333334f, 42900.0f, 1.0f},
+    {17.666666f, 19000.0f, 0.0f},
+    {17.8666668f, 4170.0f, 0.0f},
+    {17.9333324f, 1190.0f, 0.0f},
+    {17.9666672f, 406.0f, 0.0f},
+    {18.0f, 67.3f, 0.0f},
+    {18.0333328f, 67.3f, 0.0f},
+    {18.0499992f, 26.7f, 0.0f},
+    {18.0666676f, 2.52f, 0.0f},
+    {18.1000004f, 0.0248f, 0.0f},
+    {18.1333332f, 0.001f, 0.0f},
 };
 
 float ModelLux(const SkyEnvironment& sky, const Rendering::SolarFrame& frame, float sunLux, float hours)
@@ -225,14 +228,27 @@ Math::Curve PhysicalSeedCurve(const SkyEnvironment& sky, float sunLux)
 
     curve.TryInsert(SeedKey(0.0f, ModelLux(sky, frame, sunLux, 0.0f)));
     curve.TryInsert(SeedKey(12.0f, ModelLux(sky, frame, sunLux, 12.0f)));
-    for (const float elevation : kSeedElevationsDegrees)
+    // A seed elevation whose light is already at the floor carries no shape, and under a hazy sky
+    // several of the twilight ones are: keep only the last dark one before the light, which anchors
+    // where the rise begins, so the curve's key budget goes to the rise itself.
+    constexpr size_t kSeedElevationCount = std::size(kSeedElevationsDegrees);
+    for (size_t e = 0; e < kSeedElevationCount; ++e)
     {
         float morning = 0.0f;
         float evening = 0.0f;
-        if (!HoursAtElevation(angles, elevation, morning, evening))
+        if (!HoursAtElevation(angles, kSeedElevationsDegrees[e], morning, evening))
             continue;
-        curve.TryInsert(SeedKey(morning, ModelLux(sky, frame, sunLux, morning)));
-        curve.TryInsert(SeedKey(evening, ModelLux(sky, frame, sunLux, evening)));
+        const float morningLux = ModelLux(sky, frame, sunLux, morning);
+        const float eveningLux = ModelLux(sky, frame, sunLux, evening);
+        float nextMorning = 0.0f;
+        float nextEvening = 0.0f;
+        const bool nextIsLit = e + 1 < kSeedElevationCount &&
+                               HoursAtElevation(angles, kSeedElevationsDegrees[e + 1], nextMorning, nextEvening) &&
+                               ModelLux(sky, frame, sunLux, nextMorning) > kSeedMinimumModelLux;
+        if (morningLux <= kSeedMinimumModelLux && eveningLux <= kSeedMinimumModelLux && !nextIsLit)
+            continue;
+        curve.TryInsert(SeedKey(morning, morningLux));
+        curve.TryInsert(SeedKey(evening, eveningLux));
     }
     AssignSeedInterpolation(curve, frame);
 

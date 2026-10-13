@@ -32,7 +32,7 @@ Include/Pathfinding/
   GridMap.h                Square + hex grid map (costs, heights, blocked, reservations)
   DetourNavMap.h           Recast baking + Detour runtime queries (Pimpl)
   ObstacleAvoidance.h      CrowdManager wrapping dtCrowd
-  NavigationWorld.h        Facade: owns maps, PathBuffer, CrowdManager, NavLinks, async API
+  NavigationWorld.h        Facade: owns maps, PathBuffer, CrowdManager, NavLinks, batched grid solves
 
 Source/
   PathBuffer.cpp
@@ -41,7 +41,7 @@ Source/
   HexGridHelpers.h / .cpp  Private. Odd-r offset hex coordinate math.
   DetourNavMap.cpp          Full Recast pipeline + Detour queries (behind #if guard)
   ObstacleAvoidance.cpp     dtCrowd wrapper (behind #if guard)
-  NavigationWorld.cpp       Facade with map/link management, sync/async path queries
+  NavigationWorld.cpp       Facade with map/link management, path queries, the parallel grid solve
 ```
 
 ### Key Abstractions
@@ -66,7 +66,9 @@ In-house grid-based navigation map. Supports both square (8-neighbor) and hex (6
 - `m_Heights` (`float32`) -- per-cell world Y height
 - `m_Blocked` (`uint8`) -- per-cell blocked flag
 
-**Reservations**: A parallel flat array `m_Reservations` stores `(agentId, expirationTime)` per cell. Agents reserve cells along their path within a time horizon. The A* solver adds a penalty cost for cells reserved by other agents (expensive, not impassable). A `shared_mutex` protects the reservation array for concurrent reads (A* queries) and exclusive writes (reserve/clear).
+**Reservations**: A parallel flat array `m_Reservations` stores `(agentId, expirationTime)` per cell. Agents reserve cells along their path within a time horizon. The A* solver adds a penalty cost for cells reserved by other agents (expensive, not impassable). A `shared_mutex` protects the reservation array: writers (reserve/clear) take it exclusive, `GetCellReservation` and `IsOccupiedByOther` take it shared per call, and a path-solve window takes it shared once for all of its solves.
+
+**Read view**: path solves read the map through `GridMap::ReadView`, a value holding the settings and raw pointers to the five arrays, with inline accessors and no lock. `View()` hands one out only inside a path-solve window (`OpenPathSolveWindow` / `ClosePathSolveWindow`; `FindPath` opens one per solve, `NavigationWorld::SolveGridPaths` one per map per batch on the calling thread, held across the join). The window holds the reservation lock shared, and every writer asserts (Debug, DebugFast) while one is open; `AStarSolver` and `PathSmoother` take the view, not the map.
 
 **Coordinate conversion**: `WorldToCell` / `CellToWorld` handle both square and hex layouts. Hex uses odd-r offset coordinates with flat-top orientation.
 
@@ -113,8 +115,8 @@ Top-level facade that owns everything.
 
 - **Map management**: `AddGridMap`, `AddDetourNavMap`, `RemoveMap` with generational handle validation
 - **Sync queries**: `FindPath(mapHandle, request, outPath)` -- blocks, for editor/tools
-- **Async queries**: `RequestPath(mapHandle, request)` -- submits to JobSystem, returns `TaskHandle`
-- **Cross-map**: `RequestPathAcrossLinks(request)` -- BFS on link graph to find map sequence, then solves per-segment
+- **Batched grid solves**: `SolveGridPaths(pool, solves)` -- solves every grid request with `JobSystem::ParallelFor` on the given pool (null: on the caller, in order) and returns once all are done; each solve writes only its own status and points, so the caller allocates the paths in its own order. `HasActivePathJobs()` is true only during this call, and every `GridMap` writer and every map add, remove or replace asserts (Debug, DebugFast) while it runs
+- **Cross-map**: `FindPathAcrossLinks(request, outPath)` -- cheapest map sequence over the links (Dijkstra on `TraversalCost`), then solves per segment and joins them; blocks
 - **NavLinks**: `AddNavLink`, `RemoveNavLink`, `GetNavLink`, `ForEachNavLink`, `AutoGenerateBoundaryLinks`
 - **PathBuffer**: Thread-safe pool of variable-length path buffers
 
@@ -176,7 +178,7 @@ Source/
 | System | Phase | Order | Dependencies | Purpose |
 |--------|-------|-------|-------------|---------|
 | **NavigationSurfaceSystem** | Early | 10 | TransformHierarchy, PhysicsWriteback, TerrainModifiers (optional), TerrainExtraction (optional) | Bakes each NavigationSurface into a GridMap or a tiled DetourNavMap (tiles on the job system), publishes its bake state, stamps obstacles into grids |
-| **NavigationPathfindingSystem** | Early | 20 | NavigationSurfaceSystem | Harvests async results, queues every request (HasDestination + PathDirty, or the replan timer's ReplanRequested) and solves the oldest `MaxPathSolvesPerFrame` (default 64) each frame; the rest wait in order, a PathDirty request as Pending with its path released, a timer refresh still walking its current path. `GetStatistics()` reports the queue (the editor's `get_navigation_stats`) |
+| **NavigationPathfindingSystem** | Early | 20 | NavigationSurfaceSystem | Exclusive. Queues every request (HasDestination + PathDirty, or the replan timer's ReplanRequested) and solves the oldest `MaxPathSolvesPerFrame` (default 64) each frame, the grid requests on the world's job pool and the rest on the caller, applying the results in queue order before it returns; the rest wait in order, a PathDirty request as Pending with its path released, a timer refresh still walking its current path. `GetStatistics()` reports the queue (the editor's `get_navigation_stats`) |
 | **NavigationMovementSystem** | Early | 30 | NavigationPathfindingSystem | Steers agents along paths, manages reservations, reads crowd positions |
 | **NavigationDebugSystem** | Render | 5 | NavigationMovementSystem | Populates NavDebugData with lines/triangles for editor consumption |
 
@@ -215,11 +217,11 @@ The Editor layer is responsible for consuming this data and drawing it via `Gizm
 | Resource | Protection | Details |
 |----------|-----------|---------|
 | PathBuffer | `std::mutex` | All alloc/free/read operations lock |
-| GridMap reservations | `std::shared_mutex` | Readers (A*, GetCellReservation) share; writers (Reserve, Clear) exclusive |
-| GridMap cell data | None (read-only during queries) | Cell costs/heights/blocked are set during bake, read-only during pathfinding |
+| GridMap reservations | `std::shared_mutex` | A path-solve window holds it shared for all of its solves (A* reads through the `ReadView`, unlocked); `GetCellReservation` and `IsOccupiedByOther` share it per call; writers (Reserve, Clear) take it exclusive and assert (Debug, DebugFast) while a window is open |
+| GridMap cell data | None; no writer inside a path-solve window | Written on the main thread outside `SolveGridPaths`; every writer asserts (Debug, DebugFast) while a window is open |
 | A* solver | Stateless | All working memory is stack-local per Solve() call |
-| NavigationWorld maps | None (single-threaded access assumed) | Map add/remove happens in init systems; queries happen in pathfinding systems |
-| NavigationPathfindingSystem::m_InFlightRequests | None (single-threaded system) | Systems run sequentially per schedule |
+| NavigationWorld maps | None (single-threaded access assumed) | Map add/remove/replace on the main thread, gated on `HasActivePathJobs()`; `SolveGridPaths`' solves only read the map table, and each of those writers asserts (Debug, DebugFast) while it runs |
+| NavigationPathfindingSystem | Exclusive update | No other managed system runs while its solves read the grids; results are applied on its own thread |
 
 ---
 

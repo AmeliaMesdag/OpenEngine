@@ -306,7 +306,7 @@ RenameLayoutModal* CurvePresetPicker::EnsureRenameModal()
     if (!root)
         return nullptr;
 
-    if (UIElement* existing = root->FindById("curve-preset-rename-modal"))
+    if (UIElement* existing = root->FindById("curve-preset-rename-modal"_sid))
     {
         m_RenameModal = dynamic_cast<RenameLayoutModal*>(existing);
         if (m_RenameModal)

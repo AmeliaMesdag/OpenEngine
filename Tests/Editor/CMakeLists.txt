@@ -603,6 +603,7 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewProjection.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Markups/ConvertMarkupShapeCommand.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Markups/MarkupEditorBridge.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Markups/MarkupEditorSurfaces.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Markups/MarkupRequestGate.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Markups/MarkupCommentText.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Markups/MarkupDrawList.cpp
@@ -984,6 +985,8 @@ add_executable(HierarchyEnableStateTests
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Hierarchy/HierarchyRowActivity.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Hierarchy/HierarchyLightIconTint.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Entities/EntityDisplayName.cpp
+	# EntityDisplayName reads a component's UntitledName from the traits registry.
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Entities/EditorComponentTraits.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/InspectorEntityActivity.cpp
 )
 target_include_directories(HierarchyEnableStateTests PRIVATE

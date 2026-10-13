@@ -48,7 +48,6 @@
 #include "Components/Rendering/LocalBounds.h"
 #include "Components/Rendering/Light.h"
 #include "Components/Rendering/MeshRenderer.h"
-#include "Components/Rendering/TonemapMode.h"
 #include "Components/Measure/MeasureComponent.h"
 #include "Components/Hierarchy.h"
 #include "Components/HierarchyQueries.h"
@@ -4175,6 +4174,9 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
         // before any optional tuning; otherwise default Auto settings never enter
         // autoExposureTuned and the meter remains latched off indefinitely.
         pp.AutoExposureActive = autoExposureOn;
+        // The view output is the Scene View's alone and feeds back the same way: start each
+        // frame from the look, and let the switches below choose otherwise.
+        pp.ViewOutput = Engine::Renderer::PostProcessViewOutput::Look;
         const Engine::Renderer::ViewRegistry::CameraExposure lens = SceneViewLensExposure(&GetWorld());
         pp.DofFocusDistance = std::max(lens.FocusDistance, 0.01f);
         pp.DofFocalLengthMm = std::max(lens.FocalLengthMm, 1.0f);
@@ -4199,17 +4201,11 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
             }
             if (needsToolbarOverride)
             {
-                // "Tonemapping off" maps to a concrete curve chosen per display: on an HDR
-                // output, Linear (true identity) routes scene values into the panel's
-                // headroom; on SDR, Linear would hard-clip bright pixels to flat white, so
-                // fall back to Neutral (gentle highlight roll-off). Same HDR check the
-                // Tonemap node uses, so editor and node agree on what "HDR" means.
+                // "Tonemapping off" depends on the display (ApplySceneViewPostProcessSwitches);
+                // the same HDR check the Tonemap node's device uses.
                 const bool hdrOutputActive =
                     rs->GetDevice() &&
                     Rendering::IsHdrOutputModeActive(rs->GetDevice()->GetActiveHdrOutputMode());
-                const int32_t offTonemapMode = static_cast<int32_t>(
-                    hdrOutputActive ? Components::TonemapMode::Linear
-                                    : Components::TonemapMode::Neutral);
                 Editor::ApplySceneViewPostProcessSwitches(
                     {.PostProcessing = masterOn,
                      .Bloom = bloomOn,
@@ -4217,7 +4213,7 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
                      .ColorFilter = colorFilterOn,
                      .ContrastAdaptiveSharpening = casOn,
                      .Crt = crtOn},
-                    offTonemapMode, pp);
+                    hdrOutputActive, pp);
                 // Fixed and Scene Light: pin the Scene View to the fixed or the derived EV100
                 // instead of leaving a metered/stale scale. This override is authoritative for
                 // the view, so exposure is set here rather than via the clobbered camera path.

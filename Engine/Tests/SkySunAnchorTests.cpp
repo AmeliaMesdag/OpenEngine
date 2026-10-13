@@ -617,12 +617,12 @@ constexpr int64_t kFullNightUlpBound = 16;
 constexpr GoldenHour kDeliveredGoldens[] = {
     {12.0f, GoldenMatch::Day, {0x43F64E30u, 0x43F64E30u, 0x43F64E30u},
      {0x43F64E30u, 0x43F64E30u, 0x43F64E30u}, {0x3F800000u, 0x3F800000u, 0x3F800000u}},
-    {17.75f, GoldenMatch::Day, {0x4344DB1Au, 0x42D03D06u, 0x41A8C9D9u},
-     {0x4344DB1Au, 0x42D03D06u, 0x41A8C9D9u}, {0x3ECC9AA7u, 0x3E586F44u, 0x3D2F6E96u}},
-    {18.15f, GoldenMatch::Twilight, {0x401F45B9u, 0x3D61D37Du, 0x38A999BDu},
-     {0x401F2BE4u, 0x3D5F0D86u, 0x36704D78u}, {}},
-    {18.5f, GoldenMatch::Twilight, {0x3C4B2840u, 0x3C1E80D9u, 0x3BA2515Fu},
-     {0x362615DFu, 0x2CEA5AF5u, 0x15984328u}, {}},
+    {17.75f, GoldenMatch::Day, {0x42EBF23Du, 0x424507D3u, 0x40E086E0u},
+     {0x42EBF23Du, 0x424507D3u, 0x40E086E0u}, {0x3E753BACu, 0x3DCCC923u, 0x3C695D3Eu}},
+    {18.15f, GoldenMatch::Twilight, {0x3A34F798u, 0x39540D8Bu, 0x375B3DCBu},
+     {0x34F12713u, 0x2D050AC8u, 0x1E565126u}, {}},
+    {18.5f, GoldenMatch::Twilight, {0x3C1ED17Au, 0x3BDD3F58u, 0x3B3F447Eu},
+     {0x10DB09A5u, 0x00000000u, 0x00000000u}, {}},
     {0.0f, GoldenMatch::FullNight, {0x3CC0C5BCu, 0x3CD11934u, 0x3CF41945u},
      {0x00000000u, 0x00000000u, 0x00000000u}, {}},
 };
@@ -816,7 +816,7 @@ TEST(SkyLinkedSun, TheFogSunAtNightIsUnchanged)
         bool ShowMoon;
         float DeliveredLuminance; // luminance(fog colour) x fog intensity
     };
-    constexpr NightFog kNightFog[] = {{true, 0.0254095f}, {false, 0.0145869f}};
+    constexpr NightFog kNightFog[] = {{true, 0.0254095f}, {false, 0.0153712f}};
     constexpr float kRecordedPrecision = 1e-5f; // the values were recorded to six significant digits
 
     for (const NightFog& expected : kNightFog)

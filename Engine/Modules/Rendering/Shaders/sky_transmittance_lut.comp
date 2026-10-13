@@ -39,9 +39,10 @@ void main()
 
     // Midpoint rule with steps short against the aerosol's 1.2 km scale height. The error grows with
     // the aerosol's density: from the ground at 10 degrees, 40 steps miss the transmittance by 0.8 %
-    // at Earth's pristine aerosol (optical depth 0.005) and by 16 % at a hazy day's 0.20; 256 steps
-    // keep it under 0.4 % across that range. The LUT is baked only when the atmosphere changes.
-    const int kSteps = 256;
+    // at Earth's pristine aerosol (optical depth 0.005) and by 16 % at a hazy day's 0.20; 512 steps
+    // keep a typical day's (0.15) within 0.1 % of the converged integral down to the horizon. The
+    // LUT is baked only when the atmosphere changes.
+    const int kSteps = 512;
     float ds = sMax / float(kSteps);
 
     vec3 tau = vec3(0.0);

@@ -506,8 +506,8 @@ public:
     int GetPixelPerfectScale() const { return m_PixelPerfectScale; }
     bool GetPostProcessingEnabled() const { return m_PostProcessingEnabled; }
     bool GetPostFxBloomEnabled() const { return m_PostFxBloomEnabled; }
-    // When false, Scene View forces a raw Linear tonemap (no curve, HDR hard-clips) while other post
-    // settings follow the world — "tonemapping off" means off, not a different curve.
+    // When false, the Scene View shows no look on an HDR display and the Neutral look on SDR
+    // (ApplySceneViewPostProcessSwitches); the other post settings follow the world.
     bool GetPostFxTonemapEnabled() const { return m_PostFxTonemapEnabled; }
     bool GetPostFxColorFilterEnabled() const { return m_PostFxColorFilterEnabled; }
     bool GetPostFxCasEnabled() const { return m_PostFxCasEnabled; }

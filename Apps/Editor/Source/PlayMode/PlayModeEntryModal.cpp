@@ -79,12 +79,12 @@ PlayModeEntryModal::PlayModeEntryModal(Editor::PlayModeEntryGate& gate)
     }
     m_Backdrop = backdrop.get();
     m_Backdrop->SetFocusable(true);
-    m_Title = dynamic_cast<Label*>(m_Backdrop->FindById("play-entry-title"));
-    m_Message = dynamic_cast<Label*>(m_Backdrop->FindById("play-entry-message"));
-    m_Activity = dynamic_cast<Label*>(m_Backdrop->FindById("play-entry-activity"));
-    m_ProgressTrack = m_Backdrop->FindById("play-entry-progress-track");
-    m_ProgressFill = m_Backdrop->FindById("play-entry-progress-fill");
-    m_Button = dynamic_cast<Button*>(m_Backdrop->FindById("play-entry-button"));
+    m_Title = dynamic_cast<Label*>(m_Backdrop->FindById("play-entry-title"_sid));
+    m_Message = dynamic_cast<Label*>(m_Backdrop->FindById("play-entry-message"_sid));
+    m_Activity = dynamic_cast<Label*>(m_Backdrop->FindById("play-entry-activity"_sid));
+    m_ProgressTrack = m_Backdrop->FindById("play-entry-progress-track"_sid);
+    m_ProgressFill = m_Backdrop->FindById("play-entry-progress-fill"_sid);
+    m_Button = dynamic_cast<Button*>(m_Backdrop->FindById("play-entry-button"_sid));
     if (m_Button)
         m_Button->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) { OnButtonClicked(); });
     m_Backdrop->RegisterEventHandler(kEventKeyDown,

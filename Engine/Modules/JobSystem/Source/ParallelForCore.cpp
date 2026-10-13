@@ -448,6 +448,11 @@ bool WorkStealingThreadPool::RunParallelFor(WorkStealingThreadPool* pool, bool (
 {
     if (unitCount == 0)
         return true;
+    // A unit is a job body whichever thread runs it: a helper's units through
+    // its envelope, the caller's under this scope, at the caller's own
+    // context (Normal outside a body). Without it IsExecutingJob() inside a
+    // unit would depend on which thread claimed the unit.
+    const JobBodyScope callerUnits(CallerContext());
     if (pool == nullptr)
         return RunEveryUnitOnTheCaller(invoke, body, unitCount, options.Stop);
 

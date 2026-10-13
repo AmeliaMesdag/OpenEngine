@@ -22,7 +22,7 @@ struct NavigationPathfindingStatistics
 
     // The newest Update.
     uint32 NewRequests = 0;        ///< Requests that joined the queue.
-    uint32 Solved = 0;             ///< Requests solved (or handed to an async job).
+    uint32 Solved = 0;             ///< Requests solved.
     uint32 Backlog = 0;            ///< Requests left queued for a later Update.
     uint32 OldestWaitFrames = 0;   ///< How long the oldest request still queued has waited; 0 when none is.
     float32 OldestWaitSeconds = 0.0f;

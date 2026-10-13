@@ -1534,8 +1534,8 @@ void RegisterSkyEnvironmentInspector()
         AddSkyEnvironmentDayKeyGradientRow(
             physical, "Ground albedo ramp",
             "The ground's color through the day. It colors the light the ground bounces back up, which "
-            "reaches every surface facing sideways or down, and the visible ground in Planet Ground and "
-            "Stylized Ground. Click a point to edit its color key.",
+            "reaches every surface facing sideways or down and brightens the sky from below, and the "
+            "visible ground in Planet Ground and Stylized Ground. Click a point to edit its color key.",
             w, n, undo, openPicker, allSkyTargets,
             groundAlbedoAccess, dayKeyTimeAccess, groundAlbedoDefaults, "Change Sky Ground Albedo");
 

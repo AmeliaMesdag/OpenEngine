@@ -1597,7 +1597,7 @@ void RenderExtractionSystem::ExtractPostProcessVolumes(ECS::World& world, uint64
                   // Exposure is not a volume property — it belongs to the camera (the sensor), applied
                   // per-view below, or to the world default for camera-less views. Volumes contribute
                   // only grading / tonemap / bloom / fog.
-                  ev.Settings.TonemapMode    = static_cast<int32>(vol.Tonemap);
+                  ev.Settings.Look           = static_cast<int32>(vol.Look);
                   ev.Settings.IctcpChromaCompression =
                       std::clamp(vol.IctcpChromaCompression, 0.0f, 1.0f);
                   ev.ValidSpatial = true;

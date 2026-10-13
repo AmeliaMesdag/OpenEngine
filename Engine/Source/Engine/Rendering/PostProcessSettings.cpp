@@ -348,7 +348,7 @@ bool PostProcessSettings::IsVolumetricCloudsActive(float32 epsilon) const
 // directions cannot drift.
 #define PP_CORE_SHARED_FIELDS(X)                \
     X("exposure", Exposure)                     \
-    X("tonemapMode", TonemapMode)               \
+    X("look", Look)                             \
     X("ictcpChromaCompression", IctcpChromaCompression) \
     X("fogGlowIntensity", FogGlowIntensity)     \
     X("fogGlowQuality", FogGlowQuality)         \
@@ -599,7 +599,7 @@ constexpr EffectSettingsField kCoreBlendFields[]{
     // perceptually even — a fade halfway between 1x and 4x exposure lands at 2x
     // (one stop), not the arithmetic 2.5x.
     PP_CORE_BLEND(Exposure, Log2Lerp, Always),
-    PP_CORE_BLEND(TonemapMode, Dominant, Always),
+    PP_CORE_BLEND(Look, Dominant, Always),
     PP_CORE_BLEND(IctcpChromaCompression, Lerp, Always),
     PP_CORE_BLEND(AutoExposureMinEv, Lerp, Always),
     PP_CORE_BLEND(AutoExposureMaxEv, Lerp, Always),

@@ -4,7 +4,7 @@
 // SkyRenderNode dispatches them, with SkyRenderer::FillDefaultAtmosphere's constants and a white
 // unit sun, and their texels are compared against a double-precision integral of the same model:
 // Rayleigh and Mie densities with their scale heights, Mie absorption and the ozone layer, Rayleigh
-// and Cornette-Shanks phases, the sun's transmittance integrated
+// and the aerosol's three-lobe phase, the sun's transmittance integrated
 // to the top of the atmosphere and 0 where the planet is in the way (Hillaire 2020's earthShadow),
 // and Hillaire's multiple scattering Psi_ms = L2 / (1 - fms) with the isotropic phase on both sphere
 // integrals. The reference integrates each step analytically and uses many more steps than the
@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,7 +69,7 @@ struct Atmosphere
     Rgb OzoneAbsorption{};
     double OzoneCenterHeight = 0.0;
     double OzoneHalfWidth = 0.0;
-    double MieG = 0.0;
+    Rgb GroundAlbedo{};
 };
 
 Atmosphere FromGpu(const AtmosphereParametersGPU& a)
@@ -84,10 +85,10 @@ Atmosphere FromGpu(const AtmosphereParametersGPU& a)
         atmo.BetaMie[c] = a.betaMie[c];
         atmo.MieAbsorption[c] = a.mieAbsorption[c];
         atmo.OzoneAbsorption[c] = a.ozoneAbsorption[c];
+        atmo.GroundAlbedo[c] = a.groundAlbedo[c];
     }
     atmo.OzoneCenterHeight = a.ozoneCenterHeight;
     atmo.OzoneHalfWidth = a.ozoneHalfWidth;
-    atmo.MieG = a.mieG;
     return atmo;
 }
 
@@ -132,7 +133,7 @@ Medium MediumAt(const Atmosphere& a, double h)
 }
 
 // Transmittance from radius r along zenith cosine mu to the top of the atmosphere, 0 when the
-// planet is in the way. 512 midpoint steps in double precision; the LUT pass takes 256 in float.
+// planet is in the way. 512 midpoint steps in double precision, as the LUT pass takes in float.
 Rgb TransmittanceToTop(const Atmosphere& a, double r, double mu)
 {
     if (DistanceToGround(a, r, mu) >= 0.0)
@@ -157,7 +158,8 @@ Rgb TransmittanceToTop(const Atmosphere& a, double r, double mu)
 // the second-order luminance L2 and the transfer fms, both integrated over the sphere of directions
 // with the uniform-area weight and the isotropic phase, summed as L2 / (1 - fms). The sphere and
 // path sampling are the LUT pass's (8 x 8 directions, 32 analytic steps); the sun's transmittance
-// is exact, so the comparison isolates the normalisation and the planet's shadow.
+// is exact, so the comparison isolates the normalisation and the planet's shadow. A direction that
+// ends on the planet adds the sunlight the ground reflects up it (Lambertian, GroundAlbedo).
 Rgb PsiMs(const Atmosphere& a, double r, double muSun)
 {
     const double sinSun = std::sqrt(std::max(0.0, 1.0 - muSun * muSun));
@@ -197,6 +199,16 @@ Rgb PsiMs(const Atmosphere& a, double r, double muSun)
                     path[c] *= stepT;
                 }
             }
+            // The ground's Lambertian bounce of the sun, up a ray that ends on the planet.
+            if (tGround >= 0.0)
+            {
+                const double g[3] = {dir[0] * tGround, r + dir[1] * tGround, dir[2] * tGround};
+                const double rg = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+                const double groundSunCos = (g[0] * sun[0] + g[1] * sun[1] + g[2] * sun[2]) / rg;
+                const Rgb toSun = TransmittanceToTop(a, a.PlanetRadius, groundSunCos);
+                for (int c = 0; c < 3; ++c)
+                    l2[c] += path[c] * toSun[c] * std::max(groundSunCos, 0.0) * a.GroundAlbedo[c] / kPi;
+            }
         }
     const double weight = 4.0 * kPi / (kSqrt * kSqrt) / (4.0 * kPi);
     Rgb psi{};
@@ -205,13 +217,29 @@ Rgb PsiMs(const Atmosphere& a, double r, double muSun)
     return psi;
 }
 
-// Radiance reaching the camera along dir (planet-local, +Y up) per unit sun illuminance: single
-// scattering over singleScatterSteps analytic steps, plus multiple scattering through Psi_ms over 64
-// analytic steps when withMultiscatter (it varies slowly along the ray).
-Rgb SkyRadiance(const Atmosphere& a, const double dir[3], const double sun[3], int singleScatterSteps,
-                bool withMultiscatter)
+// GE_SkyAerosolPhase: the three-lobe Henyey-Greenstein fit to the OPAC continental aerosol's Mie phase.
+double HenyeyGreenstein(double g, double cosTheta)
 {
-    const double r0 = a.PlanetRadius + kCameraHeight;
+    const double d = 1.0 + g * g - 2.0 * g * cosTheta;
+    return (1.0 - g * g) / (4.0 * kPi * d * std::sqrt(d));
+}
+
+double AerosolPhase(double cosTheta)
+{
+    return 0.0362 * HenyeyGreenstein(0.9795, cosTheta) + 0.9530 * HenyeyGreenstein(0.6503, cosTheta) +
+           0.0108 * HenyeyGreenstein(-0.7055, cosTheta);
+}
+
+// Radiance reaching the camera along dir (planet-local, +Y up) per unit sun illuminance: single
+// scattering over singleScatterSteps even analytic steps, plus multiple scattering through Psi_ms over
+// 128 analytic steps growing quadratically from the camera when withMultiscatter (Psi_ms varies
+// slowly along the ray, the aerosol near the ground does not). The scattering angle is the
+// same at every step, so miePhase, when given, is the aerosol's phase at it in place of AerosolPhase.
+Rgb SkyRadiance(const Atmosphere& a, const double dir[3], const double sun[3], int singleScatterSteps,
+                bool withMultiscatter, double cameraHeight = kCameraHeight,
+                std::optional<double> miePhase = std::nullopt)
+{
+    const double r0 = a.PlanetRadius + cameraHeight;
     const double mu = dir[1];
     double tEnd = DistanceToTop(a, r0, mu);
     const double tGround = DistanceToGround(a, r0, mu);
@@ -220,20 +248,21 @@ Rgb SkyRadiance(const Atmosphere& a, const double dir[3], const double sun[3], i
 
     const double cosTheta = dir[0] * sun[0] + dir[1] * sun[1] + dir[2] * sun[2];
     const double phaseRayleigh = 3.0 / (16.0 * kPi) * (1.0 + cosTheta * cosTheta);
-    const double g = a.MieG;
-    const double phaseMie = 3.0 / (8.0 * kPi) * ((1.0 - g * g) * (1.0 + cosTheta * cosTheta)) /
-                            ((2.0 + g * g) * std::pow(1.0 + g * g - 2.0 * g * cosTheta, 1.5));
+    const double phaseMie = miePhase ? *miePhase : AerosolPhase(cosTheta);
 
     Rgb radiance{};
     for (int pass = 0; pass < (withMultiscatter ? 2 : 1); ++pass)
     {
         const bool single = pass == 0;
-        const int steps = single ? singleScatterSteps : 64;
-        const double dt = tEnd / steps;
+        const int steps = single ? singleScatterSteps : 128;
         Rgb path{1.0, 1.0, 1.0};
         for (int i = 0; i < steps; ++i)
         {
-            const double t = (i + 0.5) * dt;
+            const double u0 = static_cast<double>(i) / steps;
+            const double u1 = static_cast<double>(i + 1) / steps;
+            const double t0 = single ? u0 * tEnd : u0 * u0 * tEnd;
+            const double dt = single ? tEnd / steps : (u1 * u1 - u0 * u0) * tEnd;
+            const double t = t0 + 0.5 * dt;
             const double p[3] = {dir[0] * t, r0 + dir[1] * t, dir[2] * t};
             const double rp = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
             const Medium m = MediumAt(a, rp - a.PlanetRadius);
@@ -263,9 +292,10 @@ Rgb SkyRadiance(const Atmosphere& a, const double dir[3], const double sun[3], i
 }
 
 // The direction a sky-view LUT texel centre stores (GE_SkyViewLutUvToDir with the ContinueHorizon
-// fold of sky_view_lut.comp), in the planet-local frame the pass builds for a camera on +Y:
-// east = +X, up = +Y, north = +Z.
-void SkyViewTexelDirection(uint32_t x, uint32_t y, double out[3])
+// fold of sky_view_lut.comp at the planet's horizon), in the planet-local frame the pass builds for a
+// camera cameraHeight up on +Y: east = +X, up = +Y, north = +Z.
+void SkyViewTexelDirection(const Atmosphere& a, uint32_t x, uint32_t y, double out[3],
+                           double cameraHeight = kCameraHeight)
 {
     const double u = (x + 0.5) / kSkyViewSize;
     const double v = (y + 0.5) / kSkyViewSize;
@@ -276,12 +306,14 @@ void SkyViewTexelDirection(uint32_t x, uint32_t y, double out[3])
     out[0] = std::cos(elev) * std::cos(az);
     out[1] = std::sin(elev);
     out[2] = std::cos(elev) * std::sin(az);
-    if (out[1] < 0.002)
+    const double radiusRatio = a.PlanetRadius / (a.PlanetRadius + cameraHeight);
+    const double foldSin = -std::sqrt(std::max(0.0, 1.0 - radiusRatio * radiusRatio)) + 0.002;
+    if (out[1] < foldSin)
     {
-        out[1] = 0.002;
-        const double n = std::sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
-        for (int c = 0; c < 3; ++c)
-            out[c] /= n;
+        const double foldCos = std::sqrt(1.0 - foldSin * foldSin);
+        out[0] = foldCos * std::cos(az);
+        out[1] = foldSin;
+        out[2] = foldCos * std::sin(az);
     }
 }
 
@@ -528,11 +560,12 @@ class SkyAtmosphereLutReferenceTest : public ::testing::Test
         return out;
     }
 
-    // Runs the sky-view pass for a white unit sun along sunDir and returns its texels.
-    std::vector<Rgb> RunSkyView(const double sunDir[3], bool withMultiscatter)
+    // Runs the sky-view pass for a white unit sun along sunDir, for a camera cameraHeight up, and
+    // returns its texels.
+    std::vector<Rgb> RunSkyView(const double sunDir[3], bool withMultiscatter, double cameraHeight = kCameraHeight)
     {
         SkyUBOGPU sky{};
-        sky.cameraPosition[1] = static_cast<float>(kCameraHeight);
+        sky.cameraPosition[1] = static_cast<float>(cameraHeight);
         for (int c = 0; c < 3; ++c)
         {
             sky.sunDirection[c] = static_cast<float>(sunDir[c]);
@@ -679,12 +712,24 @@ TEST_F(SkyAtmosphereLutReferenceTest, TheTransmittanceLookupMatchesTheIntegralAt
         const Rgb expected = TransmittanceToTop(m_Atmo, r, queries[i][1]);
         // Compared as optical depth, -ln T: a transmittance's relative error is its optical depth's
         // absolute error, so blue at the horizon (depth 9.8, T 5e-5) reads 4.7 % off in T from a
-        // 0.5 % error in depth, the bilinear read across the grazing columns. Measured worst 0.5 %;
-        // the absolute term covers fp16 near T = 1.
+        // 0.5 % error in depth, the bilinear read across the grazing columns. That error grows with
+        // the aerosol near the ground: measured worst 0.5 % in pristine air and 1.2 % through the
+        // default crisp day's aerosol (green at the horizon, depth 9.6, T 7e-5); the absolute term
+        // covers fp16 near T = 1. Through the default aerosol the grazing ray from the ground carries
+        // blue at an optical depth over 14, and through a typical day's (0.15) every channel at 16 to
+        // 23 (T 1e-7 to 1e-10), below fp16's smallest normal value: there the LUT has to read as dark
+        // as fp16 can hold, no more.
         for (int c = 0; c < 3; ++c)
         {
+            constexpr double kHalfSmallestNormal = 6.103515625e-5;
+            if (expected[c] < kHalfSmallestNormal)
+            {
+                EXPECT_LT(got[i][c], kHalfSmallestNormal)
+                    << "mu " << queries[i][1] << " channel " << c << ": LUT " << Describe(got[i]);
+                continue;
+            }
             const double depth = -std::log(expected[c]);
-            EXPECT_NEAR(-std::log(got[i][c]), depth, depth * 0.01 + 1e-3)
+            EXPECT_NEAR(-std::log(got[i][c]), depth, depth * 0.015 + 1e-3)
                 << "mu " << queries[i][1] << " channel " << c << ": LUT " << Describe(got[i]) << ", exact "
                 << Describe(expected);
         }
@@ -716,6 +761,33 @@ TEST_F(SkyAtmosphereLutReferenceTest, TheMultiscatterLutIsHillairesPsi)
     }
 }
 
+// Under a hazy day's aerosol (optical depth 0.11 at single-scattering albedo 0.9) the multiple
+// scattering on the ground and 9.7 km up, sun 48 degrees high, with the ground's bounce at the
+// default albedo 0.3: without the bounce the LUT holds 0.28x (ground) to 0.41x (9.7 km) of this.
+TEST_F(SkyAtmosphereLutReferenceTest, UnderHazeTheMultiscatterLutCarriesTheGroundsBounce)
+{
+    for (int c = 0; c < 3; ++c)
+    {
+        m_AtmoGpu.betaMie[c] = 8.333e-5f;
+        m_AtmoGpu.mieAbsorption[c] = 9.259e-6f;
+    }
+    m_Atmo = FromGpu(m_AtmoGpu);
+    Upload(m_AtmoUbo, &m_AtmoGpu, sizeof(m_AtmoGpu));
+    RunTransmittanceAndMultiscatter();
+    const std::vector<Rgb> lut = ReadBack(m_Multiscatter, kMultiscatterSize, kMultiscatterSize);
+    const double shell = m_Atmo.TopRadius - m_Atmo.PlanetRadius;
+    for (const uint32_t y : {0u, 3u})
+    {
+        constexpr uint32_t x = 27u;
+        const double muSun = static_cast<double>(x) / (kMultiscatterSize - 1u) * 2.0 - 1.0;
+        const double r = m_Atmo.PlanetRadius + static_cast<double>(y) / (kMultiscatterSize - 1u) * shell;
+        const Rgb expected = PsiMs(m_Atmo, r, muSun);
+        const Rgb& actual = lut[static_cast<size_t>(y) * kMultiscatterSize + x];
+        EXPECT_LT(WorstRatioError(actual, expected), 0.03)
+            << "row " << y << ": LUT " << Describe(actual) << ", Hillaire with the ground " << Describe(expected);
+    }
+}
+
 // The sky-view march's single scattering at the horizon, multiple scattering left out: each step's
 // in-scatter integrated against the transmittance from the step's start. Weighted by the
 // transmittance after the step, the 17.7 km horizon steps come out at 0.95/0.88/0.73 of the integral.
@@ -728,13 +800,37 @@ TEST_F(SkyAtmosphereLutReferenceTest, TheSkyViewSingleScatterMatchesTheIntegralA
     for (const uint32_t column : {kSkyViewSize / 2u, 0u})
     {
         double dir[3];
-        SkyViewTexelDirection(column, horizonRow, dir);
+        SkyViewTexelDirection(m_Atmo, column, horizonRow, dir);
         const Rgb expected = SkyRadiance(m_Atmo, dir, sun, 4096, false);
         const Rgb& actual = lut[static_cast<size_t>(horizonRow) * kSkyViewSize + column];
         EXPECT_LT(WorstRatioError(actual, expected), 0.03)
             << "column " << column << " (toward the sun is " << kSkyViewSize / 2u << "): LUT " << Describe(actual)
             << ", integral " << Describe(expected);
     }
+}
+
+// The horizon 90 degrees from the sun at 10 h, against the integral with the Mie theory phase of the
+// OPAC continental aerosol there (0.02526 per steradian at 90.5 degrees, Hess, Koepke and Schult
+// 1998; the computation is in the sky follow-on evidence, mie_opac.py). The aerosol's side scatter
+// is what lifts the horizon around the sky: the Cornette-Shanks lobe at g 0.8 the sky used before
+// scatters 0.0078 there, and under the pristine aerosol it left this horizon 10 % (red) to 3 % (blue)
+// under the integral. Measured 1.3 % under the default crisp day's aerosol.
+TEST_F(SkyAtmosphereLutReferenceTest, TheAerosolScattersToTheSideAsMieTheoryDoes)
+{
+    double sun[3];
+    SunDirection(41.6, sun);
+    const std::vector<Rgb> lut = RunSkyView(sun, false);
+    const uint32_t horizonRow = kSkyViewSize / 2u;
+    const uint32_t sideColumn = kSkyViewSize * 3u / 4u; // 90.7 degrees of azimuth from the sun
+    double dir[3];
+    SkyViewTexelDirection(m_Atmo, sideColumn, horizonRow, dir);
+    const double cosTheta = dir[0] * sun[0] + dir[1] * sun[1] + dir[2] * sun[2];
+    ASSERT_NEAR(std::acos(cosTheta) * 180.0 / kPi, 90.5, 0.1);
+    constexpr double kOpacMiePhaseAt90_5 = 0.02526;
+    const Rgb expected = SkyRadiance(m_Atmo, dir, sun, 4096, false, kCameraHeight, kOpacMiePhaseAt90_5);
+    const Rgb& actual = lut[static_cast<size_t>(horizonRow) * kSkyViewSize + sideColumn];
+    EXPECT_LT(WorstRatioError(actual, expected), 0.03)
+        << "LUT " << Describe(actual) << ", integral with the Mie phase " << Describe(expected);
 }
 
 // The sun 2 degrees below the horizon: the planet shadows the near-ground air, so only the air high
@@ -748,7 +844,7 @@ TEST_F(SkyAtmosphereLutReferenceTest, ASunBelowTheHorizonIsShadowedByThePlanet)
     for (const uint32_t row : {kSkyViewSize / 2u, SkyViewRowAtElevation(10.0)})
     {
         double dir[3];
-        SkyViewTexelDirection(kSkyViewSize / 2u, row, dir);
+        SkyViewTexelDirection(m_Atmo, kSkyViewSize / 2u, row, dir);
         const Rgb expected = SkyRadiance(m_Atmo, dir, sun, 4096, false);
         const Rgb& actual = lut[static_cast<size_t>(row) * kSkyViewSize + kSkyViewSize / 2u];
         for (int c = 0; c < 3; ++c)
@@ -760,8 +856,10 @@ TEST_F(SkyAtmosphereLutReferenceTest, ASunBelowTheHorizonIsShadowedByThePlanet)
 
 // The whole chain at the horizon and 10 degrees up, with the multiscatter LUT the pass reads: what
 // the sky draws there for the Basic 3D template's 10 h sun. Before the model was fixed this was 2 to
-// 5 times the integral and blue where the integral is near-white. Measured 0.35 % at the horizon and
-// 0.86 % at 10 degrees. Without the multiscatter LUT's
+// 5 times the integral and blue where the integral is near-white. Under the default crisp day's
+// aerosol, with the ground's bounce at albedo 0.3, the worst channel is 1.1 % off, 10 degrees up
+// (2.1 % under a typical day's, optical depth 0.15).
+// Without the multiscatter LUT's
 // half-texel inset its lowest row sits 1.6 km up, the near-ground samples of the horizon ray read
 // the multiple scattering of thinner air, and the horizon's blue comes out 5.7 % over the integral
 // (17 % under a hazy day's aerosol).
@@ -773,11 +871,62 @@ TEST_F(SkyAtmosphereLutReferenceTest, TheSkyViewRadianceMatchesTheIntegralWithMu
     for (const uint32_t row : {kSkyViewSize / 2u, SkyViewRowAtElevation(10.0)})
     {
         double dir[3];
-        SkyViewTexelDirection(kSkyViewSize / 2u, row, dir);
+        SkyViewTexelDirection(m_Atmo, kSkyViewSize / 2u, row, dir);
         const Rgb expected = SkyRadiance(m_Atmo, dir, sun, 4096, true);
         const Rgb& actual = lut[static_cast<size_t>(row) * kSkyViewSize + kSkyViewSize / 2u];
-        EXPECT_LT(WorstRatioError(actual, expected), 0.02)
+        EXPECT_LT(WorstRatioError(actual, expected), 0.03)
             << "row " << row << ": LUT " << Describe(actual) << ", integral " << Describe(expected);
+    }
+}
+
+// A camera 30 km up sees the sky down to the planet's horizon, 5.6 degrees below the horizontal:
+// 3 degrees down, the view ray grazes the air 21 km up. A bake that folds every texel below the
+// horizontal up to it reads the thin air above the camera there instead, 0.26x to 0.31x this.
+TEST_F(SkyAtmosphereLutReferenceTest, AtAltitudeTheSkyViewReachesDownToThePlanetsHorizon)
+{
+    constexpr double kAltitude = 30000.0;
+    double sun[3];
+    SunDirection(41.6, sun);
+    const std::vector<Rgb> lut = RunSkyView(sun, false, kAltitude);
+    // The row whose texel centre sits nearest 3 degrees below the horizontal (the inverse of the
+    // sky-view LUT's elevation warp).
+    const double s = -std::sqrt(2.0 * 3.0 / 180.0);
+    const uint32_t row = static_cast<uint32_t>(std::lround(0.5 * (s + 1.0) * kSkyViewSize - 0.5));
+    for (const uint32_t column : {kSkyViewSize / 2u, 0u})
+    {
+        double dir[3];
+        SkyViewTexelDirection(m_Atmo, column, row, dir, kAltitude);
+        ASSERT_LT(dir[1], -0.05) << "row " << row << " is not below the horizontal";
+        const Rgb expected = SkyRadiance(m_Atmo, dir, sun, 4096, false, kAltitude);
+        const Rgb& actual = lut[static_cast<size_t>(row) * kSkyViewSize + column];
+        EXPECT_LT(WorstRatioError(actual, expected), 0.03)
+            << "column " << column << " (toward the sun is " << kSkyViewSize / 2u << "): LUT " << Describe(actual)
+            << ", integral " << Describe(expected);
+    }
+}
+
+// Every texel below the horizon stores its own azimuth's horizon, down to the nadir: on the ground
+// and at 30 km the bottom row equals the row just below the planet's horizon. A fold that raised y
+// and renormalised turned the texels near the nadir, whose horizontal part is tiny, toward the
+// zenith on the ground and toward the nadir at altitude.
+TEST_F(SkyAtmosphereLutReferenceTest, TheTexelsNearTheNadirHoldTheirAzimuthsHorizon)
+{
+    double sun[3];
+    SunDirection(41.6, sun);
+    for (const double altitude : {kCameraHeight, 30000.0})
+    {
+        const std::vector<Rgb> lut = RunSkyView(sun, false, altitude);
+        // 6 degrees below the horizontal: below the planet's horizon at both altitudes.
+        const double s = -std::sqrt(2.0 * 6.0 / 180.0);
+        const uint32_t foldedRow = static_cast<uint32_t>(std::lround(0.5 * (s + 1.0) * kSkyViewSize - 0.5));
+        for (const uint32_t column : {kSkyViewSize / 2u, kSkyViewSize / 4u})
+        {
+            const Rgb& nadir = lut[column];
+            const Rgb& folded = lut[static_cast<size_t>(foldedRow) * kSkyViewSize + column];
+            EXPECT_LT(WorstRatioError(nadir, folded), 0.01)
+                << "altitude " << altitude << " m, column " << column << ": bottom row " << Describe(nadir)
+                << ", row " << foldedRow << " " << Describe(folded);
+        }
     }
 }
 

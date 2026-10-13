@@ -50,7 +50,7 @@ bool IsHidden(const UIElement* element)
 
 UIElement* FindButton(UIElement& strip, ToolStripPlacement placement, std::string_view id)
 {
-    return strip.FindById(Editor::RegisteredToolButtonId(placement, id));
+    return strip.FindById(HashStringId(Editor::RegisteredToolButtonId(placement, id)));
 }
 
 } // namespace
@@ -97,7 +97,7 @@ TEST(SceneViewToolStrip, ARegisteredEntryIsAppendedActivatesItsToolAndShowsItsBa
     EXPECT_TRUE(strip.GetChildren()[1]->HasClass("scene-tool-divider"));
     auto* button = dynamic_cast<Button*>(strip.GetChildren()[2].get());
     EXPECT_TRUE(strip.GetChildren()[3]->HasClass("scene-tool-badge-host"));
-    auto* badgeButton = dynamic_cast<Button*>(strip.FindById(Editor::RegisteredToolBadgeButtonId(ToolStripPlacement::Floating, "notes")));
+    auto* badgeButton = dynamic_cast<Button*>(strip.FindById(HashStringId(Editor::RegisteredToolBadgeButtonId(ToolStripPlacement::Floating, "notes"))));
     ASSERT_NE(button, nullptr);
     ASSERT_NE(badgeButton, nullptr);
     EXPECT_EQ(button->GetId(), Editor::RegisteredToolButtonId(ToolStripPlacement::Floating, "notes"));
@@ -108,7 +108,7 @@ TEST(SceneViewToolStrip, ARegisteredEntryIsAppendedActivatesItsToolAndShowsItsBa
     Click(*badgeButton);
     EXPECT_EQ(badgeOpened, 1);
 
-    auto* count = dynamic_cast<Label*>(strip.FindById(Editor::RegisteredToolBadgeCountId(ToolStripPlacement::Floating, "notes")));
+    auto* count = dynamic_cast<Label*>(strip.FindById(HashStringId(Editor::RegisteredToolBadgeCountId(ToolStripPlacement::Floating, "notes"))));
     ASSERT_NE(count, nullptr);
     kept.SetActiveEntry("notes");
     kept.Refresh(nullptr);

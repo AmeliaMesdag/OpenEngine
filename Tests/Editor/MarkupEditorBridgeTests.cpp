@@ -24,6 +24,7 @@
 #include "Input/KeyCodes.h"
 #include "InspectorRegistry.h"
 #include "Editor/Entities/EditorComponentTraits.h"
+#include "Editor/Entities/EntityDisplayName.h"
 #include "Inspectors/ComponentIconClass.h"
 #include "Logger/CallbackSink.h"
 #include "Logger/Logger.h"
@@ -583,7 +584,7 @@ TEST_F(MarkupEditorBridgeTest, TheSearchAndTheStatusFilterSelectTheSameMarkupsOn
     EXPECT_TRUE(Editor::MarkupMatchesFilters(World, lake, "", ""));
     EXPECT_FALSE(Editor::MarkupMatchesFilters(World, lake, "", proposed));
     EXPECT_TRUE(Editor::MarkupMatchesFilters(World, forest, "", proposed));
-    EXPECT_TRUE(Editor::MarkupMatchesFilters(World, forest, "mark", proposed)); // "Mark-up", any case
+    EXPECT_TRUE(Editor::MarkupMatchesFilters(World, forest, "mark", proposed)); // "Untitled mark-up", any case
     EXPECT_FALSE(Editor::MarkupMatchesFilters(World, forest, "zzz", proposed));
 }
 
@@ -1199,6 +1200,20 @@ TEST_F(MarkupEditorBridgeTest, AnEntityChipSelectsFromItsNameAndFramesFromItsGly
     frame.DispatchEvent(glyphRelease);
     const std::vector<std::pair<ECS::EntityHandle, bool>> expected{{cathedral, false}, {cathedral, true}};
     EXPECT_EQ(selects, expected);
+}
+
+// A mark-up with no name is "Untitled mark-up" on its Mark-ups panel row and wherever the editor
+// names an entity (the inspector's header, the Hierarchy, an entity link); another entity with no
+// name keeps its id.
+TEST_F(MarkupEditorBridgeTest, AnUnnamedMarkupIsAnUntitledMarkupEverywhere)
+{
+    Editor::RegisterMarkupInspector(*m_Bridge);
+    const ECS::EntityHandle markup = CreateMarkup();
+    const ECS::EntityHandle plain = World.CreateEntity();
+    World.AddComponentImmediate(plain, Components::Transform{});
+    EXPECT_EQ(Editor::MarkupTitle(World, markup), "Untitled mark-up");
+    EXPECT_EQ(Editor::EntityDisplayName(World, markup), "Untitled mark-up");
+    EXPECT_EQ(Editor::EntityDisplayName(World, plain), Editor::EntityIdLabel(plain));
 }
 
 namespace

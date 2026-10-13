@@ -522,10 +522,15 @@ add_executable(AbiNativeSmokeTest
     Integration/ScriptManagerMainThreadTaskTests.cpp
     Integration/ScriptingAbiDomainTests.cpp
     Integration/ScriptingAbiLoggerBridgeTests.cpp
+    # MainThread.Post's native half at the exports; each arm initializes and shuts down its
+    # own engine.
+    Integration/MainThreadPostTests.cpp
     ${CMAKE_SOURCE_DIR}/Tests/EngineShutdownTestEnvironment.cpp
 )
 find_package(GTest REQUIRED)
 target_link_libraries(AbiNativeSmokeTest PRIVATE Engine GameEngine.Native GTest::gtest GTest::gtest_main)
+# EngineLogCapture.h and TestTempDir.h.
+target_include_directories(AbiNativeSmokeTest PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Tests ${CMAKE_SOURCE_DIR}/Tests)
 ge_managed_fixture_paths(AbiNativeSmokeTest)
 ge_set_output_tests(AbiNativeSmokeTest)
 ge_stage_runtime_dependencies(AbiNativeSmokeTest)

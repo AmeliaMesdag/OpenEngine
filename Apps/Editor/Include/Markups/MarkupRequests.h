@@ -2,6 +2,7 @@
 
 #include "Markups/MarkupPresentation.h"
 
+#include <optional>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -12,6 +13,7 @@ struct SceneViewCameraPose;
 namespace ECS
 {
 class World;
+struct EntityHandle;
 }
 } // namespace GameEngine
 
@@ -53,8 +55,16 @@ nlohmann::json CreateMarkup(const MarkupRequestContext& context, const nlohmann:
 // extrudeHeight, members and exclusions; kind "region" converts a volume. One undo step, outside
 // which hidden (a view state) stays.
 nlohmann::json UpdateMarkup(const MarkupRequestContext& context, const nlohmann::json& params);
+// The mark-up `params.entityId` names in the context's world, or the refusal every markup_*
+// method gives for it: play mode, no scene, a missing entityId or one that names no mark-up.
+std::optional<nlohmann::json> ResolveMarkupRequest(const MarkupRequestContext& context, const nlohmann::json& params,
+                                                   ECS::EntityHandle& outEntity);
 // Appends a comment to the thread.
 nlohmann::json CommentOnMarkup(const MarkupRequestContext& context, const nlohmann::json& params);
+// What framing `markup` fits: a volume's box or sphere, a region's outline with its height, a
+// path's line, where each stands in the world. Nullopt for a region of fewer than three points.
+// markup_frame, the Mark-ups panel and the AI Assistant's chips all frame through it.
+std::optional<MarkupWorldVolume> ReadMarkupFrameVolume(const MarkupRequestContext& context, ECS::EntityHandle markup);
 // The Scene View pose that frames the mark-up's bounding sphere (ComputeLookAtPose, the
 // look_at math); the caller applies it.
 nlohmann::json FrameMarkup(const MarkupRequestContext& context, const nlohmann::json& params,

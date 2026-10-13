@@ -45,7 +45,6 @@ expect_copy("${_share}/transitive-only-port/copyright"
             "${_out}/vcpkg/transitive-only-port/copyright")
 expect_copy("${_share}/transitive-only-port/LICENSES/nested/part.txt"
             "${_out}/vcpkg/transitive-only-port/LICENSES/nested/part.txt")
-expect_copy("${SOURCE}/ThirdParty/BakingLabAces/LICENSE.txt" "${_out}/BakingLab-ACES/LICENSE.txt")
 expect_copy("${SOURCE}/ThirdParty/KhronosPbrNeutral/LICENSE.txt" "${_out}/Khronos-PBR-Neutral/LICENSE.txt")
 expect_copy("${SOURCE}/ThirdParty/MinimalAgX/LICENSE.txt" "${_out}/Minimal-AgX/LICENSE.txt")
 expect_copy("${SOURCE}/ThirdParty/OpenColorIO/LICENSE.txt" "${_out}/OpenColorIO/LICENSE.txt")
@@ -53,7 +52,6 @@ expect_copy("${SOURCE}/ThirdParty/SpeedballGi/LICENSE.md" "${_out}/Speedball-GI/
 expect_copy("${SOURCE}/Engine/Source/ThirdParty/miniz/LICENSE" "${_out}/miniz/LICENSE")
 expect_copy("${SOURCE}/Engine/Modules/VolumetricClouds/ThirdParty/SebLague-Clouds/LICENSE"
             "${_out}/SebLague-Clouds/LICENSE")
-expect_copy("${SOURCE}/ThirdParty/GT7ToneMapper/LICENSE.txt" "${_out}/GT7-Tone-Mapper/LICENSE.txt")
 expect_copy("${SOURCE}/ThirdParty/GTAO/LICENSE.txt" "${_out}/GTAO/LICENSE.txt")
 file(READ "${_out}/THIRD_PARTY_NOTICES.md" _book)
 string(FIND "${_book}" "````\nCopyright transitive-only-port" _fenced)

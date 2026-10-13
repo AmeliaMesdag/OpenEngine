@@ -28,6 +28,7 @@
 using GameEngine::Button;
 using GameEngine::kEventButtonClick;
 using GameEngine::Label;
+using GameEngine::HashStringId;
 using GameEngine::UIElement;
 using GameEngine::UIEvent;
 using GameEngine::EditorUI::InspectorNotice;
@@ -163,7 +164,7 @@ TEST(InspectorNotice, EachActionIsAFocusTargetOfItsOwn)
     fixture.Ui->FocusElement(secondAction);
     const std::string& focusedId = fixture.Ui->GetFocusedElementId();
     ASSERT_FALSE(focusedId.empty());
-    EXPECT_EQ(fixture.Ui->GetRootElement()->FindById(focusedId), secondAction)
+    EXPECT_EQ(fixture.Ui->GetRootElement()->FindById(HashStringId(focusedId)), secondAction)
         << "the focus resolves to another notice's action (id '" << focusedId << "')";
 }
 

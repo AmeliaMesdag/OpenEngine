@@ -20,14 +20,14 @@ UIElement* GetMainRoot(UIManager* mainUi)
 DockspaceElement* GetDockspace(UIManager* mainUi)
 {
     UIElement* root = GetMainRoot(mainUi);
-    return root ? dynamic_cast<DockspaceElement*>(root->FindById("dock")) : nullptr;
+    return root ? dynamic_cast<DockspaceElement*>(root->FindById("dock"_sid)) : nullptr;
 }
 
 LayoutPresetToolbar* GetToolbar(UIManager* mainUi)
 {
     UIElement* root = GetMainRoot(mainUi);
     return root
-               ? dynamic_cast<LayoutPresetToolbar*>(root->FindById("LayoutButtonContainer"))
+               ? dynamic_cast<LayoutPresetToolbar*>(root->FindById("LayoutButtonContainer"_sid))
                : nullptr;
 }
 } // namespace

@@ -12,15 +12,20 @@ class IDevice;
 
 namespace Passes {
 
+// tonemap.frag's `look` value for the no-look debug arm: exposed scene-linear with
+// no display transform. A view selects it (PostProcessViewOutput::NoLook); it is
+// never a Components::Look, whose values are 0 to 2.
+inline constexpr int32_t kTonemapNoLookArm = 3;
+
 // Parameters for an offscreen tonemap pass. Defaults mirror the main SceneView
-// ForwardPlus pipeline's "Tonemap" node (Khronos PBR Neutral, exposure 1.0), so
-// an offscreen render (asset thumbnails) shows the same operator as the viewport.
+// ForwardPlus pipeline's "Tonemap" node (the Neutral look, exposure 1.0), so
+// an offscreen render (asset thumbnails) shows the same look as the viewport.
 struct TonemapParams
 {
 	float exposure = 1.0f;
-	// tonemap.frag operator selector: 0=ACES, 1=Reinhard, 2=AgX, 3=Filmic,
-	// 4=Neutral, 5=Linear, 6=Gran Turismo 7, 7=ACES 2.
-	int32_t tonemapMode = 4;
+	// tonemap.frag's look: a Components::Look value (0 = Neutral, 1 = Filmic,
+	// 2 = Photographic).
+	int32_t look = 0;
 	// tonemap.frag output selector. 1 = emit display-referred LINEAR, UNDITHERED — a following
 	// AddSRGBEncodePass owns the linear->sRGB OETF + dither at the destination bit depth. This is
 	// the SDR chain the main view uses (Tonemap -> FinalSRGBEncode). Do not set an OETF here:

@@ -91,4 +91,47 @@ float GE_StarGlowFiltered(vec2 q, vec2 dqdx, vec2 dqdy)
     return 0.25 * sum;
 }
 
+// A 32-bit integer hash (PCG output permutation), for per-star choices that need no catalog data.
+uint GE_StarHash(uint x)
+{
+    x = x * 747796405u + 2891336453u;
+    uint w = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+float GE_StarHash01(uint x)
+{
+    return float(GE_StarHash(x) & 0xFFFFu) / 65535.0;
+}
+
+// Each star's own twinkle range, from its catalog index: x is its peak brightness as a fraction
+// of full, y its low phase as a fraction of its own peak. Most stars twinkle with a peak of
+// 0.2 + 0.8 h^4 and a low phase of 0.4 to 0.7 of that peak; one star in five stays faint and
+// barely twinkles (peak 0.2, low phase 0.9). The whole star dims: core, points and glow together.
+//
+// Full is the star's light at the catalog brightness and Star Brightness. At full, a star's core
+// sits on the tone curve's shoulder at any night exposure, so a range of 0.6 to 1.0 still read as
+// white at every peak; the peaks are spread low enough that most cores land on the curve's slope.
+// Calibrated under auto exposure at the Basic 3D template's 22 h pose: the per-pixel maximum over
+// a run puts the cores' peaks at 177 / 233 / 248 of 255 (p10 / p50 / p90), with 7 % at 250 or
+// above. Over the catalog and a twinkle period a star carries 0.25 of its full light.
+const float kStarFaintShare = 0.2;
+const vec2 kStarFaintRange = vec2(0.2, 0.9);
+
+vec2 GE_StarTwinkleRange(uint starIndex)
+{
+    if (GE_StarHash01(starIndex + 0x632BE5ABu) < kStarFaintShare)
+        return kStarFaintRange;
+    float h = GE_StarHash01(starIndex);
+    float peak = 0.2 + 0.8 * h * h * h * h;
+    float low = 0.4 + 0.3 * GE_StarHash01(starIndex ^ 0x9E3779B9u);
+    return vec2(peak, low);
+}
+
+// A star's brightness at a twinkle phase in [0, 1] (0 the low phase, 1 the peak).
+float GE_StarTwinkleBrightness(vec2 twinkleRange, float phase)
+{
+    return twinkleRange.x * mix(twinkleRange.y, 1.0, phase);
+}
+
 #endif // GE_STAR_SPARKLE_GLSL
