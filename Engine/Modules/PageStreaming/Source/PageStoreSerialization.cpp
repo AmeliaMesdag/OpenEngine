@@ -123,6 +123,7 @@ std::optional<PageFieldKind> PageEncodingKind(PageFieldFormat format, PageFieldF
         {PageFieldKind::Normal, PageFieldFormat::Bc5, PageFieldFilter::NormalTent},
         {PageFieldKind::GrassControl, PageFieldFormat::Rg8, PageFieldFilter::Tent},
         {PageFieldKind::Color, PageFieldFormat::Rgba8Srgb, PageFieldFilter::PremultipliedTent},
+        {PageFieldKind::NormalSamples, PageFieldFormat::Rg8, PageFieldFilter::NormalTent},
     };
     for (const KindEncoding& encoding : kEncodings)
         if (encoding.Format == format && encoding.Filter == filter)
@@ -144,6 +145,8 @@ const char* PageFieldKindName(PageFieldKind kind)
         return "grass control";
     case PageFieldKind::Color:
         return "color";
+    case PageFieldKind::NormalSamples:
+        return "normal samples";
     }
     return "unknown";
 }

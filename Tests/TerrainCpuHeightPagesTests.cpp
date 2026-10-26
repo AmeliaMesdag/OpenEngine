@@ -19,11 +19,13 @@
 #include "PageStreaming/PageResidency.h"
 #include "PageStreaming/PageStoreFormat.h"
 #include "PageStreaming/PageStoreReader.h"
+#include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
 #include "Mathematics/Rect.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
 #include "PhysicsECS/Components/PhysicsBody.h"
+#include "Terrain/TerrainTypes.h"
 #include "TestTempDir.h"
 
 #include <gtest/gtest.h>
@@ -438,6 +440,44 @@ void ExpectQueryBitEqualToUploads(const TerrainHeightPages& pages,
                 ++compared;
             }
     EXPECT_EQ(compared, kSamples * kSamples);
+}
+
+// A terrain entity of `terrain` at world (x, y, z).
+ECS::EntityHandle AddTerrainEntity(ECS::World& world, const Components::Terrain& terrain, float32 x, float32 y,
+                                   float32 z)
+{
+    Components::WorldTransform transform;
+    transform.matrix[12] = x;
+    transform.matrix[13] = y;
+    transform.matrix[14] = z;
+    const ECS::EntityHandle entity = world.CreateEntity();
+    world.AddComponentImmediate(entity, terrain);
+    world.AddComponentImmediate(entity, transform);
+    return entity;
+}
+
+// A flat planar terrain of `size` metres with its height data, centered on world (x, 0, z).
+ECS::EntityHandle AddPlanarTerrain(ECS::World& world, float32 size, float32 x, float32 z)
+{
+    Terrain::TerrainConfig config;
+    config.HeightmapWidth = config.HeightmapHeight = 33;
+    config.WorldSizeX = config.WorldSizeZ = size;
+    const TerrainHandle handle = TerrainService::Get().CreateTerrain(config);
+    Components::Terrain terrain;
+    terrain.SizeX = terrain.SizeZ = size;
+    terrain.BaseSource = Components::TerrainBaseSource::Flat;
+    terrain.TerrainDataHandle = handle.Index;
+    terrain.TerrainDataGeneration = handle.Generation;
+    return AddTerrainEntity(world, terrain, x, 0.0f, z);
+}
+
+// A planet of `radius` metres, centered on the world origin as the renderer draws it.
+ECS::EntityHandle AddPlanet(ECS::World& world, float32 radius)
+{
+    Components::Terrain terrain;
+    terrain.Domain = Components::TerrainDomain::Spherical;
+    terrain.PlanetRadius = radius;
+    return AddTerrainEntity(world, terrain, 0.0f, 150.0f, -700.0f);
 }
 
 // A physics body of `motion` at world (x, 0, z).
@@ -1084,4 +1124,33 @@ TEST(CpuHeightPages, ARecordExactlyFullReportsEveryChangeItHoldsAndNoReaderOneCh
     changed.clear();
     EXPECT_FALSE(query.CollectPageChanges({directory.Epoch, changeCount - ring.size() - 1u}, changed))
         << "a reader one change further behind would miss the overwritten change";
+}
+
+// The island scene's three terrains: a planet around the origin, a planar terrain away from the
+// origin and the island at the origin. The query at a point on the island reads the island, in
+// whatever order the world stores the terrains.
+TEST(SurfaceHeightTerrain, ThePointPicksTheTerrainUnderItInEveryStorageOrder)
+{
+    if (!TerrainService::TryGet())
+        TerrainService::Initialize();
+    const Mathematics::Vector3 onIsland(10.0f, 0.0f, -20.0f);
+    for (const bool islandFirst : {false, true})
+    {
+        ECS::World world;
+        ECS::EntityHandle island;
+        if (islandFirst)
+            island = AddPlanarTerrain(world, 512.0f, 0.0f, 0.0f);
+        AddPlanet(world, 2000.0f);
+        AddPlanarTerrain(world, 256.0f, 700.0f, 0.0f);
+        if (!islandFirst)
+            island = AddPlanarTerrain(world, 512.0f, 0.0f, 0.0f);
+
+        EXPECT_EQ(FindSurfaceHeightTerrain(world, onIsland).Terrain, world.GetComponent<Components::Terrain>(island))
+            << "island first: " << islandFirst;
+        const SurfaceHeightQuery query = ResolveSurfaceHeightQuery(world, onIsland);
+        ASSERT_TRUE(query.IsValid()) << "island first: " << islandFirst;
+        EXPECT_FLOAT_EQ(query.FootprintOriginX(), -256.0f);
+        EXPECT_FLOAT_EQ(query.FootprintSizeX(), 512.0f);
+    }
+    TerrainService::Shutdown();
 }

@@ -2,19 +2,17 @@
 
 #include "HeightPageCodec.h"
 #include "PageCodec.h"
+#include "PageFieldFilter.h"
 #include "PageStreaming/PageStoreWriter.h"
 #include "PageStoreSerialization.h"
 
 #include "JobSystem/WorkStealingThreadPool.h"
-#include "Mathematics/Interpolation.h"
 #include "Mathematics/Matrix3x3.h"
 #include "Mathematics/Vector3.h"
-#include "Types/Color.h"
 
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -27,23 +25,7 @@ namespace
 // buffer (64 pages of at most 67.6 KB).
 constexpr uint32 kPagesEncodedPerChunk = 64u;
 
-// The 3 x 3 footprint of a coarser sample: the finer samples 2i - 1, 2i and 2i + 1 along both axes,
-// edge-clamped, row-major, with the [1 2 1] x [1 2 1] tent's weights, which sum to 16.
-constexpr uint32 kTaps = 9u;
-constexpr std::array<uint32, kTaps> kTapWeights{1u, 2u, 1u, 2u, 4u, 2u, 1u, 2u, 1u};
-constexpr uint32 kTapWeightSum = 16u;
-constexpr float32 kByteMax = 255.0f;
-// A splat texel's four weights sum to this.
-constexpr uint32 kWeightChannels = 4u;
-constexpr uint32 kWeightSum = 255u;
-
 using FinerRows = std::array<const uint8*, 3>;
-using Taps = std::array<const uint8*, kTaps>;
-
-uint32 ClampIndex(int64 index, uint32 count)
-{
-    return static_cast<uint32>(std::clamp<int64>(index, 0, static_cast<int64>(count) - 1));
-}
 
 const float32* Heights(const uint8* row)
 {
@@ -66,101 +48,14 @@ void HeightTentRow(const FinerRows& rows, uint32 finerWidth, float32* out, uint3
                  0.25f * TentAcross(Heights(rows[2]), i, finerWidth);
 }
 
-Taps GatherTaps(const FinerRows& rows, uint32 i, uint32 finerWidth, uint32 texelBytes)
+FilterTaps GatherTaps(const FinerRows& rows, uint32 i, uint32 finerWidth, uint32 texelBytes)
 {
     const int64 center = 2 * static_cast<int64>(i);
-    Taps taps{};
+    FilterTaps taps{};
     for (uint32 r = 0; r < 3u; ++r)
         for (uint32 c = 0; c < 3u; ++c)
             taps[r * 3u + c] = rows[r] + static_cast<std::size_t>(ClampIndex(center - 1 + c, finerWidth)) * texelBytes;
     return taps;
-}
-
-uint8 ToByte(float32 unit)
-{
-    return static_cast<uint8>(std::lround(Math::Clamp01(unit) * kByteMax));
-}
-
-// The tent per channel, rounded to nearest.
-void TentTexel(const Taps& taps, uint32 channels, uint8* out)
-{
-    for (uint32 channel = 0; channel < channels; ++channel)
-    {
-        uint32 sum = 0;
-        for (uint32 t = 0; t < kTaps; ++t)
-            sum += kTapWeights[t] * taps[t][channel];
-        out[channel] = static_cast<uint8>((sum + kTapWeightSum / 2u) / kTapWeightSum);
-    }
-}
-
-// The tent per weight, renormalized to sum to 255: each weight takes the floor of its share and the
-// remainder goes to the largest (the lowest channel on a tie). A footprint with no weight stays zero.
-void WeightsTentTexel(const Taps& taps, uint8* out)
-{
-    std::array<uint32, kWeightChannels> sums{};
-    uint32 total = 0;
-    for (uint32 channel = 0; channel < kWeightChannels; ++channel)
-    {
-        for (uint32 t = 0; t < kTaps; ++t)
-            sums[channel] += kTapWeights[t] * taps[t][channel];
-        total += sums[channel];
-    }
-    if (total == 0)
-    {
-        std::fill(out, out + kWeightChannels, uint8{0});
-        return;
-    }
-    uint32 assigned = 0;
-    uint32 largest = 0;
-    for (uint32 channel = 0; channel < kWeightChannels; ++channel)
-    {
-        out[channel] = static_cast<uint8>(static_cast<uint64>(sums[channel]) * kWeightSum / total);
-        assigned += out[channel];
-        if (sums[channel] > sums[largest])
-            largest = channel;
-    }
-    out[largest] = static_cast<uint8>(out[largest] + (kWeightSum - assigned));
-}
-
-// A unit normal stored as (x, z) in unsigned normalized bytes; y is the non-negative rest.
-Mathematics::Vector3 DecodeNormal(const uint8* texel)
-{
-    const float32 x = static_cast<float32>(texel[0]) / kByteMax * 2.0f - 1.0f;
-    const float32 z = static_cast<float32>(texel[1]) / kByteMax * 2.0f - 1.0f;
-    return {x, std::sqrt(std::max(0.0f, 1.0f - x * x - z * z)), z};
-}
-
-// The tent on the unit normals, renormalized; a footprint whose normals cancel faces up.
-void NormalTentTexel(const Taps& taps, uint8* out)
-{
-    Mathematics::Vector3 sum;
-    for (uint32 t = 0; t < kTaps; ++t)
-        sum = sum + DecodeNormal(taps[t]) * static_cast<float32>(kTapWeights[t]);
-    Mathematics::Vector3 normal = sum.NormalizeOrZero();
-    if (normal.LengthSquared() == 0.0f)
-        normal = Mathematics::Vector3(0.0f, 1.0f, 0.0f);
-    out[0] = ToByte(normal.x * 0.5f + 0.5f);
-    out[1] = ToByte(normal.z * 0.5f + 0.5f);
-}
-
-// The tent in linear light on premultiplied color: rgb decoded from sRGB, a linear, rgb encoded back.
-void PremultipliedTentTexel(const Taps& taps, uint8* out)
-{
-    ColorLinear sum(0.0f, 0.0f, 0.0f, 0.0f);
-    for (uint32 t = 0; t < kTaps; ++t)
-    {
-        const ColorLinear tap = ColorSRGB::FromSRGB255(taps[t][0], taps[t][1], taps[t][2], taps[t][3]).ToLinear();
-        const float32 weight = static_cast<float32>(kTapWeights[t]) / static_cast<float32>(kTapWeightSum);
-        sum.r += weight * tap.r;
-        sum.g += weight * tap.g;
-        sum.b += weight * tap.b;
-        sum.a += weight * tap.a;
-    }
-    const ColorSRGB encoded = sum.ToSRGB();
-    out[0] = ToByte(encoded.r);
-    out[1] = ToByte(encoded.g);
-    out[2] = ToByte(encoded.b);
-    out[3] = ToByte(encoded.a);
 }
 
 // The three values in ascending order, summed from the smallest.
@@ -442,27 +337,8 @@ void PagePyramidBuilder::MakeCoarserRow(uint32 levelIndex, uint32 row, std::vect
         return;
     }
     for (uint32 i = 0; i < width; ++i)
-    {
-        const Taps taps = GatherTaps(rows, i, finerWidth, m_TexelBytes);
-        uint8* texel = out.data() + static_cast<std::size_t>(i) * m_TexelBytes;
-        switch (m_Filter)
-        {
-        case PageFieldFilter::WeightsTent:
-            WeightsTentTexel(taps, texel);
-            break;
-        case PageFieldFilter::NormalTent:
-            NormalTentTexel(taps, texel);
-            break;
-        case PageFieldFilter::Tent:
-            TentTexel(taps, m_TexelBytes, texel);
-            break;
-        case PageFieldFilter::PremultipliedTent:
-            PremultipliedTentTexel(taps, texel);
-            break;
-        case PageFieldFilter::HeightTent:
-            break;
-        }
-    }
+        FilterCoarserTexel(m_Filter, GatherTaps(rows, i, finerWidth, m_TexelBytes), m_TexelBytes,
+                           out.data() + static_cast<std::size_t>(i) * m_TexelBytes);
 }
 
 float32 PagePyramidBuilder::FaceSample(uint32 levelIndex, int64 x, int64 z) const

@@ -15,8 +15,8 @@ namespace GameEngine.Scripting
         internal ulong WorldHandle;
 
         /// <summary>
-        /// Commands on the world <paramref name="worldHandle"/>. The generated code of a C# system makes them and
-        /// passes them to Execute; a system gets them as a parameter and does not make its own.
+        /// Commands on the world <paramref name="worldHandle"/>. The generated code of a C# system passes them to
+        /// Execute, and <see cref="GameSystem"/> gives them as its Commands property; a system does not make its own.
         /// </summary>
         [EditorBrowsable(EditorBrowsableState.Never)]
         public EntityCommands(ulong worldHandle)

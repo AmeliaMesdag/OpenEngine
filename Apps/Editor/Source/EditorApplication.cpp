@@ -211,7 +211,6 @@
 #include "Markups/MarkupEditorBridge.h"
 #include "Markups/MarkupEditorSurfaces.h"
 #include "SceneView/BuiltInSceneViewTools.h"
-#include "Placement/RecipeControllers.h"
 #include "PlayMode/PlayModeEntryModal.h"
 #include "PlayMode/PlayModeManager.h"
 #include "PlayMode/GameViewPointerLock.h"
@@ -1519,18 +1518,13 @@ EditorApplication::EditorApplication(const ApplicationConfig& config)
     // queued startup scene to be requested.
     m_SceneEditor->SetBootFlowActiveProbe(
         [this]() { return ShouldIdleWorldPathForProjectPicker() || !m_DeferredStartupSceneWorkspace.empty(); });
-    // The recipe controllers' generated entities are scoped to the open scene
-    // (RecipeControllers::ReleaseSceneScoped). Release them at the swap, while the
-    // outgoing world is still the one they describe. Wired here rather than at the
-    // panel-construction site because a scene can be swapped with no panel in
-    // play (--scene, MCP open_scene).
+    // The editor services release their scene-scoped state at a swap, against the
+    // outgoing world. Wired here, not at panel construction: a scene can swap with
+    // no panel (--scene, MCP open_scene).
     m_SceneEditor->SetSceneScopedGeneratorRelease([this]()
     {
-        auto* world = EngineCore::GetInstance().EnsurePrimaryWorld();
-        if (!world)
-            return;
-        if (m_RecipeControllers)
-            m_RecipeControllers->ReleaseSceneScoped(*world, MainRenderServices());
+        if (auto* world = EngineCore::GetInstance().EnsurePrimaryWorld())
+            m_EditorServices.ReleaseSceneScoped(*world);
     });
     Editor::RegisterAssetPipelineCommands([this]() -> std::optional<std::filesystem::path>
     {
@@ -2548,6 +2542,7 @@ bool EditorApplication::Initialize()
             {
                 if (auto* rgBuild = sm->GetSystem<Engine::Renderer::RenderGraphBuildSystem>())
                     rgBuild->SetSkipFrameGraphBuild(true);
+                m_EditorServices.Start({m_UndoRedo.get(), *sm});
             }
         }
 
@@ -6676,19 +6671,6 @@ void EditorApplication::Update(float64 deltaTime)
         }
     }
 
-    // Maintain what the recipe components on splines generate, and the terrain
-    // effects under a generated run (Placement/RecipeControllers.h).
-    {
-        GE_CPU_PROFILE_SCOPE("EditorApplication.Update.RecipeControllers");
-        if (auto* world = EngineCore::GetInstance().EnsurePrimaryWorld())
-        {
-            if (!m_RecipeControllers)
-                m_RecipeControllers = std::make_unique<Editor::RecipeControllers>();
-            m_RecipeControllers->Update(*world, MainRenderServices(), m_UndoRedo.get(),
-                                        static_cast<float>(deltaTime));
-        }
-    }
-
     // Drive scene document UX (Ctrl+S save/save-as, dirty prompt, scene open requests).
     if (m_SceneEditor)
     {
@@ -8339,6 +8321,9 @@ void EditorApplication::OnShutdown()
     // and with it every ECS system holding a subscription.
     FileWatchingService::GetInstance().StopWatching();
 
+    // The editor services hold systems of the schedule; they go before the loop
+    // destroys the systems.
+    m_EditorServices.Stop();
     // Disable engine-managed rendering loop early so ECS rendering systems
     // can no longer submit GPU work during teardown.
     EngineCore::GetInstance().DisableRenderingLoop();

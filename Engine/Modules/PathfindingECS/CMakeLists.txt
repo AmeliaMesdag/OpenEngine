@@ -32,6 +32,9 @@ target_include_directories(PathfindingECS
         $<TARGET_PROPERTY:FileWatcher,INTERFACE_INCLUDE_DIRECTORIES>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Source
+        # The bake waits for the spline recipes (SplineRecipesScriptApi.h). Headers only: the
+        # SplineRecipes objects reach the binary through the Engine module splice.
+        $<TARGET_PROPERTY:SplineRecipes,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 target_link_libraries(PathfindingECS

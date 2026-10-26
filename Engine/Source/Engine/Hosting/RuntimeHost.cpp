@@ -33,6 +33,7 @@
 #include "Rendering/Passes/TemporalDither.h"
 #include "Scene/AssetManagerSceneResolver.h"
 #include "Scene/SceneIO.h"
+#include "SplineRecipes/SplineRecipeSystem.h"
 #include "UI/UIManager.h"
 #include "UI/UITextureSpace.h"
 
@@ -326,6 +327,13 @@ bool RuntimeHost::OpenScene(const std::filesystem::path& scenePath)
     const auto& assetRoot = engine.GetResolvedAssetRoot();
     const auto sceneFile = assetRoot / scenePath;
 
+    // What the spline recipes generated belongs to the outgoing scene: release it
+    // against the outgoing world, before the load clears it (SplineRecipeSystem).
+    auto* loop = engine.GetRenderingLoop();
+    auto* systems = loop ? loop->GetSystemManager() : nullptr;
+    if (auto* recipes = systems ? systems->GetSystem<SplineRecipes::SplineRecipeSystem>() : nullptr)
+        recipes->ReleaseSceneScoped(*world);
+
     Scene::AssetManagerSceneResolver assetResolver(engine.GetAssetManager(), assetRoot,
                                                    Scene::AssetManagerSceneResolver::UnknownFile::AssignGuid);
 
@@ -348,7 +356,7 @@ bool RuntimeHost::OpenScene(const std::filesystem::path& scenePath)
     // has landed, so no frame waits for a load. Skeletons bind as entities complete.
     m_SceneResolve = Engine::Renderer::SceneResolveBatch::None;
     auto* rs = m_RenderCtx ? m_RenderCtx->GetRenderServices() : nullptr;
-    if (auto* loop = engine.GetRenderingLoop(); rs && loop)
+    if (rs && loop)
         m_SceneResolve = loop->GetSceneResolveService().EnqueueWorld(*world, *rs);
 
     Logger::Log::Info("Runtime: Loaded scene '{}'", sceneFile.string());

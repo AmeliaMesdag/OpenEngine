@@ -27,7 +27,7 @@ public uint Spawn(PrefabRef prefab, in Transform at, uint parent = 0);
 ::::
 :::::
 
-A C# system gets `EntityCommands` as a parameter of `Execute`. `Spawn` returns the root's id, or 0 when the prefab is not loaded. A `PrefabRef` that names no prefab throws an `ArgumentException`.
+An entity system gets `EntityCommands` as a parameter of `Execute`; a `GameSystem` uses its `Commands` property. `Spawn` returns the root's id, or 0 when the prefab is not loaded. A `PrefabRef` that names no prefab throws an `ArgumentException`.
 
 :::::tabs
 ::::tab[C++]

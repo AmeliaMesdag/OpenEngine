@@ -1171,7 +1171,7 @@ endif()
 set(GE_ENGINE_MODULES
     Logger AssetCore AssetDatabase JobSystem ECS FileWatcher AssetRuntime Audio Scripting NativeScripting
     Platform FileSystem FileSystemCore Memory GameEngineRendering RenderServices VolumetricFog HeightFog GPUFogParticles Particles ParticlesAuthoring ParticlesAssets ParticlesSystems ParticlesRendering Animation NumericExpression UI Physics PhysicsECS
-    Pathfinding PathfindingECS Terrain PageStreaming TerrainECS TerrainGrass CBTTerrain CBTTerrainECS Ocean Spline SplineGeometry SplineLayout SplineECS MarkupECS Graph
+    Pathfinding PathfindingECS Terrain PageStreaming TerrainECS TerrainGrass CBTTerrain CBTTerrainECS Ocean Spline SplineGeometry SplineLayout SplineECS SplineRecipes MarkupECS Graph
     GenerationalVector Scheduler Scene SceneBvh MeshPicking Text Input PluginAPI Image
     PlatformServices PlatformProvider${GE_PLATFORM_BACKEND})
 target_link_libraries(Engine

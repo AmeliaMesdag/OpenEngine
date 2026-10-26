@@ -9,6 +9,11 @@
 #include <span>
 #include <vector>
 
+namespace GameEngine::Mathematics
+{
+struct Vector3;
+}
+
 namespace GameEngine::PageStreaming
 {
 
@@ -70,6 +75,9 @@ enum class PageFieldKind : uint8
     Normal = 2,       ///< the surface normal's x and z
     GrassControl = 3, ///< the grass height and density targets
     Color = 4,        ///< the premultiplied color map and its weight
+    /// A Normal store's unencoded samples, from which its coarser pages are filtered. A bake cache
+    /// beside the store: never in a terrain container.
+    NormalSamples = 5,
 };
 
 /// How a page's samples are stored.
@@ -266,6 +274,8 @@ bool IsBlockFormat(PageFieldFormat format);
 uint32 PageStrideTexels(PageFieldFormat format);
 /// Bytes of one decoded sample of `format`: a float32 height, or the format's channels.
 uint32 PageTexelBytes(PageFieldFormat format);
+/// Stores the unit normal `normal` as a normal sample: (x, z) * 0.5 + 0.5 in two unsigned bytes.
+void EncodeNormalSample(const Mathematics::Vector3& normal, uint8* outTexel);
 /// The stored bytes of one page of `format`; a HeightSteps page holds 16-bit words, or 32-bit
 /// integers when `wide`.
 uint32 PageStoredBytes(PageFieldFormat format, bool wide);
@@ -284,5 +294,10 @@ std::span<float32> HeightSamples(std::vector<uint8>& bytes);
 /// an empty `present` makes every page present. Offsets are assigned as the pages are written
 /// (PageStoreWriter).
 PageStoreLayout MakePageStoreLayout(const PageStoreHeader& header, std::span<const uint8> present = {});
+
+/// The layout of `layout`'s store with more pages present: its own present pages keep their
+/// entries, and each page `present` marks (as MakePageStoreLayout reads it) is added unwritten.
+/// For a store that grows as its pages are baked; PageStoreWriter::OpenForPatch takes the result.
+PageStoreLayout AddPresentPages(const PageStoreLayout& layout, std::span<const uint8> present);
 
 } // namespace GameEngine::PageStreaming

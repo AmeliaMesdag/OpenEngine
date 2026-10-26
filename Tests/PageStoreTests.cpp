@@ -16,6 +16,7 @@
 #include "PageStreaming/PageLoader.h"
 #include "PageStreaming/PageResidency.h"
 #include "PageStreaming/PageStoreFormat.h"
+#include "PageStreaming/PageStorePatcher.h"
 #include "PageStreaming/PageStoreReader.h"
 #include "PageStreaming/PageStoreWriter.h"
 #include "PageStreaming/PageTableEntry.h"
@@ -1147,6 +1148,334 @@ TEST_F(PageStoreTest, TheWeightsTentKeepsEveryTexelsWeightsSummingTo255)
     }
 }
 
+namespace
+{
+
+// The level-0 pages of `layout` whose stored samples hold a sample of `rect`.
+std::vector<PageAddress> Level0PagesHolding(const PageStoreLayout& layout, const PageSampleRect& rect)
+{
+    std::vector<PageAddress> pages;
+    const PageStoreLevel& shape = layout.Levels.front();
+    for (uint32 pz = 0; pz < shape.PagesZ; ++pz)
+        for (uint32 px = 0; px < shape.PagesX; ++px)
+        {
+            const int64 firstX = static_cast<int64>(px) * kPageOwnedSamples - 1;
+            const int64 firstZ = static_cast<int64>(pz) * kPageOwnedSamples - 1;
+            if (firstX <= rect.MaxX && firstX + kPageStrideSamples > rect.MinX && firstZ <= rect.MaxZ &&
+                firstZ + kPageStrideSamples > rect.MinZ)
+                pages.push_back(PageAddress{0, 0, px, pz});
+        }
+    return pages;
+}
+
+// Every page of two stores of one layout holds the same samples.
+void ExpectSameSurfacePages(const PageStoreReader& actual, const PageStoreReader& expected)
+{
+    for (uint8 level = 0; level < expected.Layout().Levels.size(); ++level)
+    {
+        const PageStoreLevel& shape = expected.Layout().Levels[level];
+        for (uint32 pz = 0; pz < shape.PagesZ; ++pz)
+            for (uint32 px = 0; px < shape.PagesX; ++px)
+                ASSERT_EQ(SurfacePage(actual, PageAddress{0, level, px, pz}),
+                          SurfacePage(expected, PageAddress{0, level, px, pz}))
+                    << "level " << int(level) << " page " << px << "," << pz;
+    }
+}
+
+// `weights` with the texels of `rect` turned: each texel's four weights in reverse order.
+std::vector<uint8> TurnedWeights(std::vector<uint8> weights, uint32 width, const PageSampleRect& rect)
+{
+    for (uint32 z = rect.MinZ; z <= rect.MaxZ; ++z)
+        for (uint32 x = rect.MinX; x <= rect.MaxX; ++x)
+        {
+            uint8* texel = &weights[(static_cast<std::size_t>(z) * width + x) * 4u];
+            std::reverse(texel, texel + 4);
+        }
+    return weights;
+}
+
+// The stride samples of level-0 page `address` of a row-major grid of `format` texels, the apron
+// edge-clamped.
+std::vector<uint8> GridPageSamples(const std::vector<uint8>& grid, uint32 width, uint32 height, PageFieldFormat format,
+                                   const PageAddress& address)
+{
+    const uint32 stride = PageStrideTexels(format);
+    const int64 apron = (stride - kPageOwnedSamples) / 2u;
+    const uint32 texel = PageTexelBytes(format);
+    std::vector<uint8> samples(static_cast<std::size_t>(stride) * stride * texel);
+    for (uint32 r = 0; r < stride; ++r)
+        for (uint32 c = 0; c < stride; ++c)
+        {
+            const int64 x = std::clamp<int64>(int64{address.X} * kPageOwnedSamples - apron + c, 0, width - 1);
+            const int64 z = std::clamp<int64>(int64{address.Z} * kPageOwnedSamples - apron + r, 0, height - 1);
+            std::memcpy(&samples[(static_cast<std::size_t>(r) * stride + c) * texel],
+                        &grid[(static_cast<std::size_t>(z) * width + static_cast<std::size_t>(x)) * texel], texel);
+        }
+    return samples;
+}
+
+} // namespace
+
+TEST_F(PageStoreTest, APatchedPageIsWrittenAtItsAddressAndTheBytesTheStoreHoldsAreNotWrittenAgain)
+{
+    constexpr uint32 kWidth = 300u;
+    constexpr uint32 kHeight = 270u;
+    const std::filesystem::path file = m_Dir / "splat.gepage";
+    BuildSurfaceStore(file, PageFieldFormat::Rgba8, PageFieldFilter::WeightsTent, kWidth, kHeight,
+                      SplatWeights(kWidth, kHeight));
+    const PageAddress address{0, 0, 1, 1};
+    std::vector<uint8> page;
+    PageStoreLayout layout;
+    {
+        PageStoreReader reader;
+        ASSERT_EQ(reader.Open(file, PageFieldKind::Splat), "");
+        page = SurfacePage(reader, address);
+        layout = reader.Layout();
+    }
+    std::reverse(page.begin(), page.end());
+
+    PageStoreWriter writer;
+    ASSERT_EQ(writer.OpenForPatch(file, file, layout), "");
+    PageStorePatcher patcher(writer, nullptr);
+    ASSERT_TRUE(patcher.WritePage(address, page));
+    ASSERT_TRUE(patcher.WritePage(address, page));
+    EXPECT_FALSE(patcher.WritePage(address, std::span<const uint8>(page).first(page.size() - 4u)));
+    EXPECT_EQ(patcher.PagesWritten(), 1u);
+    EXPECT_EQ(patcher.PagesUnchanged(), 1u);
+    ASSERT_EQ(writer.Finish(), "");
+
+    PageStoreReader reader;
+    ASSERT_EQ(reader.Open(file, PageFieldKind::Splat), "");
+    EXPECT_EQ(SurfacePage(reader, address), page);
+
+    // A Bc5 store refilters from its unencoded samples: without its unencoded store it is refused.
+    PageStoreHeader header;
+    header.Format = PageFieldFormat::Bc5;
+    header.Filter = PageFieldFilter::NormalTent;
+    header.SamplesX = kWidth;
+    header.SamplesZ = kHeight;
+    PageStoreWriter normals;
+    ASSERT_EQ(normals.Create(m_Dir / "normal.gepage", MakePageStoreLayout(header)), "");
+    PageStorePatcher normalPatcher(normals, nullptr);
+    const std::vector<uint8> samples(static_cast<std::size_t>(136u) * 136u * 2u, 128u);
+    EXPECT_FALSE(normalPatcher.WritePage(PageAddress{0, 0, 0, 0}, samples));
+    EXPECT_FALSE(normalPatcher.RefilterAncestors(PageSampleRect{0, 0, 10, 10}));
+}
+
+TEST_F(PageStoreTest, RefilteringTheAncestorsOfAPatchedRectGivesTheFullBuildAndRewritesOnlyThePagesThatChanged)
+{
+    // 600 x 600 weights: 5 x 5 pages, then 3 x 3, 2 x 2 and one. The rect crosses page edges at
+    // level 0 and level 1.
+    constexpr uint32 kSide = 600u;
+    const PageSampleRect rect{200u, 140u, 330u, 260u};
+    const std::vector<uint8> before = SplatWeights(kSide, kSide);
+    const std::vector<uint8> after = TurnedWeights(before, kSide, rect);
+    const std::filesystem::path patched = m_Dir / "patched.gepage";
+    const std::filesystem::path built = m_Dir / "built.gepage";
+    BuildSurfaceStore(patched, PageFieldFormat::Rgba8, PageFieldFilter::WeightsTent, kSide, kSide, before);
+    BuildSurfaceStore(built, PageFieldFormat::Rgba8, PageFieldFilter::WeightsTent, kSide, kSide, after);
+
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(built, PageFieldKind::Splat), "");
+    PageStoreLayout layout;
+    uint64 changedPages = 0;
+    {
+        PageStoreReader original;
+        ASSERT_EQ(original.Open(patched, PageFieldKind::Splat), "");
+        layout = original.Layout();
+        for (std::size_t i = 0; i < layout.Entries.size(); ++i)
+            changedPages += layout.Entries[i].Hash != expected.Layout().Entries[i].Hash ? 1u : 0u;
+    }
+    ASSERT_GT(changedPages, 9u);
+    ASSERT_LT(changedPages, layout.Entries.size());
+
+    JobSystem::WorkStealingThreadPool pool(4);
+    PageStoreWriter writer;
+    ASSERT_EQ(writer.OpenForPatch(patched, patched, layout), "");
+    PageStorePatcher patcher(writer, &pool);
+    for (const PageAddress& address : Level0PagesHolding(layout, rect))
+        ASSERT_TRUE(patcher.WritePage(address, SurfacePage(expected, address)));
+    ASSERT_TRUE(patcher.RefilterAncestors(rect));
+    EXPECT_EQ(patcher.PagesWritten(), changedPages);
+    ASSERT_EQ(writer.Finish(), "");
+
+    PageStoreReader actual;
+    ASSERT_EQ(actual.Open(patched, PageFieldKind::Splat), "");
+    ExpectSameSurfacePages(actual, expected);
+}
+
+TEST_F(PageStoreTest, ABc5StorePatchedAPageAtATimeIsTheFullBuildFilteredFromItsUnencodedSamples)
+{
+    // The coarser Bc5 pages are filtered from the Rg8 store of the unencoded samples, never from
+    // blocks, so the patched store holds the blocks of the full build, which filters unencoded rows.
+    constexpr uint32 kSide = 600u;
+    std::vector<uint8> normals(static_cast<std::size_t>(kSide) * kSide * 2u);
+    for (std::size_t i = 0; i < normals.size(); ++i)
+        normals[i] = static_cast<uint8>(64u + ((static_cast<uint32>(i) * 2654435761u) >> 25));
+    const std::filesystem::path built = m_Dir / "built.gepage";
+    BuildSurfaceStore(built, PageFieldFormat::Bc5, PageFieldFilter::NormalTent, kSide, kSide, normals);
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(built, PageFieldKind::Normal), "");
+
+    const PageStoreHeader header = expected.Layout().Header;
+    PageStoreHeader samplesHeader = header;
+    samplesHeader.Format = PageFieldFormat::Rg8;
+    const std::filesystem::path patched = m_Dir / "patched.gepage";
+    PageStoreWriter writer;
+    PageStoreWriter unencoded;
+    ASSERT_EQ(writer.Create(patched, MakePageStoreLayout(header)), "");
+    ASSERT_EQ(unencoded.Create(m_Dir / "samples.gepage", MakePageStoreLayout(samplesHeader)), "");
+    JobSystem::WorkStealingThreadPool pool(4);
+    PageStorePatcher patcher(writer, unencoded, &pool);
+    const PageStoreLevel& level0 = expected.Layout().Levels.front();
+    for (uint32 pz = level0.PagesZ; pz-- > 0;)
+        for (uint32 px = level0.PagesX; px-- > 0;)
+        {
+            const PageAddress address{0, 0, px, pz};
+            ASSERT_TRUE(patcher.WritePage(address, GridPageSamples(normals, kSide, kSide, header.Format, address)));
+            ASSERT_TRUE(patcher.RefilterAncestors(PageSampleRect{px * kPageOwnedSamples, pz * kPageOwnedSamples,
+                                                                 px * kPageOwnedSamples + kPageOwnedSamples - 1u,
+                                                                 pz * kPageOwnedSamples + kPageOwnedSamples - 1u}));
+        }
+    ASSERT_EQ(writer.Finish(), "");
+    ASSERT_EQ(unencoded.Finish(), "");
+    PageStoreReader actual;
+    ASSERT_EQ(actual.Open(patched, PageFieldKind::Normal), "");
+    ExpectSameSurfacePages(actual, expected);
+}
+
+TEST_F(PageStoreTest, ACoarseLevelWrittenFirstIsReplacedByTheFilterOfLevelZeroAsItsPagesLand)
+{
+    // The cold bake's order: every coarser page is written first from its own evaluation (here a
+    // flat weight), then the level-0 pages land in any order. A coarser page waits for every page
+    // it reads; once the last one lands, the store equals the full build.
+    constexpr uint32 kSide = 600u;
+    const std::vector<uint8> weights = SplatWeights(kSide, kSide);
+    const std::filesystem::path built = m_Dir / "built.gepage";
+    BuildSurfaceStore(built, PageFieldFormat::Rgba8, PageFieldFilter::WeightsTent, kSide, kSide, weights);
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(built, PageFieldKind::Splat), "");
+
+    PageStoreHeader header = expected.Layout().Header;
+    const std::filesystem::path baked = m_Dir / "baked.gepage";
+    PageStoreWriter writer;
+    ASSERT_EQ(writer.Create(baked, MakePageStoreLayout(header)), "");
+    PageStorePatcher patcher(writer, nullptr);
+    std::vector<uint8> flat(static_cast<std::size_t>(kPageSampleCount) * 4u, 0u);
+    for (std::size_t t = 0; t < flat.size(); t += 4u)
+        flat[t] = 255u;
+    const std::vector<PageStoreLevel>& levels = expected.Layout().Levels;
+    for (uint8 level = static_cast<uint8>(levels.size() - 1u); level > 0; --level)
+        for (uint32 pz = 0; pz < levels[level].PagesZ; ++pz)
+            for (uint32 px = 0; px < levels[level].PagesX; ++px)
+                ASSERT_TRUE(patcher.WritePage(PageAddress{0, level, px, pz}, flat));
+
+    // The first level-0 page alone changes no coarser page: each one it reaches also reads a
+    // page not yet written.
+    const uint64 coarsePages = patcher.PagesWritten();
+    ASSERT_TRUE(patcher.WritePage(PageAddress{0, 0, 0, 0}, SurfacePage(expected, PageAddress{0, 0, 0, 0})));
+    ASSERT_TRUE(patcher.RefilterAncestors(PageSampleRect{0, 0, 127, 127}));
+    EXPECT_EQ(patcher.PagesWritten(), coarsePages + 1u);
+
+    // The rest land from the far corner back, each followed by its refilter.
+    for (uint32 pz = levels[0].PagesZ; pz-- > 0;)
+        for (uint32 px = levels[0].PagesX; px-- > 0;)
+        {
+            const PageAddress address{0, 0, px, pz};
+            ASSERT_TRUE(patcher.WritePage(address, SurfacePage(expected, address)));
+            ASSERT_TRUE(patcher.RefilterAncestors(PageSampleRect{px * kPageOwnedSamples, pz * kPageOwnedSamples,
+                                                                 px * kPageOwnedSamples + kPageOwnedSamples - 1u,
+                                                                 pz * kPageOwnedSamples + kPageOwnedSamples - 1u}));
+        }
+    ASSERT_EQ(writer.Finish(), "");
+    PageStoreReader actual;
+    ASSERT_EQ(actual.Open(baked, PageFieldKind::Splat), "");
+    ExpectSameSurfacePages(actual, expected);
+}
+
+TEST_F(PageStoreTest, ACoarsePageWrittenByWritePageIsANewInputToTheLevelAbove)
+{
+    // Level 1 is written with the bytes its refilter makes, so the refilter changes no level-1
+    // page. Level 2 and up were written from another evaluation and must still become the filter.
+    constexpr uint32 kSide = 600u;
+    const std::filesystem::path built = m_Dir / "built.gepage";
+    BuildSurfaceStore(built, PageFieldFormat::Rgba8, PageFieldFilter::WeightsTent, kSide, kSide,
+                      SplatWeights(kSide, kSide));
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(built, PageFieldKind::Splat), "");
+    const std::vector<PageStoreLevel>& levels = expected.Layout().Levels;
+    ASSERT_GE(levels.size(), 3u);
+
+    const std::filesystem::path baked = m_Dir / "baked.gepage";
+    PageStoreWriter writer;
+    ASSERT_EQ(writer.Create(baked, MakePageStoreLayout(expected.Layout().Header)), "");
+    PageStorePatcher patcher(writer, nullptr);
+    std::vector<uint8> flat(static_cast<std::size_t>(kPageSampleCount) * 4u, 0u);
+    for (std::size_t t = 0; t < flat.size(); t += 4u)
+        flat[t] = 255u;
+    for (uint8 level = static_cast<uint8>(levels.size()); level-- > 0;)
+        for (uint32 pz = 0; pz < levels[level].PagesZ; ++pz)
+            for (uint32 px = 0; px < levels[level].PagesX; ++px)
+            {
+                const PageAddress address{0, level, px, pz};
+                ASSERT_TRUE(patcher.WritePage(address, level >= 2u ? flat : SurfacePage(expected, address)));
+            }
+    ASSERT_TRUE(patcher.RefilterAncestors(PageSampleRect{0, 0, kSide - 1u, kSide - 1u}));
+    ASSERT_EQ(writer.Finish(), "");
+    PageStoreReader actual;
+    ASSERT_EQ(actual.Open(baked, PageFieldKind::Splat), "");
+    ExpectSameSurfacePages(actual, expected);
+}
+
+TEST_F(PageStoreTest, AStoreGrowsItsPresentPagesInAPatchAndKeepsTheBytesOfThePagesItHeld)
+{
+    // The coarser levels are baked first into a store that holds only them; level 0 is added by a
+    // patch, whose longer index moves the pages it covers. Every page then reads as the full build.
+    constexpr uint32 kSide = 600u;
+    const std::filesystem::path built = m_Dir / "built.gepage";
+    BuildSurfaceStore(built, PageFieldFormat::Rgba8, PageFieldFilter::WeightsTent, kSide, kSide, SplatWeights(kSide, kSide));
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(built, PageFieldKind::Splat), "");
+    const std::vector<PageStoreLevel>& levels = expected.Layout().Levels;
+    const std::size_t level0Pages = static_cast<std::size_t>(levels[0].PagesX) * levels[0].PagesZ;
+
+    const std::filesystem::path grown = m_Dir / "grown.gepage";
+    std::vector<uint8> present(static_cast<std::size_t>(DensePageCount(levels)), 1u);
+    std::fill_n(present.begin(), level0Pages, uint8{0});
+    {
+        PageStoreWriter writer;
+        ASSERT_EQ(writer.Create(grown, MakePageStoreLayout(expected.Layout().Header, present)), "");
+        PageStorePatcher patcher(writer, nullptr);
+        for (uint8 level = 1; level < levels.size(); ++level)
+            for (uint32 pz = 0; pz < levels[level].PagesZ; ++pz)
+                for (uint32 px = 0; px < levels[level].PagesX; ++px)
+                    ASSERT_TRUE(patcher.WritePage(PageAddress{0, level, px, pz},
+                                                  SurfacePage(expected, PageAddress{0, level, px, pz})));
+        ASSERT_EQ(writer.Finish(), "");
+    }
+    PageStoreLayout layout;
+    {
+        PageStoreReader coarse;
+        ASSERT_EQ(coarse.Open(grown, PageFieldKind::Splat), "");
+        EXPECT_EQ(coarse.Layout().ResolvePresent(PageAddress{0, 0, 3, 2}), (PageAddress{0, 1, 1, 1}));
+        layout = coarse.Layout();
+    }
+
+    std::vector<uint8> level0(present.size(), 0u);
+    std::fill_n(level0.begin(), level0Pages, uint8{1});
+    PageStoreWriter writer;
+    ASSERT_EQ(writer.OpenForPatch(grown, grown, AddPresentPages(layout, level0)), "");
+    ASSERT_EQ(writer.Layout().Entries.size(), expected.Layout().Entries.size());
+    PageStorePatcher patcher(writer, nullptr);
+    for (uint32 pz = 0; pz < levels[0].PagesZ; ++pz)
+        for (uint32 px = 0; px < levels[0].PagesX; ++px)
+            ASSERT_TRUE(patcher.WritePage(PageAddress{0, 0, px, pz}, SurfacePage(expected, PageAddress{0, 0, px, pz})));
+    ASSERT_EQ(writer.Finish(), "");
+    PageStoreReader actual;
+    ASSERT_EQ(actual.Open(grown, PageFieldKind::Splat), "");
+    ExpectSameSurfacePages(actual, expected);
+}
+
 TEST_F(PageStoreTest, ABc5PagesApronBlockIsItsNeighborsEdgeBlockBitForBit)
 {
     // 300 x 300 normals: 3 x 3 pages at level 0, 2 x 2 at level 1. A page stores its 128 samples and
@@ -1826,6 +2155,21 @@ TEST(GeneratedHeightPageProviderTest, FlatBaseIsZeroAndOutOfRangeAddressesFail)
 }
 
 // ---- Container and loader --------------------------------------------------------------------------
+
+TEST_F(PageStoreTest, ATerrainContainerRefusesANormalSamplesCache)
+{
+    // The unencoded samples beside a Normal store are a bake cache: an export packs the Bc5 store.
+    constexpr uint32 kSide = 300u;
+    const std::vector<uint8> normals(static_cast<std::size_t>(kSide) * kSide * 2u, 128u);
+    const std::filesystem::path samples = m_Dir / "normal.samples.gepage";
+    BuildSurfaceStore(samples, PageFieldFormat::Rg8, PageFieldFilter::NormalTent, kSide, kSide, normals);
+    PageStoreReader reader;
+    ASSERT_EQ(reader.Open(samples, PageFieldKind::NormalSamples), "");
+    const TerrainContainerField field{PageFieldKind::NormalSamples, samples};
+    const std::filesystem::path container = m_Dir / "cache.geterrain";
+    EXPECT_NE(WriteTerrainContainer(container, {&field, 1}).find("never ships"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(container));
+}
 
 TEST_F(PageStoreTest, TerrainContainerReadsItsHeightFieldAtItsOffsetUnchanged)
 {

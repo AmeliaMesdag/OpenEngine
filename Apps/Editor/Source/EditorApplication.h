@@ -23,6 +23,7 @@
 #include "Assets/PolyhavenDownloadManager.h"
 #include "Panels/PlayModeChangeReviewModal.h"
 #include "Editor/RenderGraphTickRegistry.h"
+#include "Editor/Registries/EditorServiceRegistry.h"
 #include "Editor/Registries/StatusBarItemRegistry.h"
 #include "EditorVideoPlayerController.h"
 #include "Startup/EditorSessionDescriptor.h"
@@ -85,7 +86,6 @@ class MovieRecorderController;
 class PlayModeManager;
 class GameViewPointerLock;
 class WindowCursorLock;
-class RecipeControllers;
 class ScriptStatusIndicator;
 class UniversalSearchController;
 class DiagnosticShortcuts;
@@ -345,7 +345,7 @@ class EditorApplication : public Application
     // Shows m_PlayMode's entry gate.
     class PlayModeEntryModal* m_PlayEntryModal = nullptr; // owned by UI tree
     std::unique_ptr<Editor::MovieRecorderController> m_MovieRecorder;
-    std::unique_ptr<Editor::RecipeControllers> m_RecipeControllers;
+    Editor::EditorServiceRegistry m_EditorServices;
     std::unique_ptr<MissingAssetTracker> m_MissingAssetTracker;
 
     // Separate InputSystem for gameplay code — only receives events when

@@ -3,6 +3,8 @@
 #include "PageStoreSerialization.h"
 
 #include "Mathematics/CubeFaces.h"
+#include "Mathematics/Interpolation.h"
+#include "Mathematics/Vector3.h"
 
 #include <algorithm>
 #include <cassert>
@@ -147,6 +149,13 @@ uint32 PageTexelBytes(PageFieldFormat format)
     return 0u;
 }
 
+void EncodeNormalSample(const Mathematics::Vector3& normal, uint8* outTexel)
+{
+    constexpr float32 kByteMax = 255.0f;
+    outTexel[0] = static_cast<uint8>(std::lround(Math::Clamp01(normal.x * 0.5f + 0.5f) * kByteMax));
+    outTexel[1] = static_cast<uint8>(std::lround(Math::Clamp01(normal.z * 0.5f + 0.5f) * kByteMax));
+}
+
 uint32 PageStoredBytes(PageFieldFormat format, bool wide)
 {
     const uint32 stride = PageStrideTexels(format);
@@ -184,6 +193,31 @@ std::span<float32> HeightSamples(std::vector<uint8>& bytes)
     assert(bytes.size() == PagePayloadBytes(PageFieldFormat::HeightSteps) &&
            reinterpret_cast<std::uintptr_t>(bytes.data()) % alignof(float32) == 0 && "not a loaded height page");
     return {reinterpret_cast<float32*>(bytes.data()), kPageSampleCount};
+}
+
+PageStoreLayout AddPresentPages(const PageStoreLayout& layout, std::span<const uint8> present)
+{
+    std::vector<uint8> merged(present.begin(), present.end());
+    std::vector<std::pair<std::size_t, PageAddress>> kept;
+    std::size_t page = 0;
+    for (uint32 face = 0; face < layout.Header.FaceCount; ++face)
+        for (std::size_t level = 0; level < layout.Levels.size(); ++level)
+            for (uint32 z = 0; z < layout.Levels[level].PagesZ; ++z)
+                for (uint32 x = 0; x < layout.Levels[level].PagesX; ++x, ++page)
+                {
+                    const PageAddress address{static_cast<uint8>(face), static_cast<uint8>(level), x, z};
+                    const std::optional<std::size_t> index = layout.PresentIndex(address);
+                    if (!index)
+                        continue;
+                    if (page < merged.size())
+                        merged[page] = 1u;
+                    kept.emplace_back(*index, address);
+                }
+    PageStoreLayout grown = MakePageStoreLayout(layout.Header, merged);
+    for (const auto& [index, address] : kept)
+        if (const std::optional<std::size_t> to = grown.PresentIndex(address))
+            grown.Entries[*to] = layout.Entries[index];
+    return grown;
 }
 
 PageStoreLayout MakePageStoreLayout(const PageStoreHeader& header, std::span<const uint8> present)

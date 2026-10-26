@@ -71,6 +71,7 @@
 #include "SplineECS/SplineNetwork.h"
 #include "SplineECS/SplineService.h"
 #include "SplineECS/Systems/RegisterSplineSystems.h"
+#include "SplineRecipes/SplineRecipeSystem.h"
 #include "PathfindingECS/NavigationService.h"
 #include "PathfindingECS/Systems/RegisterPathfindingSystems.h"
 // ECS integration
@@ -1508,6 +1509,7 @@ bool EngineCore::EnableRenderingLoop(Engine::Renderer::RenderServices* renderSer
             {"RenderExtraction", "TerrainExtraction"},
             renderServices ? renderServices->GetDevice() : nullptr, renderServices);
         SplineECS::AddSplineSystemsToSchedule(schedule);
+        SplineRecipes::AddSplineRecipeSystemsToSchedule(schedule, renderServices);
         PathfindingECS::AddPathfindingSystemsToSchedule(schedule);
         // Associate contributions with their plugin so reload reconciliation
         // can replace or retire that plugin's systems.
