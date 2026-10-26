@@ -215,6 +215,7 @@
 #include "PlayMode/PlayModeEntryModal.h"
 #include "PlayMode/PlayModeManager.h"
 #include "PlayMode/GameViewPointerLock.h"
+#include "PlayMode/WindowCursorLock.h"
 #include "PlayMode/RuntimeInputConnection.h"
 #include "Scene/SceneEditorController.h"
 #include "Scene/SceneThumbnailCapture.h"
@@ -2822,7 +2823,8 @@ bool EditorApplication::Initialize()
             Editor::ApplySavedHiDpiPlatformSettings(main->uiPlatform.get());
 
             // Set cursor callback to change OS cursor based on hovered UI element's CSS cursor property.
-            SetupUICursorCallback(main->ui.get(), main->window.get());
+            main->cursorLock = std::make_unique<Editor::WindowCursorLock>(*main->window);
+            SetupUICursorCallback(main->ui.get(), main->window.get(), main->cursorLock.get());
         }
 
         // Wire tooltip settings into UIManager so it respects user preferences.
@@ -6941,7 +6943,7 @@ void EditorApplication::Update(float64 deltaTime)
 
         if (m_RuntimeInput)
             m_GameViewPointerLock->Update(*m_RuntimeInput,
-                                          gameViewHost ? gameViewHost->window.get() : nullptr,
+                                          gameViewHost ? gameViewHost->cursorLock.get() : nullptr,
                                           m_PlayMode &&
                                               m_PlayMode->GetState() == GameEngine::Editor::PlayModeState::Play);
     }
@@ -8155,7 +8157,8 @@ void EditorApplication::Render()
             }
             if (win && win->window)
             {
-                m_GameViewPointerLock->ForgetWindow(win->window.get());
+                m_GameViewPointerLock->ForgetCursorLock(win->cursorLock.get());
+                win->cursorLock.reset();
                 win->window->Destroy();
                 win->window.reset();
             }
@@ -8204,7 +8207,7 @@ WindowInputRouterConfig::PlaySurface EditorApplication::GetPlaySurface(Platform:
             return surface;
         surface.gameplaySink = m_RuntimeInput.get();
         surface.gameUi = win->gameView ? win->gameView->GetGameUI() : nullptr;
-        surface.pointerLocked = m_GameViewPointerLock->IsLockedTo(window);
+        surface.pointerLocked = m_GameViewPointerLock->IsLockedTo(win->cursorLock.get());
         // The mapper maps from the context resolved here instead of finding the
         // window again. Holding it raw is safe because a surface is built and
         // spent inside one routing call (WindowInputRouter::RouteMouseMove), with
@@ -8504,6 +8507,9 @@ void EditorApplication::OnShutdown()
         // Window
         if (win->window)
         {
+            if (m_GameViewPointerLock)
+                m_GameViewPointerLock->ForgetCursorLock(win->cursorLock.get());
+            win->cursorLock.reset();
             win->window->Destroy();
             win->window.reset();
         }

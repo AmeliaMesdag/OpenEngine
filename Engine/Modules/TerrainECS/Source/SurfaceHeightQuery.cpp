@@ -135,9 +135,9 @@ bool SurfaceHeightQuery::SamplePaged(float32 u, float32 v, SurfaceHeightPolicy p
     for (uint32 level = 0; level < m_Levels.size(); ++level)
     {
         const PageTexel texel = LocatePageTexel(m_Levels, level, u, v);
-        std::span<const float32> samples;
+        std::span<const uint8> bytes;
         const PageStreaming::CpuPageState state =
-            m_Pages.Page(PageStreaming::PageAddress{0, static_cast<uint8>(level), texel.PageX, texel.PageZ}, samples);
+            m_Pages.Page(PageStreaming::PageAddress{0, static_cast<uint8>(level), texel.PageX, texel.PageZ}, bytes);
         if (state == PageStreaming::CpuPageState::Missing)
         {
             finerMissing = true;
@@ -149,6 +149,7 @@ bool SurfaceHeightQuery::SamplePaged(float32 u, float32 v, SurfaceHeightPolicy p
         if (policy == SurfaceHeightPolicy::RequireFinest && detail == SurfaceHeightDetail::Coarse)
             return false;
         constexpr uint32 kStride = PageStreaming::kPageStrideSamples;
+        const std::span<const float32> samples = PageStreaming::HeightSamples(bytes);
         float32 normalized = SampleGridBilinearTexel(samples.data(), kStride, kStride, texel.StrideX, texel.StrideZ);
         if (m_Overlay)
             normalized += OverlayDelta(*m_Overlay, level, texel);
@@ -163,9 +164,10 @@ bool SurfaceHeightQuery::FillFinestPage(uint32 pageX, uint32 pageZ, std::span<fl
     assert(out.size() == static_cast<std::size_t>(kFinestPageGridSamples) * kFinestPageGridSamples);
     if (!HasPageSource() || out.size() != static_cast<std::size_t>(kFinestPageGridSamples) * kFinestPageGridSamples)
         return false;
-    std::span<const float32> samples;
-    if (m_Pages.Page(PageStreaming::PageAddress{0, 0, pageX, pageZ}, samples) != PageStreaming::CpuPageState::Resident)
+    std::span<const uint8> bytes;
+    if (m_Pages.Page(PageStreaming::PageAddress{0, 0, pageX, pageZ}, bytes) != PageStreaming::CpuPageState::Resident)
         return false;
+    const std::span<const float32> samples = PageStreaming::HeightSamples(bytes);
     // Grid sample i of the page is its stride sample i + kPageApronSamples: the first owned sample on.
     constexpr uint32 kApron = PageStreaming::kPageApronSamples;
     constexpr uint32 kStride = PageStreaming::kPageStrideSamples;

@@ -7,6 +7,7 @@
 
 #include "JobSystem/WorkStealingThreadPool.h"
 #include "Mathematics/Interpolation.h"
+#include "Mathematics/Matrix3x3.h"
 #include "Mathematics/Vector3.h"
 #include "Types/Color.h"
 
@@ -162,12 +163,37 @@ void PremultipliedTentTexel(const Taps& taps, uint8* out)
     out[3] = ToByte(encoded.a);
 }
 
+// The three values in ascending order, summed from the smallest.
+float32 AscendingSum(Mathematics::Vector3 values)
+{
+    std::sort(std::begin(values.v), std::end(values.v));
+    return (values.v[0] + values.v[1]) + values.v[2];
+}
+
 } // namespace
 
-PagePyramidBuilder::PagePyramidBuilder(PageStoreWriter& writer, bool patching, JobSystem::WorkStealingThreadPool* pool)
+float32 CubeFaceTent(const Mathematics::Matrix3x3& taps)
+{
+    const float32 neighbors = (taps[1][0] + taps[1][2]) + (taps[0][1] + taps[2][1]);
+    const float32 diagonals = (taps[0][0] + taps[2][2]) + (taps[2][0] + taps[0][2]);
+    return (0.25f * taps[1][1] + 0.125f * neighbors) + 0.0625f * diagonals;
+}
+
+float32 CubeCornerTent(float32 corner, const Mathematics::Vector3& edges, const Mathematics::Vector3& diagonals)
+{
+    constexpr float32 kCornerWeight = 5.0f / 16.0f;
+    constexpr float32 kEdgeWeight = 1.0f / 6.0f;
+    constexpr float32 kDiagonalWeight = 1.0f / 16.0f;
+    return (kCornerWeight * corner + kEdgeWeight * AscendingSum(edges)) + kDiagonalWeight * AscendingSum(diagonals);
+}
+
+PagePyramidBuilder::PagePyramidBuilder(PageStoreWriter& writer, bool patching, JobSystem::WorkStealingThreadPool* pool,
+                                       const PageFaceBuild* face)
     : m_Writer(writer)
     , m_Patching(patching)
     , m_Pool(pool)
+    , m_FaceBuild(face)
+    , m_Face(face ? face->Face : uint8{0})
 {
     const PageStoreHeader& header = writer.Layout().Header;
     m_Codec = MakePageCodec(header);
@@ -191,6 +217,13 @@ PagePyramidBuilder::PagePyramidBuilder(PageStoreWriter& writer, bool patching, J
         }
         m_Levels.push_back(std::move(state));
     }
+    if (m_FaceBuild && m_FaceBuild->Capture)
+    {
+        m_FaceBuild->Capture->Levels.resize(m_Levels.size());
+        for (std::size_t level = 0; level < m_Levels.size(); ++level)
+            for (std::vector<float32>& line : m_FaceBuild->Capture->Levels[level])
+                line.assign(m_Levels[level].Shape.SamplesX, 0.0f);
+    }
 }
 
 PagePyramidBuilder::~PagePyramidBuilder() = default;
@@ -210,6 +243,7 @@ void PagePyramidBuilder::PushLevel0Rows(const uint8* rows, uint32 rowCount)
             Quantize(0, reinterpret_cast<float32*>(level0.Rows[firstNew + r].data()), level0.Shape.SamplesX);
         });
     level0.RowsReceived += rowCount;
+    CaptureInnerLines(0, level0.RowsReceived - rowCount, rowCount);
     Advance(0);
 }
 
@@ -270,6 +304,8 @@ void PagePyramidBuilder::EmitPageRow(uint32 levelIndex, uint32 pageRow)
 {
     // A chunk of the row is encoded in parallel, then written in X order: the writer places pages
     // in the order they arrive, so the store's bytes do not depend on the workers.
+    if (m_FaceBuild && m_FaceBuild->Capture)
+        return;
     const uint32 pagesX = m_Levels[levelIndex].Shape.PagesX;
     std::vector<EncodedPage> encoded(std::min(pagesX, kPagesEncodedPerChunk));
     std::vector<uint8> changed(encoded.size());
@@ -286,7 +322,7 @@ void PagePyramidBuilder::EmitPageRow(uint32 levelIndex, uint32 pageRow)
                 m_PagesUnchanged.fetch_add(1);
                 continue;
             }
-            if (!m_Writer.WritePage(PageAddress{0, static_cast<uint8>(levelIndex), first + i, pageRow}, encoded[i]))
+            if (!m_Writer.WritePage(PageAddress{m_Face, static_cast<uint8>(levelIndex), first + i, pageRow}, encoded[i]))
             {
                 m_Failed.store(true);
                 return;
@@ -303,20 +339,34 @@ bool PagePyramidBuilder::EncodePage(uint32 levelIndex, uint32 pageX, uint32 page
     std::vector<uint8> samples(static_cast<std::size_t>(m_Stride) * m_Stride * m_TexelBytes);
     const int64 firstX = static_cast<int64>(pageX) * kPageOwnedSamples - m_Apron;
     const int64 firstZ = static_cast<int64>(pageZ) * kPageOwnedSamples - m_Apron;
-    for (uint32 r = 0; r < m_Stride; ++r)
+    if (m_FaceBuild)
     {
-        const uint8* source = Row(level, firstZ + r);
-        uint8* out = samples.data() + static_cast<std::size_t>(r) * m_Stride * m_TexelBytes;
-        for (uint32 c = 0; c < m_Stride; ++c)
-            std::memcpy(out + static_cast<std::size_t>(c) * m_TexelBytes,
-                        source + static_cast<std::size_t>(ClampIndex(firstX + c, width)) * m_TexelBytes, m_TexelBytes);
+        // A cube store holds float32 heights.
+        assert(m_TexelBytes == sizeof(float32));
+        for (uint32 row = 0; row < m_Stride; ++row)
+        {
+            auto* out = reinterpret_cast<float32*>(samples.data()) + static_cast<std::size_t>(row) * m_Stride;
+            for (uint32 column = 0; column < m_Stride; ++column)
+                out[column] = FaceSample(levelIndex, firstX + column, firstZ + row);
+        }
+    }
+    else
+    {
+        for (uint32 row = 0; row < m_Stride; ++row)
+        {
+            const uint8* source = Row(level, firstZ + row);
+            uint8* out = samples.data() + static_cast<std::size_t>(row) * m_Stride * m_TexelBytes;
+            for (uint32 column = 0; column < m_Stride; ++column)
+                std::memcpy(out + static_cast<std::size_t>(column) * m_TexelBytes,
+                            source + static_cast<std::size_t>(ClampIndex(firstX + column, width)) * m_TexelBytes, m_TexelBytes);
+        }
     }
 
     PageFootprint footprint;
     if (IsHeight())
         footprint = BoundHeightPage(levelIndex, pageX, pageZ, samples);
     m_Codec->Encode(levelIndex, samples, footprint, encoded);
-    const PageAddress address{0, static_cast<uint8>(levelIndex), pageX, pageZ};
+    const PageAddress address{m_Face, static_cast<uint8>(levelIndex), pageX, pageZ};
     const PageIndexEntry* current = m_Writer.Layout().FindPresent(address);
     return !(m_Patching && current && current->Hash == encoded.Hash && current->MinWord == encoded.MinWord &&
              current->MaxWord == encoded.MaxWord && current->Flags == encoded.Flags);
@@ -370,6 +420,7 @@ void PagePyramidBuilder::MakeCoarserRows(uint32 levelIndex, uint32 firstRow, uin
     for (std::vector<uint8>& row : rows)
         coarser.Rows.push_back(std::move(row));
     coarser.RowsReceived += rowCount;
+    CaptureInnerLines(levelIndex + 1u, coarser.RowsReceived - rowCount, rowCount);
 }
 
 void PagePyramidBuilder::MakeCoarserRow(uint32 levelIndex, uint32 row, std::vector<uint8>& out) const
@@ -383,7 +434,10 @@ void PagePyramidBuilder::MakeCoarserRow(uint32 levelIndex, uint32 row, std::vect
     if (m_Filter == PageFieldFilter::HeightTent)
     {
         float32* heights = reinterpret_cast<float32*>(out.data());
-        HeightTentRow(rows, finerWidth, heights, width);
+        if (m_FaceBuild)
+            MakeFaceRow(levelIndex, row, heights, width);
+        else
+            HeightTentRow(rows, finerWidth, heights, width);
         Quantize(levelIndex + 1u, heights, width);
         return;
     }
@@ -408,6 +462,76 @@ void PagePyramidBuilder::MakeCoarserRow(uint32 levelIndex, uint32 row, std::vect
         case PageFieldFilter::HeightTent:
             break;
         }
+    }
+}
+
+float32 PagePyramidBuilder::FaceSample(uint32 levelIndex, int64 x, int64 z) const
+{
+    const LevelState& level = m_Levels[levelIndex];
+    const int64 last = static_cast<int64>(level.Shape.SamplesX) - 1;
+    x = std::clamp<int64>(x, -1, last + 1);
+    z = std::clamp<int64>(z, -1, last + 1);
+    const bool pastX = x < 0 || x > last;
+    const bool pastZ = z < 0 || z > last;
+    // Past a corner no face has a sample: the corner sample repeats. Without ghosts (the capture
+    // pass) a side's own sample stands in: only the sides' samples read it, and the capture keeps
+    // none of them.
+    if ((pastX && pastZ) || ((pastX || pastZ) && !m_FaceBuild->Ghosts))
+        return Heights(Row(level, std::clamp<int64>(z, 0, last)))[std::clamp<int64>(x, 0, last)];
+    if (!pastX && !pastZ)
+        return Heights(Row(level, z))[x];
+    const auto& lines = m_FaceBuild->Ghosts->Levels[levelIndex];
+    if (pastZ)
+        return lines[static_cast<std::size_t>(z < 0 ? PageFaceSide::MinZ : PageFaceSide::MaxZ)][static_cast<std::size_t>(x)];
+    return lines[static_cast<std::size_t>(x < 0 ? PageFaceSide::MinX : PageFaceSide::MaxX)][static_cast<std::size_t>(z)];
+}
+
+void PagePyramidBuilder::MakeFaceRow(uint32 levelIndex, uint32 row, float32* out, uint32 width) const
+{
+    const uint32 last = width - 1u;
+    const int64 centerZ = 2 * static_cast<int64>(row);
+    for (uint32 column = 0; column < width; ++column)
+    {
+        const int64 centerX = 2 * static_cast<int64>(column);
+        if ((column == 0 || column == last) && (row == 0 || row == last))
+        {
+            // Outward from the corner along X and Z. The sample one past the corner along X and the
+            // one past it along Z are both the third edge's sample next to the corner.
+            const int64 outwardX = column == 0 ? -1 : 1;
+            const int64 outwardZ = row == 0 ? -1 : 1;
+            out[column] = CubeCornerTent(
+                FaceSample(levelIndex, centerX, centerZ),
+                {FaceSample(levelIndex, centerX - outwardX, centerZ), FaceSample(levelIndex, centerX, centerZ - outwardZ),
+                 FaceSample(levelIndex, centerX + outwardX, centerZ)},
+                {FaceSample(levelIndex, centerX - outwardX, centerZ - outwardZ),
+                 FaceSample(levelIndex, centerX + outwardX, centerZ - outwardZ),
+                 FaceSample(levelIndex, centerX - outwardX, centerZ + outwardZ)});
+            continue;
+        }
+        Mathematics::Matrix3x3 taps;
+        for (int32 dz = -1; dz <= 1; ++dz)
+            for (int32 dx = -1; dx <= 1; ++dx)
+                taps[dx + 1][dz + 1] = FaceSample(levelIndex, centerX + dx, centerZ + dz);
+        out[column] = CubeFaceTent(taps);
+    }
+}
+
+void PagePyramidBuilder::CaptureInnerLines(uint32 levelIndex, uint32 firstRow, uint32 rowCount)
+{
+    if (!m_FaceBuild || !m_FaceBuild->Capture)
+        return;
+    const LevelState& level = m_Levels[levelIndex];
+    const uint32 samples = level.Shape.SamplesX;
+    auto& lines = m_FaceBuild->Capture->Levels[levelIndex];
+    for (uint32 z = firstRow; z < firstRow + rowCount; ++z)
+    {
+        const float32* row = Heights(Row(level, z));
+        if (z == 1u)
+            std::copy(row, row + samples, lines[static_cast<std::size_t>(PageFaceSide::MinZ)].begin());
+        if (z == samples - 2u)
+            std::copy(row, row + samples, lines[static_cast<std::size_t>(PageFaceSide::MaxZ)].begin());
+        lines[static_cast<std::size_t>(PageFaceSide::MinX)][z] = row[1];
+        lines[static_cast<std::size_t>(PageFaceSide::MaxX)][z] = row[samples - 2u];
     }
 }
 

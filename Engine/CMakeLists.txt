@@ -94,11 +94,14 @@ set(ENGINE_SOURCES
     Source/Components/Rendering/SkySunIlluminance.cpp
     Source/Components/Rendering/SkySunPath.cpp
     Source/Scene/SceneIO.cpp
+    Source/Scene/AssetManagerSceneResolver.cpp
+    Source/Scene/PrefabLibrary.cpp
     Source/Scene/SceneRaycast.cpp
     Source/Scene/MeshBvhCache.cpp
     Source/Scene/MeshBvhDiskFormat.cpp
     Source/Scene/TerrainPicking.cpp
     Source/Scene/PrefabPlacement.cpp
+    Source/Scene/PrefabSpawn.cpp
     Source/Scene/PrefabOverrideWriter.cpp
     Source/Scene/KeptComponentResolver.cpp
     Source/Scene/SceneEngineEmbedMaterializer.cpp
@@ -2879,7 +2882,7 @@ endif()
 
                 # Headless shader correctness gates, independent of the editor
                 # benchmark scripts and of pipeline-declaration fixture state.
-                foreach(aa_test IN ITEMS TaaResolveHistoryTests SsaaResolveTests)
+                foreach(aa_test IN ITEMS TaaResolveHistoryTests SsaaResolveTests MsaaColorResolveTests)
                     add_executable(${aa_test} Tests/${aa_test}.cpp)
                     target_link_libraries(${aa_test} PRIVATE Engine RenderGraphTestSupport GTest::gtest GTest::gtest_main)
                     set_target_properties(${aa_test} PROPERTIES
@@ -3580,6 +3583,8 @@ endif()
 	    add_executable(EngineSceneIOTests
 	        Tests/SceneIOTests.cpp
 	        Tests/EmbeddedAnimationPersistenceTests.cpp
+	        Tests/PrefabLibraryTests.cpp
+	        Tests/PrefabTimingTests.cpp
 	        Tests/SceneIntegerTests.cpp
 	        Tests/SceneStructArrayTests.cpp
 	        Tests/SceneSchemaOwnershipTests.cpp
@@ -3590,6 +3595,8 @@ endif()
 	        Modules/TerrainGrass/Tests/TerrainGrassClampsTests.cpp
 	        Modules/TerrainGrass/Tests/TerrainGrassPresetsTests.cpp)
 	    target_link_libraries(EngineSceneIOTests PRIVATE Engine GTest::gtest GTest::gtest_main)
+	    # PrefabLibraryTests reads the engine's private prefab library header and the shared TestTempDir.h.
+	    target_include_directories(EngineSceneIOTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source" ${CMAKE_SOURCE_DIR}/Tests)
 	    # TerrainGrassClamps.SceneSchemaCarriesNoInlineClampCall reads the scene schema and fails on
 	    # any field bound written inline there instead of in the shared clamp pass.
 	    # SceneIO.CommittedScenesLoadWithNoSkippedFieldAndNoUnknownComponent loads the committed scenes

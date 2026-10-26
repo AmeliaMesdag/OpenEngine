@@ -177,6 +177,7 @@ set(EDITOR_SOURCES
     Source/PlayMode/PlayButtonMenu.cpp
     Source/PlayMode/PlayButtonState.cpp
     Source/PlayMode/GameViewPointerLock.cpp
+    Source/PlayMode/WindowCursorLock.cpp
     Source/Scene/DefaultSceneEntities.cpp
     Source/Scene/SceneBackupRecovery.cpp
     Source/Scene/SceneDocumentManager.cpp
@@ -710,6 +711,7 @@ set(EDITOR_HEADERS
     Include/PlayMode/PlayButtonMenu.h
     Include/PlayMode/PlayButtonState.h
     Include/PlayMode/GameViewPointerLock.h
+    Include/PlayMode/WindowCursorLock.h
     Source/PlayMode/GameViewPointerLockRule.h
     Include/UndoRedo/VcsRevertCommand.h
     Include/UndoRedo/TagCommands.h

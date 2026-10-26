@@ -510,10 +510,12 @@ set(EDITOR_TEST_SOURCES
 	# TU (InputSystem only), so it compiles in rather than dragging EditorApplication.
 	RuntimeInputConnectionTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/RuntimeInputConnection.cpp
-	# When the editor grants the game's pointer lock. Leaf TU (InputSystem +
-	# Window), so it compiles in rather than dragging EditorApplication.
+	# When the editor grants the game's pointer lock, and which lock a window
+	# holds. Leaf TUs (InputSystem + Window), so they compile in rather than
+	# dragging EditorApplication.
 	GameViewPointerLockTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/GameViewPointerLock.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/PlayMode/WindowCursorLock.cpp
 	# The colour picker dialog's own routing: a UI-only chain, plus the
 	# eyedropper's screen-wide pointer grab and the Escape that ends it. Leaf TU
 	# (WindowInputRouter + std::function), so it compiles in rather than dragging
@@ -989,6 +991,8 @@ set(EDITOR_TEST_SOURCES
 	MaterialInspectorLayoutTests.cpp
 	# The percent row's value box holds "100 %" at the inspector's default width.
 	InspectorPercentRowLayoutTests.cpp
+	# An inspector label drag locks the pointer only past the drag threshold.
+	InspectorLabelDragPointerLockTests.cpp
 	# A pending asset's header: the name ellipsises first and "preparing" stays right after it.
 	PendingAssetHeaderLayoutTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/PendingAssetHeader.cpp

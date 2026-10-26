@@ -192,9 +192,9 @@ void ExpectDirectoryMatchesResidency(const CpuPages& cpu, std::span<const PageSt
             for (uint32 x = 0; x < levels[level].PagesX; ++x)
             {
                 const PageAddress address{0, static_cast<uint8>(level), x, z};
-                std::span<const float32> samples;
+                std::span<const uint8> samples;
                 const PageStreaming::CpuPageState state = directory.Page(address, samples);
-                const std::vector<float32>* held = cpu.Residency.Samples(kStream, address);
+                const std::vector<uint8>* held = cpu.Residency.Bytes(kStream, address);
                 ASSERT_EQ(state == PageStreaming::CpuPageState::Resident, held != nullptr)
                     << when << ": level " << level << " page " << x << ", " << z;
                 if (held)
@@ -246,14 +246,14 @@ TEST(CpuHeightPages, TheCpuPageDirectoryHoldsEveryPageTheResidencyHoldsAfterLand
         cpu.Cache.Update(frame);
     }
     ExpectDirectoryMatchesResidency(cpu.Cache, levels, "after the first window landed");
-    ASSERT_NE(cpu.Cache.Residency.Samples(kStream, firstPage), nullptr);
+    ASSERT_NE(cpu.Cache.Residency.Bytes(kStream, firstPage), nullptr);
     for (; frame < 8; ++frame)
     {
         cpu.Cache.Want(WindowAround(700.0f, 700.0f));
         cpu.Cache.Update(frame);
     }
     ExpectDirectoryMatchesResidency(cpu.Cache, levels, "after the trim");
-    ASSERT_EQ(cpu.Cache.Residency.Samples(kStream, firstPage), nullptr) << "the trim did not drop the first window";
+    ASSERT_EQ(cpu.Cache.Residency.Bytes(kStream, firstPage), nullptr) << "the trim did not drop the first window";
 }
 
 TEST(CpuHeightPages, OutsideEveryWindowTheAnswerIsCoarseAndNeverUnsampledInsideTheFootprint)
@@ -402,7 +402,10 @@ void RunAndCollectLevel0Uploads(TerrainHeightPages& pages, const PagedTerrainReq
                 continue;
             for (const HeightPageUpload& samples : pages.Uploads())
                 if (samples.Slot == upload.Slot)
-                    uploads[{upload.Page.Address.X, upload.Page.Address.Z}] = samples.Samples;
+                {
+                    const std::span<const float32> heights = PageStreaming::HeightSamples(samples.Bytes);
+                    uploads[{upload.Page.Address.X, upload.Page.Address.Z}] = {heights.begin(), heights.end()};
+                }
         }
     }
 }

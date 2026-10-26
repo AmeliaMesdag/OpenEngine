@@ -48,6 +48,8 @@ target_link_libraries(PathfindingECS
         # link would create a SHARED↔STATIC cycle, which CMake forbids. Engine's
         # symbols get resolved when Engine.dll links PathfindingECS.lib. The
         # Engine/Include headers the sources use arrive through ECSComponents.
+        # AssetManager.h includes Events/Event.h (header-only).
+        Events
         PhysicsECS
         # The surface bake reads the terrain's height (SurfaceHeightQuery).
         TerrainECS

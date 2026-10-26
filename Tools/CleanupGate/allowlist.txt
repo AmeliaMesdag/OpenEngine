@@ -17,6 +17,7 @@ Apps/Editor/Source/Projects/SubprocessStream.cpp:std_thread:1                   
 Apps/Editor/Source/main.cpp:debug_output:1                                                # crash handler: writes to the debugger after the logger may be gone
 Apps/Editor/Source/main.cpp:printf_output:14                                              # crash handler: writes to stderr after the logger may be gone
 Engine/Include/Platform/Thread.h:sleep_poll:1                                             # Platform::SleepPrecise, the engine's one sleep
+Engine/Include/Scene/PrefabSpawn.h:one_free_function_file:1                               # SpawnPrefab and DespawnPrefab; the gate does not see SpawnPrefab, whose signature wraps
 Engine/Modules/CBTTerrain/Source/CBTInstance.cpp:manual_barrier:20                        # the CBT shadow chain's resources and passes move into the render graph (#4809)
 Engine/Modules/CBTTerrain/Source/CBTResources.cpp:create_buffer:8                         # the CBT shadow chain's resources and passes move into the render graph (#4809)
 Engine/Modules/CBTTerrain/Source/CBTResources.cpp:create_command_list:1                   # the CBT shadow chain's resources and passes move into the render graph (#4809)
@@ -101,6 +102,7 @@ Engine/Source/Scene/PrefabOverrideWriter.cpp:string_key_unordered_set:2         
 Engine/Source/Scene/PrefabOverrideWriter.h:std_unordered_map:2                            # keyed per entity of a whole scene (the save context's tag map, the members by entity): a sorted insert is linear
 Engine/Source/Scene/PrefabOverrideWriter.h:std_unordered_set:1                            # keyed per entity of a whole scene (the excluded set, the created ids): a sorted insert is linear
 Engine/Source/Scene/PrefabOverrideWriter.h:string_key_unordered_set:1                     # the tags of every entity of a whole scene: a sorted insert is linear
+Engine/Source/Scene/PrefabSpawn.cpp:one_free_function_file:1                              # SpawnPrefab and DespawnPrefab; the gate does not see SpawnPrefab, whose signature wraps
 Engine/Source/Scene/SceneDoc.h:string_key_unordered_set:1                                 # the tags of every entity of a whole scene: a sorted insert is linear
 Engine/Source/Scene/SceneIO.cpp:std_unordered_map:4                                       # keyed per entity of a whole scene (the save context's tag map, the members by entity): a sorted insert is linear
 Engine/Source/Scene/SceneIO.cpp:std_unordered_set:7                                       # keyed per entity of a whole scene (the excluded set, the created ids): a sorted insert is linear

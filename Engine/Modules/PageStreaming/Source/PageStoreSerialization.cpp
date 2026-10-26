@@ -73,8 +73,11 @@ std::string ValidateHeader(const PageStoreHeader& header, uint32 levelCount)
         return "a store that holds no heights has height units or a reference radius";
     if (header.FaceCount == 0 || header.FaceCount > kPageStoreMaxFaces)
         return "face count out of range";
-    if (header.FaceMap != PageFaceMap::Flat)
+    if (header.FaceMap != PageFaceMap::Flat && header.FaceMap != PageFaceMap::EqualAngleCube)
         return "unknown face map";
+    if (header.FaceMap == PageFaceMap::EqualAngleCube &&
+        (header.FaceCount != kPageStoreMaxFaces || header.SamplesX != header.SamplesZ))
+        return "a cube store has six square faces";
     if (header.SamplesX == 0 || header.SamplesZ == 0 || header.SamplesX > kPageStoreMaxSamplesPerAxis ||
         header.SamplesZ > kPageStoreMaxSamplesPerAxis)
         return "level-0 size out of range";

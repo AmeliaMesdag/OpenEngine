@@ -84,6 +84,7 @@ class PackageManagerController;
 class MovieRecorderController;
 class PlayModeManager;
 class GameViewPointerLock;
+class WindowCursorLock;
 class RecipeControllers;
 class ScriptStatusIndicator;
 class UniversalSearchController;
@@ -218,6 +219,8 @@ class EditorApplication : public Application
         WindowRole role = WindowRole::Tool;
         WindowCapabilities capabilities{};
         std::unique_ptr<Platform::Window> window; // platform window wrapper
+        // The one owner of the window's cursor lock; it dies before the window.
+        std::unique_ptr<Editor::WindowCursorLock> cursorLock;
         int width = 0;
         int height = 0;
         std::string title;
