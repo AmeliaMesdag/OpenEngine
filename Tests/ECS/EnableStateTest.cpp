@@ -16,7 +16,7 @@
 #include "Components/Transform.h"
 #include "ECS/AutoRegistration.h"
 #include "ECS/CachedQuery.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/Components.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"

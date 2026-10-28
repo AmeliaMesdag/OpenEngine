@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "InspectorLayoutFixture.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 
 #include "Components/Terrain/TerrainModifierEffects.h"
 #include "UI/Controls/FloatField.h"

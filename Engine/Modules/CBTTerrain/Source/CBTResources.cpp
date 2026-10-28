@@ -3,11 +3,13 @@
 #include <algorithm>
 
 #include "CBTTerrain/CBTKernelSet.h"
+#include "CBTTerrain/CBTSphereFaceMap.h"
 
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
 #include "Logger/Logger.h"
 
+#include <cassert>
 #include <cstring>
 
 namespace GameEngine::CBTTerrain
@@ -569,7 +571,8 @@ void CBTResources::WriteOneSet(Rendering::DescriptorSetHandle set,
                                       std::vector<TextureViewHandle>(m_NormalChainViews.begin(), m_NormalChainViews.end()));
 }
 
-void CBTResources::UploadFrameParams(uint32_t frameCounter, const CBTFrameParams& params)
+void CBTResources::UploadFrameParams(uint32_t frameCounter, const CBTFrameParams& params,
+                                     const SphereEditRegions& sphereDirty)
 {
     if (!m_FrameParams.IsValid())
         return;
@@ -583,6 +586,14 @@ void CBTResources::UploadFrameParams(uint32_t frameCounter, const CBTFrameParams
     // The page table's slot stride travels with the frame that reads it (cbt_layout.glsl
     // CBT_PageRingBase): ProvisionPageTableWords runs before this upload in the frame.
     dst->AnalyticParams[kCBTPageRingWordsLane] = static_cast<float>(m_PageTableSlotWords);
+    for (Mathematics::Vector4& rect : dst->SphereDirty)
+        rect = Mathematics::Vector4{};
+    for (uint32_t i = 0; i < sphereDirty.Count; ++i)
+    {
+        const SphereFaceUVRect& rect = sphereDirty.Rects[i];
+        assert(rect.Face < kCubeFaceCount6 && "a sphere dirty rect names a cube face");
+        dst->SphereDirty[rect.Face] = Mathematics::Vector4{rect.MinU, rect.MinV, rect.MaxU, rect.MaxV};
+    }
     m_Device->UnmapBuffer(m_FrameParams);
 }
 

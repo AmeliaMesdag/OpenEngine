@@ -20,7 +20,7 @@
 // Deduced-parameter detection: probe slot I with ProbeAlienTag (a type
 // nothing converts to). Only a deduced parameter can bind it.
 
-#include "ECS/ComponentConcepts.h"
+#include "ECS/Component/ComponentConcepts.h"
 #include "ECS/ECS.h"
 
 #include <cstdint>

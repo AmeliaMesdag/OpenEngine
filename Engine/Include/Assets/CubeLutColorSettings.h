@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Rendering/Utils/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
 
 #include <filesystem>
 

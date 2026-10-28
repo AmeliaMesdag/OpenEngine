@@ -11,7 +11,7 @@
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "ECS/World.h"
-#include "Editor/Hierarchy/HierarchyEntityIcon.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h"
 #include "Types/FlatMap.h"
 
 #include <span>

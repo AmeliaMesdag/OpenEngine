@@ -5,6 +5,12 @@ description: How fine the terrain mesh is near the camera and far from it, set b
 
 A terrain is drawn as one adaptive mesh: triangles are small near the camera and grow with distance, and the mesh re-adapts every frame as the camera moves. Two things decide how fine it is. Near the camera of a heightfield terrain, the height data's own spacing sets the smallest triangle. Farther away, **Target Pixel Error** sets how long a triangle edge may be on screen. This page explains both and what each one costs.
 
+:::note[One terrain draws per scene]
+
+A scene draws one terrain. When more than one terrain is active, the terrain added first draws, and the Inspector of every other terrain names the drawn terrain. To draw another terrain, disable or delete the drawn one. When a scene opens, its active terrains count as added in the order the scene lists them. A terrain that is disabled when the scene opens counts as added when it is first enabled. A planar terrain that does not draw still has its collision; of several planets, only the one added first gets collision.
+
+:::
+
 ## The short version
 
 :::tip[Leave Target Pixel Error at 11 and choose detail with Samples Per Meter]

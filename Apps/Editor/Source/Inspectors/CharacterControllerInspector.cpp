@@ -2,7 +2,7 @@
 
 #include "InspectorRegistry.h"
 #include "Inspectors/InspectorUIHelpers.h"
-#include "Inspectors/PhysicsInspectorShared.h"
+#include "Inspectors/Physics/PhysicsInspectorShared.h"
 
 #include "ECS/ECSTemplates.h"
 #include "Editor/Entities/EditorComponentTraits.h"

@@ -4,7 +4,7 @@
 #include "Types/Types.h"
 
 #include <memory>
-#include "Rendering/CameraDerivation.h"
+#include "Rendering/Camera/CameraDerivation.h"
 
 namespace GameEngine::Rendering
 {

@@ -8,7 +8,7 @@
 #include "Components/Transform.h"
 #include "DayCycle/DayCycleAxis.h"
 #include "DayCycle/DayCycleScrub.h"
-#include "DayCycle/DayCycleWindow.h"
+#include "DayCycle/DayCycleWindow/DayCycleWindow.h"
 #include "Editor/Entities/EditorECSHelpers.h"
 #include "Engine/Rendering/SkyRenderFeature.h"
 #include "UI/Controls/CurveField.h"

@@ -4,7 +4,7 @@
 #include "Markups/MarkupEditorBridge.h"
 #include "Markups/MarkupEditorSurfaces.h"
 #include "Platform/Shell.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "UI/Controls/EntityLink.h"
 #include "UI/Controls/Label.h"
 #include "UI/UIEvents.h"

@@ -11,7 +11,7 @@
 #include "Rendering/Core/GPUCulling.h"
 #include "Rendering/Core/GPUInstanceDepthClass.h"
 #include "Types/GeometricReserve.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Core/SpecializationConstants.h"
 
 static_assert(GameEngine::Rendering::kMaxCullingViewsPerDispatch ==

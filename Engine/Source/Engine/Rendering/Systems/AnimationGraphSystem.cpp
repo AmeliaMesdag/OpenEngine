@@ -2,9 +2,9 @@
 #include "ECSModules/Rendering/Systems/AnimationGraphCompileFromModel.h"
 
 #include "Animation/AnimationEventCollectorStore.h"
-#include "Animation/AnimationGraphPlayer.h"
-#include "Animation/AnimationGraphSerializer.h"
-#include "Animation/AnimationGraphStore.h"
+#include "Animation/AnimationGraph/AnimationGraphPlayer.h"
+#include "Animation/AnimationGraph/AnimationGraphSerializer.h"
+#include "Animation/AnimationGraph/AnimationGraphStore.h"
 #include "Animation/EvaluationContext.h"
 #include "Animation/Nodes/AdditiveBlendNode.h"
 #include "Animation/Nodes/Blend2Node.h"

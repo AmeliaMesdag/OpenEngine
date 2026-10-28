@@ -9,7 +9,7 @@
 #include "Logger/Logger.h"
 #include "Rendering/Core/Device.h"
 #include "Types/StringUtils.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 
 namespace GameEngine::Engine::Renderer::Pipeline::Nodes::Detail
 {

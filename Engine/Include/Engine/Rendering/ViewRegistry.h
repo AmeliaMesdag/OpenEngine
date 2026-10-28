@@ -8,12 +8,12 @@
 
 #pragma once
 
-#include "Rendering/CameraTypes.h"                // CameraData/Info, ViewDesc, ViewClearConfig, ViewTargets
+#include "Rendering/Camera/CameraTypes.h"                // CameraData/Info, ViewDesc, ViewClearConfig, ViewTargets
 #include "Rendering/Core/Device.h"                // IDevice, BufferHandle, kMaxSupportedFramesInFlight
 #include "Engine/Rendering/AntiAliasing.h"        // AntiAliasingMode, jitter primitives
 #include "Rendering/Core/Handle.h"                // TextureHandle, SamplerHandle
 #include "Rendering/Core/RenderGraph/RGFrame.h"   // RGTexture, RGFrameStamp
-#include "Rendering/Materials/ShaderVariantKey.h" // MaterialKeyword
+#include "Rendering/Materials/Shader/ShaderVariantKey.h" // MaterialKeyword
 #include "Engine/Rendering/CameraAspectRatio.h"   // ViewLetterbox, PixelPerfectViewState
 #include "Engine/Rendering/DrawCommand.h"         // DrawCommand
 #include "Engine/Rendering/DepthPassTypes.h"      // DepthPassType

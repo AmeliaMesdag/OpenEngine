@@ -32,7 +32,7 @@
 #include "Ocean/OceanTime.h"
 #include "Ocean/OceanUnderwater.h"
 #include "Ocean/OceanWaveMaskSim.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Handle.h"
 
 #include <array>

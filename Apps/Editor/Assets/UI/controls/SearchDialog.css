@@ -395,6 +395,11 @@ button.search-dialog-result-view-toggle,
 	background-color: #FFC107;
 }
 
+/* The prefab glyph the Assets browser and the Hierarchy show. */
+.icon-prefab {
+	background-image: url("editor:Icons/PrefabAsset.svg");
+}
+
 .icon-command {
 	background-color: var(--ui_color_accent_blue);
 }

@@ -1,4 +1,4 @@
-/* ScriptPackagesList (Apps/Editor/Source/Editor/Settings/ScriptPackagesList.h).
+/* ScriptPackagesList (Apps/Editor/Source/Editor/Settings/ScriptPackages/ScriptPackagesList.h).
  *
  * The list is the control's element; its rows, the add row and the status line come from
  * ScriptPackagesList.uxml and ScriptPackageRow.uxml beside this sheet. The control requests this

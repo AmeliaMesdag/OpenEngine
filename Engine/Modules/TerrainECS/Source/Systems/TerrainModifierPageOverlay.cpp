@@ -257,7 +257,7 @@ void TerrainModifierSystem::BakeHeightPageOverlay(TiledTerrainData& tiled, float
                 changed = Union(changed, *dirty);
         }
         PublishPageOverlay(
-            tiled, std::make_shared<PageStreaming::HeightPageOverlay>(levels, bake, std::move(delta)), changed);
+            tiled, std::make_shared<PageStreaming::HeightPageOverlay>(uint8{0}, levels, bake, std::move(delta)), changed);
     }
     tiled.PageOverlayCurrent = true;
 }

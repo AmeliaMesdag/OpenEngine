@@ -6,7 +6,7 @@
 // definition in one translation unit.
 
 #include "Core/WindowUiBootstrap.h"
-#include "EditorApplication.h"
+#include "EditorApplication/EditorApplication.h"
 
 #include <filesystem>
 #include <string>

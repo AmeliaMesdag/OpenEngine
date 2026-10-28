@@ -130,6 +130,9 @@ struct Terrain
     uint32 TerrainDataGeneration = 0;
     uint32 TiledTerrainHandle = 0;     // TiledTerrainData (tile management, 0 = not tiled)
     uint32 TiledTerrainGeneration = 0;
+    // [DoNotSerialize] The first extraction frame that visited this terrain, 0 until then. The earliest
+    // terrain draws (TerrainECS::DrawOrderKey), so a terrain added later never takes the draw.
+    uint32 DrawOrderFrame = 0;
     // [DoNotSerialize] The scene asset this terrain was loaded from, set by its scene schema
     // at load. With the entity's SceneEntityTag it names the terrain's one baked-terrain
     // cache artifact (TerrainBakeCache.h). Null for a terrain no saved scene loaded, which

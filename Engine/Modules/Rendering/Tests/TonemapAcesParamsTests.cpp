@@ -9,7 +9,7 @@
 #include <Rendering/Core/CommandList.h>
 #include <Rendering/Core/Device.h>
 #include <Rendering/Materials/MaterialBuilder.h>
-#include <Rendering/Materials/ShaderReflection.h>
+#include <Rendering/Materials/Shader/ShaderReflection.h>
 
 using namespace GameEngine::Rendering;
 

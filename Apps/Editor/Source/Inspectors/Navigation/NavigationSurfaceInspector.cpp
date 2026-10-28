@@ -3,7 +3,7 @@
 #include "Editor/Entities/EditorComponentTraits.h"
 #include "InspectorRegistry.h"
 #include "Inspectors/DefaultComponentInspector.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "SceneView/Gizmos/NavigationSurfaceGizmo.h"
 #include "UI/Controls/Dropdown.h"
@@ -12,7 +12,7 @@
 #include "UI/Controls/Vector3Field.h"
 #include "UI/InspectorSection.h"
 
-#include "ECS/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
 #include "Components/Transform.h"

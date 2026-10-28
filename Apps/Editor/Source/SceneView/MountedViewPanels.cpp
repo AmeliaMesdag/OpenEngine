@@ -2,7 +2,7 @@
 
 #include "EditorPanelIds.h"
 #include "Panels/GameViewPanel.h"
-#include "Panels/SceneViewPanel.h"
+#include "SceneView/SceneViewPanel.h"
 #include "UI/Controls/Mount.h"
 #include "UI/UIElement.h"
 #include "UI/UIManager.h"

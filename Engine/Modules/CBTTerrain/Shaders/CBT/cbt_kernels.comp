@@ -522,6 +522,7 @@ void Kernel_Reset()
     gQueue.WorkQueue[CBT_WQ_PROPAGATE_SIMPLIFY_COUNTER] = 0;
     gQueue.WorkQueue[CBT_WQ_SIMPLIFY_COUNTER] = 0;
     gQueue.WorkQueue[CBT_WQ_VERTEX_EVAL_COUNTER] = 0; // plan §planet-shading perf counter
+    gQueue.WorkQueue[CBT_WQ_UNRESOLVED_PAGE_SAMPLES] = 0;
     // The four counters, named: each one accumulates across frames if it is not zeroed here,
     // and CBTLayout.GlslValidationCountersMatchCpp pins each assignment by name.
     gValidation.Validation[CBT_VALIDATION_ERROR_COUNTER] = 0u;
@@ -1584,37 +1585,30 @@ void Kernel_Classify()
     // thresholds oscillates the density); the edit's new heights re-refine the region
     // through the normal screen-space metric once VertexEval re-samples them. An empty
     // rect (no edit) skips this entirely, keeping the loop quiescent (the #405 pattern).
-    // (face,rect) region identity (plan §planet-editing). The stored per-corner UV is
-    // the terrain UV (planar) or the FACE-LOCAL UV (spherical) VertexEval wrote last
-    // frame. Planar: overlap the bisector's UV AABB with the dirty rect. Spherical: the
-    // dirty rect is face-local and pc.dirtyFace selects the face — this bisector only
-    // qualifies when it lives on that face (region-proportional per face; a cross-face
-    // edit is handed one face per update, the others re-refine via the normal metric).
-    // Overlap => bin MODIFIED; the new heights reach the split test through VertexEval's
-    // re-sample. An empty rect (no edit) skips this, keeping the loop quiescent.
-    bool dirtyOverlap = false;
-    if (pc.dirtyMaxU > pc.dirtyMinU && pc.dirtyMaxV > pc.dirtyMinV)
+    // The stored per-corner UV is the terrain UV (planar) or the face-local UV (spherical) that
+    // VertexEval wrote last frame. Planar overlaps the bisector's UV AABB with the push-constant rect;
+    // the sphere with its own face's rect, so every face listed this update reclassifies at once.
+    vec4 dirtyRect = vec4(pc.dirtyMinU, pc.dirtyMinV, pc.dirtyMaxU, pc.dirtyMaxV);
+    if (pc.domainMode == CBT_DOMAIN_SPHERICAL)
     {
-        bool faceMatch = true;
-        if (pc.domainMode == CBT_DOMAIN_SPHERICAL)
-        {
-            uint numSubdiv = depth - pc.baseDepth;
-            uint rootIndex = uint(h >> numSubdiv) - (1u << pc.baseDepth);
-            faceMatch = (rootIndex < CBT_SPHERE_ROOT_COUNT) &&
-                        (CBT_FaceOfRoot(rootIndex) == pc.dirtyFace);
-        }
-        if (faceMatch)
-        {
-            vec2 uv0 = vec2(gVertex.Vertex[slot].corner0.w, gVertex.Vertex[slot].meta.x);
-            vec2 uv1 = vec2(gVertex.Vertex[slot].corner1.w, gVertex.Vertex[slot].meta.y);
-            vec2 uv2 = vec2(gVertex.Vertex[slot].corner2.w, gVertex.Vertex[slot].meta.z);
-            vec2 uvMin = min(uv0, min(uv1, uv2));
-            vec2 uvMax = max(uv0, max(uv1, uv2));
-            dirtyOverlap = uvMax.x >= pc.dirtyMinU && uvMin.x <= pc.dirtyMaxU &&
-                           uvMax.y >= pc.dirtyMinV && uvMin.y <= pc.dirtyMaxV;
-            if (dirtyOverlap)
-                gBisector.Bisector[slot].flags = CBT_FLAG_VIS_MOD; // bin into the MODIFIED stream
-        }
+        uint numSubdiv = depth - pc.baseDepth;
+        uint rootIndex = uint(h >> numSubdiv) - (1u << pc.baseDepth);
+        dirtyRect = rootIndex < CBT_SPHERE_ROOT_COUNT
+                        ? gParams.Params[pc.frameIndex % CBT_FRAME_RING].sphereDirty[CBT_FaceOfRoot(rootIndex)]
+                        : vec4(0.0);
+    }
+    bool dirtyOverlap = false;
+    if (dirtyRect.z > dirtyRect.x && dirtyRect.w > dirtyRect.y)
+    {
+        vec2 uv0 = vec2(gVertex.Vertex[slot].corner0.w, gVertex.Vertex[slot].meta.x);
+        vec2 uv1 = vec2(gVertex.Vertex[slot].corner1.w, gVertex.Vertex[slot].meta.y);
+        vec2 uv2 = vec2(gVertex.Vertex[slot].corner2.w, gVertex.Vertex[slot].meta.z);
+        vec2 uvMin = min(uv0, min(uv1, uv2));
+        vec2 uvMax = max(uv0, max(uv1, uv2));
+        dirtyOverlap = uvMax.x >= dirtyRect.x && uvMin.x <= dirtyRect.z && uvMax.y >= dirtyRect.y &&
+                       uvMin.y <= dirtyRect.w;
+        if (dirtyOverlap)
+            gBisector.Bisector[slot].flags = CBT_FLAG_VIS_MOD; // bin into the MODIFIED stream
     }
 
     bool wantSplit = false;

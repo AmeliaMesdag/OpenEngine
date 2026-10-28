@@ -49,8 +49,21 @@ PageSampleRect Level0RectReach(std::span<const PageStoreLevel> levels, const Pag
     return rect;
 }
 
-HeightPageOverlay::HeightPageOverlay(std::span<const PageStoreLevel> levels, const PageSampleRect& level0Rect,
-                                     std::vector<float32> level0Delta)
+bool Level0RectStaysInsideFace(std::span<const PageStoreLevel> levels, const PageSampleRect& level0Rect)
+{
+    for (uint32 level = 0; level < levels.size(); ++level)
+    {
+        const PageSampleRect reach = Level0RectReach(levels, level0Rect, level);
+        if (reach.MinX == 0u || reach.MinZ == 0u || reach.MaxX + 1u >= levels[level].SamplesX ||
+            reach.MaxZ + 1u >= levels[level].SamplesZ)
+            return false;
+    }
+    return !levels.empty();
+}
+
+HeightPageOverlay::HeightPageOverlay(uint8 face, std::span<const PageStoreLevel> levels,
+                                     const PageSampleRect& level0Rect, std::vector<float32> level0Delta)
+    : m_Face(face)
 {
     if (levels.empty())
         return;
@@ -100,6 +113,13 @@ void HeightPageOverlay::Rebake(const PageSampleRect& changed, std::span<const fl
     }
 }
 
+bool HeightPageOverlay::FitsLevels(std::span<const PageStoreLevel> levels) const
+{
+    return levels.size() == m_Levels.size() && !levels.empty() &&
+           levels.front().SamplesX == m_Levels.front().Shape.SamplesX &&
+           levels.front().SamplesZ == m_Levels.front().Shape.SamplesZ;
+}
+
 float32 HeightPageOverlay::Delta(uint32 level, uint32 x, uint32 z) const
 {
     if (level >= m_Levels.size())
@@ -139,8 +159,8 @@ void HeightPageOverlay::FilterLevel(uint32 level, const PageSampleRect& finerCha
 
 bool HeightPageOverlay::ApplyToPage(const PageAddress& address, std::span<float32> samples) const
 {
-    if (m_Levels.empty() || address.Level >= m_Levels.size() || samples.size() != kPageSampleCount ||
-        !PageReadsLevel0Rect(address, Level0Rect()))
+    if (m_Levels.empty() || address.Face != m_Face || address.Level >= m_Levels.size() ||
+        samples.size() != kPageSampleCount || !PageReadsLevel0Rect(address, Level0Rect()))
         return false;
     const Level& l = m_Levels[address.Level];
     const int64 firstX = static_cast<int64>(address.X) * kPageOwnedSamples - kPageApronSamples;

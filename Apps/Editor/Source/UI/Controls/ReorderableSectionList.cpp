@@ -1,7 +1,7 @@
 #include "UI/Controls/ReorderableSectionList.h"
 
 #include "UI/Controls/Foldout.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIEvents.h"
 #include "UI/UIManager.h"

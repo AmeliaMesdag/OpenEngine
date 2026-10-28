@@ -9,7 +9,7 @@
 #include "ECS/World.h"
 #include "EditorChangeNotifications.h"
 #include "Engine/Rendering/RenderLayerNames.h"
-#include "Inspectors/RenderLayerField.h"
+#include "Inspectors/RenderLayers/RenderLayerField.h"
 #include "UI/Controls/MaskField.h"
 #include "UI/Internal/MaskFieldAccess.h"
 #include "UndoRedo/UndoRedoService.h"

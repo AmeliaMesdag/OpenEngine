@@ -503,7 +503,7 @@ void CBTInstance::RecordUpdate(CommandList& cl, const CBTClassifyDesc& classify,
     // Upload this frame's camera + terrain params to the UBO ring element the kernels
     // read, CBTFrameRingSlot(frameCounter). Host-visible write completes before submit;
     // the ring + frame fence keep it clear of the previous frame's in-flight read.
-    m_Resources.UploadFrameParams(frameCounter, params);
+    m_Resources.UploadFrameParams(frameCounter, params, classify.SphereDirty);
 
     CBTPushConstants pc{};
     pc.BaseDepth = m_BaseDepth;
@@ -523,9 +523,6 @@ void CBTInstance::RecordUpdate(CommandList& cl, const CBTClassifyDesc& classify,
     pc.DirtyMinV = classify.DirtyMinV;
     pc.DirtyMaxU = classify.DirtyMaxU;
     pc.DirtyMaxV = classify.DirtyMaxV;
-    // Planet editing (plan §planet-editing): the (face,rect) selector + the sculpt-sample
-    // gate. On the sphere the dirty rect is face-local; DirtyFace names the face.
-    pc.DirtyFace = classify.DirtyFace;
     pc.SphereSculptEnabled = classify.SphereSculptEnabled;
     // The narrow-heap kernels (no 64-bit integers: WebGPU) cannot bind the
     // modified index stream — it would be the 11th storage buffer against a

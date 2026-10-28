@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 
 namespace GameEngine::Engine::Renderer::Pipeline
 {

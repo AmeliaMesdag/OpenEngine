@@ -10,7 +10,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Logger/Logger.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Materials/ShaderProfileDefines.h"
+#include "Rendering/Materials/Shader/ShaderProfileDefines.h"
 
 #include <algorithm>
 #include <array>

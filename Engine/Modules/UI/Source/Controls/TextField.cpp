@@ -15,7 +15,7 @@
 
 #include "Logger/Logger.h"
 #include "../UIAttributeAccess.h"
-#include "../UIManager_Internal.h"
+#include "../UIManager/UIManager_Internal.h"
 
 #include <algorithm>
 #include <cstddef>

@@ -26,7 +26,7 @@
 #include "PhysicsECS/Components/PlaneColliderShape.h"
 #include "Rendering/Utils/TextureUploadHelpers.h"
 #include "Scripting/NativePostSimulationSystem.h"
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>

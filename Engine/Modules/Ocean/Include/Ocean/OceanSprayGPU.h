@@ -2,7 +2,7 @@
 #include "Components/Rendering/Ocean.h"
 #include "Ocean/OceanFrameStamp.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include <string>
 #include <unordered_map>
 namespace GameEngine::Engine::Renderer::Pipeline

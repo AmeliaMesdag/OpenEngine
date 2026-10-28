@@ -7,20 +7,24 @@ The `TerrainGrass` component grows procedural grass on the terrain on the same e
 
 ## Presets
 
-**Preset** at the top of the grass settings picks the kind of field. One Undo reverts the pick. A preset sets the colors, **Blade Height**, **Blade Width**, the density and **Blade Tilt**. A preset does not change the wind, the clumps, **Root Fade**, **Canopy Shade** or the textures. Each preset in the list shows a picture of the field, its name and one line:
+**Preset** at the top of the grass settings picks the kind of field. One Undo reverts the pick. A preset sets the whole look of the field: the colors, the density, the blade shape, the clumps, the color variation, the shading, the resting lean and the flutter. A preset does not change where and how far grass grows (**Range**, the density falloff, the layer, **Mask Threshold** and **Placement Seed**), the weather (**Wind Strength**, the gusts, the wind direction and **Wind Seed**), **Splat Root Color**, the ground darkening, **Blade Segments**, the render mode or the textures. Each preset in the list shows a picture of the field, its name and one line:
 
 - **Meadow** (the default): mid-height and leaf green.
 - **Lawn**: short, dense and upright.
 - **Steppe**: sparse, tall and dry.
+- **Stylized**: even and moss green, in dense soft clumps.
 
-Every setting stays editable after you pick a preset. When you change one of them, the Preset row reads **Custom**. Custom is not in the list: pick a preset to go back to one.
+Every setting stays editable after you pick a preset. When you change a setting that the preset sets, the Preset row reads **Custom**. Custom is not in the list: pick a preset to go back to one.
 
 | Preset | Stored value | Density (blades / m²) | Height (m) | Width (m) | Tilt | Tip color |
 |---|---|---|---|---|---|---|
 | **Meadow** (the default) | `Meadow` | 21 | 0.72 | 0.036 | 14 degrees | leaf green |
 | **Lawn** | `Lawn` | 64 | 0.4 | 0.024 | 6 degrees | deeper green |
 | **Steppe** | `Steppe` | 12 | 0.9 | 0.02 | 20 degrees | dry straw green |
+| **Stylized** | `Stylized` | 128 | 0.5 | 0.032 | 11 degrees | moss green |
 | **Custom** | `Custom` | as set | as set | as set | as set | as set |
+
+Meadow, Lawn and Steppe keep the defaults for every other look setting. Stylized also sets an even color (**Random Brightness** 0.1, **Hue Variation** 0.035), larger clumps (**Clump Size** 1.8 m), a smaller flutter, less light through the blades (**Backlight** 0.35) and less canopy shade (**Canopy Shade** 0.85).
 
 The scene stores the preset as `TerrainGrass.preset`. The preset is a label of where the settings came from: a scene loads it as it was saved.
 
@@ -46,7 +50,7 @@ The maximum density is 256 blades per square meter. Placement divides the ground
 
 Each view has a fixed pool of 524,288 grass instances. The pool size does not change with the density, so a denser field uses no more memory. When the density and the range need more instances than the pool holds, placement keeps the density near the camera and shortens the range.
 
-The inspector shows a note under **Range** when this occurs. The note gives the range that the field actually reaches. For example, the default 21 blades per square meter over 500 m reaches about 369 m. A density of 64 reaches about 211 m, and a density of 200 reaches about 120 m.
+The inspector shows a note under **Range** when this occurs. The note gives the range that the field actually reaches and names the fixes: raise **Density Falloff**, or lower the density. For example, the default 21 blades per square meter over 500 m reaches about 369 m. A density of 64 reaches about 211 m, and a density of 200 reaches about 120 m.
 
 :::tip[Dense short grass]
 

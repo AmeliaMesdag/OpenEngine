@@ -14,8 +14,8 @@
 #include "Engine/Rendering/MaterialCompileSpec.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Materials/MaterialBuildService.h"
-#include "Rendering/Materials/ShaderMeta.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 #include <filesystem>
 #include <functional>

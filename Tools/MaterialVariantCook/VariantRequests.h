@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Rendering/Materials/MaterialAlphaMode.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include <algorithm>
 #include <span>
 #include <string>

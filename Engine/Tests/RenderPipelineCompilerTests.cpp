@@ -12,7 +12,7 @@
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
 #include "Ocean/Systems/RegisterOceanSystems.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 #include "TerrainECS/Systems/RegisterTerrainSystems.h"
 #include "TerrainGrass/RegisterTerrainGrass.h"

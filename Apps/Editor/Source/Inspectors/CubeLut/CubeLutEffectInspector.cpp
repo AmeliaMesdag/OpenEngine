@@ -13,7 +13,7 @@
 #include "Editor/Entities/EditorECSHelpers.h"
 #include "Inspectors/CubeLut/CubeLutPreview.h"
 #include "Inspectors/CubeLut/CubeLutStageNotice.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Mathematics/Interpolation.h"

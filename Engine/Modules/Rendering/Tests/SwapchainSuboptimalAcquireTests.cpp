@@ -14,7 +14,7 @@
 // placed before or after the present; the validation layer, when it loads on
 // this agent, reports the reused semaphore.
 
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 
 #include "Logger/CallbackSink.h"
 #include "Logger/Logger.h"

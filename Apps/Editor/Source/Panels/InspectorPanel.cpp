@@ -7,9 +7,9 @@
 #include "Input/KeyCodes.h"
 #include "Inspectors/AnimationPreviewManager.h"
 #include "Logger/Logger.h"
-#include "Panels/ScriptEditorPanel.h" // For ScriptVariable, ScriptMethod
+#include "Panels/Script/ScriptEditorPanel.h" // For ScriptVariable, ScriptMethod
 #include "Panels/OnDiskFileName.h"
-#include "Panels/ScriptVariablesEmptyState.h"
+#include "Panels/Script/ScriptVariablesEmptyState.h"
 
 #include <algorithm>
 #include <array>
@@ -31,7 +31,7 @@
 #include <type_traits>
 
 #include "Editor/EditorTreeTitleIconVars.h"
-#include "Editor/Hierarchy/HierarchyEntityIcon.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Editor/Vcs/EditorVcsProviderRegistry.h"
 #include "Editor/Hierarchy/HierarchyEnableState.h"
@@ -107,7 +107,7 @@
 #include "Components/Transform.h"
 #include "Core/Engine.h"
 #include "Engine/Rendering/RenderServices.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/Components.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
@@ -174,10 +174,10 @@
 #include "Editor/Entities/EditorInspectorPseudoComponents.h"
 #include "Engine/Rendering/PostProcessEffectRegistry.h"
 #include "TerrainECS/TerrainModifierComponents.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/DefaultComponentInspector.h"
-#include "ECS/ComponentFactory.h"
-#include "ECS/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentFactory.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
 
 #include <unordered_set>
 
@@ -4424,7 +4424,7 @@ void InspectorPanel::ShowEntity(World* world, EntityHandle entity, bool force, b
                 InspectorRegistry::Get().QueryComponentOverrides(*m_World, entity, typeId);
             sectionRaw->SetOverridden(overrides.Overridden);
             if (!overrides.Badge.empty())
-                sectionRaw->SetHeaderBadge(overrides.Badge, overrides.BadgeTooltip, InspectorSection::BadgeKind::Neutral);
+                sectionRaw->SetHeaderBadge(overrides.Badge, overrides.BadgeTooltip, InspectorSection::BadgeKind::Override);
         }
         if (hostSection)
         {
@@ -6272,16 +6272,16 @@ void InspectorPanel::ShowGraphNode(const std::string& nodeId, const std::string&
                 auto valueIt = parameters.find(key);
                 const std::string value = (valueIt != parameters.end()) ? valueIt->second : std::string();
                 AssetManager& am = EngineCore::GetInstance().GetAssetManager();
-                InspectorUI::AddAssetFieldRow(
-                    sectionContent, plannedRow.Label, GUID(value), {AssetType::Animation},
+                AssetField* field = InspectorUI::AddAssetFieldRow(
+                    sectionContent, plannedRow.Label, GUID(value), {plannedRow.AssetReference},
                     &am.GetRegistry(),
                     [this, nodeId, key](const GUID& picked)
                     {
                         const std::string text = picked.IsNull() ? std::string{} : picked.ToString();
                         if (m_OnGraphNodeParameterChanged)
                             m_OnGraphNodeParameterChanged(nodeId, key, text, true);
-                    },
-                    nullptr, "Animation clip");
+                    });
+                field->SetOnReveal(m_PingAssetPreserveInspector);
                 break;
             }
             case GraphInspectorRowKind::NodeInt:

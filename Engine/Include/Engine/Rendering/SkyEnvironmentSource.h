@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Engine/Rendering/IEnvironmentSource.h"
-#include "Rendering/Core/PipelineIdentifiers.h" // GraphicsPipelineId, ComputePipelineId
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h" // GraphicsPipelineId, ComputePipelineId
 #include "Rendering/Core/RenderGraph/RGFrame.h" // RGContext
 #include "Rendering/Sky/SkySettings.h"
 

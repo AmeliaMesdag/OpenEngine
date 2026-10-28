@@ -9,7 +9,7 @@
 #include "Rendering/Sky/SolarPath.h"
 #include "SceneView/ComponentGizmoRegistry.h"
 #include "SceneView/SceneViewGizmos.h"
-#include "Sky/SkySunDayKind.h"
+#include "Sky/SkySun/SkySunDayKind.h"
 #include "Types/Color.h"
 
 #include <algorithm>

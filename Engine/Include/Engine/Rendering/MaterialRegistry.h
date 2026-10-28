@@ -27,7 +27,7 @@
 #include "Engine/Rendering/Material.h"
 #include "Rendering/Core/Handle.h"
 #include "Rendering/Materials/MaterialDocument.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 #include <functional>
 #include <memory>

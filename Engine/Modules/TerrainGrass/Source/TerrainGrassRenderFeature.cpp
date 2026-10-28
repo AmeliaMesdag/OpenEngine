@@ -23,11 +23,11 @@
 #include "Rendering/Core/BarrierMapping.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Common/Frustum.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
 #include "Rendering/Materials/MaterialDocument.h"
-#include "Rendering/Materials/ShaderCompileService.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Rendering/Utils/BufferHelpers.h"
 #include "Terrain/TerrainTypes.h"
 #include "AssetCore/GUID.h"
@@ -501,14 +501,14 @@ public:
         // a declared-but-unbound texture draws black with no error at all, which is exactly how
         // the terrain surface failed before its own bindings landed.
         //
-        // Terrain 0, matching the single-terrain limit both CBT and the grass atlas already carry.
+        // The drawn terrain, the one the CBT draws.
         if (compatProfile)
         {
             auto* terrainFeature = &m_TerrainFeature;
-            const auto terrains = terrainFeature->GetActiveTerrains();
-            if (!terrains.empty())
+            const auto drawnTerrain = terrainFeature->GetDrawnTerrain();
+            if (drawnTerrain)
             {
-                const auto primary = terrains.front().Handle;
+                const auto primary = drawnTerrain->Handle;
                 const auto compat = terrainFeature->GetCompatLayerTextures();
                 const auto sampler = terrainFeature->GetLayerSampler();
                 const auto bindTex = [&](const char* name, Rendering::TextureHandle tex) {

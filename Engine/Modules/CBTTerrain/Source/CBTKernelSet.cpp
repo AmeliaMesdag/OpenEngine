@@ -7,7 +7,7 @@
 #include "AssetCore/SharedFileRead.h"
 
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Core/SpecializationConstants.h"
 #include "Logger/Logger.h"
 

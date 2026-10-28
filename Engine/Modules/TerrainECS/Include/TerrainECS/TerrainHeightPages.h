@@ -42,6 +42,10 @@ namespace GameEngine::TerrainECS
 {
 
 struct TerrainHandle;
+class TerrainService;
+class TerrainRenderFeature;
+class TerrainHeightPageFeature;
+struct TerrainHeightPagesTestAccess;
 
 /// What a platform spends on height pages (design D5): the height cache's slots; the page table
 /// (PageTable, design page-streaming-planets 3.4): the largest table kept dense, one tier, and the
@@ -187,6 +191,12 @@ struct PlanetPagedRequest
     PlanetPageRequestTerrain Shape;   ///< CacheSlots and Heights are set by TerrainHeightPages
     /// The narrow arm: a request past the cache's slots is made a level coarser until it fits.
     bool FitToSlots = false;
+    /// What the planet's layers add to one face of its source's pages (null: nothing), with the
+    /// version rule of PagedTerrainRequest::Overlay.
+    std::shared_ptr<const PageStreaming::HeightPageOverlay> Overlay;
+    uint64 OverlayVersion = 0;
+    PageStreaming::PageSampleRect OverlayChanged; ///< level-0 samples of the overlay's face
+    uint64 OverlayChangedSince = 0;
 };
 
 /// One level of a page stream: the pages its requester wants, and how many of them are resident.
@@ -196,12 +206,28 @@ struct HeightPageLevelCounts
     uint32 Resident = 0;
 };
 
+/// One cube face of a planet's page table, as the GPU reads it (get_terrain_stats).
+struct HeightPageFaceTable
+{
+    std::vector<uint32> EntriesPerLevel; ///< per level, the pages that have a table entry
+    /// Per page of the finest pinned level, row-major: the finest level with an entry at the page's center,
+    /// the level a lambda-0 sample there resolves to; the level count when no level has one.
+    std::vector<uint8> ResolvedLevel;
+};
+
 /// A page stream's counts per level (get_terrain_stats).
 struct HeightPageStreamCounts
 {
     std::string Label;
     bool Planet = false;
     std::vector<HeightPageLevelCounts> Levels;
+    /// A planet's table: whether the GPU draws it, its finest pinned level and that level's pages a face
+    /// side, and each face.
+    bool Published = false;
+    uint32 PinnedLevel = 0;
+    uint32 PinnedPagesX = 0;
+    uint32 PinnedPagesZ = 0;
+    std::vector<HeightPageFaceTable> Faces;
 };
 
 class TerrainHeightPages
@@ -280,18 +306,26 @@ public:
     /// caller): page assigns, releases, rewrites and arrival-fade steps, and whole terrains switching
     /// between their pages and their texture.
     std::vector<HeightPageDirtyRect>& DirtyRects() { return m_DirtyRects; }
-    /// The planets' face rects whose height changed source since the caller last drained them, one union
-    /// per face in CBT face UV: page assigns, releases, arrival-fade steps, and the neighbor face's edge
-    /// band whose corners resolve on the page's face (CBT_PlanetPagePoint). The caller clears them.
-    CBTTerrain::SphereEditRegions& PlanetDirtyRegions() { return m_PlanetDirty; }
     /// The page-table words of a terrain or planet the GPU draws from its pages, by render handle
-    /// index, and their version (bumped on every change), or null.
+    /// index, and their version (bumped on every change), or null. A planet is listed here and in
+    /// PagedTerrains only while every page of its pinned levels has its entry.
     const std::vector<uint32>* TableWords(uint32 terrain, uint64& version) const;
     /// Every terrain and planet the GPU draws from its pages (render handle indices), in no order.
     void PagedTerrains(std::vector<uint32>& out) const;
     const PageStreaming::PageResidencyManager& Residency() const { return m_Residency; }
 
 private:
+    // UpdateHeightPages drains the planets' dirty regions into the sphere dirty union.
+    friend void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature,
+                                  TerrainHeightPageFeature& pages, uint64 frameIndex, float32 deltaSeconds,
+                                  uint32 framesInFlight);
+    friend struct TerrainHeightPagesTestAccess;
+
+    /// The planets' face rects whose height changed source since the caller last drained them, one union
+    /// per face in CBT face UV: page assigns, releases, rewrites, arrival-fade steps, and the neighbor face's edge
+    /// band whose corners resolve on the page's face (CBT_PlanetPagePoint). The caller clears them.
+    CBTTerrain::SphereEditRegions& PlanetDirtyRegions() { return m_PlanetDirty; }
+
     struct PagedTerrain
     {
         uint32 Stream = 0;
@@ -327,19 +361,33 @@ private:
         uint64 Version = 0;
         uint32 RenderTerrain = kNoRenderTerrain;
         bool GpuPages = false;
+        /// Every pinned page has its entry, so every sample resolves: the GPU may draw the planet's pages.
+        bool Published = false;
         std::vector<PageStreaming::PageAddress> WantedPages; ///< this frame's wanted pages
         bool Requested = false;
+        std::shared_ptr<const PageStreaming::HeightPageOverlay> Overlay;
+        uint64 OverlayVersion = 0;
     };
 
     void Configure(PagedTerrain& terrain, const PagedTerrainRequest& request);
+    std::shared_ptr<const PageStreaming::HeightPageOverlay> FittingOverlay(const PagedPlanet& planet,
+                                                                           const PlanetPagedRequest& request) const;
+    void RefreshOverlay(uint32 stream, const PageStreaming::HeightPageOverlay* held, uint64 heldVersion,
+                        const PageStreaming::HeightPageOverlay* requested,
+                        const PageStreaming::PageSampleRect& changed, uint64 changedSince);
     void AppendStreamCounts(uint32 stream, std::span<const PageStreaming::PageAddress> wanted, uint32 levels,
                             HeightPageStreamCounts& out) const;
+    void AppendPlanetTable(const PagedPlanet& planet, HeightPageStreamCounts& out) const;
     void RequestCpuWindows(const PagedTerrain& terrain, std::span<const Mathematics::Vector3> cameras);
     void AppendBodyWindows(const PagedTerrain& terrain, std::span<const Mathematics::Vector3> cameras);
     void CollectStreamChanges(uint32 terrainKey, PagedTerrain& terrain);
     void ResetPlanetTable(PagedPlanet& planet);
     void CollectPlanetChanges(PagedPlanet& planet);
+    void AddPlanetWholeDirty();
     void AddPlanetDirtyPage(const PagedPlanet& planet, const PageStreaming::PageAddress& address);
+    void AddPlanetDirtyRewrite(const PagedPlanet& planet, const PageStreaming::PageRewrite& rewrite);
+    void AddPlanetDirtyFaceRect(uint8 face, uint32 level, uint32 samples, float32 minU, float32 minV, float32 maxU,
+                                float32 maxV);
     void AddPlanetDirtyRect(uint32 face, float32 minU, float32 minV, float32 maxU, float32 maxV);
     void LogResidencyChange(PagedTerrain& terrain);
     void AddWholeTerrainDirty(uint32 terrainKey, const PagedTerrain& terrain);

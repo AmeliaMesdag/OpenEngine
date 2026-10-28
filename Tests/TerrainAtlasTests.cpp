@@ -9,6 +9,7 @@
 #include "TerrainECS/TerrainAtlas.h"
 #include "TerrainECS/TerrainSizingPlan.h" // height-source engagement rule + author-facing sizing
 #include "TerrainECS/TerrainRenderPublication.h" // did the terrain reach the renderer at all
+#include "Components/Name.h"
 #include "ECS/Components.h" // ECS::Disabled (the extraction filter the live count must match)
 #include "ECS/ECSTemplates.h" // World::Create and AddComponentImmediate, instantiated here
 #include "ECS/Entity.h"
@@ -931,6 +932,52 @@ TEST(TerrainRenderPublication, APartialPublishIsItsOwnStateNotSilentSuccess)
 {
     EXPECT_EQ(DiagnoseTerrainPublication(3, 1), TerrainPublicationState::PartiallySkipped);
     EXPECT_NE(DiagnoseTerrainPublication(3, 1), TerrainPublicationState::Published);
+}
+
+// Only one terrain draws (#3013). An edit or a new terrain changes archetype order; for terrains
+// visited in the same frame the entity index decides, whichever archetype the query visits first.
+TEST(TerrainRenderPublication, TheSameTerrainDrawsWhicheverArchetypeTheQueryVisitsFirst)
+{
+    for (const bool editFirst : {true, false})
+    {
+        ECS::World world;
+        Components::Terrain live{};
+        live.TerrainDataGeneration = 1;
+        const ECS::EntityHandle first = world.Create<Components::Terrain>(live).GetHandle();
+        const ECS::EntityHandle second = world.Create<Components::Terrain>(live).GetHandle();
+        // The edited terrain moves to an archetype the query visits after the other terrain.
+        world.AddComponentImmediate(editFirst ? first : second, Components::Name{"Edited"});
+
+        std::vector<ECS::EntityHandle> queryOrder;
+        world.Query<ECS::Read<Components::Terrain>>().Each(
+            [&](ECS::EntityHandle entity, const Components::Terrain&) { queryOrder.push_back(entity); });
+        ASSERT_EQ(queryOrder.size(), 2u);
+        ASSERT_EQ(queryOrder.front() == second, editFirst) << "the query order is the case under test";
+
+        EXPECT_EQ(FindDrawnTerrain(world), first) << "edited first: " << editFirst;
+    }
+}
+
+// The world reuses a freed entity index, so a terrain created after a delete can have a lower index
+// than the drawn terrain. The first terrain extraction visited keeps the draw.
+TEST(TerrainRenderPublication, ATerrainCreatedAfterADeleteDoesNotTakeTheDraw)
+{
+    ECS::World world;
+    const ECS::EntityHandle deleted = world.CreateEntity();
+    Components::Terrain live{};
+    live.TerrainDataGeneration = 1;
+    live.DrawOrderFrame = 1;
+    const ECS::EntityHandle first = world.Create<Components::Terrain>(live).GetHandle();
+    world.DestroyEntityImmediate(deleted);
+
+    Components::Terrain added = live;
+    added.DrawOrderFrame = 0; // not visited by extraction yet
+    const ECS::EntityHandle second = world.Create<Components::Terrain>(added).GetHandle();
+    ASSERT_LT(second.index, first.index) << "the case under test: the new terrain reuses the freed index";
+    EXPECT_EQ(FindDrawnTerrain(world), first);
+
+    world.GetComponentForWrite<Components::Terrain>(second)->DrawOrderFrame = 2;
+    EXPECT_EQ(FindDrawnTerrain(world), first) << "visited in a later frame, the new terrain still sorts after";
 }
 
 // ---------------------------------------------------------------------------

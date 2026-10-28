@@ -7,7 +7,7 @@
 
 #include "Source/Vulkan/DeviceHealthState.h"
 #include "Source/Vulkan/PendingWorkerDeviceLoss.h"
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 #include "Source/Vulkan/VulkanFaultInjection.h"
 #include "ScopedEnvVar.h"
 
@@ -33,8 +33,8 @@
 
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineCache.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineCache.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 
 using namespace GameEngine::Rendering;
 
@@ -1795,7 +1795,7 @@ std::vector<ScannedFile> LoadStrippedSources(const std::filesystem::path& dir)
 {
     namespace fs = std::filesystem;
     std::vector<ScannedFile> files;
-    for (const auto& entry : fs::directory_iterator(dir))
+    for (const auto& entry : fs::recursive_directory_iterator(dir))
     {
         const fs::path& p = entry.path();
         if (!entry.is_regular_file() || (p.extension() != ".cpp" && p.extension() != ".h"))

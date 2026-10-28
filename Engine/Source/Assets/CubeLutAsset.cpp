@@ -2,7 +2,7 @@
 
 #include "AssetCore/SharedFileRead.h"
 #include "Logger/Logger.h"
-#include "Rendering/Utils/CubeLutFileParser.h"
+#include "Rendering/Utils/CubeLut/CubeLutFileParser.h"
 
 #include <algorithm>
 #include <string_view>

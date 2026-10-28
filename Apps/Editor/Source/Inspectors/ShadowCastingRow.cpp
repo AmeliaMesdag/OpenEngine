@@ -1,7 +1,7 @@
 #include "Inspectors/ShadowCastingRow.h"
 
 #include "Components/Rendering/MeshRenderer.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 
 namespace GameEngine::InspectorDrag

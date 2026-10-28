@@ -24,10 +24,9 @@ class World;
 namespace GameEngine::Editor
 {
 
-/// The Inspector's bar on an entity of a prefab instance: the prefab and the instance on line 1, the
-/// button that selects the prefab file and the override count on line 2. A commit in its instance
-/// refreshes it and the Inspector's override marks in place; only an exit from the instance or a
-/// change to the removed components asks for a rebuild.
+/// The Inspector's bar on an entity of a prefab instance: the glyph, the prefab and the instance on line 1;
+/// the select button and the override counts on line 2. A commit in the instance refreshes it in place; an
+/// exit from the instance or a change to the removed components asks for a rebuild.
 class PrefabBar final : public UIElement
 {
   public:
@@ -63,8 +62,12 @@ class PrefabBar final : public UIElement
     std::function<void()> m_RequestRebuild;
     // The entity's own overrides as the Inspector's marks show them.
     std::vector<Scene::PrefabOverride> m_ShownOverrides;
-    Label* m_Title = nullptr;
+    UIElement* m_Glyph = nullptr;
+    Label* m_TitleLead = nullptr;
+    Label* m_TitlePrefab = nullptr;
+    Label* m_TitleTail = nullptr;
     Label* m_Count = nullptr;
+    Label* m_InstanceCount = nullptr;
     Button* m_SelectAssetButton = nullptr;
 };
 

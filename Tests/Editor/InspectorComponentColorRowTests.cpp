@@ -9,7 +9,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Inspectors/InspectorComponentColorRow.h"
+#include "Inspectors/InspectorComponent/InspectorComponentColorRow.h"
 
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Components/Rendering/SkyEnvironment.h"

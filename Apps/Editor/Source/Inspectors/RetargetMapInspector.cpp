@@ -3,7 +3,7 @@
 #include "InspectorRegistry.h"
 #include "Inspectors/InspectorUIHelpers.h"
 
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 #include "Animation/OpStackNode.h"
 #include "Animation/RetargetMap.h"
 #include "AssetCore/Asset.h"

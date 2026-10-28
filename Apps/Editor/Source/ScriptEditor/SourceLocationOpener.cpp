@@ -3,7 +3,7 @@
 #include "Editor/Settings/ScriptEditorSettings.h"
 #include "EditorPanelManager.h"
 #include "ExternalScriptEditorLauncher.h"
-#include "Panels/ScriptEditorPanel.h"
+#include "Panels/Script/ScriptEditorPanel.h"
 #include "ScriptEditor/SourceLocation.h"
 
 #include <algorithm>

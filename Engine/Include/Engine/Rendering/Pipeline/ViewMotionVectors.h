@@ -1,9 +1,9 @@
 #pragma once
 
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 
 #include <memory>
 #include <unordered_map>

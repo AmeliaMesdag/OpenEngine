@@ -9,7 +9,7 @@
 
 #include "Engine/Rendering/MeshGPURegistry.h"
 #include "Rendering/Core/Handle.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Materials/MaterialAlphaMode.h"
 #include "Types/Types.h"
 

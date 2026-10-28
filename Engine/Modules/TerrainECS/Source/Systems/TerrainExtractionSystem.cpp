@@ -7,6 +7,7 @@
 #include "TerrainECS/TerrainGrassAlpha.h"
 #include "TerrainECS/TerrainGrassAuthoredBits.h"
 #include "TerrainECS/TerrainRenderFeature.h"
+#include "TerrainECS/TerrainRenderPublication.h"
 #include "TerrainECS/TileStreamingManager.h"
 #include "TerrainECS/AtlasResidencyController.h"
 #include "TerrainECS/AtlasTileNormal.h"
@@ -36,7 +37,7 @@
 #include "Rendering/Core/Device.h"
 #include "Terrain/CDLODSelection.h"
 #include "Logger/Logger.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Sky/SkySettings.h"
 #include "Core/CpuProfiler.h"
 
@@ -45,6 +46,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <numeric>
 
 using GameEngine::TerrainECS::ExtractCameraPosition;
 
@@ -595,6 +597,55 @@ void TerrainExtractionSystem::PublishSunGlareSkyline(ECS::World& world)
         m_ViewSkylines.Erase(viewId);
 }
 
+namespace
+{
+
+// Stamps the first extraction frame that visits the terrain (Terrain::DrawOrderFrame).
+void StampDrawOrder(Components::Terrain& terrain, uint64 extractionFrame)
+{
+    if (terrain.DrawOrderFrame == 0)
+        terrain.DrawOrderFrame = static_cast<uint32>(extractionFrame);
+}
+
+} // namespace
+
+void TerrainExtractionSystem::PublishInDrawnTerrainOrder(const ECS::World& world, std::span<const uint64> drawOrder,
+                                                         std::vector<ECS::EntityHandle>& entities,
+                                                         std::vector<TerrainInstanceInfo>& infos,
+                                                         std::vector<Terrain::TerrainGPUParams>& params)
+{
+    // One params entry per published terrain: both vectors take the same order.
+    std::vector<uint32> order(entities.size());
+    std::iota(order.begin(), order.end(), 0u);
+    std::stable_sort(order.begin(), order.end(),
+                     [drawOrder](uint32 a, uint32 b) { return drawOrder[a] < drawOrder[b]; });
+    std::vector<ECS::EntityHandle> orderedEntities;
+    std::vector<TerrainInstanceInfo> orderedInfos;
+    std::vector<Terrain::TerrainGPUParams> orderedParams;
+    orderedEntities.reserve(order.size());
+    orderedInfos.reserve(order.size());
+    orderedParams.reserve(order.size());
+    for (const uint32 position : order)
+    {
+        orderedEntities.push_back(entities[position]);
+        orderedInfos.push_back(std::move(infos[position]));
+        orderedParams.push_back(params[position]);
+    }
+    entities = std::move(orderedEntities);
+    infos = std::move(orderedInfos);
+    params = std::move(orderedParams);
+
+    const ECS::EntityHandle drawn = entities.empty() ? ECS::EntityHandle{} : entities.front();
+    const bool changed = drawn.id != m_LoggedDrawnTerrain.id || entities.size() != m_LoggedActiveTerrainCount;
+    m_LoggedDrawnTerrain = drawn;
+    m_LoggedActiveTerrainCount = entities.size();
+    if (!changed || entities.size() < 2)
+        return;
+    const auto* name = world.GetComponent<Components::Name>(drawn);
+    Logger::Log::Info("Terrain: {} active terrains; only one draws: '{}' (entity {}). The others are not drawn",
+                      entities.size(), name ? name->View() : std::string_view{}, drawn.index);
+}
+
 void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
 {
     GE_CPU_PROFILE_SCOPE("Terrain.Extraction");
@@ -709,6 +760,8 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
     terrainService->GetHeightPages().GatherBodyWindows(world);
 
     std::vector<TerrainInstanceInfo> activeInfos;
+    std::vector<ECS::EntityHandle> activeEntities; // the entity of each activeInfos row
+    std::vector<uint64> activeDrawOrder;           // the DrawOrderKey of each activeInfos row
     std::vector<Terrain::TerrainGPUParams> paramsArray;
     // Every terrain's four channel-role materials, concatenated. Params entries name records in
     // here by absolute index, so the two are built and published as one unit.
@@ -719,6 +772,7 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                   Components::Terrain& terrain,
                   const Components::WorldTransform& worldXf)
         {
+            StampDrawOrder(terrain, atlasFrame);
             if (terrain.Domain == Components::TerrainDomain::Spherical)
             {
                 GE_CPU_PROFILE_SCOPE("Terrain.PlanetHeightPages");
@@ -2158,6 +2212,8 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                                 info.AtlasRowBytes.size());
                 info.PatchGridSize = Terrain::kDefaultGridSize;
                 activeInfos.push_back(std::move(info));
+                activeEntities.push_back(entity);
+                activeDrawOrder.push_back(DrawOrderKey(terrain, entity));
 
                 // Tile unloading is handled by TileStreamingManager::UnloadDistantTiles.
 
@@ -2523,7 +2579,11 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
             }
 
             activeInfos.push_back(std::move(info));
+            activeEntities.push_back(entity);
+            activeDrawOrder.push_back(DrawOrderKey(terrain, entity));
         });
+
+    PublishInDrawnTerrainOrder(world, activeDrawOrder, activeEntities, activeInfos, paramsArray);
 
     // Upload the params array (one entry per terrain) and the material table its LayerRole
     // indices address, in one call so both land on the same ring element. Called even when empty

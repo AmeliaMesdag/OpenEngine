@@ -11,7 +11,7 @@
 
 #include "SceneView/SceneViewGizmos.h"
 #include "SceneView/TransformTool.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include "Components/Hierarchy.h"
 #include "Components/Rendering/LocalBounds.h"

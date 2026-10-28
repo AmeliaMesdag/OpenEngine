@@ -58,14 +58,15 @@ enum class TerrainGrassRenderMode : uint8
     Blend = 1,
 };
 
-// The kind of field the palette and blade dials were set from (TerrainGrass/TerrainGrassPresets.h).
-// Meadow is the component's defaults. Custom once any of the preset's dials is edited away from it.
+// The kind of field the look dials were set from (TerrainGrass/TerrainGrassPresets.h). Meadow is the
+// component's defaults. Custom once any of the preset's look dials is edited away from it.
 enum class TerrainGrassPreset : uint8
 {
     Custom = 0,
     Meadow = 1,
     Lawn = 2,
     Steppe = 3,
+    Stylized = 4,
 };
 
 // Grass placement is planar-only. The placement compute (terrain_grass_place.comp) lays blade
@@ -119,8 +120,8 @@ inline uint32 TerrainGrassAutoRootColor(uint32 tipColor)
 struct TerrainGrass
 {
     TerrainGrassRenderMode RenderMode = TerrainGrassRenderMode::Dither;
-    // The kind of field the palette, blade size, density and tilt below come from. Picking one in
-    // the inspector writes those dials (ApplyTerrainGrassPreset); they stay editable.
+    // The kind of field the look dials below come from. Picking one in the inspector writes them
+    // (ApplyTerrainGrassPreset); they stay editable.
     TerrainGrassPreset Preset = TerrainGrassPreset::Meadow;
     // Blades per square metre AT THE CAMERA, independent of terrain size: the same value reads the
     // same on a 512 m and a 10 km terrain. Density falls off to zero at Range along DensityFalloff,

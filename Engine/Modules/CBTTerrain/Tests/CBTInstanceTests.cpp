@@ -826,7 +826,7 @@ TEST_F(CBTInstanceTest, GatedVertexEvalUsesCompactModifiedStream)
     PoisonWord(*m_Device, resources.GetBuffer(CBTBinding::IndirectDraw),
                kDrawStreamModified * kDrawStreamStride, 3u);
     PoisonWord(*m_Device, resources.GetBuffer(CBTBinding::WorkQueue), kWQVertexEvalCounter, 0u);
-    resources.UploadFrameParams(0u, CBTIdentityFrameParams());
+    resources.UploadFrameParams(0u, CBTIdentityFrameParams(), SphereEditRegions{});
     CBTPushConstants pc = DefaultPlanarPush();
     pc.GateVertexEval = 1u;
     DispatchSingleKernel(*m_Device, m_KernelSet, instance, CBTKernel::VertexEval, pc);

@@ -1674,6 +1674,49 @@ button.node-graph-variables-add:active,
 	flex: 1 1 auto;
 }
 
+/* An asset reference on a pin: the Inspector's asset field at the node's
+   scale, in the value-box tone. */
+.graph-node-layer .asset-field {
+	min-height: 0;
+	height: 100%;
+	padding-left: calc(6px * var(--length-scale, 1));
+	padding-right: calc(2px * var(--length-scale, 1));
+	border-radius: calc(4px * var(--length-scale, 1));
+	border-color: transparent;
+	background-color: var(--graph-value-bg, #202020);
+	font-size: inherit;
+	/* The node text em: 13px at zoom 1 (.graph-z3), scaled with the zoom. */
+	--asset-field-em: calc(13px * var(--length-scale, 1));
+}
+
+.graph-node-layer .asset-field:hover {
+	border-color: var(--ui_color_dropdown_outline_hover);
+}
+
+.graph-node-layer .asset-field-name {
+	font-size: inherit;
+}
+
+.graph-node-layer .asset-field-preview {
+	width: calc(12px * var(--length-scale, 1));
+	height: calc(12px * var(--length-scale, 1));
+	min-width: calc(12px * var(--length-scale, 1));
+	min-height: calc(12px * var(--length-scale, 1));
+}
+
+.graph-node-layer .asset-field-clear,
+.graph-node-layer .asset-field-pick {
+	width: calc(14px * var(--length-scale, 1));
+	height: calc(14px * var(--length-scale, 1));
+	min-width: calc(14px * var(--length-scale, 1));
+	min-height: calc(14px * var(--length-scale, 1));
+}
+
+/* The chevron at the size the clear cross draws: both marks read as one pair. */
+.graph-node-layer .asset-field-pick {
+	background-size: 7px 7px;
+}
+
 /* ---- Shared value-box surface --------------------------------------------
    ONE rule paints every editable value box on a node — wide fields, X/Y/Z
    chips, text inputs, dropdown headers, suffix hosts — with the shared tone,

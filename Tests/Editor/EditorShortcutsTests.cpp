@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Core/WindowInputRouter.h"
-#include "Editor/Hierarchy/HierarchyEntityCommands.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityCommands.h"
 #include "EditorContextMenu/DirectoryMenuEditItems.h"
 #include "Editor/Shortcuts/EditorShortcuts.h"
 #include "EditorInputActions.h"

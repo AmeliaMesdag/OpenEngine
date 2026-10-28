@@ -3,7 +3,7 @@
 #include "MetalAccelerationStructures.h"
 #include "MetalCommandList.h"
 #include "MetalHdrOutput.h"
-#include "MetalIndirectCountResources.h"
+#include "MetalIndirectCount/MetalIndirectCountResources.h"
 #include "MetalLayerBridge.h"
 #include "MetalQueryPool.h"
 #include "MetalSwapchain.h"
@@ -12,7 +12,7 @@
 
 #include "Logger/Logger.h"
 #include "Rendering/Core/RendererProfile.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 
 #include <cstring>
 

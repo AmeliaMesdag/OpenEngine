@@ -15,7 +15,7 @@
 // safe because the controller strictly outlives this frame's Execute()).
 
 #include "Mathematics/Interpolation.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include "Assets/AssetManager.h"
 #include "Assets/AssetRegistry.h"
@@ -41,10 +41,10 @@
 #include "Mathematics/Vector4.h"
 #include "Rendering/Common/Frustum.h"
 #include "Mathematics/Vector3.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineDescTranslator.h"
+#include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/Core/ReverseZ.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"

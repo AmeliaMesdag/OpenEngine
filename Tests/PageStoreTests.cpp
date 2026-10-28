@@ -3577,7 +3577,7 @@ TEST(HeightPageOverlayTest, EachLevelIsTheStoresTentOfTheBakedMinusTheBase)
     const std::vector<PageStoreLevel> levels = BuildPageStoreLevels(601, 300);
     const PageSampleRect rect{100, 40, 250, 170};
     const std::vector<float32> delta = RectDelta(rect, 0.5f);
-    const HeightPageOverlay overlay(levels, rect, delta);
+    const HeightPageOverlay overlay(0, levels, rect, delta);
     ExpectOverlayIsThePyramidOf(overlay, TentPyramid(Dense(rect, delta, levels.front()), levels), levels);
 }
 
@@ -3586,7 +3586,7 @@ TEST(HeightPageOverlayTest, AnEditRebakesOnlyItsRectAndEqualsAFreshOverlay)
     const std::vector<PageStoreLevel> levels = BuildPageStoreLevels(601, 300);
     const PageSampleRect rect{100, 40, 250, 170};
     std::vector<float32> delta = RectDelta(rect, 0.5f);
-    HeightPageOverlay after(levels, rect, delta);
+    HeightPageOverlay after(0, levels, rect, delta);
     const PageSampleRect edit{180, 90, 210, 140};
     const std::vector<float32> edited = RectDelta(edit, 2.0f);
     after.Rebake(edit, edited);
@@ -3604,7 +3604,7 @@ TEST(HeightPageOverlayTest, APageGainsItsLevelsDeltaUnderEveryStoredSampleApronI
     // the edge between (1, 0) and (1, 1), so page (1, 0)'s first apron column (x 127) and last apron
     // row (z 128) lie inside the overlay.
     const PageSampleRect rect{120, 120, 140, 140};
-    const HeightPageOverlay overlay(levels, rect, RectDelta(rect, 0.5f));
+    const HeightPageOverlay overlay(0, levels, rect, RectDelta(rect, 0.5f));
     const uint32 pageX = 1u;
     const PageAddress page{0, 0, pageX, 0};
     std::vector<float32> samples(kPageSampleCount, 1.0f);
@@ -3632,6 +3632,29 @@ TEST(HeightPageOverlayTest, APageGainsItsLevelsDeltaUnderEveryStoredSampleApronI
     EXPECT_EQ(far, std::vector<float32>(kPageSampleCount, 1.0f));
 }
 
+TEST(HeightPageOverlayTest, AnOverlayAddsToThePagesOfItsOwnFaceOnly)
+{
+    const std::vector<PageStoreLevel> levels = BuildPageStoreLevels(257, 257);
+    const PageSampleRect rect{60, 60, 70, 70};
+    const HeightPageOverlay overlay(3, levels, rect, std::vector<float32>(rect.Width() * rect.Height(), 5.0f));
+    EXPECT_EQ(overlay.Face(), 3u);
+    std::vector<float32> own(kPageSampleCount, 1.0f);
+    ASSERT_TRUE(overlay.ApplyToPage(PageAddress{3, 0, 0, 0}, own));
+    EXPECT_FLOAT_EQ(own[66u * kPageStrideSamples + 66u], 6.0f) << "level-0 sample (65, 65) is stored at (66, 66)";
+    std::vector<float32> other(kPageSampleCount, 1.0f);
+    EXPECT_FALSE(overlay.ApplyToPage(PageAddress{0, 0, 0, 0}, other)) << "face 0's page at the same place";
+    EXPECT_EQ(other, std::vector<float32>(kPageSampleCount, 1.0f));
+}
+
+TEST(HeightPageOverlayTest, ARectStaysInsideItsFaceOnlyWhileNoLevelReadsAnEdgeSample)
+{
+    const std::vector<PageStoreLevel> levels = BuildPageStoreLevels(257, 257);
+    EXPECT_TRUE(Level0RectStaysInsideFace(levels, PageSampleRect{100, 100, 150, 150}));
+    EXPECT_FALSE(Level0RectStaysInsideFace(levels, PageSampleRect{0, 100, 20, 150})) << "on the edge at level 0";
+    EXPECT_FALSE(Level0RectStaysInsideFace(levels, PageSampleRect{100, 240, 150, 255}))
+        << "inside at level 0, on the edge at a coarser level";
+}
+
 TEST(PageResidencyTest, ARefreshedResidentPageIsRewrittenInItsSlotWithTheRectsRefreshedUnderIt)
 {
     JobSystem::WorkStealingThreadPool pool(2);
@@ -3656,8 +3679,8 @@ TEST(PageResidencyTest, ARefreshedResidentPageIsRewrittenInItsSlotWithTheRectsRe
     const PageSampleRect both{10, 4, 40, 20};
     const CachedPage edited{7, PageAddress{0, 0, 0, 0}};
     const uint32 slot = residency.FieldCache(7).SlotOf(edited);
-    residency.Refresh(7, edit);
-    residency.Refresh(7, second);
+    residency.Refresh(7, 0, edit);
+    residency.Refresh(7, 0, second);
     std::vector<CachedPage> rewritten;
     frame = RunFramesUntil(residency, frame, [&] {
         residency.Request(7, wanted);
@@ -3682,6 +3705,52 @@ TEST(PageResidencyTest, ARefreshedResidentPageIsRewrittenInItsSlotWithTheRectsRe
             << "level " << int(page.Address.Level) << " page (" << page.Address.X << ", " << page.Address.Z
             << ") was rewritten though the edit is not under it";
     EXPECT_EQ(rewritten.size(), provider->Levels().size()) << "one page per level reads the edit";
+    pool.Shutdown();
+}
+
+// A planet stream: a refresh of one face's rect rewrites that face's pages, not the pages at the same place on
+// another face.
+TEST(PageResidencyTest, ARefreshRewritesThePagesOfItsFaceOnly)
+{
+    JobSystem::WorkStealingThreadPool pool(2);
+    GeneratedPlanetLattice lattice;
+    lattice.ReferenceRadius = 2000.0;
+    lattice.FaceSamples = 257;
+    lattice.Height = [](const Mathematics::Vector3&, float32) { return 0.0f; };
+    lattice.HeightRange = [](const Mathematics::Vector3&, float32, float32) { return PageHeightRange{}; };
+    const auto provider = std::make_shared<GeneratedHeightPageProvider>(lattice);
+    PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
+    residency.ConfigureField(7, 128, 2, 0.4f);
+    residency.Configure(7, 7, PageSource{nullptr, provider});
+    std::vector<PageWant> wanted;
+    const std::vector<PageStoreLevel> levels = BuildPageStoreLevels(lattice.FaceSamples, lattice.FaceSamples);
+    for (const uint8 face : {uint8{0}, uint8{3}})
+        for (uint32 level = 0; level < levels.size(); ++level)
+            for (uint32 z = 0; z < levels[level].PagesZ; ++z)
+                for (uint32 x = 0; x < levels[level].PagesX; ++x)
+                    wanted.push_back({PageAddress{face, uint8(level), x, z}, float32(x + z), false});
+    residency.Request(7, wanted);
+    uint64 frame = RunFramesUntil(residency, 0, [&] { return residency.FieldCache(7).ResidentCount() == wanted.size(); });
+    ASSERT_EQ(residency.FieldCache(7).ResidentCount(), wanted.size());
+    for (int i = 0; i < 40; ++i)
+    {
+        residency.Request(7, wanted);
+        residency.Update(++frame, 1.0f / 60.0f, false);
+    }
+
+    residency.Refresh(7, 3, PageSampleRect{10, 10, 20, 20});
+    std::vector<CachedPage> rewritten;
+    for (int i = 0; i < 60; ++i)
+    {
+        residency.Request(7, wanted);
+        residency.Update(++frame, 1.0f / 60.0f, false);
+        for (const PageRewrite& rewrite : residency.FieldCache(7).Rewrites())
+            rewritten.push_back(rewrite.Page);
+    }
+    EXPECT_EQ(rewritten.size(), levels.size()) << "one page a level of face 3 reads the rect";
+    for (const CachedPage& page : rewritten)
+        EXPECT_EQ(int(page.Address.Face), 3) << "level " << int(page.Address.Level) << " page (" << page.Address.X
+                                         << ", " << page.Address.Z << ")";
     pool.Shutdown();
 }
 

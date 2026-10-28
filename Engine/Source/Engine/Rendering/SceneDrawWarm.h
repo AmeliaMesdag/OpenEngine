@@ -3,8 +3,8 @@
 #include "AssetCore/GUID.h"
 #include "Engine/Rendering/ParallaxReliefDepth.h"
 #include "Engine/Rendering/MeshGPURegistry.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 #include <cstdint>
 #include <unordered_set>

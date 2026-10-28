@@ -12,7 +12,7 @@
 #include "Editor/Entities/EditorECSHelpers.h"
 
 #include "Inspectors/InspectorColorSwatchRow.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Inspectors/LuxText.h"

@@ -18,7 +18,8 @@ enum class CBTTreeRestart : uint8_t
 {
     None,
     DomainChanged,   // planar <-> spherical
-    TerrainRetired,  // the drawn terrain was replaced, re-provisioned or removed (every scene open does this)
+    TerrainRetired,  // the drawn terrain was replaced, re-provisioned or removed (every scene open does this),
+                     // or another terrain became the drawn one
     DepthCapLowered, // the cap fell below the deepest cap the tree was allowed to reach
 };
 
@@ -46,16 +47,22 @@ class CBTTreeSeed
                   "the restart seed must leave the pool to the screen-space refinement");
 
     // The tree was seeded from its roots for `domain` (kDomainPlanar / kDomainSpherical) under
-    // `maxDepth`. Clears a pending retire and the settle hold.
+    // `maxDepth`. Clears a pending retire, the settle hold and the drawn terrain: the next
+    // NoteDrawnTerrain names the terrain the new tree grows on.
     void Seeded(uint32_t domain, uint32_t maxDepth);
 
-    // The texture set of the terrain the tree grew on was retired (CBTRenderFeature::
-    // ConsumeTerrainRetire): the terrain under the tree is no longer the one it grew on.
+    // The terrain under the tree is no longer the one it grew on: its texture set was retired
+    // (CBTRenderFeature::ConsumeTerrainRetire) or another terrain became the drawn one (NoteDrawnTerrain).
     void NoteTerrainRetired()
     {
         m_TerrainRetired = true;
         ++m_RetireCount;
     }
+
+    // The tree draws terrain (`index`, `generation`) this frame (CBTRenderFeature::BuildFrameParams).
+    // A terrain other than the one drawn since the last seed restarts the tree, as a retire does,
+    // and returns true. A frame with no terrain keeps the last one.
+    [[nodiscard]] bool NoteDrawnTerrain(uint32_t index, uint32_t generation);
 
     // Why the tree must restart in frame `frameCounter`, or None. A cap that rises is remembered
     // without a restart, so lowering it later back to where the tree was seeded still restarts:
@@ -91,6 +98,10 @@ class CBTTreeSeed
     uint32_t m_DeepestAllowedDepth = 0;
     bool m_TerrainRetired = false;
     uint64_t m_RetireCount = 0;
+    // The terrain drawn since the last seed.
+    bool m_HasDrawnTerrain = false;
+    uint32_t m_DrawnTerrainIndex = 0;
+    uint32_t m_DrawnTerrainGeneration = 0;
     // The restart request as last seen, and the frame it was first seen in that form.
     bool m_Holding = false;
     Request m_HeldRequest{};

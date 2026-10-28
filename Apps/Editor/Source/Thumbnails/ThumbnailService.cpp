@@ -7,7 +7,7 @@
 #include "Assets/AssetRegistry.h"
 #include "Editor/Assets/ShaderGlslOpen.h"
 #include "Thumbnails/AssetThumbnailHandler.h"
-#include "Thumbnails/ModelThumbnailHandler.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
 #include "Thumbnails/ShaderGraphThumbnailMaterial.h"
 #include "Core/Engine.h"
 #include "JobSystem/WorkStealingThreadPool.h"
@@ -42,7 +42,7 @@ static bool IsImageExtension(const std::filesystem::path& p)
     auto ext = ToLowerAscii(p.has_extension() ? p.extension().string() : std::string());
     // .ktx/.ktx2 render through the UI background path, which re-decodes
     // block-compressed containers to RGBA8 (UI::UploadBackgroundImageFromAsset,
-    // Engine/Modules/UI/Source/BackgroundImageUpload.cpp).
+    // Engine/Modules/UI/Source/BackgroundImage/BackgroundImageUpload.cpp).
     return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" ||
            ext == ".tga" || ext == ".gif" || ext == ".webp" || ext == ".svg" ||
            ext == ".hdr" || ext == ".ktx" || ext == ".ktx2";

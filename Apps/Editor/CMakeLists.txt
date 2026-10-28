@@ -4,13 +4,13 @@ set(EDITOR_SOURCES
     Source/main.cpp
     Source/Editor/Application/BuildConfigStatus.cpp
     Source/Editor/Application/EditorVersion.cpp
-    Source/EditorApplication.cpp
+    Source/EditorApplication/EditorApplication.cpp
     Source/DeviceLossSurfacer.cpp
     Source/Diagnostics/MainThreadHangWatchdog.cpp
-    Source/Diagnostics/FramePhaseHistory.cpp
-    Source/Diagnostics/FramePhaseRecorder.cpp
+    Source/Diagnostics/FramePhase/FramePhaseHistory.cpp
+    Source/Diagnostics/FramePhase/FramePhaseRecorder.cpp
     Source/EditorTreeTitleIconVars.cpp
-    Source/Settings/RenderPipelineSettings.cpp
+    Source/Editor/Settings/Render/RenderPipelineSettings.cpp
     Source/Editor/Assets/AssetRelativePath.cpp
     Source/Editor/BuildExporters/SteamDeckBuildExporter.cpp
     Source/Editor/BuildExporters/WebBuildExporter.cpp
@@ -28,13 +28,13 @@ set(EDITOR_SOURCES
     Source/Editor/Settings/SceneViewExposureSettingsPage.cpp
     Source/Editor/Settings/GraphSettingsPage.cpp
     Source/Editor/Settings/LodSettingsPage.cpp
-    Source/Editor/Settings/RenderLayersSettingsPage.cpp
-    Source/Editor/Settings/ScriptPackagesSettingsPage.cpp
-    Source/Editor/Settings/ScriptPackagesList.cpp
+    Source/Editor/Settings/Render/RenderLayersSettingsPage.cpp
+    Source/Editor/Settings/ScriptPackages/ScriptPackagesSettingsPage.cpp
+    Source/Editor/Settings/ScriptPackages/ScriptPackagesList.cpp
     Source/Editor/Settings/SettingsTextFieldRow.cpp
     Source/Editor/Settings/PhysicsProjectSettings.cpp
     Source/Editor/Settings/ProjectUIScaleBinding.cpp
-    Source/Editor/Settings/RenderProjectSettings.cpp
+    Source/Editor/Settings/Render/RenderProjectSettings.cpp
     Source/Editor/Settings/SvgRasterSettings.cpp
     Source/Editor/Settings/UIScaleProjectSettingsWriter.cpp
 	Source/Editor/RenderGraphTickRegistry.cpp
@@ -62,8 +62,8 @@ set(EDITOR_SOURCES
     Source/UndoRedo/EntityComponentsEdit.cpp
     Source/UndoRedo/RenameAssetCommand.cpp
     Source/UndoRedo/SetAssetMetaValueCommand.cpp
-    Source/UndoRedo/SplinePointEdits.cpp
-    Source/UndoRedo/SplineNetworkRecordCommand.cpp
+    Source/UndoRedo/Spline/SplinePointEdits.cpp
+    Source/UndoRedo/Spline/SplineNetworkRecordCommand.cpp
     Source/Assets/AsyncAssetHelpers.cpp
     Source/Assets/TexturePreparingStatusItem.cpp
     Source/Editor/Registries/BuiltInStatusBarItems.cpp
@@ -74,12 +74,12 @@ set(EDITOR_SOURCES
     Source/Editor/Entities/SkyboxEntityFactory.cpp
     Source/Assets/AssetsBrowserController.cpp
     Source/Assets/AssetsFolderDropRegistry.cpp
-    Source/Assets/EditorAssetActionsInstall.cpp
+    Source/Editor/Assets/EditorAssetActionsInstall.cpp
     Source/Assets/AssetsDataProviders.cpp
     Source/Assets/DownloadPillOverlay.cpp
-    Source/Assets/PolyhavenDownloadManager.cpp
-    Source/Assets/PolyhavenPlaceholderFactory.cpp
-    Source/Assets/PolyhavenService.cpp
+    Source/Assets/Polyhaven/PolyhavenDownloadManager.cpp
+    Source/Assets/Polyhaven/PolyhavenPlaceholderFactory.cpp
+    Source/Assets/Polyhaven/PolyhavenService.cpp
     Source/UI/InlineRenameSession.cpp
     Source/UI/SmartFolder/SmartFolder.cpp
     Source/UI/SmartFolder/SmartFolderController.cpp
@@ -96,12 +96,12 @@ set(EDITOR_SOURCES
     Source/Panels/BuiltInPanelTypes.cpp
     Source/Panels/MovieRecorderPanel.cpp
     Source/Panels/HierarchyPanel.cpp
-    Source/Editor/Hierarchy/HierarchyEntityIcon.cpp
+    Source/Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.cpp
     Source/Editor/Hierarchy/HierarchyOrdering.cpp
     Source/Editor/Hierarchy/HierarchyEmptyParent.cpp
-    Source/Editor/Hierarchy/HierarchyEntityCommands.cpp
-    Source/Editor/Hierarchy/HierarchyEntityDelete.cpp
-    Source/Editor/Hierarchy/HierarchyEntityRename.cpp
+    Source/Editor/Hierarchy/HierarchyEntity/HierarchyEntityCommands.cpp
+    Source/Editor/Hierarchy/HierarchyEntity/HierarchyEntityDelete.cpp
+    Source/Editor/Hierarchy/HierarchyEntity/HierarchyEntityRename.cpp
     Source/Editor/Hierarchy/HierarchyReparent.cpp
     Source/Panels/InspectorPanel.cpp
     Source/Panels/AssetViewPanel.cpp
@@ -109,10 +109,10 @@ set(EDITOR_SOURCES
     Source/Panels/LogModel.cpp
     Source/Panels/LogPanel.cpp
     Source/Panels/LogView.cpp
-    Source/Panels/ScriptDiagnosticsByAssembly.cpp
-    Source/Panels/ScriptErrorsPanel.cpp
-    Source/Panels/ShaderErrorRows.cpp
-    Source/Panels/ShaderErrorsPanel.cpp
+    Source/Panels/Script/ScriptDiagnosticsByAssembly.cpp
+    Source/Panels/Script/ScriptErrorsPanel.cpp
+    Source/Panels/ShaderErrors/ShaderErrorRows.cpp
+    Source/Panels/ShaderErrors/ShaderErrorsPanel.cpp
     Source/Panels/MonitorsPanel.cpp
     Source/Panels/RenderGraphPanel.cpp
     Source/Panels/CpuProfilerPanel.cpp
@@ -141,33 +141,33 @@ set(EDITOR_SOURCES
     Source/Panels/VideoPlayerModal.cpp
     Source/EditorVideoPlayerController.cpp
     Source/Panels/GameViewPanel.cpp
-    Source/Panels/SceneViewPanel.cpp
-    Source/Panels/SceneViewPanelMenus.cpp
-    Source/Panels/SceneViewPanelQuad.cpp
+    Source/SceneView/SceneViewPanel.cpp
+    Source/SceneView/SceneViewPanelMenus.cpp
+    Source/SceneView/SceneViewPanelQuad.cpp
     Source/Panels/SettingsPanel.cpp
     Source/Panels/SettingsPanelTreeScaling.cpp
 	Source/Panels/CompletionPopup.cpp
-	Source/Panels/ScriptEditorPanel.cpp
-	Source/Panels/ScriptSyntax.cpp
-	Source/Panels/ScriptTextArea.cpp
+	Source/Panels/Script/ScriptEditorPanel.cpp
+	Source/Panels/Script/ScriptSyntax.cpp
+	Source/Panels/Script/ScriptTextArea.cpp
     Source/Panels/ColorPicker.cpp
     Source/Panels/ColorPickerPopup.cpp
     Source/Panels/SceneCameraSettingsPopup.cpp
     Source/ColorPicker/ColorPickerPresenter.cpp
     Source/ColorPicker/ColorPickerScope.cpp
-    Source/ColorPicker/ColorPickerWindow.cpp
+    Source/ColorPicker/ColorPickerWindow/ColorPickerWindow.cpp
     Source/ColorPicker/ColorPickerEditorIntegration.cpp
-    Source/ColorPicker/ColorPickerWindowInput.cpp
+    Source/ColorPicker/ColorPickerWindow/ColorPickerWindowInput.cpp
 	Source/Panels/DiffPanel.cpp
-    Source/Panels/AnimationWindowPanel.cpp
+    Source/Panels/Animation/AnimationWindowPanel.cpp
     Source/Panels/MixerPanel.cpp
     Source/Panels/TimelineBarElement.cpp
     Source/Panels/DopeSheetView.cpp
     Source/Panels/CurvesGraphView.cpp
-    Source/Panels/TimeCompositeView.cpp
+    Source/Panels/TimeComposite/TimeCompositeView.cpp
     Source/Panels/LaneClipEditorView.cpp
     Source/Panels/SequencerModelSerialization.cpp
-    Source/Panels/TimeCompositeTimelineBridge.cpp
+    Source/Panels/TimeComposite/TimeCompositeTimelineBridge.cpp
     Source/Panels/UIDemoPanel.cpp
     Source/Panels/MissingAssetsPanel.cpp
     Source/Panels/PackageManagerPanel.cpp
@@ -176,6 +176,7 @@ set(EDITOR_SOURCES
     Source/PlayMode/PlayModeEntryGate.cpp
     Source/PlayMode/PlayModeEntryModal.cpp
     Source/PlayMode/PlayModeManager.cpp
+    Source/PlayMode/PlayModeGameViewFocus.cpp
     Source/PlayMode/ModelAnimationPlayMode.cpp
     Source/PlayMode/AnimationPlayModeHelpers.cpp
     Source/PlayMode/RuntimeInputConnection.cpp
@@ -193,7 +194,7 @@ set(EDITOR_SOURCES
     Source/GameViewMovieCapture.cpp
     Source/MovieRecorderController.cpp
     Source/MovieRecorderToolbarMenu.cpp
-    Source/SceneViewController.cpp
+    Source/SceneView/SceneViewController.cpp
     Source/EditorComponentInstantiations.cpp
     Source/Scripting/EditorScriptMenuRegistry.cpp
     Source/Scripting/ScriptStatusIndicator.cpp
@@ -204,17 +205,17 @@ set(EDITOR_SOURCES
 	Source/Thumbnails/ThumbnailService.cpp
 	Source/Thumbnails/ThumbnailMenuItems.cpp
 	Source/Thumbnails/ShaderGraphThumbnailMaterial.cpp
-	Source/Thumbnails/CubeLutStripBands.cpp
-	Source/Thumbnails/CubeLutStripRequest.cpp
-	Source/Thumbnails/CubeLutThumbnailHandler.cpp
-	Source/Thumbnails/ModelThumbnailHandler.cpp
-	Source/Thumbnails/ModelThumbnailBakeQueue.cpp
-	Source/Thumbnails/ModelThumbnailBakedImages.cpp
-	Source/Thumbnails/ModelThumbnailCacheFiles.cpp
-	Source/Thumbnails/ModelThumbnailImports.cpp
-	Source/Thumbnails/ModelThumbnailPngPersistence.cpp
-	Source/Thumbnails/ModelThumbnailPreviewScene.cpp
-	Source/Thumbnails/ModelThumbnailRenderLanes.cpp
+	Source/Inspectors/CubeLut/CubeLutStripBands.cpp
+	Source/Inspectors/CubeLut/CubeLutStripRequest.cpp
+	Source/Inspectors/CubeLut/CubeLutThumbnailHandler.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailHandler.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailBakeQueue.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailBakedImages.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailCacheFiles.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailImports.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailPngPersistence.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailPreviewScene.cpp
+	Source/Thumbnails/ModelThumbnail/ModelThumbnailRenderLanes.cpp
 	Source/Thumbnails/TextureThumbnailHandler.cpp
 	Source/Thumbnails/VideoThumbnailHandler.cpp
 	Source/UI/InspectorSection.cpp
@@ -258,6 +259,8 @@ set(EDITOR_SOURCES
 	Source/UI/Controls/CurveTangents.cpp
 	Source/UI/Controls/CurvePresets.cpp
 	Source/UI/Controls/CurvePresetPicker.cpp
+	Source/UI/Controls/EntityMemberList/EntityMemberList.cpp
+	Source/UI/Controls/EntityMemberList/EntityMemberList.h
 	Source/UI/Layout/DockConfigElements.cpp
 	Source/UI/Layout/EditorDockConfigParser.cpp
 	Source/Inspectors/TransformInspector.cpp
@@ -269,10 +272,10 @@ set(EDITOR_SOURCES
 	Source/Inspectors/InspectorEntityActivity.cpp
 	Source/Inspectors/InspectorSectionHosts.cpp
 	Source/Inspectors/PreservedFieldNotice.cpp
-	Source/Inspectors/InspectorComponentSection.cpp
+	Source/Inspectors/InspectorComponent/InspectorComponentSection.cpp
 	Source/Inspectors/MeshRendererInspector.cpp
 	Source/Inspectors/ShadowCastingRow.cpp
-	Source/Inspectors/RenderLayerField.cpp
+	Source/Inspectors/RenderLayers/RenderLayerField.cpp
 	Source/Inspectors/Navigation/NavigationAgentInspector.cpp
 	Source/Inspectors/Navigation/NavigationSourceComponentTraits.cpp
 	Source/Inspectors/Navigation/NavigationSurfaceInspector.cpp
@@ -287,9 +290,9 @@ set(EDITOR_SOURCES
 	Source/Inspectors/LightInspector.cpp
 	Source/Inspectors/LensFlareSourceInspector.cpp
 	Source/Inspectors/MeasureInspector.cpp
-	Source/Inspectors/PhysicsBodyInspector.cpp
+	Source/Inspectors/Physics/PhysicsBodyInspector.cpp
 	Source/Inspectors/CharacterControllerInspector.cpp
-	Source/Inspectors/PhysicsColliderInspector.cpp
+	Source/Inspectors/Physics/PhysicsColliderInspector.cpp
 	Source/Inspectors/MaterialInspector.cpp
 	Source/Inspectors/MaterialInspectorSections.cpp
 	Source/Inspectors/DeclaredPropertyRowModel.cpp
@@ -305,60 +308,60 @@ set(EDITOR_SOURCES
 	Source/Inspectors/ScriptInspector.cpp
 	Source/Inspectors/NativeSourceInspector.cpp
 	Source/Inspectors/RenderPipelineInspector.cpp
-	Source/Inspectors/SkyEnvironmentInspector.cpp
+	Source/Sky/SkyEnvironment/SkyEnvironmentInspector.cpp
 	Source/Inspectors/DayOfYearText.cpp
-	Source/Inspectors/SkyDayCurveRow.cpp
+	Source/Sky/SkyDayCurveRow.cpp
 	Source/Inspectors/LuxText.cpp
-	Source/Inspectors/SkySun/SkySunCurveReference.cpp
-	Source/Inspectors/SkySun/SkySunDriveRows.cpp
-	Source/Inspectors/SkySun/SkySunIlluminanceRow.cpp
-	Source/Inspectors/SkyStarLookRow.cpp
-	Source/Inspectors/SkyStarSeenByRow.cpp
-	Source/Inspectors/SkySun/SkySunPathRows.cpp
-	Source/Inspectors/SkySun/SkySunPathCaptions.cpp
-	Source/Inspectors/SkySun/SkySunReadoutCard.cpp
-	Source/Inspectors/SkySun/SkySunReadoutText.cpp
+	Source/Sky/SkySun/SkySunCurveReference.cpp
+	Source/Sky/SkySun/SkySunDriveRows.cpp
+	Source/Sky/SkySun/SkySunIlluminanceRow.cpp
+	Source/Sky/SkyStarLookRow.cpp
+	Source/Sky/SkyStarSeenByRow.cpp
+	Source/Sky/SkySun/SkySunPathRows.cpp
+	Source/Sky/SkySun/SkySunPathCaptions.cpp
+	Source/Sky/SkySun/SkySunReadoutCard.cpp
+	Source/Sky/SkySun/SkySunReadoutText.cpp
 	Source/Inspectors/AmbientLightInspector.cpp
 	Source/Inspectors/SkyboxInspector.cpp
 	Source/Inspectors/OceanWaveSpectrumInspector.cpp
 	Source/Inspectors/OceanDepthCacheSourceInspector.cpp
 	Source/Inspectors/Particles/ParticleInspector.cpp
 	Source/Inspectors/Particles/Controls/ParticlePreviewControls.cpp
-	Source/Inspectors/Particles/ParticleStackInspector.cpp
-	Source/Inspectors/Particles/ParticleStackEditor.cpp
+	Source/Inspectors/Particles/ParticleStack/ParticleStackInspector.cpp
+	Source/Inspectors/Particles/ParticleStack/ParticleStackEditor.cpp
 	Source/Inspectors/Particles/ParticleParameterFields.cpp
 	Source/Inspectors/Particles/ParticleProcessorSearchProvider.cpp
 	Source/Inspectors/Particles/ParticleEmitterStackSection.cpp
-	Source/Inspectors/Particles/ParticleStackReference.cpp
+	Source/Inspectors/Particles/ParticleStack/ParticleStackReference.cpp
 	Source/Inspectors/Particles/ParticleRendererInspector.cpp
 	Source/Inspectors/PostProcessVolumeInspector.cpp
 	Source/Inspectors/WindVolumeInspector.cpp
-	Source/Inspectors/BloomEffectInspector.cpp
-	Source/Inspectors/ChromaticAberrationEffectInspector.cpp
-	Source/Inspectors/DepthOfFieldEffectInspector.cpp
-	Source/Inspectors/FilmSimulationEffectInspector.cpp
-	Source/Inspectors/AmbientOcclusionEffectInspector.cpp
-	Source/Inspectors/ScreenSpaceReflectionsEffectInspector.cpp
-	Source/Inspectors/ContrastAdaptiveSharpenEffectInspector.cpp
-	Source/Inspectors/ExposureAdjustmentEffectInspector.cpp
-	Source/Inspectors/CrtEffectInspector.cpp
-	Source/Inspectors/FastBlurEffectInspector.cpp
-	Source/Inspectors/HeatDistortionEffectInspector.cpp
-	Source/Inspectors/VhsEffectInspector.cpp
-	Source/Inspectors/HeightFogEffectInspector.cpp
-	Source/Inspectors/ColorFilterEffectInspector.cpp
-	Source/Inspectors/ColorGradeEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/BloomEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ChromaticAberrationEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/DepthOfFieldEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/FilmSimulationEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/AmbientOcclusionEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ScreenSpaceReflectionsEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ContrastAdaptiveSharpenEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ExposureAdjustmentEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/CrtEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/FastBlurEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/HeatDistortionEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/VhsEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/HeightFogEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ColorFilterEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ColorGradeEffectInspector.cpp
 	Source/Inspectors/CubeLut/CubeLutAssetInspector.cpp
 	Source/Inspectors/CubeLut/CubeLutEffectInspector.cpp
 	Source/Inspectors/CubeLut/CubeLutPreview.cpp
 	Source/Inspectors/CubeLut/CubeLutStageNotice.cpp
 	Source/Inspectors/CubeLut/CubeLutPreviewPopover.cpp
-	Source/Inspectors/DebandEffectInspector.cpp
-	Source/Inspectors/VignetteEffectInspector.cpp
-	Source/Inspectors/ShadowSettingsEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/DebandEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/VignetteEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/ShadowSettingsEffectInspector.cpp
 	Source/Inspectors/AtmosphericCloudLayerInspector.cpp
 	Source/Inspectors/VolumetricCloudsInspector.cpp
-	Source/Inspectors/VolumetricFogEffectInspector.cpp
+	Source/Inspectors/PostProcessEffects/VolumetricFogEffectInspector.cpp
 	Source/Inspectors/AudioInspector.cpp
 	Source/Inspectors/AudioEmitterInspector.cpp
 	Source/Inspectors/SkeletonProfileInspector.cpp
@@ -369,35 +372,36 @@ set(EDITOR_SOURCES
 	Source/Terrain/TerrainHeightmapInspector.cpp
 	Source/Terrain/RawHeightmapSettingsCommit.cpp
 	Source/Terrain/TerrainInspector.cpp
+	Source/Terrain/TerrainDrawnNotice.cpp
 	Source/Terrain/TerrainSizingNotice.cpp
 	Source/Terrain/TerrainPageCookOverlay.cpp
-	Source/Terrain/TerrainModifierInspectors.cpp
+	Source/Terrain/TerrainModifier/TerrainModifierInspectors.cpp
 	Source/Terrain/TerrainVolumeNotices.cpp
-	Source/Terrain/TerrainGrassPresetRow.cpp
-	Source/Terrain/TerrainGrassRegionRows.cpp
+	Source/Terrain/TerrainGrass/TerrainGrassPresetRow.cpp
+	Source/Terrain/TerrainGrass/TerrainGrassRegionRows.cpp
 	Source/Terrain/TerrainColorZoneInspector.cpp
 	Source/Terrain/TerrainMaterialLibraryMint.cpp
 	Source/Terrain/TerrainMaterialLibraryInspector.cpp
 	Source/Navigation/NavigationBakedDataSave.cpp
 	Source/Terrain/TerrainBakeCacheSave.cpp
-	Source/Terrain/TerrainGrassVocabulary.cpp
+	Source/Terrain/TerrainGrass/TerrainGrassVocabulary.cpp
 	Source/Terrain/TerrainRoleMaterials.cpp
-	Source/Terrain/TerrainRuleConditionVocabulary.cpp
-	Source/Terrain/TerrainRuleWeightProfileStrip.cpp
-	Source/Terrain/TerrainRuleRows.cpp
-	Source/Terrain/TerrainRuleNotices.cpp
+	Source/Terrain/TerrainRule/TerrainRuleConditionVocabulary.cpp
+	Source/Terrain/TerrainRule/TerrainRuleWeightProfileStrip.cpp
+	Source/Terrain/TerrainRule/TerrainRuleRows.cpp
+	Source/Terrain/TerrainRule/TerrainRuleNotices.cpp
 	Source/Terrain/TerrainInteractiveModifierEdit.cpp
 	Source/Terrain/SphereSculptSaver.cpp
 	Source/Terrain/TerrainZonePayloadSaver.cpp
-	Source/Sky/SkyEnvironmentComponentTraits.cpp
-	Source/Sky/SkyEnvironmentCreation.cpp
-	Source/Sky/SkySunLinkUndo.cpp
+	Source/Sky/SkyEnvironment/SkyEnvironmentComponentTraits.cpp
+	Source/Sky/SkyEnvironment/SkyEnvironmentCreation.cpp
+	Source/Sky/SkySun/SkySunLinkUndo.cpp
 	Source/Sky/SkyPathGizmo.cpp
-	Source/Sky/SkySunDayKind.cpp
+	Source/Sky/SkySun/SkySunDayKind.cpp
 	Source/Sky/StarLookPresets.cpp
-	Source/Sky/SkySunIlluminanceSwitch.cpp
-	Source/Sky/SkySunPathSwitch.cpp
-	Source/Sky/SkyEnvironmentEdit.cpp
+	Source/Sky/SkySun/SkySunIlluminanceSwitch.cpp
+	Source/Sky/SkySun/SkySunPathSwitch.cpp
+	Source/Sky/SkyEnvironment/SkyEnvironmentEdit.cpp
 	Source/Inspectors/Spline/SplineInspector.cpp
 	Source/Inspectors/SplineFence/SplineFenceInspector.cpp
 	Source/Inspectors/SplineFence/SplineFencePartRow.cpp
@@ -426,12 +430,12 @@ set(EDITOR_SOURCES
 	Source/EditorDebugMetrics.cpp
 	Source/Assets/EditorAssetRegistrations.cpp
 	Source/Graph/NodeColorSettings.cpp
-	Source/Graph/GraphNodeRegistry.cpp
+	Source/Graph/GraphNode/GraphNodeRegistry.cpp
 	Source/Graph/AnimationGraphNodeTypes.cpp
-	Source/ShaderGraph/GraphPreviewMaterialRuntime.cpp
-	Source/ShaderGraph/MaterialGraphNodePreviewMaterials.cpp
-	Source/ShaderGraph/MaterialGraphPreviewModel.cpp
-	Source/ShaderGraph/MaterialGraphPreviews.cpp
+	Source/ShaderGraph/GraphPreview/GraphPreviewMaterialRuntime.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphNodePreviewMaterials.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphPreviewModel.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphPreviews.cpp
 	Source/Graph/GraphKindChrome.cpp
 	Source/Graph/GraphSubgraphStore.cpp
 	Source/Graph/GraphNest.cpp
@@ -443,37 +447,37 @@ set(EDITOR_SOURCES
 	Source/Graph/BlendSpace2DEditor.cpp
 	Source/Graph/GraphCanvas.cpp
 	Source/Graph/GraphRouteSolver.cpp
-	Source/Graph/GraphNode.cpp
-	Source/Graph/GraphNodeIcons.cpp
-	Source/Graph/GraphPort.cpp
+	Source/Graph/GraphNode/GraphNode.cpp
+	Source/Graph/GraphNode/GraphNodeIcons.cpp
+	Source/Graph/GraphPort/GraphPort.cpp
 	Source/Graph/GraphPortedNode.cpp
-	Source/ShaderGraph/MaterialGraphController.cpp
-	Source/ShaderGraph/MaterialGraphDiagnosticsSummary.cpp
-	Source/ShaderGraph/MaterialGraphVariables.cpp
-	Source/ShaderGraph/MaterialGraphNodeTypes.cpp
-	Source/ShaderGraph/MaterialGraphNode.cpp
-	Source/ShaderGraph/GraphPreviewAtlas.cpp
-	Source/ShaderGraph/GraphPreviewAtlasLayout.cpp
-	Source/Graph/GraphPortDropSlot.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphController.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphDiagnosticsSummary.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphVariables.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphNodeTypes.cpp
+	Source/ShaderGraph/MaterialGraph/MaterialGraphNode.cpp
+	Source/ShaderGraph/GraphPreview/GraphPreviewAtlas.cpp
+	Source/ShaderGraph/GraphPreview/GraphPreviewAtlasLayout.cpp
+	Source/Graph/GraphPort/GraphPortDropSlot.cpp
 	Source/Graph/GraphCanvasEditKeys.cpp
-	Source/Graph/GraphNodePool.cpp
+	Source/Graph/GraphNode/GraphNodePool.cpp
 	Source/Graph/GraphOverlay.cpp
-	Source/Graph/GraphNodeSummary.cpp
+	Source/Graph/GraphNode/GraphNodeSummary.cpp
 	Source/Graph/GraphVariableValues.cpp
 	Source/Graph/GraphInspectorRows.cpp
 	Source/Graph/GraphPanelFactory.cpp
 	Source/Panels/GraphPanel.cpp
-	Source/Panels/ShaderGraphPanel.cpp
-	Source/Panels/AnimationGraphPanel.cpp
+	Source/ShaderGraph/ShaderGraphPanel.cpp
+	Source/Panels/Animation/AnimationGraphPanel.cpp
 	Source/Panels/GameLogicGraphPanel.cpp
-		Source/ShaderGraph/MaterialGraphPreviewHost.cpp
+		Source/ShaderGraph/MaterialGraph/MaterialGraphPreviewHost.cpp
 
 	# VCS glue (provider-agnostic; providers live in Packages/*-vcs)
 	Source/VersionControl/EditorVersionControlService.cpp
 	Source/VersionControl/EditorVersionControlUi.cpp
-	Source/VersionControl/SceneDiff.cpp
-	Source/VersionControl/SceneDiffLiveOverlay.cpp
-	Source/VersionControl/SceneDiffVcs.cpp
+	Source/VersionControl/SceneDiff/SceneDiff.cpp
+	Source/VersionControl/SceneDiff/SceneDiffLiveOverlay.cpp
+	Source/VersionControl/SceneDiff/SceneDiffVcs.cpp
 	Source/VersionControl/Ui/HierarchyVcsController.cpp
 	Source/VersionControl/Ui/InspectorVcsController.cpp
 	Source/VersionControl/Ui/VcsCommitDialog.cpp
@@ -494,17 +498,17 @@ set(EDITOR_SOURCES
 	Source/SceneView/ComponentGizmos.cpp
 	Source/SceneView/ReflectionProbeGizmo.cpp
 	Source/SceneView/Gizmos/DDGIVolumeGizmo.cpp
-	Source/SceneView/TerrainModifierGizmo.cpp
+	Source/Terrain/TerrainModifier/TerrainModifierGizmo.cpp
 	Source/SceneView/LightGizmo.cpp
 	Source/SceneView/CameraFrameGizmo.cpp
 	Source/SceneView/NavGridBrushTool.cpp
-	Source/SceneView/TerrainBrushTool.cpp
+	Source/Terrain/TerrainBrushTool.cpp
 	Source/SceneView/MeasureSceneGizmo.cpp
-	Source/SceneView/SplineTool.cpp
-	Source/SceneView/SplineOwnerQuery.cpp
-	Source/SceneView/SplineStrokeCapture.cpp
-	Source/SceneView/SplineSceneGizmo.cpp
-	Source/SceneView/SplineDrapePolylines.cpp
+	Source/SceneView/SplineTool/SplineTool.cpp
+	Source/SceneView/SplineTool/SplineOwnerQuery.cpp
+	Source/SceneView/SplineTool/SplineStrokeCapture.cpp
+	Source/SceneView/SplineTool/SplineSceneGizmo.cpp
+	Source/SceneView/SplineTool/SplineDrapePolylines.cpp
 	Source/SceneView/SceneViewDropPlacement.cpp
 	Source/SceneView/SceneViewNoticeOverlay.cpp
 	Source/SceneView/SceneViewFraming.cpp
@@ -523,37 +527,37 @@ set(EDITOR_SOURCES
 	Source/Markups/MarkupPresentation.cpp
 	Source/Markups/MarkupRenderFeature.cpp
 	Source/Markups/MarkupPathPort.cpp
-	Source/Markups/MarkupRegionDisplay.cpp
+	Source/Markups/MarkupRegion/MarkupRegionDisplay.cpp
 	Source/Markups/MarkupInspectorRows.cpp
 	Source/Markups/MarkupPathInspector.cpp
-	Source/Markups/MarkupRegionInspector.cpp
-	Source/Markups/MarkupRegionPort.cpp
+	Source/Markups/MarkupRegion/MarkupRegionInspector.cpp
+	Source/Markups/MarkupRegion/MarkupRegionPort.cpp
 	Source/Markups/MarkupRequests.cpp
 	Source/Markups/MarkupTool.cpp
 	Source/Markups/MarkupsPanel.cpp
 	Source/DayCycle/DayCycleAxis.cpp
 	Source/DayCycle/DayCycleDescriptionField.cpp
 	Source/DayCycle/DayCycleEditorServices.cpp
-	Source/DayCycle/DayCycleProfileControls.cpp
-	Source/DayCycle/DayCycleProfileInspector.cpp
-	Source/DayCycle/DayCycleProfileSave.cpp
+	Source/DayCycle/DayCycleProfile/DayCycleProfileControls.cpp
+	Source/DayCycle/DayCycleProfile/DayCycleProfileInspector.cpp
+	Source/DayCycle/DayCycleProfile/DayCycleProfileSave.cpp
 	Source/DayCycle/DayCycleRowsHost.cpp
 	Source/DayCycle/DayCycleScrub.cpp
 	Source/DayCycle/DayCycleShippedProfiles.cpp
 	Source/DayCycle/DayCycleSunNow.cpp
 	Source/DayCycle/DayCycleTrackRows.cpp
-	Source/DayCycle/DayCycleWindow.cpp
-	Source/DayCycle/DayCycleWindowRegistration.cpp
+	Source/DayCycle/DayCycleWindow/DayCycleWindow.cpp
+	Source/DayCycle/DayCycleWindow/DayCycleWindowRegistration.cpp
 	Source/DayCycle/DayCycleWorkingCopy.cpp
 	Source/Markups/MarkupsPanelRows.cpp
 	Source/Markups/MarkupActionMenuItems.h
 	Source/SceneView/SceneViewToolStrip.cpp
 	Source/SceneView/SceneViewToolStripRegistry.cpp
 	Source/SceneView/BuiltInSceneViewTools.cpp
-	Source/SceneView/SplineToolMenu.cpp
-	Source/SceneView/SplineToolStripEntry.cpp
-	Source/SceneView/TerrainBrushToolStripEntry.cpp
-	Source/SceneView/TerrainPresence.cpp
+	Source/SceneView/SplineTool/SplineToolMenu.cpp
+	Source/SceneView/SplineTool/SplineToolStripEntry.cpp
+	Source/Terrain/TerrainBrushToolStripEntry.cpp
+	Source/Terrain/TerrainPresence.cpp
 	Source/SceneView/SceneViewProjection.cpp
 	Source/SceneView/SceneViewAutoExposure.cpp
 	Source/SceneView/SceneViewPostProcessSwitches.cpp
@@ -578,8 +582,8 @@ set(EDITOR_SOURCES
 	Source/Picking/ScenePick.cpp
 	Source/Picking/PickRootResolver.cpp
 	# Prefabs: placing, creating and unpacking instances of .prefab assets.
-	Source/Prefabs/CreatePrefabCommand.cpp
-	Source/Prefabs/CreatePrefabDialog.cpp
+	Source/Prefabs/CreatePrefab/CreatePrefabCommand.cpp
+	Source/Prefabs/CreatePrefab/CreatePrefabDialog.cpp
 	Source/Prefabs/PrefabBar.cpp
 	Source/Prefabs/PrefabEditorRegistration.cpp
 	Source/Prefabs/PrefabHierarchyRows.cpp
@@ -588,104 +592,105 @@ set(EDITOR_SOURCES
 	Source/Prefabs/PrefabService.cpp
 	Source/Prefabs/PrefabThumbnailHandler.cpp
 	Source/Prefabs/UnpackPrefabCommand.cpp
-	Source/EditorApplication_InspectorSettings.cpp
+	Source/EditorApplication/EditorApplication_InspectorSettings.cpp
 	Source/Editor/Settings/EditorHiDpiPlatformSettings.cpp
-	Source/EditorApplication_Fullscreen.cpp
-	Source/EditorApplication_Boot.cpp
-	Source/EditorApplication_AssetPreview.cpp
-	Source/EditorApplication_LayoutPresets.cpp
-	Source/EditorApplication_Windows.cpp
-	Source/EditorApplication_Shortcuts.cpp
+	Source/EditorApplication/EditorApplication_Fullscreen.cpp
+	Source/EditorApplication/EditorApplication_Boot.cpp
+	Source/EditorApplication/EditorApplication_AssetPreview.cpp
+	Source/EditorApplication/EditorApplication_LayoutPresets.cpp
+	Source/EditorApplication/EditorApplication_Windows.cpp
+	Source/EditorApplication/EditorApplication_Shortcuts.cpp
 	Source/Editor/Shortcuts/DiagnosticShortcuts.cpp
 	Source/DebugServer/EditorDebugServer.cpp
 	Source/DebugServer/BenchSceneHandlers.cpp
 	Source/DebugServer/CameraProjectionReport.cpp
-	Source/DebugServer/TerrainSplitThresholdReport.cpp
+	Source/DebugServer/Terrain/TerrainStatsReport.cpp
 	Source/DebugServer/SceneHierarchyReport.cpp
 	Source/DebugServer/LogQueryReport.cpp
 	Source/DebugServer/BuildStatusReport.cpp
-	Source/DebugServer/ComponentValueReader.cpp
-	Source/DebugServer/RenderLayerMaskValue.cpp
-	Source/DebugServer/SchemaComponentApply.cpp
+	Source/DebugServer/Components/ComponentValueReader.cpp
+	Source/DebugServer/Components/RenderLayerMaskValue.cpp
+	Source/DebugServer/Components/SchemaComponentApply.cpp
 	Source/DebugServer/DebugHandlers.cpp
 	Source/DebugServer/DebugServerReply.cpp
 	Source/DebugServer/ElementPointerTarget.cpp
 	Source/DebugServer/AssistantSessionHandlers.cpp
 	Source/DebugServer/GpuToolingHandlers.cpp
 	Source/DebugServer/GroundQueryDebugHandlers.cpp
-	Source/DebugServer/JobSystemDebugHandlers.cpp
-	Source/DebugServer/JobSystemReport.cpp
+	Source/DebugServer/JobSystem/JobSystemDebugHandlers.cpp
+	Source/DebugServer/JobSystem/JobSystemReport.cpp
 	Source/DebugServer/MemoryDebugHandlers.cpp
 	Source/DebugServer/NavigationDebugHandlers.cpp
 	Source/DebugServer/SystemWaveTraceReport.cpp
-	Source/DebugServer/FramePhaseDebugHandlers.cpp
-	Source/DebugServer/FramePhaseReport.cpp
+	Source/DebugServer/FramePhase/FramePhaseDebugHandlers.cpp
+	Source/DebugServer/FramePhase/FramePhaseReport.cpp
 	Source/DebugServer/MarkupDebugHandlers.cpp
 	Source/DebugServer/SkyDebugHandlers.cpp
 	Source/DebugServer/ThumbnailDebugHandlers.cpp
-	Source/DebugServer/ParallaxDebugHandlers.cpp
-	Source/DebugServer/ParallaxStepsViewRequest.cpp
+	Source/DebugServer/Parallax/ParallaxDebugHandlers.cpp
+	Source/DebugServer/Parallax/ParallaxStepsViewRequest.cpp
 	Source/DebugServer/InjectedInput.cpp
 	Source/DebugServer/OpenAssetPath.cpp
-	Source/DebugServer/PhysicsDebugHandlers.cpp
-	Source/DebugServer/PhysicsRaycastRequest.cpp
+	Source/DebugServer/Physics/PhysicsDebugHandlers.cpp
+	Source/DebugServer/Physics/PhysicsRaycastRequest.cpp
 	Source/DebugServer/PlayModeRequest.cpp
 	Source/DebugServer/PerformDropRequest.cpp
 	Source/DebugServer/PointerCoordsRequest.cpp
 	Source/DebugServer/SceneDegradedReport.cpp
 	Source/DebugServer/RenderGraphResourceFilter.cpp
 	Source/DebugServer/ScreenshotCaptureWait.cpp
-	Source/DebugServer/TerrainDebugHandlers.cpp
-	Source/DebugServer/TerrainStrokeTarget.cpp
+	Source/DebugServer/Terrain/PlanetPageOverlayHandler.cpp
+	Source/DebugServer/Terrain/TerrainDebugHandlers.cpp
+	Source/DebugServer/Terrain/TerrainStrokeTarget.cpp
 	Source/DebugServer/UITreeDump.cpp
 	Source/DebugServer/ViewFocusRequest.cpp
-	Source/DebugServer/RenderDocCapture.cpp
-	Source/DebugServer/NsightGraphicsCapture.cpp
-	Source/DebugServer/WindowPrintCapture.cpp
+	Source/DebugServer/Capture/RenderDocCapture.cpp
+	Source/DebugServer/Capture/NsightGraphicsCapture.cpp
+	Source/DebugServer/Capture/WindowPrintCapture.cpp
 )
 
 set(EDITOR_HEADERS
-    Source/EditorApplication.h
+    Source/EditorApplication/EditorApplication.h
     Source/EditorDockNodeJson.h
 	Source/DebugServer/EditorDebugServer.h
 	Source/DebugServer/BenchSceneHandlers.h
 	Source/DebugServer/CameraProjectionReport.h
-	Source/DebugServer/TerrainSplitThresholdReport.h
+	Source/DebugServer/Terrain/TerrainStatsReport.h
 	Source/DebugServer/SceneHierarchyReport.h
 	Source/DebugServer/LogQueryReport.h
 	Source/DebugServer/BuildStatusReport.h
-	Source/DebugServer/ComponentValueReader.h
-	Source/DebugServer/SchemaComponentApply.h
+	Source/DebugServer/Components/ComponentValueReader.h
+	Source/DebugServer/Components/SchemaComponentApply.h
 	Source/DebugServer/DebugHandlers.h
 	Source/DebugServer/DebugServerReply.h
 	Source/DebugServer/ElementPointerTarget.h
 	Source/DebugServer/GpuToolingHandlers.h
 	Source/DebugServer/GroundQueryDebugHandlers.h
-	Source/DebugServer/JobSystemDebugHandlers.h
-	Source/DebugServer/JobSystemReport.h
+	Source/DebugServer/JobSystem/JobSystemDebugHandlers.h
+	Source/DebugServer/JobSystem/JobSystemReport.h
 	Source/DebugServer/MemoryDebugHandlers.h
 	Source/DebugServer/NavigationDebugHandlers.h
 	Source/DebugServer/SystemWaveTraceReport.h
-	Source/DebugServer/FramePhaseDebugHandlers.h
-	Source/DebugServer/FramePhaseReport.h
+	Source/DebugServer/FramePhase/FramePhaseDebugHandlers.h
+	Source/DebugServer/FramePhase/FramePhaseReport.h
 	Source/DebugServer/SkyDebugHandlers.h
-	Source/DebugServer/ParallaxDebugHandlers.h
-	Source/DebugServer/ParallaxStepsViewRequest.h
+	Source/DebugServer/Parallax/ParallaxDebugHandlers.h
+	Source/DebugServer/Parallax/ParallaxStepsViewRequest.h
 	Source/DebugServer/InjectedInput.h
 	Source/DebugServer/OpenAssetPath.h
-	Source/DebugServer/PhysicsDebugHandlers.h
-	Source/DebugServer/PhysicsRaycastRequest.h
+	Source/DebugServer/Physics/PhysicsDebugHandlers.h
+	Source/DebugServer/Physics/PhysicsRaycastRequest.h
 	Source/DebugServer/PlayModeRequest.h
 	Source/DebugServer/PointerCoordsRequest.h
 	Source/DebugServer/SceneDegradedReport.h
 	Source/DebugServer/RenderGraphResourceFilter.h
-	Source/DebugServer/TerrainDebugHandlers.h
-	Source/DebugServer/TerrainStrokeTarget.h
+	Source/DebugServer/Terrain/TerrainDebugHandlers.h
+	Source/DebugServer/Terrain/TerrainStrokeTarget.h
 	Source/DebugServer/UITreeDump.h
 	Source/DebugServer/ViewFocusRequest.h
-	Source/DebugServer/RenderDocCapture.h
-	Source/DebugServer/NsightGraphicsCapture.h
-	Source/DebugServer/WindowPrintCapture.h
+	Source/DebugServer/Capture/RenderDocCapture.h
+	Source/DebugServer/Capture/NsightGraphicsCapture.h
+	Source/DebugServer/Capture/WindowPrintCapture.h
 	Source/Startup/EditorCommandLine.h
 	Source/Startup/EditorPathPolicy.h
 	Source/Startup/EditorSessionDescriptor.h
@@ -711,6 +716,7 @@ set(EDITOR_HEADERS
     Include/UndoRedo/SetAssetMetaValueCommand.h
     Include/UndoRedo/DeleteAssetPathsCommand.h
     Include/PlayMode/PlayModeManager.h
+    Source/PlayMode/PlayModeGameViewFocus.h
     Include/PlayMode/RuntimeInputConnection.h
     Include/PlayMode/PlayButtonMenu.h
     Include/PlayMode/PlayButtonState.h
@@ -731,45 +737,45 @@ set(EDITOR_HEADERS
 	Include/Inspectors/ExposureCompensationCurveRow.h
 	Include/Inspectors/LightInspector.h
 	Include/Inspectors/MeasureInspector.h
-	Include/Inspectors/PhysicsBodyInspector.h
+	Include/Inspectors/Physics/PhysicsBodyInspector.h
 	Include/Inspectors/CharacterControllerInspector.h
-	Include/Inspectors/PhysicsColliderInspector.h
+	Include/Inspectors/Physics/PhysicsColliderInspector.h
 	Include/Inspectors/MaterialInspector.h
 	Include/Inspectors/ShaderInspector.h
 	Include/Inspectors/ScriptInspector.h
 	Include/Inspectors/RenderPipelineInspector.h
-	Include/Inspectors/SkyEnvironmentInspector.h
+	Include/Sky/SkyEnvironment/SkyEnvironmentInspector.h
 	Include/Inspectors/DayOfYearText.h
-	Include/Inspectors/SkyDayCurveRow.h
+	Include/Sky/SkyDayCurveRow.h
 	Include/Inspectors/LuxText.h
-	Include/Inspectors/SkySun/SkySunCurveReference.h
-	Include/Inspectors/SkySun/SkySunDriveRows.h
-	Include/Inspectors/SkySun/SkySunIlluminanceRow.h
-	Include/Inspectors/SkyStarLookRow.h
-	Include/Inspectors/SkyStarSeenByRow.h
-	Include/Inspectors/SkySun/SkySunPathRows.h
-	Include/Inspectors/SkySun/SkySunPathCaptions.h
-	Include/Inspectors/SkySun/SkySunReadoutCard.h
-	Include/Inspectors/SkySun/SkySunReadoutText.h
+	Include/Sky/SkySun/SkySunCurveReference.h
+	Include/Sky/SkySun/SkySunDriveRows.h
+	Include/Sky/SkySun/SkySunIlluminanceRow.h
+	Include/Sky/SkyStarLookRow.h
+	Include/Sky/SkyStarSeenByRow.h
+	Include/Sky/SkySun/SkySunPathRows.h
+	Include/Sky/SkySun/SkySunPathCaptions.h
+	Include/Sky/SkySun/SkySunReadoutCard.h
+	Include/Sky/SkySun/SkySunReadoutText.h
 	Include/Inspectors/SkyboxInspector.h
-	Include/Sky/SkyEnvironmentComponentTraits.h
-	Include/Sky/SkyEnvironmentCreation.h
-	Include/Sky/SkySunLinkUndo.h
+	Include/Sky/SkyEnvironment/SkyEnvironmentComponentTraits.h
+	Include/Sky/SkyEnvironment/SkyEnvironmentCreation.h
+	Include/Sky/SkySun/SkySunLinkUndo.h
 	Include/Sky/SkyPathGizmo.h
 	Include/Sky/StarLookPresets.h
-	Include/Sky/SkySunDayKind.h
-	Include/Sky/SkySunIlluminanceSwitch.h
-	Include/Sky/SkySunPathSwitch.h
-	Include/Sky/SkyEnvironmentEdit.h
+	Include/Sky/SkySun/SkySunDayKind.h
+	Include/Sky/SkySun/SkySunIlluminanceSwitch.h
+	Include/Sky/SkySun/SkySunPathSwitch.h
+	Include/Sky/SkyEnvironment/SkyEnvironmentEdit.h
 	Include/Inspectors/OceanWaveSpectrumInspector.h
 	Include/Inspectors/Particles/ParticleInspector.h
 	Include/Inspectors/Particles/Controls/ParticlePreviewControls.h
-	Include/Inspectors/Particles/ParticleStackEditor.h
+	Include/Inspectors/Particles/ParticleStack/ParticleStackEditor.h
 	Include/Inspectors/Particles/ParticleParameterFields.h
 	Include/Inspectors/Particles/ParticleProcessorSearchProvider.h
-	Include/Inspectors/Particles/ParticleStackInspector.h
+	Include/Inspectors/Particles/ParticleStack/ParticleStackInspector.h
 	Include/Inspectors/Particles/ParticleEmitterStackSection.h
-	Include/Inspectors/Particles/ParticleStackReference.h
+	Include/Inspectors/Particles/ParticleStack/ParticleStackReference.h
 	Include/Inspectors/Particles/ParticleRendererInspector.h
 	Include/Inspectors/WindVolumeInspector.h
 	Include/Inspectors/AudioInspector.h
@@ -813,7 +819,7 @@ set(EDITOR_HEADERS
     Include/Assets/AssetRenameController.h
     Include/Assets/AssetsBrowserController.h
     Include/Assets/AssetsFolderDropRegistry.h
-    Include/Assets/EditorAssetActionsInstall.h
+    Include/Editor/Assets/EditorAssetActionsInstall.h
     Include/Assets/AssetsDataProviders.h
 	Include/ExternalScriptEditorLauncher.h
 	Include/ScriptEditor/SourceLocation.h
@@ -830,12 +836,12 @@ set(EDITOR_HEADERS
 		Include/Panels/HierarchyPanel.h
 		Include/Editor/Entities/CopiedEntityRuntimeRefs.h
 		Include/Editor/Entities/EntityDuplicate.h
-		Include/Editor/Hierarchy/HierarchyEntityIcon.h
+		Include/Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h
     Include/Panels/LogChannelPopover.h
     Include/Panels/LogPanel.h
     Include/Panels/LogView.h
-    Include/Panels/ScriptDiagnosticsByAssembly.h
-    Include/Panels/ScriptErrorsPanel.h
+    Include/Panels/Script/ScriptDiagnosticsByAssembly.h
+    Include/Panels/Script/ScriptErrorsPanel.h
     Include/Panels/SaveSceneAsModal.h
     Include/Panels/ConfirmActionModal.h
     Include/Panels/SaveSceneChangesModal.h
@@ -849,56 +855,56 @@ set(EDITOR_HEADERS
     Include/Panels/VideoPlayerModal.h
     Include/EditorVideoPlayerController.h
     Include/Panels/GameViewPanel.h
-	Include/Panels/SceneViewPanel.h
+	Include/SceneView/SceneViewPanel.h
 	Include/Panels/SettingsPanel.h
 	Include/Panels/CompletionPopup.h
-	Include/Panels/ScriptEditorPanel.h
-	Include/Panels/ScriptSyntax.h
-	Include/Panels/ScriptTextArea.h
+	Include/Panels/Script/ScriptEditorPanel.h
+	Include/Panels/Script/ScriptSyntax.h
+	Include/Panels/Script/ScriptTextArea.h
 	Include/Panels/GraphKindHooks.h
 	Include/Panels/GraphPanel.h
 	Include/Panels/ColorPicker.h
 	Include/Graph/NodeColorSettings.h
-	Include/Graph/GraphNodeRegistry.h
+	Include/Graph/GraphNode/GraphNodeRegistry.h
 	Include/Graph/GraphKindChrome.h
 	Include/Graph/GraphSubgraphStore.h
 	Include/Graph/GraphNest.h
 	Include/Graph/GraphBlendSpace1DStore.h
 	Include/Graph/BlendSpace1DEditor.h
 	Include/Graph/GraphCanvas.h
-	Include/Graph/GraphNode.h
-	Include/Graph/GraphNodeIcons.h
-	Include/Graph/GraphPort.h
+	Include/Graph/GraphNode/GraphNode.h
+	Include/Graph/GraphNode/GraphNodeIcons.h
+	Include/Graph/GraphPort/GraphPort.h
 	Include/Graph/GraphPortedNode.h
-	Include/ShaderGraph/MaterialGraphController.h
-	Include/ShaderGraph/MaterialGraphVariables.h
-	Include/ShaderGraph/MaterialGraphNodeTypes.h
-	Include/ShaderGraph/MaterialGraphNode.h
-	Include/ShaderGraph/MaterialGraphPreviews.h
-	Include/ShaderGraph/MaterialGraphPreviewHost.h
+	Include/ShaderGraph/MaterialGraph/MaterialGraphController.h
+	Include/ShaderGraph/MaterialGraph/MaterialGraphVariables.h
+	Include/ShaderGraph/MaterialGraph/MaterialGraphNodeTypes.h
+	Include/ShaderGraph/MaterialGraph/MaterialGraphNode.h
+	Include/ShaderGraph/MaterialGraph/MaterialGraphPreviews.h
+	Include/ShaderGraph/MaterialGraph/MaterialGraphPreviewHost.h
 	Include/ShaderGraph/GraphNodePreviewBinding.h
-	Include/ShaderGraph/GraphPreviewAtlas.h
-	Include/ShaderGraph/GraphPreviewAtlasLayout.h
-	Include/Graph/GraphPortDropSlot.h
+	Include/ShaderGraph/GraphPreview/GraphPreviewAtlas.h
+	Include/ShaderGraph/GraphPreview/GraphPreviewAtlasLayout.h
+	Include/Graph/GraphPort/GraphPortDropSlot.h
 	Include/Graph/GraphCanvasEditKeys.h
-	Include/Graph/GraphNodePool.h
+	Include/Graph/GraphNode/GraphNodePool.h
 	Include/Graph/GraphOverlay.h
-	Include/Graph/GraphNodeSummary.h
+	Include/Graph/GraphNode/GraphNodeSummary.h
 	Include/Graph/GraphInspectorRows.h
 	Include/Panels/ColorPickerPopup.h
 	Include/Panels/SceneCameraSettingsPopup.h
 	Include/ColorPicker/ColorPickerPresenter.h
 	Include/ColorPicker/ColorPickerScope.h
-	Include/ColorPicker/ColorPickerWindow.h
+	Include/ColorPicker/ColorPickerWindow/ColorPickerWindow.h
 	Include/ColorPicker/ColorPickerContext.h
-	Source/ColorPicker/ColorPickerWindowInput.h
+	Source/ColorPicker/ColorPickerWindow/ColorPickerWindowInput.h
 	Include/Panels/DiffPanel.h
-	Include/Panels/AnimationWindowPanel.h
+	Include/Panels/Animation/AnimationWindowPanel.h
 	Include/Panels/TimelineBarElement.h
 	Include/Panels/DopeSheetView.h
 	Include/Panels/CurvesGraphView.h
-	Include/Panels/TimeCompositeModel.h
-	Include/Panels/TimeCompositeView.h
+	Include/Panels/TimeComposite/TimeCompositeModel.h
+	Include/Panels/TimeComposite/TimeCompositeView.h
 	Include/Panels/LaneClipModel.h
 	Include/Panels/LaneClipEditorView.h
 	Include/Panels/UIDemoPanel.h
@@ -913,7 +919,7 @@ set(EDITOR_HEADERS
     Include/GameViewController.h
     Include/GameViewMovieCapture.h
     Include/MovieRecorderToolbarMenu.h
-	Include/SceneViewController.h
+	Include/SceneView/SceneViewController.h
 	Include/SceneView/GizmoSettingsWiring.h
 	Include/SceneView/SceneViewGridRenderer.h
 	Include/SceneView/SceneViewDropPlacement.h
@@ -1004,7 +1010,7 @@ set(EDITOR_SDK_SOURCES
 	Source/EditorPaths.cpp
 	# The layout loader and its text cache, in the SDK so every control that loads a layout shares one cache.
 	Source/UI/ControlLayoutLoader.cpp
-	Source/SettingsStore.cpp
+	Source/Editor/Settings/SettingsStore.cpp
 	Source/InspectorRegistry.cpp
 	Source/Picking/EditorPickProviders.cpp
 	Source/Assets/AssetSearchProvider.cpp

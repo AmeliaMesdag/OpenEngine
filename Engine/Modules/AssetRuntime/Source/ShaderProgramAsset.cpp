@@ -9,7 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "Rendering/Core/Device.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 #include "Types/StringUtils.h"

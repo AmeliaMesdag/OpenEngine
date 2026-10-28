@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "Editor/Hierarchy/EntityNameEdit.h"
-#include "Editor/Hierarchy/HierarchyEntityRename.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityRename.h"
 #include "EditorChangeNotifications.h"
 #include "InspectorLayoutFixture.h"
 #include "UI/InlineRenameSession.h"

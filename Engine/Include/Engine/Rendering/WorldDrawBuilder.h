@@ -4,7 +4,7 @@
 
 #include "Engine/Rendering/MeshGPURegistry.h"
 #include "Engine/Rendering/WorldDrawTypes.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Types/FalseSharing.h"
 #include "Types/Types.h"
 

@@ -22,11 +22,11 @@
 #include "Ocean/OceanRenderFeature.h"
 #include "Ocean/OceanRenderNode.h"
 #include "Ocean/OceanSurfaceMaterial.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/Materials/MaterialBuildContext.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 #include "SharedHeadlessDevice.h"
 #include "StagedTestPaths.h"
 #include <gtest/gtest.h>

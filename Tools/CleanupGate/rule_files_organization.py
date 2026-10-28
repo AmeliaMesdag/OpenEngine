@@ -11,13 +11,17 @@ leading run of PascalCase words of the file name, without the trailing owner wor
 one word of at least six letters. A file counts when two other files of its folder start with its feature (the longest such
 feature names the file's folder), or when its folder has a subfolder named for the feature. A feature that a folder name on the
 path starts with (case and a plural ending aside) is the folder's own and counts nothing, and so is a feature that every file of
-its folder starts with. Examples: ProjectPickerModal.h, ProjectPickerCard.h and ProjectPickerImportView.h in Panels/ count three
-(ProjectPicker); SceneViewPanel.cpp, SceneViewPanelMenus.cpp and SceneViewPanelQuad.cpp count three (SceneView);
-ProjectPickerRecentList.h beside Panels/ProjectPicker/ counts one. Non-examples: SceneOutline.h, SceneSaver.h and SceneTabs.h
+its folder starts with, and a feature that starts with the name of its own folder when that name is a singular feature (not
+Source, Include or a plural such as Assets). Examples:
+ProjectPickerModal.h, ProjectPickerCard.h and ProjectPickerImportView.h in Panels/ count three (ProjectPicker);
+SceneViewPanel.cpp, SceneViewPanelMenus.cpp and SceneViewPanelQuad.cpp count three (SceneView); ProjectPickerRecentList.h beside
+Panels/ProjectPicker/ counts one; KHRHumanoidImporter.h, KHRHumanoidShared.h and KHRHumanoidShared.cpp among other files in
+Humanoid/ count three (KHRHumanoid does not start with Humanoid). Non-examples: SceneOutline.h, SceneSaver.h and SceneTabs.h
 count zero (Scene is one word of five letters); PhysicsBody.cpp, PhysicsWorld.cpp and PhysicsQuery.cpp in
 Engine/Modules/Physics/Source/ count zero (the module folder is the feature's folder); SplineNetworkGraph.cpp,
 SplineNetworkJunction.cpp and SplineNetworkSolver.cpp alone in Network/ count zero (every file of the folder starts with
-SplineNetwork).
+SplineNetwork); SkySunPathRows.h, SkySunPathSwitch.h and SkySunPathCaptions.h in Sky/SkySun/ count zero (SkySunPath starts with
+SkySun).
 """
 import os
 import re
@@ -44,6 +48,7 @@ kPascalWord = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+")
 kOwnerWords = {"Panel", "Inspector", "Modal", "Tests"}
 kMinFeatureFiles = 3
 kMinOneWordLetters = 6
+kScopeRootNames = {"Source", "Include"}
 kFeatureFolderPiece = "the folder "
 # Names every subsystem defines for itself; two files defining one of them is not a duplicate helper.
 kCommonNames = {"main", "WinMain", "DllMain", "operator", "Register", "Initialize", "Shutdown", "Update", "Create", "Destroy", "Get", "Set", "Describe", "Tick", "Reset", "Clear", "Apply", "Render", "Draw", "Build", "Load", "Save", "Begin", "End", "Run", "Stop", "Start", "Add", "Remove", "Find", "Compile", "Flush", "Resize", "Poll"}
@@ -140,9 +145,17 @@ def _folded_words(name):
 
 
 def _is_own_folder(feature, folder):
-    """True when a folder name on the path starts with the words of the feature: the file is already in the feature's folder."""
+    """True when a folder name on the path starts with the words of the feature, or when the feature starts with the words of its own
+    folder and that folder name is a feature: the file is in the feature's folder or in its parent feature's folder."""
     feature_words = _folded_words(feature)
-    return any(_folded_words(name)[:len(feature_words)] == feature_words for name in folder.split("/"))
+    if any(_folded_words(name)[:len(feature_words)] == feature_words for name in folder.split("/")):
+        return True
+    # A plural folder (Assets/, Systems/) or a scope root (Source/, Include/) is a category, not a parent feature.
+    own_name = os.path.basename(folder)
+    own_words = _folded_words(own_name)
+    if own_name in kScopeRootNames or not own_words or _words(own_name)[-1].lower() != own_words[-1]:
+        return False
+    return _feature(_words(own_name)) is not None and feature_words[:len(own_words)] == own_words
 
 
 def loose_feature_sites(paths):

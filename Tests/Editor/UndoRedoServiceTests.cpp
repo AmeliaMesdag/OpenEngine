@@ -21,7 +21,7 @@
 #include "Editor/Entities/ComponentEnabledToggle.h"
 #include "Editor/Entities/EditorComponentTraits.h"
 #include "Inspectors/AnimatorInspector.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/TransformInspector.h"
 #include "UndoRedo/UndoRedoService.h"
 
@@ -31,7 +31,7 @@
 #include "Components/Terrain/TerrainModifierEffects.h"
 #include "Components/Transform.h"
 #include "Components/Hierarchy.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "ECS/World.h"

@@ -1,6 +1,6 @@
 #include "Graph/GraphKindChrome.h"
 
-#include "Graph/GraphNodeRegistry.h"
+#include "Graph/GraphNode/GraphNodeRegistry.h"
 
 #include <algorithm>
 #include <cctype>

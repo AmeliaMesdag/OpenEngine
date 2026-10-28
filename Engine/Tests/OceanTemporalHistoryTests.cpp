@@ -8,7 +8,7 @@
 #include "Ocean/OceanFrameStamp.h"
 #include "Ocean/OceanShadowSim.h"
 #include "Ocean/OceanTypes.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"

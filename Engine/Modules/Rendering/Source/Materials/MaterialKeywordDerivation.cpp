@@ -1,11 +1,11 @@
 #include "Rendering/Materials/MaterialKeywordDerivation.h"
 
-#include "Rendering/Materials/MaterialBlendComposite.h"
+#include "Rendering/Materials/MaterialBlend/MaterialBlendComposite.h"
 #include "Rendering/Materials/MaterialBuildContext.h"
 #include "Rendering/Materials/MaterialDocument.h"
-#include "Rendering/Materials/ShaderCapabilityDetector.h"
-#include "Rendering/Materials/ShaderComposer.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderCapabilityDetector.h"
+#include "Rendering/Materials/Shader/ShaderComposer.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 #include <algorithm>
 #include <variant>

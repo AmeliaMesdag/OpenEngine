@@ -8,7 +8,7 @@
 #include "MetalShaderTranslator.h"
 
 #include "Rendering/Core/DeviceFormatting.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Core/SpecializationConstants.h"
 #include "Logger/Logger.h"
 

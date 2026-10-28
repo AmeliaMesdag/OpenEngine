@@ -10,7 +10,7 @@
 #include "Panels/AssetsPanel.h"
 #include "Panels/HierarchyPanel.h"
 #include "Panels/ProjectPicker/ProjectPickerModal.h"
-#include "Panels/ScriptEditorPanel.h"
+#include "Panels/Script/ScriptEditorPanel.h"
 #include "Panels/SettingsPanel.h"
 #include "Platform/Shell.h"
 #include "PlayMode/PlayModeManager.h"

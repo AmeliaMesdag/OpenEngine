@@ -735,7 +735,7 @@ set(RENDERING_CORE_SOURCES
 	    # The compat-profile flag the resolved RendererProfile sets. Core rather
 	    # than part of the Materials block below: ShaderVariantKey reads it in
 	    # every configuration, including builds without nlohmann.
-	    Source/Materials/ShaderProfileDefines.cpp
+	    Source/Materials/Shader/ShaderProfileDefines.cpp
 	    # Immediate-mode render graph (the RenderGraph rewrite; dirs rename to
 	    # RenderGraph in this slice-9 commit)
 	    Source/Core/RenderGraph/RGCrossFrameAccesses.cpp
@@ -751,10 +751,10 @@ set(RENDERING_CORE_SOURCES
 	    Source/Core/RenderGraph/RGUploadRing.cpp
 	    Source/Core/RenderGraph/RGFullscreen.cpp
 	    Source/Core/RenderGraph/RGWindowFrame.cpp
-	    Source/Core/PipelineTypes.cpp
-	    Source/Core/PipelineCache.cpp
-	    Source/Core/PipelineBuildTable.cpp
-	    Source/Core/PipelineDescTranslator.cpp
+	    Source/Core/Pipeline/PipelineTypes.cpp
+	    Source/Core/Pipeline/PipelineCache.cpp
+	    Source/Core/Pipeline/PipelineBuildTable.cpp
+	    Source/Core/Pipeline/PipelineDescTranslator.cpp
 	    Source/Core/ResourceManager.cpp
 	    Source/Core/BindlessResourceManager.cpp
 	    Source/Core/SpecializationConstants.cpp
@@ -767,14 +767,14 @@ set(RENDERING_CORE_SOURCES
 		    Source/Core/RecomputeElision.cpp
 		    Source/Core/FrustumCullingStrategy.cpp
 		    Source/Core/HzbCullingStrategy.cpp
-		    Source/CameraDerivation.cpp
+		    Source/Camera/CameraDerivation.cpp
 
 	    # Common utilities
 	    Source/Common/Utils.cpp
 		    Source/Common/Frustum.cpp
-		    Source/Common/CubeLutColorDomain.cpp
-		    Source/Common/CubeLutFileParser.cpp
-		    Source/Common/CubeLutGpuUpload.cpp
+		    Source/Common/CubeLut/CubeLutColorDomain.cpp
+		    Source/Common/CubeLut/CubeLutFileParser.cpp
+		    Source/Common/CubeLut/CubeLutGpuUpload.cpp
 
 	    ${CMAKE_CURRENT_SOURCE_DIR}/Include/Rendering/Core/DescriptorWriter.h
 
@@ -806,20 +806,20 @@ set(RENDERING_CORE_SOURCES
 set(RENDERING_VULKAN_SOURCES
     Source/Vulkan/TextureUsagePolicy.cpp
     Source/Vulkan/ValidationStats.cpp
-    Source/Vulkan/VulkanDevice.cpp
+    Source/Vulkan/VulkanDevice/VulkanDevice.cpp
     Source/Vulkan/VulkanAccelerationStructures.cpp
     Source/Vulkan/DeviceHealthState.cpp
-    Source/Vulkan/VulkanGpuCheckpoints.cpp
-    Source/Vulkan/VulkanDeviceFault.cpp
+    Source/Vulkan/VulkanGpu/VulkanGpuCheckpoints.cpp
+    Source/Vulkan/VulkanDevice/VulkanDeviceFault.cpp
     Source/Vulkan/VulkanToolingInfo.cpp
     Source/Vulkan/VulkanCommandList.cpp
     Source/Vulkan/VulkanResources.cpp
     Source/Vulkan/VulkanMemory.cpp
     Source/Vulkan/VulkanSwapchain.cpp
-    Source/Vulkan/VulkanPipelineCache.cpp
+    Source/Vulkan/VulkanPipelineCache/VulkanPipelineCache.cpp
     Source/Vulkan/VulkanPipelineCompileGate.cpp
     Source/Vulkan/VulkanQueryPool.cpp
-    Source/Vulkan/VulkanQueueFamilySelection.cpp
+    Source/Vulkan/VulkanQueue/VulkanQueueFamilySelection.cpp
     Source/Vulkan/VulkanSharedInstance.cpp
 )
 
@@ -867,9 +867,9 @@ set(RENDERING_METAL_SOURCES
     Source/Metal/MetalQueryPool.cpp
     Source/Metal/MetalSubmitQueue.cpp
     Source/Metal/MetalAccelerationStructures.cpp
-    Source/Metal/MetalIndirectCountResources.cpp
+    Source/Metal/MetalIndirectCount/MetalIndirectCountResources.cpp
     Source/Metal/MetalIndirectCommandArena.cpp
-    Source/Metal/MetalIndirectCountEncoder.cpp
+    Source/Metal/MetalIndirectCount/MetalIndirectCountEncoder.cpp
 )
 
 # Create main library
@@ -880,7 +880,7 @@ add_library(GameEngineRendering OBJECT
     # Core engine dependencies
 	target_link_libraries(GameEngineRendering PUBLIC Logger)
 	# Types: header-only basic types module exposing "Types/Types.h" used by
-	#        public rendering headers such as Rendering/CameraTypes.h.
+	#        public rendering headers such as Rendering/Camera/CameraTypes.h.
 	target_link_libraries(GameEngineRendering PUBLIC Types)
 	# Mathematics: canonical GLM-backed math module exposing "Mathematics/..." headers
 	target_link_libraries(GameEngineRendering PUBLIC Mathematics)
@@ -957,19 +957,19 @@ find_package(nlohmann_json CONFIG QUIET)
             Source/Materials/MaterialPropertyBinding.cpp
             Source/Materials/MaterialShaderIncludeRoots.cpp
             Source/Materials/MaterialValidation.cpp
-            Source/Materials/ShaderCompileService.cpp
-            Source/Materials/ShaderIncludeClosure.cpp
-            Source/Materials/ShaderSourceCache.cpp
+            Source/Materials/Shader/ShaderCompileService.cpp
+            Source/Materials/Shader/ShaderIncludeClosure.cpp
+            Source/Materials/Shader/ShaderSourceCache.cpp
             Source/Materials/SlangCompileLane.cpp
-            Source/Materials/ShaderLayoutShape.cpp
-            Source/Materials/ShaderReflection.cpp
-            Source/Materials/ShaderMetaJson.cpp
-            Source/Materials/ShaderMetaValidation.cpp
-            Source/Materials/ShaderComposer.cpp
-            Source/Materials/ShaderDeformationEnvelope.cpp
-            Source/Materials/ShaderPropertyTable.cpp
-            Source/Materials/ShaderPropertyTableCache.cpp
-            Source/Materials/ShaderCapabilityDetector.cpp
+            Source/Materials/Shader/ShaderLayoutShape.cpp
+            Source/Materials/Shader/ShaderReflection.cpp
+            Source/Materials/Shader/ShaderMetaJson.cpp
+            Source/Materials/Shader/ShaderMetaValidation.cpp
+            Source/Materials/Shader/ShaderComposer.cpp
+            Source/Materials/Shader/ShaderDeformationEnvelope.cpp
+            Source/Materials/Shader/ShaderPropertyTable.cpp
+            Source/Materials/Shader/ShaderPropertyTableCache.cpp
+            Source/Materials/Shader/ShaderCapabilityDetector.cpp
             Source/Materials/SurfaceShaderTemplate.cpp
             Source/ShaderGraph/SgTypes.cpp
             Source/ShaderGraph/SgTagParser.cpp
@@ -1097,8 +1097,8 @@ if(RENDERING_HAS_VULKAN)
         target_compile_definitions(GameEngineRendering PRIVATE RENDERING_HAS_VMA=1)
         # Only add materials sources if nlohmann_json is available (guard against missing dep)
         if(nlohmann_json_FOUND)
-            target_sources(GameEngineRendering PRIVATE Source/Materials/ShaderReflection.cpp)
-            target_sources(GameEngineRendering PRIVATE Source/Materials/ShaderMetaJson.cpp)
+            target_sources(GameEngineRendering PRIVATE Source/Materials/Shader/ShaderReflection.cpp)
+            target_sources(GameEngineRendering PRIVATE Source/Materials/Shader/ShaderMetaJson.cpp)
             target_include_directories(GameEngineRendering PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Include)
         endif()
         message(STATUS "VMA linked to GameEngineRendering (GPUOpen::VulkanMemoryAllocator)")
@@ -2657,7 +2657,7 @@ if(GTest_FOUND)
             Tests/VertexDeformationClockTests.cpp
             Tests/DeformationMotionVariantTests.cpp)
         target_link_libraries(ShaderVariantKeyTests PRIVATE GameEngineRendering FileSystemObjects GTest::gtest GTest::gtest_main)
-        # Module-private headers (Source/Materials/ShaderSourceCache.h) by module path.
+        # Module-private headers (Source/Materials/Shader/ShaderSourceCache.h) by module path.
         target_include_directories(ShaderVariantKeyTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
             ${GLSL_HOST_SHIM_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
         rendering_test_shader_paths(ShaderVariantKeyTests)

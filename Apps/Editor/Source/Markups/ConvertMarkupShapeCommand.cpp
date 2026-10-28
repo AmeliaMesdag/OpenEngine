@@ -6,7 +6,7 @@
 #include "EditorChangeNotifications.h"
 #include "Markups/MarkupPathPort.h"
 #include "Markups/MarkupPresentation.h"
-#include "Markups/MarkupRegionPort.h"
+#include "Markups/MarkupRegion/MarkupRegionPort.h"
 #include "Mathematics/Matrix4x4.h"
 #include "Mathematics/MatrixOps.h"
 #include "SplineECS/SplineService.h"

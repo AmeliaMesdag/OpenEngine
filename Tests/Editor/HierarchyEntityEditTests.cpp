@@ -5,8 +5,8 @@
 
 #include <gtest/gtest.h>
 
-#include "Editor/Hierarchy/HierarchyEntityCommands.h"
-#include "Editor/Hierarchy/HierarchyEntityDelete.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityCommands.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityDelete.h"
 #include "EditorChangeNotifications.h"
 #include "RecordingContextMenu.h"
 #include "UndoRedo/DeleteEntitiesCommand.h"

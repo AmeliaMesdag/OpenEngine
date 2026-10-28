@@ -5,7 +5,7 @@
 
 #include <vector>
 
-#include "../Source/Vulkan/VulkanDevice.h"
+#include "../Source/Vulkan/VulkanDevice/VulkanDevice.h"
 
 using namespace GameEngine::Rendering;
 

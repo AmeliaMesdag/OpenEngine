@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 #include "AssetCore/Asset.h"
 #include "AssetCore/GUID.h"
 #include "Types/Types.h"

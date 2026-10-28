@@ -3,11 +3,12 @@
 // registry and job host are deterministic substitutes; no copy of the slot loop
 // or persistence implementation lives here. Reintroducing its whole-sweep return
 // must fail this test. This is not a live GPU/orbit integration test.
-#include "Thumbnails/ModelThumbnailCachePolicy.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailCachePolicy.h"
 #include "Image/PixelImage.h"
 #include "Image/Decode.h"
 #include "Image/Encode.h"
 #include "Image/Resample.h"
+#include "Mathematics/Interpolation.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <chrono>
@@ -28,6 +29,7 @@ namespace ThumbnailPersistenceHost
 {
 using GameEngine::GUID;
 namespace ThumbnailCachePolicy = GameEngine::ThumbnailCachePolicy;
+namespace Math = GameEngine::Math;
 namespace Rendering
 {
 enum class TextureFormat { RGBA8_UNORM, RGBA8_SRGB, R16G16B16A16_FLOAT };

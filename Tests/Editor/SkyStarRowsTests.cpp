@@ -1,10 +1,9 @@
-// The Sky Environment's star rows (Inspectors/SkyStarLookRow, Inspectors/SkyStarSeenByRow): the Preset
-// list holds the four looks, each with a picture; a pick applies the look as one undo step and leaves
-// Seen by alone; the field reads Custom when a dial or the night tint differs, and picking the look
-// then resets it; a caption names a night tint that alone reads Custom; the Seen by tiles set the observer as one undo step.
+// The Sky Environment's star rows (Sky/SkyStarLookRow, Sky/SkyStarSeenByRow): the Preset list holds four looks
+// with pictures. A pick applies one look as one undo step and keeps Seen by. The field reads Custom when a dial or
+// the night tint differs, and a caption names that tint. A Seen by tile sets the observer as one undo step.
 
-#include "Inspectors/SkyStarLookRow.h"
-#include "Inspectors/SkyStarSeenByRow.h"
+#include "Sky/SkyStarLookRow.h"
+#include "Sky/SkyStarSeenByRow.h"
 
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Components/Rendering/SkyEnvironment.h"

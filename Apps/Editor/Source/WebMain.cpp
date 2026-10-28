@@ -11,7 +11,7 @@
 // callback that runs Application::Tick once per frame, then returns with the
 // runtime kept alive.
 
-#include "EditorApplication.h"
+#include "EditorApplication/EditorApplication.h"
 
 #include "Core/Application.h"
 #include "Core/Engine.h"

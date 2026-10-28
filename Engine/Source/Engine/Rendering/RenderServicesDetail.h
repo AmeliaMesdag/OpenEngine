@@ -10,7 +10,7 @@
 #include "Engine/Rendering/ShadowFrameInfo.h"
 #include "Mathematics/Matrix4x4.h"
 #include "Mathematics/Vector3.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Common/Frustum.h"
 #include "Rendering/Core/CullingStrategy.h"
 

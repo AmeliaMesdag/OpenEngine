@@ -4,8 +4,8 @@
 // a valid version and refuses an invalid one. Under central package versions the versions go into
 // Directory.Packages.props.
 
-#include "Editor/Settings/ScriptPackagesList.h"
-#include "Editor/Settings/ScriptPackagesSettingsPage.h"
+#include "Editor/Settings/ScriptPackages/ScriptPackagesList.h"
+#include "Editor/Settings/ScriptPackages/ScriptPackagesSettingsPage.h"
 
 #include "Editor/Settings/EditorSettingsRegistry.h"
 #include "UI/Controls/Label.h"

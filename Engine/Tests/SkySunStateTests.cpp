@@ -7,7 +7,7 @@
 #include <cmath>
 
 #include "Engine/Rendering/PostProcessVolumeExtract.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Sky/AtmosphereTransmittance.h"
 #include "Rendering/Sky/SkySunState.h"
 #include "Rendering/Sky/SkySystem.h"

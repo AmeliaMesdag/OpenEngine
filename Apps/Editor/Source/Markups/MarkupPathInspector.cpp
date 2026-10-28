@@ -7,7 +7,7 @@
 #include "MarkupECS/MarkupRegionMesh.h"
 #include "Markups/MarkupInspectorRows.h"
 #include "Markups/MarkupKind.h"
-#include "Markups/MarkupRegionDisplay.h"
+#include "Markups/MarkupRegion/MarkupRegionDisplay.h"
 #include "Spline/SplineData.h"
 #include "SplineECS/SplineService.h"
 #include "Types/FormatNumber.h"

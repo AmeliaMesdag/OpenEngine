@@ -8,18 +8,19 @@
 #include "Editor/DragDropPayloads.h"
 #include "Editor/Entities/EditorComponentTraits.h"
 #include "Editor/Entities/EntityDuplicate.h"
-#include "Editor/Hierarchy/HierarchyEntityIcon.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h"
 #include "Editor/Registries/EditorPluginRegistry.h"
 #include "EditorChangeNotifications.h"
 #include "EditorContext.h"
-#include "Prefabs/CreatePrefabCommand.h"
-#include "Prefabs/CreatePrefabDialog.h"
+#include "Prefabs/CreatePrefab/CreatePrefabCommand.h"
+#include "Prefabs/CreatePrefab/CreatePrefabDialog.h"
 #include "Prefabs/PrefabBar.h"
 #include "Prefabs/PrefabHierarchyRows.h"
 #include "Prefabs/PrefabInstanceDescriptions.h"
 #include "Prefabs/PrefabRemovedComponents.h"
 #include "Prefabs/PrefabService.h"
 #include "Prefabs/PrefabThumbnailHandler.h"
+#include "InspectorLayoutFixture.h"
 #include "InspectorRegistry.h"
 #include "Inspectors/DefaultComponentInspector.h"
 #include "Inspectors/InspectorUIHelpers.h"
@@ -1294,8 +1295,33 @@ void SetName(ECS::World& world, ECS::EntityHandle entity, std::string_view name)
     name.copy(component->value, sizeof(component->value) - 1);
 }
 
-// The text of the label `id` in the prefab bar that the Inspector's banners add for `entity`; a marker
-// when they add no single bar.
+// The texts of the shown labels at and under `element`, joined with spaces, as a user reads them.
+std::string ShownText(const UIElement& element)
+{
+    if (element.HasClass("hidden"))
+        return {};
+    if (const auto* label = dynamic_cast<const Label*>(&element))
+        return label->GetText();
+    std::string text;
+    for (const auto& child : element.GetChildren())
+    {
+        const std::string part = ShownText(*child);
+        if (part.empty())
+            continue;
+        text += text.empty() ? part : " " + part;
+    }
+    return text;
+}
+
+// The shown text of the element `id` of `bar`; a marker when the bar has no such element.
+std::string BarText(UIElement& bar, std::string_view id)
+{
+    const UIElement* element = bar.FindById(HashStringId(id));
+    return element ? ShownText(*element) : std::string("(no element)");
+}
+
+// The shown text of the element `id` in the prefab bar that the Inspector's banners add for `entity`; a
+// marker when they add no single bar.
 std::string PrefabBarText(ECS::World& world, ECS::EntityHandle entity, std::string_view id)
 {
     UIElement content;
@@ -1309,8 +1335,7 @@ std::string PrefabBarText(ECS::World& world, ECS::EntityHandle entity, std::stri
     const auto& children = content.GetChildren();
     if (children.size() != 1 || !dynamic_cast<const Editor::PrefabBar*>(children.front().get()))
         return "(no single bar)";
-    const auto* label = dynamic_cast<const Label*>(children.front()->FindById(HashStringId(id)));
-    return label ? label->GetText() : std::string("(no label)");
+    return BarText(*children.front(), id);
 }
 
 } // namespace
@@ -1340,6 +1365,7 @@ TEST_F(PrefabPlaceTests, TheInspectorShowsThePrefabBarOnEveryEntityOfAnInstance)
     EXPECT_EQ(PrefabBarText(world, missing, "prefab-bar-title"), "Instance of a missing prefab");
     EXPECT_EQ(PrefabBarText(world, plain, "prefab-bar-title"), "(no single bar)");
     EXPECT_EQ(PrefabBarText(world, lid, "prefab-bar-count"), "No overrides") << "the root's name is placement";
+    EXPECT_EQ(PrefabBarText(world, lid, "prefab-bar-instance-count"), "");
 
     Components::Name* lidName = world.GetComponentForWrite<Components::Name>(lid);
     ASSERT_NE(lidName, nullptr);
@@ -1508,7 +1534,7 @@ TEST_F(PrefabPlaceTests, TheEntityHeaderOfAnAddedEntityReadsAdded)
     EXPECT_EQ(badge->GetText(), "Added");
     EXPECT_FALSE(badge->GetTooltip().empty());
     EXPECT_TRUE(badge->HasClass("inspector-section-header-badge"));
-    EXPECT_TRUE(badge->HasClass("inspector-section-header-badge-neutral"));
+    EXPECT_TRUE(badge->HasClass("inspector-section-header-badge-override"));
 
     UpdateEntityNameOverrideMark(header, *nameField, world, lid);
     EXPECT_FALSE(header.HasClass("inspector-header-container-overridden"));
@@ -1597,7 +1623,9 @@ TEST_F(PrefabPlaceTests, ThePrefabBarKeepsTheInspectorWhenAnotherEntitysOverride
     world.AddComponentImmediate(root, Components::ReflectionProbe{});
     Notifications().NotifyComponentCommit<Components::ReflectionProbe>(&world, root);
     EXPECT_EQ(count->GetText(), "No overrides on Lid");
-    EXPECT_EQ(count->GetTooltip(), "1 override on Probe_01") << "the member names the instance's count";
+    EXPECT_EQ(BarText(bar, "prefab-bar-instance-count"), "1 override on Probe_01")
+        << "the member names the instance's count on a second line";
+    EXPECT_TRUE(count->GetTooltip().empty()) << "the instance's count is on the bar, not behind a hover";
     EXPECT_EQ(rebuilds, 0) << "the shown entity's overrides are as they were";
 }
 
@@ -1663,22 +1691,17 @@ TEST_F(PrefabPlaceTests, ThePrefabBarOfANestedMemberNamesItsScope)
     SetName(world, hub, "Spoke");
 
     Editor::PrefabBar bar(world, hub, &Notifications(), {}, {}, {});
-    const auto* title = dynamic_cast<const Label*>(bar.FindById("prefab-bar-title"_sid));
-    const auto* count = dynamic_cast<const Label*>(bar.FindById("prefab-bar-count"_sid));
     const auto* select = dynamic_cast<const Button*>(bar.FindById("prefab-bar-select-asset"_sid));
-    ASSERT_NE(title, nullptr);
-    ASSERT_NE(count, nullptr);
     ASSERT_NE(select, nullptr);
-    EXPECT_EQ(title->GetText(), "Part of Wheel in Cart_01");
-    EXPECT_EQ(count->GetText(), "1 override on Spoke");
+    EXPECT_EQ(BarText(bar, "prefab-bar-title"), "Part of Wheel in Cart_01");
+    EXPECT_EQ(BarText(bar, "prefab-bar-count"), "1 override on Spoke");
+    EXPECT_EQ(BarText(bar, "prefab-bar-instance-count"), "") << "an entity with overrides of its own has one line";
     EXPECT_EQ(select->GetText(), "Select Wheel");
-    EXPECT_TRUE(count->GetTooltip().empty()) << "an entity with overrides of its own has no tooltip";
     Editor::PrefabBar wheelBar(world, wheel, &Notifications(), {}, {}, {});
-    const auto* wheelCount = dynamic_cast<const Label*>(wheelBar.FindById("prefab-bar-count"_sid));
-    ASSERT_NE(wheelCount, nullptr);
-    EXPECT_TRUE(wheelCount->GetText().starts_with("No overrides on ")) << wheelCount->GetText();
-    EXPECT_EQ(wheelCount->GetText().find("Cart_01"), std::string::npos) << "one sentence on the bar";
-    EXPECT_EQ(wheelCount->GetTooltip(), "1 override on Cart_01");
+    const std::string wheelCount = BarText(wheelBar, "prefab-bar-count");
+    EXPECT_TRUE(wheelCount.starts_with("No overrides on ")) << wheelCount;
+    EXPECT_EQ(wheelCount.find("Cart_01"), std::string::npos) << "one count on each line";
+    EXPECT_EQ(BarText(wheelBar, "prefab-bar-instance-count"), "1 override on Cart_01");
 }
 
 // An entity that the instance added says so in the bar's title and has no count line: it is one of the
@@ -1701,7 +1724,162 @@ TEST_F(PrefabPlaceTests, ThePrefabBarOfAnAddedEntitySaysItWasAdded)
     const auto* count = dynamic_cast<const Label*>(bar.FindById("prefab-bar-count"_sid));
     ASSERT_NE(count, nullptr);
     EXPECT_TRUE(count->HasClass("hidden")) << count->GetText();
+    EXPECT_EQ(BarText(bar, "prefab-bar-instance-count"), "");
     EXPECT_EQ(PrefabBarText(world, root, "prefab-bar-count"), "1 override") << "the root counts the added entity";
+}
+
+// A member with no overrides of its own in an instance with some shows two count lines, its own
+// and the instance's; the root with overrides shows one. The glyph is the Hierarchy's instance glyph.
+TEST_F(PrefabPlaceTests, ThePrefabBarShowsTheInstancesCountOnASecondLineOnlyForAMemberWithNone)
+{
+    UIRegistration::RegisterBuiltInControls();
+    const std::filesystem::path file = WriteAsset("Crate.prefab", kCratePrefab);
+    ECS::World world;
+    const ECS::EntityHandle root = PlaceAt(world, file, 0.0f, 0.0f, 0.0f);
+    ASSERT_TRUE(root.IsValid());
+    SetName(world, root, "Crate_01");
+    const ECS::EntityHandle lid = FindChild(world, root);
+    ASSERT_TRUE(lid.IsValid());
+    world.AddComponentImmediate(root, Components::ReflectionProbe{});
+    Editor::NotifyWorldStructure(&Notifications(), &world);
+
+    Editor::PrefabBar memberBar(world, lid, &Notifications(), {}, {}, {});
+    EXPECT_EQ(BarText(memberBar, "prefab-bar-count"), "No overrides on Lid");
+    EXPECT_EQ(BarText(memberBar, "prefab-bar-instance-count"), "1 override on Crate_01");
+    const UIElement* glyph = memberBar.FindById("prefab-bar-glyph"_sid);
+    ASSERT_NE(glyph, nullptr) << "the bar has no prefab glyph";
+    EXPECT_TRUE(glyph->HasClass("entity-icon") && glyph->HasClass("hierarchy-entity-prefab"))
+        << "the glyph is not the Hierarchy's instance glyph";
+
+    Editor::PrefabBar rootBar(world, root, &Notifications(), {}, {}, {});
+    EXPECT_EQ(BarText(rootBar, "prefab-bar-count"), "1 override");
+    EXPECT_EQ(BarText(rootBar, "prefab-bar-instance-count"), "") << "the root's count is the instance's";
+    const UIElement* rootGlyph = rootBar.FindById("prefab-bar-glyph"_sid);
+    ASSERT_NE(rootGlyph, nullptr);
+    EXPECT_TRUE(rootGlyph->HasClass("hierarchy-entity-prefab") && !rootGlyph->HasClass("prefab-bar-glyph-missing"));
+
+    const ECS::EntityHandle missing = world.CreateEntity();
+    world.AddComponentImmediate(missing, Components::PrefabInstance{GUID::Generate()});
+    Editor::PrefabBar missingBar(world, missing, &Notifications(), {}, {}, {});
+    const UIElement* missingGlyph = missingBar.FindById("prefab-bar-glyph"_sid);
+    ASSERT_NE(missingGlyph, nullptr);
+    EXPECT_TRUE(missingGlyph->HasClass("prefab-bar-glyph-missing") && !missingGlyph->HasClass("hierarchy-entity-prefab"))
+        << "a missing prefab file shows the instance glyph";
+    const UIElement* missingName = missingBar.FindById("prefab-bar-prefab"_sid);
+    ASSERT_NE(missingName, nullptr);
+    EXPECT_TRUE(missingName->HasClass("prefab-bar-prefab-missing")) << "a missing prefab file shows its name in teal";
+}
+
+namespace
+{
+
+// The sheets the editor attaches after the theme for a prefab bar: the Hierarchy's glyph, the buttons
+// and the bar's own sheet.
+const std::vector<std::string> kPrefabBarSheets{"Assets/UI/theme/views.css", "Assets/UI/controls/Button.css",
+                                                "Assets/UI/controls/PrefabBar/PrefabBar.css"};
+
+// The resolved style of the element `id` of `bar`; null when the bar has no such element.
+const ResolvedStyle* BarStyle(UIElement& bar, std::string_view id)
+{
+    const UIElement* element = bar.FindById(HashStringId(id));
+    return element ? &element->GetResolvedStyle() : nullptr;
+}
+
+} // namespace
+
+// On the editor's sheets the glyph and the prefab's name take the prefab color; with the prefab file not
+// in the project, the glyph is the question mark and both take the error color.
+TEST_F(PrefabPlaceTests, ThePrefabBarDrawsTheGlyphAndTheNameInThePrefabColorOrAsMissing)
+{
+    UIRegistration::RegisterBuiltInControls();
+    const std::filesystem::path file = WriteAsset("Crate.prefab", kCratePrefab);
+    ECS::World world;
+    const ECS::EntityHandle root = PlaceAt(world, file, 0.0f, 0.0f, 0.0f);
+    ASSERT_TRUE(root.IsValid());
+    const ECS::EntityHandle missing = world.CreateEntity();
+    world.AddComponentImmediate(missing, Components::PrefabInstance{GUID::Generate()});
+
+    auto panel = std::make_unique<UIElement>();
+    panel->AddClass("inspector-panel");
+    auto foundBar = std::make_unique<Editor::PrefabBar>(world, root, nullptr, Editor::PrefabBar::SelectAssetHandler{},
+                                                        std::function<void()>{}, std::function<void()>{});
+    auto missingBar = std::make_unique<Editor::PrefabBar>(world, missing, nullptr, Editor::PrefabBar::SelectAssetHandler{},
+                                                          std::function<void()>{}, std::function<void()>{});
+    Editor::PrefabBar& found = *foundBar;
+    Editor::PrefabBar& lost = *missingBar;
+    panel->AddChild(std::move(foundBar));
+    panel->AddChild(std::move(missingBar));
+    InspectorLayoutTesting::InspectorLayoutFixture fixture;
+    fixture.ExtraSheets = kPrefabBarSheets;
+    if (!fixture.Build(std::move(panel)))
+        GTEST_SKIP() << fixture.Diagnostic;
+
+    const ResolvedStyle* lead = BarStyle(found, "prefab-bar-title-lead");
+    const ResolvedStyle* name = BarStyle(found, "prefab-bar-prefab");
+    const ResolvedStyle* glyph = BarStyle(found, "prefab-bar-glyph");
+    const ResolvedStyle* missingName = BarStyle(lost, "prefab-bar-prefab");
+    const ResolvedStyle* missingGlyph = BarStyle(lost, "prefab-bar-glyph");
+    ASSERT_TRUE(lead && name && glyph && missingName && missingGlyph) << "a bar did not load its layout";
+    EXPECT_NE(name->Visual.Color, lead->Visual.Color) << "the prefab's name is in the text color";
+    EXPECT_EQ(name->Visual.Color, glyph->Visual.BackgroundImage.Tint) << "the name and the glyph are not in one color";
+    EXPECT_NE(glyph->Visual.BackgroundImage.Source.Value.find("Cube.svg"), std::string::npos)
+        << "the glyph is not the instance glyph";
+    EXPECT_NE(missingName->Visual.Color, name->Visual.Color) << "a missing prefab's name is in the prefab color";
+    EXPECT_EQ(missingName->Visual.Color, missingGlyph->Visual.BackgroundImage.Tint)
+        << "a missing prefab's name and glyph are not in one color";
+    EXPECT_NE(missingGlyph->Visual.BackgroundImage.Source.Value.find("help.svg"), std::string::npos)
+        << "a missing prefab file shows the instance glyph";
+}
+
+// On a 360 px Inspector the instance's count line of a member wraps; the select button keeps the small
+// size and the one height it has beside a single count line, and its text sits on the first count line's baseline.
+TEST_F(PrefabPlaceTests, ThePrefabBarsSelectButtonKeepsOneHeightWhenTheCountLinesWrap)
+{
+    // Button.css: the min-height of a button with no size class.
+    constexpr float kDefaultButtonMinHeight = 32.0f;
+    UIRegistration::RegisterBuiltInControls();
+    const std::filesystem::path file = WriteAsset("Crate.prefab", kCratePrefab);
+    ECS::World world;
+    const ECS::EntityHandle root = PlaceAt(world, file, 0.0f, 0.0f, 0.0f);
+    ASSERT_TRUE(root.IsValid());
+    SetName(world, root, "Storage crate by the north gate of the old town");
+    const ECS::EntityHandle lid = FindChild(world, root);
+    ASSERT_TRUE(lid.IsValid());
+    world.AddComponentImmediate(root, Components::ReflectionProbe{});
+    Editor::NotifyWorldStructure(&Notifications(), &world);
+
+    auto panel = std::make_unique<UIElement>();
+    panel->AddClass("inspector-panel");
+    auto memberBar = std::make_unique<Editor::PrefabBar>(world, lid, &Notifications(), Editor::PrefabBar::SelectAssetHandler{},
+                                                         std::function<void()>{}, std::function<void()>{});
+    auto rootBar = std::make_unique<Editor::PrefabBar>(world, root, &Notifications(), Editor::PrefabBar::SelectAssetHandler{},
+                                                       std::function<void()>{}, std::function<void()>{});
+    Editor::PrefabBar& member = *memberBar;
+    Editor::PrefabBar& rootOne = *rootBar;
+    panel->AddChild(std::move(memberBar));
+    panel->AddChild(std::move(rootBar));
+    InspectorLayoutTesting::InspectorLayoutFixture fixture;
+    fixture.ViewportW = 360;
+    fixture.ExtraSheets = kPrefabBarSheets;
+    if (!fixture.Build(std::move(panel)))
+        GTEST_SKIP() << fixture.Diagnostic;
+
+    const UIElement* memberButton = member.FindById("prefab-bar-select-asset"_sid);
+    const UIElement* rootButton = rootOne.FindById("prefab-bar-select-asset"_sid);
+    const UIElement* entityLine = member.FindById("prefab-bar-count"_sid);
+    const UIElement* instanceLine = member.FindById("prefab-bar-instance-count"_sid);
+    ASSERT_TRUE(memberButton && rootButton && entityLine && instanceLine) << "a bar did not load its layout";
+    ASSERT_GT(instanceLine->GetLayoutHeight(), entityLine->GetLayoutHeight())
+        << "the instance's count line does not wrap: " << BarText(member, "prefab-bar-instance-count");
+    EXPECT_FLOAT_EQ(memberButton->GetLayoutHeight(), rootButton->GetLayoutHeight())
+        << "the button grows when the count lines wrap";
+    EXPECT_LT(memberButton->GetLayoutHeight(), kDefaultButtonMinHeight) << "the button is not the small size";
+    // Both texts are 12 px. On one baseline their text boxes start within 1 px of one y: the button's
+    // text box is the taller one.
+    constexpr float kBaselineTolerancePx = 1.0f;
+    EXPECT_NEAR(memberButton->GetLayoutY() + memberButton->GetResolvedStyle().Layout.Padding.Top,
+                entityLine->GetLayoutY(), kBaselineTolerancePx)
+        << "the button text is not on the baseline of the first count line";
 }
 
 // A committed field change marks the member's Hierarchy row with no change to the world's structure.

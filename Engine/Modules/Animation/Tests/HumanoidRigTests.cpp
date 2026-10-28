@@ -5,7 +5,7 @@
 #include "LogCapture.h"
 
 #include "Animation/HumanBone.h"
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 
 #include "AssetCore/GUID.h"
 

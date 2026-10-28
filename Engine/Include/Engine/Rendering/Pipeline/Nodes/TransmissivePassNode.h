@@ -2,7 +2,7 @@
 
 #include "Engine/Rendering/Pipeline/DepthUpsamplePass.h"
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Rendering/Core/RenderGraph/RGBarrier.h"
 
 #include <cstdint>

@@ -3,10 +3,10 @@
 #include "Components/Rendering/Camera.h"
 #include "ECS/Entity.h"
 #include "Mathematics/Matrix4x4.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 #include <optional>
-#include "Rendering/CameraDerivation.h"
+#include "Rendering/Camera/CameraDerivation.h"
 
 // Explicit imports from the Rendering module (CodingStyle: no namespace-scope using-directives in headers).
 namespace GameEngine::Engine::Renderer

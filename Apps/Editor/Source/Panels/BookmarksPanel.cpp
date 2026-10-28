@@ -14,7 +14,7 @@
 #include "UI/UIElement.h"
 #include "UI/UIEvents.h"
 #include "UI/Interaction/Payload.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/UIManager.h"
 #include "UI/Controls/ScrollView.h"
 #include "UI/Controls/Label.h"
@@ -24,8 +24,8 @@
 #include "UI/StyleProperties.h"
 #include "Panels/SettingsPanel.h"
 #include "Panels/AssetsPanel.h"
-#include "Assets/PolyhavenDownloadManager.h"
-#include "Assets/PolyhavenService.h"
+#include "Assets/Polyhaven/PolyhavenDownloadManager.h"
+#include "Assets/Polyhaven/PolyhavenService.h"
 #include "Scheduler/Scheduler.h"
 #include "Panels/HierarchyPanel.h"
 #include "Thumbnails/IThumbnailProvider.h"
@@ -39,7 +39,7 @@
 #include "Input/InputSystem.h"
 #include "Panels/ConfirmActionModal.h"
 #include "ECS/ECS.h"
-#include "Editor/Hierarchy/HierarchyEntityIcon.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h"
 
 #include <algorithm>
 #include <cctype>

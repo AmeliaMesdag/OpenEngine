@@ -950,7 +950,8 @@ void AppendBuildPageFields(SettingsCategoryDescriptor& build, const BuildSetting
                             []() { return CreateGlobalSceneListBlock(); });
         scenes.SectionHeader = "Global scene list";
         scenes.SectionDescription =
-            "Scenes included when a platform has \"Use global scene list\" enabled.";
+            "Scenes included when a platform has \"Use global scene list\" enabled. The first scene opens "
+            "when the game starts. With no scene in any list, the game ships the project's startup scene.";
         build.Fields.push_back(std::move(scenes));
     }
 }

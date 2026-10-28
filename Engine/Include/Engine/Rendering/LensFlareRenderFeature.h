@@ -4,7 +4,7 @@
 #include "Assets/LensFlareTypes.h" // LensFlare::FlareGlobals
 #include "Mathematics/Curve.h"     // Math::CurveKey
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineDescTranslator.h"
+#include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
 
 #include <cstdint>
 #include <unordered_map>

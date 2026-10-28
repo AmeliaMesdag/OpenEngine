@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 
 #include <cstdint>

@@ -25,7 +25,7 @@
 #include "ECS/World.h"
 #include "ECS/Entity.h"
 #include "ECS/Components.h"
-#include "ECS/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
 #include "ECS/ECSTemplates.h"
 
 #include "Components/SceneViewHidden.h"

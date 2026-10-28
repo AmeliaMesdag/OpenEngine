@@ -4,7 +4,7 @@
 #include "Ocean/OceanTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/Handle.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Core/RenderGraph/RGReadbackRing.h"
 
 #include <atomic>

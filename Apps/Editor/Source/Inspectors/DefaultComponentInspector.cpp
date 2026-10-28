@@ -6,9 +6,9 @@
 #include "UndoRedo/UndoRedoService.h"
 #include "Inspectors/InspectorDragHelpers.h"  // AddFloatRowWithDrag / AddIntRowWithDrag / AddToggleRow
 #include "Inspectors/InspectorUIHelpers.h"    // InspectorUI::AddLine
-#include "Inspectors/InspectorComponentRowHelpers.h"  // MakeComponentSnapshotTargetById
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"  // MakeComponentSnapshotTargetById
 #include "Inspectors/PreservedFieldNotice.h"          // AddPreservedFieldNotice
-#include "Inspectors/RenderLayerField.h"              // the render layer rows on the project's names
+#include "Inspectors/RenderLayers/RenderLayerField.h"              // the render layer rows on the project's names
 #include "UI/Controls/MaskField.h"
 #include "UI/Controls/TextField.h"            // editable String / uint rows
 #include "UI/Controls/Dropdown.h"             // enum name dropdown (scanner-detected enum fields)
@@ -17,8 +17,8 @@
 #include "UI/StyleProperties.h"               // Style::* for the Color swatch drawer
 #include "UI/UIManager.h"                      // GetFocusedElementId for the live-refresh focus skip
 
-#include "ECS/ComponentFactory.h"            // GetDefaultBytes (the None value of a float row)
-#include "ECS/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentFactory.h"            // GetDefaultBytes (the None value of a float row)
+#include "ECS/Component/ComponentFieldRegistry.h"
 #include "ECS/FieldAccess.h"             // ReadFieldInteger / WriteFieldInteger
 #include "ECS/Reflection.h"               // FieldInfo, FieldTypeId, FieldElementSize
 
@@ -1893,7 +1893,8 @@ static bool RenderFieldRows(const InspectorContext& ctx, ECS::ComponentTypeId ty
                 FieldEditContext fec = fecBase;
                 fec.Label = std::string(FieldDisplayName(field));
                 const std::size_t offset = field.Offset;
-                InspectorUI::AddEntityFieldRow(parent, fec.Label, ECS::EntityHandle(id), ctx.World,
+                EntityField* entityField = InspectorUI::AddEntityFieldRow(
+                    parent, fec.Label, ECS::EntityHandle(id), ctx.World,
                     [fec, offset](ECS::EntityHandle h) {
                         const std::uint32_t newId = h.id;
                         CommitFieldPatch(fec, [offset, newId](Snapshot& b) {
@@ -1902,6 +1903,7 @@ static bool RenderFieldRows(const InspectorContext& ctx, ECS::ComponentTypeId ty
                         });
                     },
                     {}, tooltipPtr);
+                entityField->SetOnReveal(ctx.SelectEntity);
                 any = true;
                 break;
             }
@@ -1927,7 +1929,7 @@ static bool RenderFieldRows(const InspectorContext& ctx, ECS::ComponentTypeId ty
 
                     FieldEditContext fec = fecBase;
                     fec.Label = ElementLabel(FieldDisplayName(field), i, count);
-                    InspectorUI::AddAssetFieldRow(parent, fec.Label, current,
+                    AssetField* assetField = InspectorUI::AddAssetFieldRow(parent, fec.Label, current,
                         AcceptedAssetTypesForAssetField(field),
                         &EngineCore::GetInstance().GetAssetManager().GetRegistry(),
                         [fec, offset](const GUID& picked) {
@@ -1938,6 +1940,7 @@ static bool RenderFieldRows(const InspectorContext& ctx, ECS::ComponentTypeId ty
                             });
                         },
                         ctx.Thumbnails, tooltipPtr);
+                    assetField->SetOnReveal(ctx.PingAssetPreserveInspector);
                     any = true;
                 }
                 break;

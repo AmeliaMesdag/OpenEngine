@@ -3,7 +3,7 @@
 #include <fstream>
 #include <cstring>
 
-#include "Rendering/Materials/ShaderReflection.h"
+#include "Rendering/Materials/Shader/ShaderReflection.h"
 #include "Rendering/Common/Utils.h"
 
 #include "TestUtils.h"

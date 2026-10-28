@@ -7,7 +7,7 @@
 #include "Ocean/OceanFrameStamp.h"
 #include "Ocean/OceanRenderFeature.h"
 #include "Ocean/OceanRenderNode.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "TestDeviceHelper.h"

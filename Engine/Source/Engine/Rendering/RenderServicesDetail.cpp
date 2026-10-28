@@ -12,7 +12,7 @@
 #include "Core/Engine.h"
 #include "Logger/Logger.h"
 #include "Mathematics/MatrixOps.h"
-#include "Rendering/CameraDerivation.h"
+#include "Rendering/Camera/CameraDerivation.h"
 #include "Rendering/Common/Frustum.h"
 #include "Rendering/Common/MatrixUtils.h"
 

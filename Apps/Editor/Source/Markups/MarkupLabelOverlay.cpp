@@ -14,7 +14,7 @@
 #include "Mathematics/Vector3.h"
 #include "SceneView/SceneViewEvents.h"
 #include "SceneView/SceneViewProjection.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "UI/Controls/Label.h"
 #include "UI/StyleProperties.h"
 

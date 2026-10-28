@@ -3,7 +3,7 @@
 #include "Engine/Rendering/IRenderFeature.h"
 #include "Mathematics/Vector4.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineDescTranslator.h"
+#include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
 
 #include <cstddef>
 #include <cstdint>

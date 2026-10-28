@@ -10,7 +10,7 @@
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Components/Rendering/LightPhotometry.h"
 #include "Rendering/Core/NamedPushConstantWriter.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 
 #include <algorithm>
 #include <cmath>

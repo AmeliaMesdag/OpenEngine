@@ -19,7 +19,7 @@
 #include "UI/Controls/TreeView.h"
 #include "UI/Controls/Mount.h"
 #include "UI/Controls/Label.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/Registration/ElementRegistration.h"
 
 #include <nlohmann/json.hpp>

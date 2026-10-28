@@ -7,7 +7,7 @@
 #include "Engine/Rendering/WorldDrawBuilder.h"
 #include "Engine/Rendering/WorldDrawTypes.h"
 #include "JobSystem/ParallelAlgorithms.h"
-#include "Rendering/CameraDerivation.h"
+#include "Rendering/Camera/CameraDerivation.h"
 #include "Rendering/Common/Frustum.h"
 #include "Rendering/Core/GPUCulling.h"
 #include "Rendering/Core/GPUInstanceDepthClass.h"

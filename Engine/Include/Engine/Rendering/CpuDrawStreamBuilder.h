@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Types/Types.h"
 
 #include <cstdint>

@@ -3,7 +3,7 @@
 #include "UI/Controls/Label.h"
 #include "UI/Controls/ScrollView.h"
 #include "UI/Controls/VirtualWindowCore.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/Interaction/ItemResizeGesture.h"
 #include "UI/Layout/ElementOverrideHelpers.h"
 #include "UI/UIManager.h"

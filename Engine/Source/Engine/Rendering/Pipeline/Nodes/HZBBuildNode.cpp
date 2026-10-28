@@ -10,8 +10,8 @@
 #include "Rendering/Common/Utils.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/GPUCulling.h"
-#include "Rendering/Core/PipelineTypes.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 #include <nlohmann/json.hpp>

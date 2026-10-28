@@ -22,7 +22,7 @@
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/ViewParamsLayout.h"
 #include "Rendering/Materials/MaterialBuilder.h"
-#include "Rendering/Materials/ShaderReflection.h"
+#include "Rendering/Materials/Shader/ShaderReflection.h"
 #include "Rendering/Sky/SkyRenderer.h"
 #include "TestDeviceHelper.h"
 

@@ -1,6 +1,9 @@
+#include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <iterator>
 #include <limits>
+#include <vector>
 
 #include "Core/Application.h"
 #include "Core/Engine.h"
@@ -15,10 +18,10 @@
 #include "Terrain/TerrainTypes.h"
 #include "Mathematics/Quaternion.h"
 #include "Mathematics/Vector3.h"
-#include "SceneView/SplineOwnerQuery.h"
-#include "SceneView/SplineSceneGizmo.h"
-#include "SceneView/SplineTool.h"
-#include "SceneView/SplineToolStripEntry.h"
+#include "SceneView/SplineTool/SplineOwnerQuery.h"
+#include "SceneView/SplineTool/SplineSceneGizmo.h"
+#include "SceneView/SplineTool/SplineTool.h"
+#include "SceneView/SplineTool/SplineToolStripEntry.h"
 #include "Scripting/ScriptsConfig.h"
 #include "Spline/SplineData.h"
 #include "SplineECS/SplineService.h"
@@ -417,6 +420,33 @@ struct SplineFixture
     GameEngine::Spline::SplineData* Data = nullptr;
     GameEngine::ECS::EntityHandle SplineEntity{};
 };
+
+// A flat terrain at y = 0, `worldSize` meters on a side, that a raycast and a drape can hit.
+void CreateFlatTerrain(World* world, float worldSize)
+{
+    auto* terrainService = GameEngine::TerrainECS::TerrainService::TryGet();
+    ASSERT_NE(terrainService, nullptr);
+    GameEngine::Terrain::TerrainConfig config{};
+    config.HeightmapWidth = 9;
+    config.HeightmapHeight = 9;
+    config.WorldSizeX = worldSize;
+    config.WorldSizeZ = worldSize;
+    config.HeightScale = 1.0f;
+    config.LODLevels = 1;
+    config.PatchGridSize = 8;
+    const auto terrainHandle = terrainService->CreateTerrain(config);
+    ASSERT_NE(terrainHandle.Generation, 0u);
+    Entity terrainEntity = world->Create();
+    Terrain terrain{};
+    terrain.SizeX = config.WorldSizeX;
+    terrain.SizeZ = config.WorldSizeZ;
+    terrain.HeightScale = config.HeightScale;
+    terrain.TerrainDataHandle = terrainHandle.Index;
+    terrain.TerrainDataGeneration = terrainHandle.Generation;
+    terrainEntity.Set(terrain);
+    terrainEntity.Set(WorldTransform{});
+    world->ProcessCommands();
+}
 
 SplineFixture MakeSplineEntity(World* world, uint32_t pointCount, bool closed = false)
 {
@@ -924,6 +954,133 @@ TEST(SplineInteractionStateTests, CollidingHandlesKeepSelectionAndHoverInTheirWo
     EXPECT_FALSE(stateA->Selection().Entity.IsValid());
     EXPECT_FALSE(stateA->Hover().Entity.IsValid());
     EXPECT_EQ(stateB->Selection().PointIndex, 7);
+}
+
+TEST_F(SplineToolTests, TwoDimensionalBrushDrawsInXYWithoutGroundHit)
+{
+    ScopedSplineStickToMeshSetting stickToMesh(false);
+    SplineTool tool(*GetWorld());
+    for (const auto phase : {PointerPhase::Down, PointerPhase::Move, PointerPhase::Up})
+    {
+        const float x = phase == PointerPhase::Down ? -2.0f : phase == PointerPhase::Move ? 0.0f : 2.0f;
+        auto event = MakePointer(phase, 100.0f + x * 20.0f, 100.0f, {x, 3.0f, -10.0f}, {0, 0, 1});
+        event.IsEditor2D = true;
+        event.orthoHeight = 10.0f;
+        event.tanHalfFovY = 0.0f;
+        tool.OnPointerEvent(event);
+    }
+    auto* service = GameEngine::SplineECS::SplineService::TryGet();
+    ASSERT_NE(service, nullptr);
+    size_t count = 0;
+    GetWorld()->Query<GameEngine::ECS::Read<SplineComponent>, GameEngine::ECS::Read<Transform>>()
+        .Each([&](const SplineComponent& reference, const Transform& transform)
+        {
+            ++count;
+            const auto* spline = service->GetSplineData({reference.SplineDataIndex, reference.SplineDataGeneration});
+            ASSERT_NE(spline, nullptr);
+            ASSERT_GE(spline->Points.size(), 2u);
+            for (const auto& point : spline->Points)
+            {
+                EXPECT_NEAR(point.Position.y + transform.GetPosition().y, 3.0f, 0.001f);
+                EXPECT_NEAR(point.Position.z + transform.GetPosition().z, 0.0f, 0.001f);
+            }
+        });
+    EXPECT_EQ(count, 1u);
+}
+
+TEST_F(SplineToolTests, TwoDimensionalBrushDrawsInTheTiltedPlaneOfTheSelection)
+{
+    ScopedSplineStickToMeshSetting stickToMesh(false);
+    const Vector3 ownerPosition(1.0f, 2.0f, 5.0f);
+    const Quaternion ownerRotation = Quaternion::FromAxisAngle(Vector3(0.0f, 1.0f, 0.0f), 0.5f);
+    WorldTransform ownerWorld{};
+    const Transform ownerPose = Transform::FromTRS(ownerPosition, ownerRotation, Vector3(1.0f, 1.0f, 1.0f));
+    std::copy(std::begin(ownerPose.matrix), std::end(ownerPose.matrix), std::begin(ownerWorld.matrix));
+    const GameEngine::ECS::EntityHandle owner = GetWorld()->CreateEntity();
+    GetWorld()->AddComponentImmediate(owner, ownerWorld);
+
+    SplineTool tool(*GetWorld());
+    tool.SetSelectionQuery([owner] { return owner; });
+    for (const auto phase : {PointerPhase::Down, PointerPhase::Move, PointerPhase::Up})
+    {
+        const float x = phase == PointerPhase::Down ? -2.0f : phase == PointerPhase::Move ? 0.0f : 2.0f;
+        auto event = MakePointer(phase, 100.0f + x * 20.0f, 100.0f, {x, 3.0f, -10.0f}, {0, 0, 1});
+        event.IsEditor2D = true;
+        event.orthoHeight = 10.0f;
+        event.tanHalfFovY = 0.0f;
+        tool.OnPointerEvent(event);
+    }
+
+    // Every world point lies in the selected entity's local XY plane.
+    const Vector3 ownerNormal = ownerRotation.Rotate(Vector3(0.0f, 0.0f, 1.0f));
+    auto* service = GameEngine::SplineECS::SplineService::TryGet();
+    ASSERT_NE(service, nullptr);
+    size_t count = 0;
+    GetWorld()->Query<GameEngine::ECS::Read<SplineComponent>, GameEngine::ECS::Read<Transform>>()
+        .Each([&](const SplineComponent& reference, const Transform& transform)
+        {
+            ++count;
+            const auto* spline = service->GetSplineData({reference.SplineDataIndex, reference.SplineDataGeneration});
+            ASSERT_NE(spline, nullptr);
+            ASSERT_GE(spline->Points.size(), 2u);
+            for (const auto& point : spline->Points)
+            {
+                const Vector3 world = point.Position + transform.GetPosition();
+                EXPECT_NEAR(Vector3::Dot(world - ownerPosition, ownerNormal), 0.0f, 0.001f);
+                EXPECT_NEAR(world.y, 3.0f, 0.001f);
+            }
+        });
+    EXPECT_EQ(count, 1u);
+}
+
+// The lowest world y of every line and triangle vertex the gizmo draws in one frame.
+float LowestDrawnGizmoY(GameEngine::Editor::SceneTools::SplineSceneGizmo& gizmo, World* world, ViewId view, bool is2D)
+{
+    GameEngine::Editor::SceneTools::ResetGizmoLineGroups(view);
+    GameEngine::Editor::SceneTools::ResetGizmoTriangleGroups(view);
+    const Vector3 camera(2.0f, 10.0f, -40.0f);
+    GameEngine::Editor::SceneTools::GizmoRenderContext context(view, view, &camera, nullptr, world);
+    context.SetEditor2DMode(is2D);
+    gizmo.Render(context);
+    float lowest = std::numeric_limits<float>::max();
+    const auto lowerTo = [&lowest](const std::vector<float>& xyz) {
+        for (std::size_t yIndex = 1; yIndex < xyz.size(); yIndex += 3)
+            lowest = std::min(lowest, xyz[yIndex]);
+    };
+    if (const auto* lines = GameEngine::Editor::SceneTools::GetGizmoLineGroups(view))
+        for (const auto& group : *lines)
+            lowerTo(group.vertices);
+    if (const auto* triangles = GameEngine::Editor::SceneTools::GetGizmoTriangleGroups(view))
+        for (const auto& group : *triangles)
+            lowerTo(group.vertices);
+    return lowest;
+}
+
+// A 2D view shows a spline at its authored height: nothing draped on the ground draws there.
+TEST_F(SplineToolTests, TwoDimensionalViewDrawsTheSplineWithoutTheGroundDrape)
+{
+    World* world = GetWorld();
+    CreateFlatTerrain(world, 40.0f);
+    auto& settings = GameEngine::Editor::SplineEditorSettings::Get();
+    const bool drapeBefore = settings.GetDrapeToSurface();
+    settings.SetDrapeToSurface(true);
+    const bool envelopeBefore = settings.GetShowWidthEnvelope();
+    settings.SetShowWidthEnvelope(true);
+    const SplineFixture spline = MakeSplineEntity(world, 2); // knots at y = 10
+    world->AddComponentImmediate(spline.SplineEntity, WorldTransform{});
+
+    constexpr ViewId kView = 9082;
+    GameEngine::Editor::SceneTools::SplineSceneGizmo gizmo(*world);
+    gizmo.SetSelectionQuery([&spline] { return spline.SplineEntity; });
+
+    EXPECT_LT(LowestDrawnGizmoY(gizmo, world, kView, false), 1.0f)
+        << "positive control: the 3D view drapes the spline onto the terrain";
+    EXPECT_GT(LowestDrawnGizmoY(gizmo, world, kView, true), 5.0f) << "the 2D view drew the ground drape";
+
+    GameEngine::Editor::SceneTools::ResetGizmoLineGroups(kView);
+    GameEngine::Editor::SceneTools::ResetGizmoTriangleGroups(kView);
+    settings.SetDrapeToSurface(drapeBefore);
+    settings.SetShowWidthEnvelope(envelopeBefore);
 }
 
 TEST(SplineInteractionStateTests, IndexDoesNotOwnTheStateAfterItsConsumersClose)

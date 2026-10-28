@@ -7,8 +7,8 @@ set(ASSETRUNTIME_SOURCES
     Source/AssetRegistry.cpp
     Source/AssetDependencyExtractor.cpp
     Source/ParserRegistry.cpp
-    Source/MaterialAsset.cpp
-    Source/MaterialXImport.cpp
+    Source/Material/MaterialAsset.cpp
+    Source/Material/MaterialXImport.cpp
     Source/TextureAlphaProbe.cpp
     Source/RenderPipelineAsset.cpp
     Source/ShaderProgramAsset.cpp
@@ -23,15 +23,15 @@ set(ASSETRUNTIME_SOURCES
     Source/AssetTasks.cpp
     Source/AsyncRegistryTasks.cpp
     Source/AssetDbProfiler.cpp
-    Source/MaterialAssetParser.cpp
+    Source/Material/MaterialAssetParser.cpp
     Source/SceneAssetParser.cpp
     Source/AnimationAssetParser.cpp
     Source/UILayoutAssetParser.cpp
     Source/UIStyleAssetParser.cpp
     Source/FlareAtlasAsset.cpp
-    Source/LensFlareDefinitionAsset.cpp
-    Source/LensFlareImporter.cpp
-    Source/LensFlareParsers.cpp
+    Source/LensFlare/LensFlareDefinitionAsset.cpp
+    Source/LensFlare/LensFlareImporter.cpp
+    Source/LensFlare/LensFlareParsers.cpp
     Source/TerrainMaterialLibraryAsset.cpp
     Source/TerrainMaterialLibraryParser.cpp
 )

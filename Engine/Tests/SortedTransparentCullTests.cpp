@@ -10,7 +10,7 @@
 #include "Engine/Rendering/SortedTransparentCull.h"
 
 #include "Mathematics/MatrixOps.h"
-#include "Rendering/CameraDerivation.h" // DeriveCameraData (Forward convention pin)
+#include "Rendering/Camera/CameraDerivation.h" // DeriveCameraData (Forward convention pin)
 #include "Rendering/Common/Frustum.h" // ExtractFrustumPlanes
 
 #include <cmath>

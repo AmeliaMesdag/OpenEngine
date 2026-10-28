@@ -4,7 +4,7 @@
 #include "Source/Vulkan/VulkanPipelineCompileGate.h"
 
 #include "Rendering/Core/Device.h"
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 #include "TestUtils.h"
 
 #include <gtest/gtest.h>

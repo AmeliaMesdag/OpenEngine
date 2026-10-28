@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "ECS/ClonePlan.h"
-#include "ECS/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "ECS/EntityRemap.h"

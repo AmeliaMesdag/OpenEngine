@@ -1,7 +1,7 @@
 #include "UI/Controls/SceneViewLayersField.h"
 
 #include "Core/Engine.h"
-#include "Inspectors/RenderLayerField.h"
+#include "Inspectors/RenderLayers/RenderLayerField.h"
 #include "SceneView/SceneViewLayerFilter.h"
 #include "UI/Registration/ElementRegistration.h"
 

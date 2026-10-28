@@ -9,7 +9,7 @@
 #include "Mathematics/Interpolation.h"
 #include "Platform/SystemMetrics.h"
 #include "Thumbnails/IThumbnailProvider.h"
-#include "Thumbnails/ModelThumbnailHandler.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
 #include "Editor/Shortcuts/EditorShortcuts.h"
 #include "UI/UIElement.h"
 #include "UI/UIManager.h"

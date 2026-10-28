@@ -17,7 +17,7 @@
 
 #include <gtest/gtest.h>
 
-#include "Assets/PolyhavenDownloadManager.h"
+#include "Assets/Polyhaven/PolyhavenDownloadManager.h"
 #include "Engine/Rendering/HlodRuntime.h"
 #include "Engine/Rendering/MeshGPURegistry.h"
 
@@ -193,7 +193,7 @@ TEST(SceneSwapOrdering, TheSharedStepReleasesTheSplineGenerators)
 // hook through the registered recipe hooks to every spline generator.
 TEST(SceneSwapOrdering, EditorApplicationWiresTheSplineGeneratorRelease)
 {
-    const std::string src = ReadFile(EditorSourceRoot() / "Source" / "EditorApplication.cpp");
+    const std::string src = ReadFile(EditorSourceRoot() / "Source" / "EditorApplication" / "EditorApplication.cpp");
     ASSERT_FALSE(src.empty());
 
     const size_t wire = src.find("SetSceneScopedGeneratorRelease(");
@@ -454,7 +454,7 @@ using ScopedEntity = GameEngine::PolyhavenDownloadManager::ScopedEntity;
 
 std::string PolyhavenManagerSource()
 {
-    return ReadFile(EditorSourceRoot() / "Source" / "Assets" / "PolyhavenDownloadManager.cpp");
+    return ReadFile(EditorSourceRoot() / "Source" / "Assets" / "Polyhaven" / "PolyhavenDownloadManager.cpp");
 }
 
 // Body of the SECOND definition matching `signature`. AssignHDRIToSkyboxOnComplete

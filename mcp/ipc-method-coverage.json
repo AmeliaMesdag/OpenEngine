@@ -52,6 +52,7 @@
     "cbt_force_vertex_eval": "Forces a CBT vertex evaluation pass; a terrain-debugging primitive, not a workflow.",
     "get_cbt_tree_audit": "CBT watertightness audit of the live tree (a ~160 MiB one-shot readback: CPU edge multiset over the decoded HeapIDs plus link, occupancy, corner-cache and draw-stream checks); a terrain-debugging primitive, not a workflow.",
     "terrain_sculpt_dab": "Applies one terrain sculpt dab; no typed tool yet.",
+    "planet_page_overlay": "Places a test bump in a planet's height-page overlay; a terrain-debugging primitive for capture pairs, not a workflow.",
     "set_terrain_brush": "Configures the terrain sculpt brush; pairs with terrain_sculpt_dab, promote together.",
 
     "graph_set_viewport": "B1 spike zoom-ladder harness: SetPanZoom on the live GraphCanvas. Measurement-only, not a user workflow.",

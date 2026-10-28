@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Common/Frustum.h"
 #include "Rendering/Common/Math.h"
 #include "Rendering/Core/CullDeformationMargins.h"

@@ -11,6 +11,7 @@
 #include "Components/Name.h"
 #include "Core/ApplicationPaths.h"
 #include "Core/Engine.h"
+#include "ECS/ECSTemplates.h"
 #include "ECSModules/Rendering/RenderingLoop.h"
 #include "Engine/Build/PackagedGameLayout.h"
 #include "Engine/GameUI/GameplayUI.h"

@@ -1679,6 +1679,7 @@ void TerrainService::ResetPlanetSculpt()
     m_RenderSculptFaces = {};
     m_SphereSculptSubTexelWarned = false;
     m_PlanetSculptRadius = 0.0f; // the next ConfigurePlanetSculpt re-derives for the new planet
+    m_PlanetPageOverlays.Clear(); // a planet's height page overlays are its layers too
     // The analytic set is derived per-planet state too. Keep its version counter monotonic (a
     // non-empty set clearing IS a change the render/physics gates must see).
     if (m_SphereAnalyticCount > 0u)
@@ -1913,6 +1914,19 @@ uint32 TerrainService::SphereSculptEscalatedPages() const
 {
     std::lock_guard<std::mutex> lock(m_SphereSculptMutex);
     return m_SphereSculpt.EscalatedPageCount();
+}
+
+void TerrainService::SetPlanetPageOverlay(uint32 planet,
+                                          std::shared_ptr<const PageStreaming::HeightPageOverlay> overlay)
+{
+    if (!overlay && !m_PlanetPageOverlays.Contains(planet))
+        return;
+    m_PlanetPageOverlays.InsertOrAssign(planet, PlanetPageOverlay{std::move(overlay), ++m_PlanetPageOverlayVersion});
+}
+
+const TerrainService::PlanetPageOverlay* TerrainService::FindPlanetPageOverlay(uint32 planet) const
+{
+    return m_PlanetPageOverlays.Find(planet);
 }
 
 void TerrainService::SetPlanetAnalyticModifiers(const CBTTerrain::SphereAnalyticFlatten* items,

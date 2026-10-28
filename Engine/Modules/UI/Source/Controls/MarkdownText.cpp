@@ -3,7 +3,7 @@
 #include "UI/Controls/Button.h"
 #include "UI/Controls/Label.h"
 #include "UI/Controls/ScrollView.h"
-#include "../Parsers/MarkdownParser.h"
+#include "../Parsers/Markdown/MarkdownParser.h"
 #include "UI/UIEvents.h"
 #include "UI/UIManager.h"
 #include "UI/UIPlatform.h"

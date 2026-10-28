@@ -14,10 +14,10 @@
 #include "Rendering/Materials/MaterialDocument.h"
 #include "Rendering/Materials/MaterialBuildService.h"
 #include "Rendering/Materials/MaterialShaderIncludeRoots.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
-#include "Rendering/Materials/ShaderComposer.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderComposer.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "TestUtils.h"
 
 #include <algorithm>

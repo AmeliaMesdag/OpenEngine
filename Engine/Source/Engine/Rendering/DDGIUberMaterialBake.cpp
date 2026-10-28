@@ -6,7 +6,7 @@
 #include "Mathematics/Vector4.h"
 #include "Rendering/Materials/LegacyMaterialLanes.h"
 #include "Rendering/Materials/MaterialParamsLayout.h"
-#include "Rendering/Materials/ShaderPropertyTable.h"
+#include "Rendering/Materials/Shader/ShaderPropertyTable.h"
 #include "Types/Color.h"
 
 #include <algorithm>

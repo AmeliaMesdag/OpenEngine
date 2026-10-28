@@ -32,14 +32,14 @@
 #include "Engine/Rendering/MaterialCompileSpec.h"
 #include "Engine/Rendering/WorldDrawTypes.h"
 #include "Rendering/Materials/MaterialDocument.h"
-#include "Rendering/Materials/ShaderPropertyTable.h"
+#include "Rendering/Materials/Shader/ShaderPropertyTable.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/Handle.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
 #include "Rendering/Materials/MaterialAlphaMode.h"
-#include "Rendering/Materials/MaterialBlend.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/MaterialBlend/MaterialBlend.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Types/StringId.h"
 #include "Types/Types.h"
 
@@ -58,7 +58,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 
 // Explicit imports from the Rendering module (CodingStyle: no namespace-scope using-directives in headers).
 namespace GameEngine::Engine::Renderer

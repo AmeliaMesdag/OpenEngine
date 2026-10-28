@@ -1,13 +1,13 @@
 #include "ECS/World.h"
-#include "ECS/ComponentFactory.h"
-#include "ECS/ComponentRegistry.h"
-#include "ECS/ComponentMigration.h"
+#include "ECS/Component/ComponentFactory.h"
+#include "ECS/Component/ComponentRegistry.h"
+#include "ECS/Component/ComponentMigration.h"
 #include "ECS/Components.h"
 #include "ECS/Entity.h"
 #include "ECS/ClonePlan.h"
 #include "ECS/EntityRemap.h"
 #include "ECS/Query.h"
-#include "ECS/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
 #include "ECS/UnresolvedComponentStore.h"
 #include "Logger/Logger.h"
 #include "Types/GeometricReserve.h"
@@ -71,11 +71,8 @@ struct RemovalScope
 };
 } // namespace
 
-// Phase 1b: ComponentTypeId is a consteval Hash64 of the normalized type name
-// (see ECS/ComponentTypeName.h). The runtime allocator that used to live here —
-// ComponentTypeIdState with its type_index map, name map, atomic next-id, mutex,
-// and cross-module redirect pointer — is deleted. Runtime-keyed blob components
-// derive their ID via Hash64(name) in ComponentRegistry directly.
+// ComponentTypeId is a consteval Hash64 of the normalized type name (ECS/Component/ComponentTypeName.h).
+// A runtime-keyed blob component gets its ID from Hash64(name) in ComponentRegistry.
 
 thread_local World::ThreadLocalBuffers World::tlBuffers;
 

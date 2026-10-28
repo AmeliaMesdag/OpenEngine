@@ -11,8 +11,8 @@
 #include "Engine/Rendering/Material.h"
 #include "EngineLogCapture.h"
 #include "Logger/Logger.h"
-#include "Rendering/Materials/ShaderDeformationEnvelope.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderDeformationEnvelope.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Types/StringId.h"
 
 #include <gtest/gtest.h>

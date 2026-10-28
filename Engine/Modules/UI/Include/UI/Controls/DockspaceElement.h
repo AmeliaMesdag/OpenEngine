@@ -63,6 +63,11 @@ public:
         m_OnTabContextMenu(panelId, x, y);
         return true;
     }
+
+    /** Invoked when the user closes a dock tab with a close gesture (panelId). The host closes the panel. */
+    void SetOnTabCloseRequested(std::function<void(const std::string&)> cb) { m_OnTabCloseRequested = std::move(cb); }
+    /** Closes a tab's panel through the host's close handler, or removes the tab when no handler is set. */
+    void RequestTabClose(const std::string& panelId);
     bool m_NeedsRebuild = false;
 
     struct DockInstrumentation
@@ -118,6 +123,7 @@ private:
     DockInstrumentation m_Instrumentation{};
     std::function<void()> m_OnPostRebuild;
     std::function<void(const std::string&, float, float)> m_OnTabContextMenu;
+    std::function<void(const std::string&)> m_OnTabCloseRequested;
 
     std::unique_ptr<DockNode> m_SavedRoot;
     uint32_t m_AccentColor = 0xFF3A8FFF;

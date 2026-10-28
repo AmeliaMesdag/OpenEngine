@@ -7,8 +7,8 @@
 #include "Engine/Build/StagedAssetCook.h"
 #include "Engine/Build/TexturePackageCook.h"
 #include "Particles/Assets/ParticleStackAsset.h"
-#include "Particles/ParticleStackAuthoring.h"
-#include "Particles/ParticleStackBinary.h"
+#include "Particles/ParticleStack/ParticleStackAuthoring.h"
+#include "Particles/ParticleStack/ParticleStackBinary.h"
 
 #include <gtest/gtest.h>
 

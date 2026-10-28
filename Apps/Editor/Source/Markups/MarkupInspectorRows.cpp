@@ -8,7 +8,7 @@
 #include "Inspectors/InspectorUIHelpers.h"
 #include "MarkupECS/MarkupService.h"
 #include "Markups/MarkupEditorBridge.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "Spline/SplineData.h"
 #include "SplineECS/SplineService.h"
 #include "UI/Controls/Button.h"

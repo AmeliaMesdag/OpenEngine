@@ -4,11 +4,11 @@
 #include "Engine/Rendering/Pipeline/ViewMotionVectors.h"
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
 
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 
 #include <cstdint>
 #include <memory>

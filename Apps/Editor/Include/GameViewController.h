@@ -8,7 +8,7 @@
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrameStamp.h"
 #include "Rendering/Core/RenderGraph/RGTypes.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "SceneView/ViewPresentationSnapshot.h"
 #include "UI/UITargetSpace.h"
 

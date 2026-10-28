@@ -2,7 +2,7 @@
 
 #include "Components/Rendering/MeshRenderer.h"
 #include "ECS/World.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "UndoRedo/UndoRedoService.h"
 
 #include <string>

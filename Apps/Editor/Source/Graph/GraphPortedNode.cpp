@@ -3,13 +3,13 @@
 #include "Core/Application.h"
 #include "Editor/EditorPaths.h"
 #include "Graph/GraphInspectorRows.h"
-#include "Graph/GraphNodeIcons.h"
-#include "Graph/GraphNodeMetrics.h"
-#include "Graph/GraphNodeRegistry.h"
-#include "Graph/GraphPortLabels.h"
-#include "Graph/GraphNodeSummary.h"
-#include "Graph/GraphPort.h"
-#include "Graph/GraphPortDropSlot.h"
+#include "Graph/GraphNode/GraphNodeIcons.h"
+#include "Graph/GraphNode/GraphNodeMetrics.h"
+#include "Graph/GraphNode/GraphNodeRegistry.h"
+#include "Graph/GraphPort/GraphPortLabels.h"
+#include "Graph/GraphNode/GraphNodeSummary.h"
+#include "Graph/GraphPort/GraphPort.h"
+#include "Graph/GraphPort/GraphPortDropSlot.h"
 #include "Graph/GraphVariableValues.h"
 #include "Graph/NodeColorSettings.h"
 #include "Input/KeyCodes.h"
@@ -24,6 +24,7 @@
 #include "UI/Controls/Label.h"
 #include "UI/Controls/TextField.h"
 #include "UI/Controls/Vector3Field.h"
+#include "UI/AssetField.h"
 #include "UI/Layout/ElementOverrideHelpers.h"
 #include "UI/Parsers/XMLParser.h"
 #include "UI/Registration/ElementRegistration.h"
@@ -378,6 +379,8 @@ T* EnsureDirectChild(UIElement& host, const char* className, Make&& make)
         return dynamic_cast<T*>(child.get());
     }
     auto el = make();
+    if (!el)
+        return nullptr;
     DecorateInlineField(*el);
     el->AddClass(className);
     T* raw = el.get();
@@ -455,6 +458,15 @@ TextField* EnsureTextChild(UIElement& host)
 {
     return EnsureDirectChild<TextField>(host, "text-field", []() {
         return std::make_unique<TextField>();
+    });
+}
+
+/* An asset reference on a pin is the Inspector's asset field: the same picker,
+   drop target and reveal, bound to the same node parameter. */
+AssetField* EnsureAssetFieldChild(UIElement& host)
+{
+    return EnsureDirectChild<AssetField>(host, "graph-asset-field", []() {
+        return std::make_unique<AssetField>();
     });
 }
 
@@ -1086,6 +1098,19 @@ void GraphPortedNode::BindDetailRows(const Graph::Node& node, std::string_view k
     HideDetailRows(row);
 }
 
+void GraphPortedNode::BindAssetField(AssetField& field, AssetType type, const std::string& portId,
+                                     const std::string& guidText)
+{
+    field.SetAcceptedTypes({type});
+    field.SetAssetRegistry(m_EditHost.Assets);
+    field.SetThumbnailProvider(m_EditHost.Thumbnails);
+    field.SetOnReveal(m_EditHost.PingAsset);
+    field.SetValue(GUID(guidText));
+    field.SetOnValueChanged([this, portId](const GUID& picked) {
+        CommitParam(portId, Graph::GraphValue(picked.IsNull() ? std::string() : picked.ToString()));
+    });
+}
+
 void GraphPortedNode::CommitParam(const std::string& key, Graph::GraphValue value)
 {
     CommitParams([key, value](Graph::Node& node) { node.Parameters[key] = value; });
@@ -1622,6 +1647,13 @@ void GraphPortedNode::BindPortEditors(const Graph::Node& node, std::string_view 
 
         if (portKind == InlinePortKind::String)
         {
+            const NodeParamSpec* spec = FindSchemaParam(schemaMeta, portId);
+            if (spec && spec->AssetReference != AssetType::Unknown)
+            {
+                if (AssetField* field = EnsureAssetFieldChild(*host))
+                    BindAssetField(*field, spec->AssetReference, portId, node.Parameters.GetString(portId, ""));
+                continue;
+            }
             TextField* field = EnsureTextChild(*host);
             if (!field)
                 continue;

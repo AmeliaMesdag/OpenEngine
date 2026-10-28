@@ -20,7 +20,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Logger/Logger.h"
 #include "Mathematics/Matrix4x4.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/RecomputeElision.h"
 #include "Rendering/Core/ReverseZ.h"
 

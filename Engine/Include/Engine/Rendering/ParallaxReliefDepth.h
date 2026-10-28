@@ -8,7 +8,7 @@
 // that depth rebuilds the hit from it instead of marching again, so both agree by construction.
 
 #include "Rendering/Materials/MaterialAlphaMode.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 #include <cstdint>
 

@@ -11,10 +11,10 @@
 #include "Assets/AssetRegistry.h"
 
 #include "Rendering/Core/Device.h"
-#include "Rendering/Materials/ShaderCapabilityDetector.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCapabilityDetector.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
-#include "Rendering/Materials/ShaderMetaValidation.h"
+#include "Rendering/Materials/Shader/ShaderMetaValidation.h"
 #include "Rendering/ShaderGraph/SgTagParser.h"
 
 #include "Editor/Assets/ShaderGlslOpen.h"

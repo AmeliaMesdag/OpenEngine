@@ -48,3 +48,7 @@
 .option-picture--grass-steppe {
 	background-image: url("editor:Icons/OptionPictures/grass-steppe.png");
 }
+
+.option-picture--grass-stylized {
+	background-image: url("editor:Icons/OptionPictures/grass-stylized.png");
+}

@@ -17,7 +17,7 @@
 #include "Assets/FileWatchingService.h"
 #include "EditorContextMenu/EditorContextMenu.h"
 #include <optional>
-#include "Assets/PolyhavenService.h"
+#include "Assets/Polyhaven/PolyhavenService.h"
 #include "Types/StringId.h"
 
 namespace GameEngine {

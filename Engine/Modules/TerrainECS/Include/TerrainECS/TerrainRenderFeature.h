@@ -6,7 +6,7 @@
 #include "TerrainECS/TerrainService.h"
 #include "TerrainECS/TerrainGpuBake.h"
 #include "TerrainECS/TerrainMaterialLibraryCache.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/DeviceFrameCounter.h"
@@ -18,6 +18,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -623,7 +624,10 @@ public:
     // ---- Active terrain instances (extracted from ECS) ----
 
     void SetActiveTerrains(std::vector<TerrainInstanceInfo> terrains);
+    // The active terrains in DrawOrderKey order: the first is the drawn one.
     std::vector<TerrainInstanceInfo> GetActiveTerrains() const;  // returns by value under lock
+    // The drawn terrain, the only one the CBT and its grass draw; empty when no terrain is active.
+    std::optional<TerrainInstanceInfo> GetDrawnTerrain() const;
     // The height textures of the first active terrain (the one the CBT renderer draws), copied
     // under the lock without the rest of its info. Present is false when no terrain is active.
     struct ActiveHeightSource

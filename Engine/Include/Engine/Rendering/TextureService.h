@@ -30,7 +30,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "Rendering/Utils/CubeLutGpuBinding.h"
+#include "Rendering/Utils/CubeLut/CubeLutGpuBinding.h"
 
 namespace GameEngine
 {

@@ -4,7 +4,7 @@
  */
 
 #include "VulkanCommandList.h"
-#include "VulkanDevice.h"
+#include "VulkanDevice/VulkanDevice.h"
 #include "VulkanMappings.h"
 #include <algorithm>
 #include <cassert>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ECS/ArchetypeTable.h"
-#include "ECS/ComponentConcepts.h"
+#include "ECS/Component/ComponentConcepts.h"
 #include "ECS/Components.h"
 #include "ECS/ECS.h"
 #include "ECS/QueryPolicy.h"

@@ -1,4 +1,4 @@
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -20,8 +20,8 @@
 #include "Logger/Logger.h"
 #include "Source/Vulkan/ValidationStats.h"
 #include "Source/Vulkan/VulkanDebugUtilsLabels.h"
-#include "Source/Vulkan/VulkanDeviceFault.h"
-#include "Source/Vulkan/VulkanGpuCheckpoints.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDeviceFault.h"
+#include "Source/Vulkan/VulkanGpu/VulkanGpuCheckpoints.h"
 #include "Source/Vulkan/VulkanSharedInstance.h"
 #include "Source/Vulkan/VulkanToolingInfo.h"
 #include "Source/Vulkan/VulkanValidationLayerSettings.h"

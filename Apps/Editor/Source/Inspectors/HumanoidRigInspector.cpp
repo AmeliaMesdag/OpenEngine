@@ -4,9 +4,9 @@
 #include "Inspectors/InspectorUIHelpers.h"
 
 #include "Animation/HumanBone.h"
-#include "Animation/HumanoidNameMatcher.h"
-#include "Animation/HumanoidRig.h"
-#include "Animation/HumanoidRigEdit.h"
+#include "Animation/Humanoid/HumanoidNameMatcher.h"
+#include "Animation/Humanoid/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRigEdit.h"
 #include "AssetCore/Asset.h"
 
 #include "UI/Controls/Button.h"

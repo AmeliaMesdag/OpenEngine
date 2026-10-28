@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../Source/Parsers/MarkdownParser.h"
+#include "../Source/Parsers/Markdown/MarkdownParser.h"
 
 #include <algorithm>
 #include <chrono>

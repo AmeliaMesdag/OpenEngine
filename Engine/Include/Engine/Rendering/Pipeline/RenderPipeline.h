@@ -2,7 +2,7 @@
 
 #include "Assets/RenderPipelineAsset.h"
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Types/FlatMap.h"
 
 #include <array>

@@ -35,7 +35,7 @@
 #include "Assets/AssetsBrowserController.h"
 #include "Assets/AssetsDataProviders.h"
 #include "Thumbnails/FolderBakeStatus.h"
-#include "Thumbnails/ModelThumbnailHandler.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
 #include "UI/SmartFolder/SmartFolderManager.h"
 #include "UI/SmartFolder/SmartFolderController.h"
 #include "Editor/Vcs/EditorVcsProviderRegistry.h"

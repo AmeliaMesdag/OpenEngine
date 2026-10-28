@@ -332,7 +332,7 @@ TEST(CBTLayout, StructSizesMatchStd430)
     // analytic sphere-modifier set (1 count vec4 + 16 x 3 vec4 placements), the draw's height-chain
     // vec4 and then the per-cell placement-cull mask tail (48 uvec4 = 768B). Every field before the
     // water plane keeps its offset (the flag-off GLSL reads are byte-stable) — locked below.
-    EXPECT_EQ(sizeof(CBTFrameParams), 1824u); // mat4 + 13 vec4 + analytic set + height chain + cell masks
+    EXPECT_EQ(sizeof(CBTFrameParams), 1920u); // mat4 + 13 vec4 + analytic set + height chain + cell masks + face rects
     EXPECT_EQ(offsetof(CBTFrameParams, PriorityParams), 224u); // last field before the water plane
     EXPECT_EQ(offsetof(CBTFrameParams, WaterPlane), 240u);
     EXPECT_EQ(offsetof(CBTFrameParams, AnalyticParams), 256u); // appended after the scalar block
@@ -352,7 +352,7 @@ TEST(CBTLayout, SurfaceParamsCarriesNoMaterialPalette)
 {
     // No palette: the analytic tail follows the leading scalar block directly (104 + 4 + 4 = 112,
     // 16-aligned for the std430 vec4-struct array).
-    EXPECT_EQ(sizeof(CBTSurfaceParams), 880u);
+    EXPECT_EQ(sizeof(CBTSurfaceParams), 1024u);
     EXPECT_EQ(offsetof(CBTSurfaceParams, SphereAnalyticCount), 104u);
     EXPECT_EQ(offsetof(CBTSurfaceParams, SphereAnalytic), 112u); // 16-aligned (std430 vec4 structs)
     EXPECT_LE(sizeof(CBTSurfaceParams), kCBTSurfaceParamsSlotStride); // still fits one ring slot
@@ -1157,6 +1157,13 @@ TEST(CBTLayout, GlslSurfaceStructsMatchCppStd430)
         {"SphereAnalyticDabCount", "uint", 1, offsetof(CBTSurfaceParams, SphereAnalyticDabCount)},
         {"SphereAnalytic", "CBTSphereAnalyticFlatten", kMaxSphereAnalyticModifiers,
          offsetof(CBTSurfaceParams, SphereAnalytic)},
+        {"PageAnchors", "ivec4", kCubeFaceCount6, offsetof(CBTSurfaceParams, PageAnchors)},
+        {"PageEye", "vec4", 1, offsetof(CBTSurfaceParams, PageEye)},
+        {"PageEyeRelative", "vec4", 1, offsetof(CBTSurfaceParams, PageEyeRelative)},
+        {"PlanetPaged", "uint", 1, offsetof(CBTSurfaceParams, PlanetPaged)},
+        {"PlanetPagePad0", "uint", 1, offsetof(CBTSurfaceParams, PlanetPagePad0)},
+        {"PlanetPagePad1", "uint", 1, offsetof(CBTSurfaceParams, PlanetPagePad1)},
+        {"PlanetPagePad2", "uint", 1, offsetof(CBTSurfaceParams, PlanetPagePad2)},
     };
     std::vector<GlslField> surfaceFields;
     ASSERT_TRUE(
@@ -1517,16 +1524,14 @@ TEST(CBTLayout, GlslHeightChainMirrorsCpp)
 }
 
 // The paged height resolve's page-table layout is hand-mirrored between CBTLayout.h (TerrainECS packs
-// the words, CBTResources sizes the ring) and cbt_layout.glsl (the taps read them). Lock the four.
+// the words, CBTResources sizes the ring), cbt_page.glsl (the word offsets every tap reads through) and
+// cbt_layout.glsl (the ring lane). Lock the four.
 TEST(CBTLayout, GlslPageTableConstantsMatchCpp)
 {
 #if defined(CBT_SHADER_SOURCE_DIR)
-    const std::string path = std::string(CBT_SHADER_SOURCE_DIR) + "/cbt_layout.glsl";
-    std::ifstream file(path);
-    ASSERT_TRUE(file.is_open()) << "cannot open " << path;
-    std::stringstream ss;
-    ss << file.rdbuf();
-    const std::string src = ss.str();
+    const std::string src = SlurpFile(std::string(CBT_SHADER_SOURCE_DIR) + "/cbt_page.glsl") +
+                            SlurpFile(std::string(CBT_SHADER_SOURCE_DIR) + "/cbt_layout.glsl");
+    ASSERT_FALSE(src.empty()) << "cannot read cbt_page.glsl and cbt_layout.glsl";
 
     std::smatch m;
     const std::regex header(R"(#define\s+CBT_PAGE_HEADER_WORDS\s+([0-9]+)u)");
@@ -2157,7 +2162,7 @@ TEST(CBTLayout, GlslStorageBindingNumbersMatchCpp)
 TEST(CBTLayout, PushConstantsWithinPolicy)
 {
     EXPECT_LE(sizeof(CBTPushConstants), 128u); // device push-constant policy
-    // 10 u32 + 4 f32 dirty rect + 2 u32 (DirtyFace, SphereSculptEnabled — planet editing) +
+    // 10 u32 + 4 f32 dirty rect + 1 u32 (SphereSculptEnabled — planet editing) +
     // 1 u32 (GateVertexEval — planet-shading quiescence gate) + 1 u32 (EditRetessEnabled — the
     // edit-driven-retess crease-term A/B toggle, round-8b) + 1 u32 (NearFieldGate — the near-field
     // force-split occupancy gate A/B toggle, round-8e saturation-deadlock fix) + 1 u32 (RegionFreeMask
@@ -2166,7 +2171,7 @@ TEST(CBTLayout, PushConstantsWithinPolicy)
     // (PoolPressure — the planar pool-pressure scale's A/B arm; GLSL mirror pc.poolPressure) + 2 u32
     // (the height build kernels' region; GLSL mirror pc.buildRegionMin / Extent) + 1 u32
     // (Settle — the rest rule; GLSL mirror pc.settle).
-    EXPECT_EQ(sizeof(CBTPushConstants), 100u);
+    EXPECT_EQ(sizeof(CBTPushConstants), 96u);
 }
 
 // The far-field region-reseed link kernel re-derives base root adjacency from a compile-time

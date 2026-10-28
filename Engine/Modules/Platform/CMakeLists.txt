@@ -23,7 +23,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # Path-to-menu-tree construction: pure string work, every platform.
-list(APPEND PLATFORM_SOURCES Source/ContextMenuBuilder.cpp)
+list(APPEND PLATFORM_SOURCES Source/ContextMenu/ContextMenuBuilder.cpp)
 
 # The request-header rule both HttpClient backends apply.
 list(APPEND PLATFORM_SOURCES Source/HttpHeaderRules.cpp)
@@ -64,51 +64,51 @@ if(EMSCRIPTEN)
 		Source/Display.cpp
 		Source/Theme_Stub.cpp
 		Source/HttpClient_Emscripten.cpp
-		Source/SystemMetrics_Linux.cpp
-		Source/SystemFonts_Web.cpp
-		Source/Toolbar_Stub.cpp
-		Source/ContextMenu_Stub.cpp
+		Source/SystemMetrics/SystemMetrics_Linux.cpp
+		Source/SystemFonts/SystemFonts_Web.cpp
+		Source/Toolbar/Toolbar_Stub.cpp
+		Source/ContextMenu/ContextMenu_Stub.cpp
 		Source/Clipboard_Web.cpp
 		Source/Gamepad_Web.cpp
 		Source/Shell_Web.cpp
-		Source/WebView_Web.cpp
+		Source/WebView/WebView_Web.cpp
 		Source/WebEnvironment_Web.cpp
 		Source/WebPersistentStorage.cpp
 	)
 elseif (WIN32)
 	list(APPEND PLATFORM_SOURCES
 		Source/OverlayWindow_Win32.cpp
-		Source/Toolbar_Win32.cpp
-		Source/ContextMenu_Win32.cpp
+		Source/Toolbar/Toolbar_Win32.cpp
+		Source/ContextMenu/ContextMenu_Win32.cpp
 		Source/MenuIconBitmap_Win32.cpp
 		Source/Theme_Win32.cpp
-        Source/SystemFonts_Win32.cpp
-        Source/SystemMetrics_Win32.cpp
-		Source/WebView_Win32.cpp
+        Source/SystemFonts/SystemFonts_Win32.cpp
+        Source/SystemMetrics/SystemMetrics_Win32.cpp
+		Source/WebView/WebView_Win32.cpp
 		Source/Utf8ToWide_Win32.cpp
-		Source/WebViewState.cpp
-		Source/WebViewEnvironment_Win32.cpp
+		Source/WebView/WebViewState.cpp
+		Source/WebView/WebViewEnvironment_Win32.cpp
 	)
 elseif(APPLE)
 	list(APPEND PLATFORM_SOURCES
-		Source/Toolbar_mac.mm
-		Source/ContextMenu_mac.mm
+		Source/Toolbar/Toolbar_mac.mm
+		Source/ContextMenu/ContextMenu_mac.mm
 		Source/Theme_Stub.cpp
-        Source/SystemFonts_mac.mm
-        Source/SystemMetrics_mac.mm
+        Source/SystemFonts/SystemFonts_mac.mm
+        Source/SystemMetrics/SystemMetrics_mac.mm
         Source/Shell_mac.mm
         Source/ScreenColor_mac.mm
         Source/Display_mac.mm
-		Source/WebView_mac.mm
+		Source/WebView/WebView_mac.mm
 	)
 else()
 	list(APPEND PLATFORM_SOURCES
-		Source/Toolbar_Stub.cpp
-		Source/ContextMenu_Stub.cpp
+		Source/Toolbar/Toolbar_Stub.cpp
+		Source/ContextMenu/ContextMenu_Stub.cpp
 		Source/Theme_Stub.cpp
-        Source/SystemFonts_Linux.cpp
-        Source/SystemMetrics_Linux.cpp
-		Source/WebView_Linux.cpp
+        Source/SystemFonts/SystemFonts_Linux.cpp
+        Source/SystemMetrics/SystemMetrics_Linux.cpp
+		Source/WebView/WebView_Linux.cpp
 	)
 endif()
 

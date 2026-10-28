@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "Core/CpuProfiler.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "SceneViewEvents.h"
 #include "SceneViewGizmos.h"
 

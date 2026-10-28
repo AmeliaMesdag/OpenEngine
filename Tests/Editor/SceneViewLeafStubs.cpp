@@ -8,7 +8,7 @@
 #include "SceneView/SceneViewGizmos.h"
 #include "SceneView/SceneViewNoticeOverlay.h"
 #include "SceneViewNoticeRecorder.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "UI/Controls/ScenePostFxMenu.h"
 #include "Mathematics/Vector3.h"
 

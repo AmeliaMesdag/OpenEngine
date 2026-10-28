@@ -2,7 +2,7 @@
 
 #include "Markups/MarkupEditorBridge.h"
 #include "Markups/MarkupRequests.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include <memory>
 

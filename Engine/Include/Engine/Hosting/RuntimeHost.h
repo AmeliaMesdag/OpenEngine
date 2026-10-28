@@ -4,7 +4,7 @@
 #include "Engine/Build/GameConfig.h"
 #include "Engine/Rendering/AntiAliasingProjectSettings.h"
 #include "Engine/Rendering/LodProjectSettings.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGWindowFrame.h"
 #include "UI/UIScaleSettings.h"

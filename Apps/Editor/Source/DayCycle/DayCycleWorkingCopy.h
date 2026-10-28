@@ -2,7 +2,7 @@
 
 #include "AssetCore/GUID.h"
 #include "Assets/DayCycleProfile.h"
-#include "DayCycle/DayCycleProfileSave.h"
+#include "DayCycle/DayCycleProfile/DayCycleProfileSave.h"
 #include "EditorChangeNotifications.h"
 
 #include <cstdint>

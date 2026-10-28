@@ -4,7 +4,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "VulkanPipelineCache.h"
+#include "VulkanPipelineCache/VulkanPipelineCache.h"
 #include "Logger/LogSink.h"
 #include "Logger/Logger.h"
 #include "Rendering/Core/Device.h"

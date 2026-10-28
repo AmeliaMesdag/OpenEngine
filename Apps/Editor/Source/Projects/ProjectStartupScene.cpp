@@ -32,27 +32,26 @@ bool IsSceneFile(const fs::path& path)
     return name.ends_with(kSceneExtension) && !name.ends_with(kBackupSceneSuffix);
 }
 
-// The absolute scene an asset-relative name refers to, when it is a scene file
-// inside the project's Assets folder.
+} // namespace
+
 std::optional<fs::path> ResolveNamedScene(const fs::path& assetsRoot, const std::string& assetRelative,
                                           const char* source)
 {
     if (assetRelative.empty())
         return std::nullopt;
+    const fs::path canonicalAssetsRoot = CanonicalPath(assetsRoot);
     const fs::path named(assetRelative);
-    const fs::path absolute = CanonicalPath(assetsRoot / named);
+    const fs::path absolute = CanonicalPath(canonicalAssetsRoot / named);
     std::error_code ec;
-    if (named.is_absolute() || RelativePathUnderRoot(absolute, assetsRoot).empty() ||
+    if (named.is_absolute() || RelativePathUnderRoot(absolute, canonicalAssetsRoot).empty() ||
         !IsSceneFile(absolute) || !fs::is_regular_file(absolute, ec))
     {
         Logger::Log::Warning("Editor: the project's {} '{}' is not a scene file under '{}'; skipping it",
-                             source, assetRelative, assetsRoot.string());
+                             source, assetRelative, canonicalAssetsRoot.string());
         return std::nullopt;
     }
     return absolute;
 }
-
-} // namespace
 
 std::optional<fs::path> ResolveProjectStartupScene(const fs::path& projectRoot,
                                                    const ProjectStartupSceneCandidates& candidates)

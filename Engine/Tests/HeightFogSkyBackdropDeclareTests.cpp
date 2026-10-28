@@ -9,7 +9,7 @@
 #include "Engine/Rendering/SkyRenderFeature.h"
 #include "Components/Rendering/PostProcessEffects/HeightFogEffect.h"
 #include "Mathematics/Matrix4x4.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGBarrier.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"

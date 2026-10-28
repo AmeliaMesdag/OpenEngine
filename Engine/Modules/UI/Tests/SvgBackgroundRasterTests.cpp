@@ -1,4 +1,4 @@
-#include "BackgroundImageGeometry.h"
+#include "BackgroundImage/BackgroundImageGeometry.h"
 #include "SvgBackgroundRaster.h"
 
 #include <gtest/gtest.h>

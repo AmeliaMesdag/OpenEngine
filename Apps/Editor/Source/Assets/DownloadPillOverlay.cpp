@@ -1,6 +1,6 @@
 #include "Assets/DownloadPillOverlay.h"
-#include "Assets/PolyhavenDownloadManager.h"
-#include "Assets/PolyhavenService.h"
+#include "Assets/Polyhaven/PolyhavenDownloadManager.h"
+#include "Assets/Polyhaven/PolyhavenService.h"
 #include "ECS/Entity.h"
 #include "Mathematics/Interpolation.h"
 #include "UI/Controls/Label.h"

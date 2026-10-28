@@ -7,7 +7,7 @@
 
 #include "Rendering/Core/Device.h" // PipelineDesc, DescriptorSetLayoutDesc
 #include "Rendering/Core/Handle.h"
-#include "Rendering/Core/PipelineIdentifiers.h" // GraphicsPipelineId
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h" // GraphicsPipelineId
 
 #include <array>
 #include <cstdint>

@@ -11,6 +11,7 @@
 #include "Types/Types.h"
 
 #include <memory>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -19,6 +20,11 @@ namespace GameEngine::Engine::Renderer
 {
 class RenderServices;
 } // namespace GameEngine::Engine::Renderer
+
+namespace GameEngine::Terrain
+{
+struct TerrainGPUParams;
+} // namespace GameEngine::Terrain
 
 namespace GameEngine::TerrainECS
 {
@@ -29,6 +35,7 @@ class TerrainService;
 class TerrainFieldUploader;
 class TerrainSkyline;
 struct TerrainTileData;
+struct TerrainInstanceInfo;
 
 // ECS system that handles terrain data lifecycle and heightmap/splat/normal GPU upload.
 // The CBT renderer consumes the extracted params + bindless textures; the upload flush
@@ -93,6 +100,15 @@ private:
     // depend on TerrainECS (the dependency runs the other way), and the glare's render node has
     // a camera but no ECS world.
     void PublishSunGlareSkyline(ECS::World& world);
+
+    // Puts the extracted terrains and their params in DrawOrderKey order, the drawn terrain first, and
+    // logs one line when the drawn terrain or the active count changes while several are active.
+    void PublishInDrawnTerrainOrder(const ECS::World& world, std::span<const uint64> drawOrder,
+                                    std::vector<ECS::EntityHandle>& entities,
+                                    std::vector<TerrainInstanceInfo>& infos,
+                                    std::vector<Terrain::TerrainGPUParams>& params);
+    ECS::EntityHandle m_LoggedDrawnTerrain{};
+    size_t m_LoggedActiveTerrainCount = 0;
     // Reused across frames so the per-frame refill does not allocate.
     std::vector<Engine::Renderer::SunGlareRenderFeature::ViewSkyline> m_SkylineScratch;
     // Each view's skyline, kept across frames, and the publish that last saw the view.

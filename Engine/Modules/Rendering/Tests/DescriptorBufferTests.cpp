@@ -1,4 +1,4 @@
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 #include "Source/Vulkan/VulkanDescriptorBufferPool.h"
 
 #include <gtest/gtest.h>

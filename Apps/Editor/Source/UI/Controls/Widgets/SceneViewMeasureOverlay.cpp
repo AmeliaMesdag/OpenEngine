@@ -12,7 +12,7 @@
 #include "Mathematics/MatrixOps.h"
 #include "Mathematics/Vector2.h"
 #include "Mathematics/Vector3.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "SceneView/SceneViewEvents.h"
 #include "SceneView/SceneViewProjection.h"
 #include "Rendering/Text/FontAtlas.h"

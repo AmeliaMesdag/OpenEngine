@@ -30,6 +30,9 @@ public:
     // Prepends an icon element before the label. Pass an empty class to skip.
     void SetIconClass(std::string_view iconClass);
 
+    // Closes this tab's panel through the dockspace's close path. Does nothing outside a dockspace.
+    void RequestClose();
+
     void OnEvent(UIEvent& e) override;
     // Compute insertion slot and drag center from pointer X, with magnet and edge forcing
     struct SlotCalcResult { size_t fromIdx; size_t toIdx; float dragCenter; float clampedDrawX; float localX; float minDrawX; float maxDrawX; };
@@ -40,6 +43,8 @@ private:
     bool IsPointInside(float x, float y) const;
     bool IsInCloseHitRect(float x, float y) const;
     UIElement* GetOwningLeaf() const;
+    // The nearest DockspaceElement ancestor, or null outside a dockspace.
+    DockspaceElement* FindDockspace() const;
     bool IsPointInLeaf(float x, float y) const;
 
     std::string GetPanelIdFromSelf() const;

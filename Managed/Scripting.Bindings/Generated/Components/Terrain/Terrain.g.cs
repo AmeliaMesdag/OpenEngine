@@ -31,7 +31,7 @@ namespace GameEngine.Scripting
         AtlasSlots = 2,
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 232)]
+    [StructLayout(LayoutKind.Explicit, Size = 236)]
     [BuiltInComponent("GameEngine::Components::Terrain")]
     public partial struct Terrain : IComponent
     {
@@ -122,12 +122,15 @@ namespace GameEngine.Scripting
         public uint TiledTerrainGeneration;
 
         [FieldOffset(100)]
+        public uint DrawOrderFrame;
+
+        [FieldOffset(104)]
         public AssetGuid BakeOriginScene;
 
-        [FieldOffset(116)]
+        [FieldOffset(120)]
         public float MaterialTiling;
 
-        [FieldOffset(120)]
+        [FieldOffset(124)]
         public AssetGuid MaterialLibraryGuid;
 
         [InlineArray(4)]
@@ -136,7 +139,7 @@ namespace GameEngine.Scripting
             private byte m_Element;
         }
 
-        [FieldOffset(136)]
+        [FieldOffset(140)]
         public LayerRoleSlotArray LayerRoleSlot;
 
         [InlineArray(4)]
@@ -145,7 +148,7 @@ namespace GameEngine.Scripting
             private AssetGuid m_Element;
         }
 
-        [FieldOffset(140)]
+        [FieldOffset(144)]
         public LayerAlbedoTextureArray LayerAlbedoTexture;
 
         [InlineArray(4)]
@@ -154,19 +157,19 @@ namespace GameEngine.Scripting
             private float m_Element;
         }
 
-        [FieldOffset(204)]
+        [FieldOffset(208)]
         public LayerTilingArray LayerTiling;
 
-        [FieldOffset(220)]
+        [FieldOffset(224)]
         public uint LayerHexTiling;
 
-        [FieldOffset(224)]
+        [FieldOffset(228)]
         public RenderLayerMask RenderLayers;
 
-        [FieldOffset(228)]
+        [FieldOffset(232)]
         public bool CastShadows;
 
-        [FieldOffset(229)]
+        [FieldOffset(233)]
         public bool ReceiveShadows;
     }
 }

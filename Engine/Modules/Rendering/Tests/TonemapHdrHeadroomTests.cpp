@@ -86,10 +86,10 @@
 #include <Rendering/Core/CommandList.h>
 #include <Rendering/Core/Device.h>
 #include <Rendering/Materials/MaterialBuilder.h>
-#include <Rendering/Materials/ShaderReflection.h>
+#include <Rendering/Materials/Shader/ShaderReflection.h>
 
-#include <Rendering/Utils/CubeLutFileParser.h>
-#include <Rendering/Utils/CubeLutGpuUpload.h>
+#include <Rendering/Utils/CubeLut/CubeLutFileParser.h>
+#include <Rendering/Utils/CubeLut/CubeLutGpuUpload.h>
 
 #include "Source/Passes/TonemapAces2Tables.h"
 

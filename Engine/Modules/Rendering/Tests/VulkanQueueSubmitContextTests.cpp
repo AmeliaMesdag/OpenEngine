@@ -11,8 +11,8 @@
 // from a worker is undefined), so a failure here is a genuinely lost or duplicated value and
 // never a benign mid-flight read.
 
-#include "Source/Vulkan/VulkanQueueRetireTracking.h"
-#include "Source/Vulkan/VulkanQueueSubmitContext.h"
+#include "Source/Vulkan/VulkanQueue/VulkanQueueRetireTracking.h"
+#include "Source/Vulkan/VulkanQueue/VulkanQueueSubmitContext.h"
 
 #include <gtest/gtest.h>
 

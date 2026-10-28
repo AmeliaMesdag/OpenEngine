@@ -11,11 +11,11 @@
 #include "Engine/Rendering/WorldDrawTypes.h"
 #include "AssetCore/GUID.h"
 #include "Assets/ModelAsset.h" // Mesh + Vertex for the registry submesh
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 #include "RGPassQuery.h"
 #include "SharedHeadlessDevice.h"

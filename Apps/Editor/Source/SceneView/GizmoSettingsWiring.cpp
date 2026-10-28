@@ -2,7 +2,7 @@
 
 #include "Panels/SettingsPanel.h"
 #include "SceneView/TransformTool.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "Editor/Settings/SettingsStore.h"
 
 namespace GameEngine

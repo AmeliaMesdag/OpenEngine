@@ -4,7 +4,7 @@
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/QueryPool.h"
 
-#include "MetalIndirectCountEncoder.h"
+#include "MetalIndirectCount/MetalIndirectCountEncoder.h"
 #include "MetalQueryPool.h"
 
 #include <Metal/Metal.hpp>

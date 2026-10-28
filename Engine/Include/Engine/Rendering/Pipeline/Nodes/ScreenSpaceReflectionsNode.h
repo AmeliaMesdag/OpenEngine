@@ -8,8 +8,8 @@
 
 #include "Mathematics/Rect.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 
 #include <array>
 #include <memory>

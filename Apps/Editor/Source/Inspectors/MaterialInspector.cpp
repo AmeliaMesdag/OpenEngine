@@ -32,10 +32,10 @@
 #include "Rendering/Materials/MaterialKeywordDerivation.h"
 #include "Rendering/Materials/MaterialPropertyBinding.h"
 #include "Rendering/Materials/MaterialValidation.h"
-#include "Rendering/Materials/ShaderCapabilityDetector.h"
-#include "Rendering/Materials/ShaderPropertyTable.h"
-#include "Rendering/Materials/ShaderMetaValidation.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderCapabilityDetector.h"
+#include "Rendering/Materials/Shader/ShaderPropertyTable.h"
+#include "Rendering/Materials/Shader/ShaderMetaValidation.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Rendering/ShaderGraph/SgPropertyBinding.h"
 
 #include "Editor/EditorPaths.h"
@@ -44,7 +44,7 @@
 #include "Editor/Materials/MaterialRows.h"
 #include "Editor/Materials/MaterialRuntimeTextures.h"
 #include "Editor/Materials/MaterialUndoSnapshot.h"
-#include "Panels/ShaderErrorRows.h"
+#include "Panels/ShaderErrors/ShaderErrorRows.h"
 
 #include "UI/Controls/Button.h"
 #include "UI/Controls/Dropdown.h"

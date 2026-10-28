@@ -17,7 +17,7 @@
 #include "Core/Engine.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
-#include "Rendering/Utils/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
 #include "UI/Controls/Button.h"
 #include "UI/Controls/InspectorNotice.h"
 #include "UI/Controls/Label.h"

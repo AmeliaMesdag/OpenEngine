@@ -24,10 +24,10 @@
 #include "Engine/Rendering/SkinPaletteAtlas.h"
 #include "Logger/Logger.h"
 
-#include "Animation/HumanoidImport.h"
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidImport.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 #include "Animation/RetargetMap.h"
-#include "Animation/SkeletonProfile.h"
+#include "Animation/Skeleton/SkeletonProfile.h"
 
 #include "Core/Engine.h"
 #include "Mathematics/Interpolation.h"

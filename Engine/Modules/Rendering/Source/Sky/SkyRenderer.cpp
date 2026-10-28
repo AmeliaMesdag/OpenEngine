@@ -5,9 +5,9 @@
 #include "Rendering/Common/Utils.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/DeviceFormatting.h"
-#include "Rendering/Core/PipelineDescTranslator.h"
-#include "Rendering/Core/PipelineTypes.h"
-#include "Rendering/Materials/ShaderLayoutShape.h"
+#include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
+#include "Rendering/Materials/Shader/ShaderLayoutShape.h"
 
 #include "Image/Decode.h"
 #include "Logger/Logger.h"

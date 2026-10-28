@@ -11,7 +11,7 @@
 #include "Spline/SplineData.h"
 #include "Spline/SplineEvaluator.h"
 #include "Spline/SplineUtility.h"
-#include "UndoRedo/SplinePointEdits.h"
+#include "UndoRedo/Spline/SplinePointEdits.h"
 #include "UndoRedo/UndoRedoService.h"
 
 #include <cmath>

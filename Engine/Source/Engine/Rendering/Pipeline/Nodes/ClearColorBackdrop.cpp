@@ -5,10 +5,10 @@
 #include "Engine/Rendering/Pipeline/ViewExposureHistory.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Logger/Logger.h"
-#include "Rendering/Core/PipelineDescTranslator.h"
+#include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/Core/RenderGraph/RGFullscreen.h"
-#include "Rendering/Materials/ShaderLayoutShape.h"
+#include "Rendering/Materials/Shader/ShaderLayoutShape.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 #include <array>

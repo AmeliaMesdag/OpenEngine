@@ -55,6 +55,10 @@ float CBT_PageSlotFade(uint)
     return 1.0f;
 }
 
+void CBT_PageUnresolved()
+{
+}
+
 CBTPageLevel CBT_PageLevelShape(uint level)
 {
     const GameEngine::PageStreaming::PageStoreLevel& shape = s_Field->Table.Levels()[level];

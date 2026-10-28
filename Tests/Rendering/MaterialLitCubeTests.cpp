@@ -18,7 +18,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Mathematics/Angle.h"
 #include "Mathematics/Interpolation.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/ReverseZ.h"
 #include "Rendering/Core/ViewParamsLayout.h"
 #include "Rendering/Common/Math.h"

@@ -118,7 +118,7 @@ export const tools: ToolDef[] = [
       "and the response always reports the resulting 'playMode' so a caller never has to trust its own intent — the same vocabulary get_editor_state uses. " +
       "SCENE STATE: entering snapshots the ECS world; exiting restores that snapshot, so everything the running game changed in the ECS world is DISCARDED. Terrain reverts zone payloads only (sculpt/heightmap stores are untouched), physics is reset rather than restored, and audio voices are stopped. Nothing is ever saved on your behalf — save first if the pre-play edits matter. " +
       "Exiting can land in 'change_review' rather than 'editing' when editor commands (not game code) ran during play: that state holds those edits pending, and a second 'exit' discards them, exactly as the toolbar Stop button does. " +
-      "This never switches the editor to the fullscreen game layout, so the dock layout you set up survives a play session (activateGameView changes which tab is in front, nothing else), " +
+      "This never switches the editor to the fullscreen game layout. Entering play brings a docked Game View tab to the front and gives its viewport the keyboard focus, as the toolbar Play button does; stopping brings back the tab that was in front and gives the focus back to the element that had it. " +
       "and it skips the toolbar's pre-play pending-download prompt — playing proceeds even if assets are still downloading. " +
       "While game scripts are building, 'enter' answers with 'waitingForScriptBuild': true and 'playMode' 'editing': the editor shows its Entering Play Mode dialog and enters when the build finishes, or stays in editing when the build fails or the dialog is canceled; poll get_editor_state for the outcome. 'exit' during that wait drops the entry and answers 'entryCanceled': true. After a failed script build, 'enter' is refused until the module rebuilds. " +
       "IF YOUR SESSION TOUCHES GAME UI, PASS activateGameView — read its description first; without it managed UI resolves nothing and looks broken.",
@@ -126,10 +126,9 @@ export const tools: ToolDef[] = [
       action: z.enum(["enter", "exit", "pause", "resume"]).describe(
         "enter: editing -> playing. exit: playing/paused -> editing (or change_review). pause: playing -> paused. resume: paused -> playing. There is no frame-step action in the editor."),
       activateGameView: z.boolean().optional().describe(
-        "Bring the Game View tab to the front (and give its viewport UI focus) BEFORE the transition. Default false, which leaves your dock layout untouched. " +
+        "Open the Game View if it is closed, bring its tab to the front, give its viewport UI focus and raise the editor window, BEFORE the transition. Default false: entering play still brings a docked Game View to the front, but does not open a closed one. " +
         "PASS true FOR ANY SESSION THAT TOUCHES GAME UI. The Game View's composite is the only thing that publishes the gameplay UI host, so while another tab is in front NO UI DOCUMENT IS MOUNTED: C# Ui.FindElement returns null and [UiElement] fields never bind. " +
         "That failure is indistinguishable from a broken scripting ABI, and the Scene View's HUD preview keeps drawing the HUD while it happens, so the screenshot looks right while every probe reads dead. " +
-        "The toolbar Play button only raises the Game View when the toolbar's play-fullscreen toggle is on (off by default), so it is not a workaround. " +
         "If the main editor window is unavailable the transition is refused outright rather than entering play with the caller believing the view is up. " +
         "Otherwise read the result rather than assuming it: the response carries 'gameViewActive' (read back from the dock model — this is the one that governs whether UI mounts) and 'gameViewViewportFocused' (input routing only; it can be false on the first call after the panel was closed, because the viewport element is not mounted the same frame — call again if you need input to reach the game)."),
     },

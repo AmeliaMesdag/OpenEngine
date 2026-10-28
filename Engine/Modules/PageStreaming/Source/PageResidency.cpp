@@ -457,7 +457,7 @@ void PageResidencyManager::StartLoad(uint32 streamId, Stream& stream, const Page
                     });
 }
 
-void PageResidencyManager::Refresh(uint32 streamId, const PageSampleRect& level0Rect)
+void PageResidencyManager::Refresh(uint32 streamId, uint8 face, const PageSampleRect& level0Rect)
 {
     const auto it = m_Streams.find(streamId);
     if (it == m_Streams.end())
@@ -465,7 +465,7 @@ void PageResidencyManager::Refresh(uint32 streamId, const PageSampleRect& level0
     Stream& stream = it->second;
     for (const CachedPage& page : m_Fields.at(stream.Field).Resident())
     {
-        if (page.Stream != streamId || !PageReadsLevel0Rect(page.Address, level0Rect))
+        if (page.Stream != streamId || page.Address.Face != face || !PageReadsLevel0Rect(page.Address, level0Rect))
             continue;
         if (PageSampleRect* stale = stream.Stale.Find(page.Address))
             *stale = Union(*stale, level0Rect);

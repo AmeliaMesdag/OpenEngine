@@ -566,6 +566,7 @@ struct Bound
     uint32 Dim = 0;
 };
 Bound s_Bound;
+uint32 s_Unresolved = 0; ///< the walks that found no resident page since the test reset it
 
 #include "PageResolveTypesExtracted.h"
 
@@ -580,6 +581,11 @@ uint CBT_PageTableWord(uint index)
 float CBT_PageSlotFade(uint slot)
 {
     return s_Bound.Table->SlotFades()[slot];
+}
+
+void CBT_PageUnresolved()
+{
+    ++s_Unresolved;
 }
 
 CBTPageLevel CBT_PageLevelShape(uint level)
@@ -660,6 +666,23 @@ TEST(PagedHeightResolve, TheGlslResolveIsTheMirrorBitForBit)
                 ++compared;
             }
     EXPECT_EQ(compared, 9u * 65u * 49u);
+}
+
+TEST(PagedHeightResolve, AWalkThatFindsNoResidentPageUpToTheTopCountsOneUnresolvedSample)
+{
+    PagedField field(64);
+    PageResolveGlsl::s_Unresolved = 0;
+    EXPECT_EQ(PageResolveGlsl::Sample(field, 0.5f, 0.5f, 0.0f), 0.0f);
+    EXPECT_EQ(PageResolveGlsl::s_Unresolved, 1u) << "no page is resident";
+
+    const std::vector<PageAddress> all = field.AllPages();
+    for (int frame = 0; frame < 40; ++frame)
+        field.Step(all);
+    PageResolveGlsl::s_Unresolved = 0;
+    for (float32 level : {0.0f, 0.5f, 1.0f, 40.0f})
+        for (uint32 i = 0; i <= 16; ++i)
+            PageResolveGlsl::Sample(field, float32(i) / 16.0f, 1.0f - float32(i) / 16.0f, level);
+    EXPECT_EQ(PageResolveGlsl::s_Unresolved, 0u) << "every page is resident";
 }
 
 namespace

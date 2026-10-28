@@ -8,7 +8,7 @@
 #include <gtest/gtest.h>
 
 #include "InspectorRegistry.h"
-#include "Terrain/TerrainGrassRegionRows.h"
+#include "Terrain/TerrainGrass/TerrainGrassRegionRows.h"
 #include "Terrain/TerrainInteractiveModifierEdit.h"
 
 #include "Components/Terrain/Terrain.h"

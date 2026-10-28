@@ -19,7 +19,7 @@
 #include "Mathematics/Interpolation.h"
 #include "Rendering/Materials/MaterialDocument.h"
 
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Inspectors/MaterialInspector.h"
@@ -32,7 +32,7 @@
 #include "UI/Controls/Foldout.h"
 #include "UI/Controls/Label.h"
 #include "UndoRedo/UndoRedoService.h"
-#include "Inspectors/RenderLayersRow.h"
+#include "Inspectors/RenderLayers/RenderLayersRow.h"
 #include "Inspectors/ShadowCastingRow.h"
 
 #include "Editor/Entities/EditorInspectorPseudoComponents.h"

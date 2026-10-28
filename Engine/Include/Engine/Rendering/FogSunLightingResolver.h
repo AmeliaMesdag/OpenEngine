@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 namespace GameEngine::Engine::Renderer {
 

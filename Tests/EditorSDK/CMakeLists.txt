@@ -45,12 +45,12 @@ add_executable(EditorSdkRegistryTests
     SettingsTextFieldRowTests.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/SettingsTextFieldRow.cpp
     RenderLayersSettingsPageTests.cpp
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/RenderLayersSettingsPage.cpp
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/RenderLayerField.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/Render/RenderLayersSettingsPage.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/RenderLayers/RenderLayerField.cpp
     # The Script Packages page: its registration, and its list reading and writing a scripts csproj.
     ScriptPackagesSettingsPageTests.cpp
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/ScriptPackagesSettingsPage.cpp
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/ScriptPackagesList.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/ScriptPackages/ScriptPackagesSettingsPage.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/ScriptPackages/ScriptPackagesList.cpp
     # Game UI scale policy: the editor-side write and the Game UI Scaling page,
     # which SettingsPageOpenIsNotAnEditTests also seeds. Same arrangement.
     UIScaleProjectSettingsWriterTests.cpp
@@ -62,12 +62,12 @@ add_executable(EditorSdkRegistryTests
     GraphSettingsPageTests.cpp
     GraphSettingsPageTestStubs.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/GraphSettingsPage.cpp
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Graph/GraphNodeRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Graph/GraphNode/GraphNodeRegistry.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Graph/AnimationGraphNodeTypes.cpp
     # RegistersGameLogicAndMaterialTypeColors asserts the MATERIAL type colors,
     # so these have to be really registered rather than stubbed — and
     # GraphNodeRegistry.cpp does not link without this TU either.
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/ShaderGraph/MaterialGraphNodeTypes.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/ShaderGraph/MaterialGraph/MaterialGraphNodeTypes.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Graph/NodeColorSettings.cpp
     # Opening a settings page must not write the project file. Complements
     # LodSettingsPageTests, which asserts the descriptor's shape without
@@ -78,7 +78,7 @@ add_executable(EditorSdkRegistryTests
     # file owns (it composes Rendering::LodProjectSettings from Engine), same
     # arrangement.
     RenderProjectSettingsTests.cpp
-    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/RenderProjectSettings.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/Render/RenderProjectSettings.cpp
     # The guard that keeps an unchanged HDR re-apply (project open, settings
     # page edit) from recreating the swapchain. A pure predicate over
     # HdrOutputState, so it compiles in here without a device.

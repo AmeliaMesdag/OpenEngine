@@ -3,7 +3,7 @@
 #include "AssetCore/GUID.h"
 #include "Components/Rendering/ParticleRenderer.h"
 #include "GPUFogParticles/GPUFogParticlesMaterial.h"
-#include "Rendering/Materials/MaterialBlendComposite.h"
+#include "Rendering/Materials/MaterialBlend/MaterialBlendComposite.h"
 
 #include <algorithm>
 #include <array>

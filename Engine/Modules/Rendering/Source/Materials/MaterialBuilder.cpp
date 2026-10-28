@@ -1,7 +1,7 @@
 #include "Rendering/Materials/MaterialBuilder.h"
 #include <algorithm>
 #include <stdexcept>
-#include "Rendering/Materials/ShaderMetaValidation.h"
+#include "Rendering/Materials/Shader/ShaderMetaValidation.h"
 
 
 namespace GameEngine { namespace Rendering {

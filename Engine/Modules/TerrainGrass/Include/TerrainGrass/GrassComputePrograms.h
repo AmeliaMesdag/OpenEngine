@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 
 #include <filesystem>
 

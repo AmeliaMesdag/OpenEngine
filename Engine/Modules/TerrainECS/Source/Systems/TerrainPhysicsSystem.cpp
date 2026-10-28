@@ -1,5 +1,6 @@
 #include "TerrainECS/Systems/TerrainPhysicsSystem.h"
 #include "TerrainECS/TerrainService.h"
+#include "TerrainECS/TerrainRenderPublication.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "TerrainECS/PlanetFaceCollider.h"
 #include "TerrainECS/Components/TerrainPageCollider.h"
@@ -510,46 +511,52 @@ void TerrainPhysicsSystem::UpdatePlanetColliders(ECS::World& world)
                                                        orphanTags[i].PhysicsHandleGeneration);
     }
 
-    // 2. Find the active planet: the first enabled spherical terrain. Only one planet gets
-    //    face colliders (CBT likewise renders terrain 0); a second is warned once.
+    // 2. Find the active planet: the enabled spherical terrain with the smallest DrawOrderKey.
+    //    Only one planet gets face colliders, as only one terrain draws; a second is warned once.
     ECS::EntityHandle activePlanet{};
-    PlanetColliderParams params{};
-    float32 centerX = 0.0f, centerY = 0.0f, centerZ = 0.0f;
-    bool foundPlanet = false;
+    uint64 activePlanetKey = 0;
+    uint32 planetCount = 0;
     world.Query<ECS::Read<Components::Terrain>, ECS::Read<Components::WorldTransform>>()
-        .Each([&](ECS::EntityHandle entity, const Components::Terrain& terrain,
-                  const Components::WorldTransform& wt)
+        .Each([&](ECS::EntityHandle entity, const Components::Terrain& terrain, const Components::WorldTransform&)
         {
             if (terrain.Domain != Components::TerrainDomain::Spherical)
                 return;
-            if (foundPlanet)
+            ++planetCount;
+            const uint64 key = DrawOrderKey(terrain, entity);
+            if (!activePlanet.IsValid() || key < activePlanetKey)
             {
-                if (!m_WarnedDuplicatePlanetClaim)
-                {
-                    Logger::Log::Warning(
-                        "TerrainPhysicsSystem: multiple spherical terrains — provisioning "
-                        "planet colliders for the first only");
-                    m_WarnedDuplicatePlanetClaim = true;
-                }
-                return;
+                activePlanet = entity;
+                activePlanetKey = key;
             }
-            foundPlanet = true;
-            activePlanet = entity;
-            params.Radius = terrain.PlanetRadius;
-            // Base relief is the companion TerrainPlanetRelief component (default when
-            // absent) — the same values CBTUpdateSystem feeds the renderer. Reading them is
-            // not sufficient on its own: these params only reach a face patch when something
-            // re-cooks it, so an edit to them must cross the shape baseline below.
-            Components::TerrainPlanetRelief relief{};
-            if (const auto* r = world.GetComponent<Components::TerrainPlanetRelief>(entity))
-                relief = *r;
-            params.ReliefAmplitude = relief.Amplitude;
-            params.ReliefFrequency = relief.Frequency;
-            params.ReliefOctaves = relief.Octaves;
-            centerX = wt.matrix[12];
-            centerY = wt.matrix[13];
-            centerZ = wt.matrix[14];
         });
+    if (planetCount > 1 && !m_WarnedDuplicatePlanetClaim)
+    {
+        Logger::Log::Warning("TerrainPhysicsSystem: multiple spherical terrains — provisioning "
+                             "planet colliders for the one added first only");
+        m_WarnedDuplicatePlanetClaim = true;
+    }
+    const bool foundPlanet = activePlanet.IsValid();
+    PlanetColliderParams params{};
+    float32 centerX = 0.0f, centerY = 0.0f, centerZ = 0.0f;
+    if (foundPlanet)
+    {
+        const auto& terrain = *world.GetComponent<Components::Terrain>(activePlanet);
+        const auto& wt = *world.GetComponent<Components::WorldTransform>(activePlanet);
+        params.Radius = terrain.PlanetRadius;
+        // Base relief is the companion TerrainPlanetRelief component (default when
+        // absent) — the same values CBTUpdateSystem feeds the renderer. Reading them is
+        // not sufficient on its own: these params only reach a face patch when something
+        // re-cooks it, so an edit to them must cross the shape baseline below.
+        Components::TerrainPlanetRelief relief{};
+        if (const auto* r = world.GetComponent<Components::TerrainPlanetRelief>(activePlanet))
+            relief = *r;
+        params.ReliefAmplitude = relief.Amplitude;
+        params.ReliefFrequency = relief.Frequency;
+        params.ReliefOctaves = relief.Octaves;
+        centerX = wt.matrix[12];
+        centerY = wt.matrix[13];
+        centerZ = wt.matrix[14];
+    }
 
     if (!foundPlanet)
         return; // no planet — nothing to provision or refresh (orphans already torn down)

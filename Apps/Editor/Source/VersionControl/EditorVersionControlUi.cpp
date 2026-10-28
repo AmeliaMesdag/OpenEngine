@@ -16,7 +16,7 @@
 #include "UI/Layout/Docking.h"
 #include "VCSIntegration/IVCSIntegration.h"
 #include "VersionControl/EditorVersionControlService.h"
-#include "VersionControl/SceneDiff.h"
+#include "VersionControl/SceneDiff/SceneDiff.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>

@@ -1,6 +1,6 @@
 #include "Terrain/TerrainRoleMaterials.h"
 
-#include "Inspectors/InspectorComponentSection.h"
+#include "Inspectors/InspectorComponent/InspectorComponentSection.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Terrain/TerrainMaterialLibraryInspector.h"
 #include "Terrain/TerrainLayers.h"

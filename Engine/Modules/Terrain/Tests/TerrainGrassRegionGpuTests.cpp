@@ -15,9 +15,9 @@
 #include "TerrainFieldUploader.h"
 #include "TerrainECS/TerrainColorMap.h"
 #include "Rendering/Core/CommandList.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/Materials/MaterialBuilder.h"
-#include "Source/Vulkan/VulkanDevice.h"
+#include "Source/Vulkan/VulkanDevice/VulkanDevice.h"
 
 #include <algorithm>
 #include <array>

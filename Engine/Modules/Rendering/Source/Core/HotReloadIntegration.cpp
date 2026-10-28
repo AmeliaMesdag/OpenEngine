@@ -1,7 +1,7 @@
 #include "Rendering/Core/HotReloadIntegration.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineCache.h"
-#include "../Materials/ShaderSourceCache.h"
+#include "Rendering/Core/Pipeline/PipelineCache.h"
+#include "../Materials/Shader/ShaderSourceCache.h"
 
 namespace GameEngine { namespace Rendering {
 

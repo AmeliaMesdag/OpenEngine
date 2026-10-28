@@ -20,7 +20,7 @@
 #include <span>
 
 #include "Mathematics/MatrixOps.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 #include "ECS/World.h"
 #include "ECS/ECSTemplates.h"

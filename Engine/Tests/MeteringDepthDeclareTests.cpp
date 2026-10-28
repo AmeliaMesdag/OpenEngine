@@ -17,7 +17,7 @@
 #include "RGPassQuery.h"
 #include "Rendering/Materials/MaterialBuildContext.h"
 #include "StagedTestPaths.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "SharedHeadlessDevice.h"

@@ -4,7 +4,7 @@
 #include "Engine/Rendering/ParallaxReliefDepth.h"
 #include "Rendering/Materials/MaterialAlphaMode.h"
 #include "Rendering/Materials/MaterialKeywordDerivation.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Types/Types.h"
 
 #include <algorithm>

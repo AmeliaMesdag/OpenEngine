@@ -11,13 +11,13 @@
 
 #include "Animation/AnimationPose.h"
 #include "Animation/EvaluationContext.h"
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 #include "Animation/Nodes/RetargetNode.h"
 #include "Animation/PoseStack.h"
 #include "Animation/PoseToSkinMatrices.h"
 #include "Animation/RetargetMap.h"
-#include "Animation/SkeletonData.h"
-#include "Animation/SkeletonProfile.h"
+#include "Animation/Skeleton/SkeletonData.h"
+#include "Animation/Skeleton/SkeletonProfile.h"
 
 #include "ECSModules/Rendering/SkeletonStore.h"
 #include "ECSModules/Rendering/ClipStore.h"

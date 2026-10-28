@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AssetCore/Asset.h"
-#include "Rendering/Utils/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
 #include "Types/Types.h"
 
 #include <cstdint>

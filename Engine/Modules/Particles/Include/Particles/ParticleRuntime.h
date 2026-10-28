@@ -4,7 +4,7 @@
 #include "Mathematics/Vector4.h"
 #include "Particles/CompiledParticleStack.h"
 #include "Particles/ParticleChannels.h"
-#include "Particles/ParticleProcessorRegistry.h"
+#include "Particles/ParticleProcessor/ParticleProcessorRegistry.h"
 #include "Particles/ParticleTrailStore.h"
 #include "Particles/Processors/ParticleEventProcessor.h"
 #include "Types/StringId.h"

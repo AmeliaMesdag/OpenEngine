@@ -1,7 +1,7 @@
 #include "Editor/Settings/BuildRenderPipelineSettings.h"
 
 #include "Editor/Settings/BuildSettingsStore.h"
-#include "Editor/Settings/RenderPipelineSettings.h"
+#include "Editor/Settings/Render/RenderPipelineSettings.h"
 #include "Core/Engine.h"
 
 #include <algorithm>

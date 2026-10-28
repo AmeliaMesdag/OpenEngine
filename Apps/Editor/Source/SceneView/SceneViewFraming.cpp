@@ -11,7 +11,7 @@
 #include "Mathematics/VectorOps.h"
 #include "Rendering/Common/Math.h"
 #include "SceneView/SceneViewCameraRig.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include <algorithm>
 #include <cmath>

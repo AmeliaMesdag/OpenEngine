@@ -23,7 +23,7 @@
 // Other composite types (math vectors, nested PODs) opt in by specializing
 // FieldTypeTraits<T> — see FieldTypeTraits below.
 
-#include "ECS/ComponentTypeName.h"
+#include "ECS/Component/ComponentTypeName.h"
 #include "Types/Color.h"
 
 #include <cstddef>

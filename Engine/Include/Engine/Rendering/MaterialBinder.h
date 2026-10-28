@@ -33,10 +33,10 @@
 
 #include "Engine/Rendering/DrawBindings.h"
 #include "Engine/Rendering/PassBindingContext.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Handle.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Types/StringId.h"
 
 #include <array>

@@ -7,7 +7,7 @@
 #include "ECS/Entity.h"
 #include "ECS/World.h"
 #include "ECS/Query.h"
-#include "ECS/ComponentConcepts.h"
+#include "ECS/Component/ComponentConcepts.h"
 #include "ECS/AutoRegistration.h"
 
 // Include the template implementations

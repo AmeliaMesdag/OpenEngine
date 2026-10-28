@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "UndoRedo/SplineNetworkRecordCommand.h"
-#include "UndoRedo/SplineUndoHelpers.h"
+#include "UndoRedo/Spline/SplineNetworkRecordCommand.h"
+#include "UndoRedo/Spline/SplineUndoHelpers.h"
 #include "UndoRedo/UndoRedoService.h"
 
 #include "Components/Name.h"

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Engine/Rendering/IRenderFeature.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/PerViewReadbackRings.h"
 

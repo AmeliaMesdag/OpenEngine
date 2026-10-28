@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ECS/ComponentTypeName.h"
+#include "ECS/Component/ComponentTypeName.h"
 #include "JobSystem/TaskHandle.h"
 #include "JobSystem/TaskTypes.h"
 #include "JobSystem/WorkStealingThreadPool.h"

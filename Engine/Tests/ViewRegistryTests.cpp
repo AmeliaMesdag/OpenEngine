@@ -2,7 +2,7 @@
 
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/Camera.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 using namespace GameEngine;
 using namespace GameEngine::Rendering;

@@ -208,7 +208,9 @@ const uint CBT_OFF_FRUSTUM_KEEP_SATURATED_STRIDE = 2u;    // steps per update wh
 // CBTLayout.h mirrors both.
 const uint CBT_WQ_REST_LIVE_COUNT = 16u;
 const uint CBT_REST_LATCH_DEADBAND_DIVISOR = 1024u;
-const uint CBT_WQ_COUNTER_SLOTS = 17u;
+// The page samples of this update that found no resident page (CBTLayout.h kWQUnresolvedPageSamples).
+const uint CBT_WQ_UNRESOLVED_PAGE_SAMPLES = 17u;
+const uint CBT_WQ_COUNTER_SLOTS = 18u;
 
 // Work-queue payload lanes — 3 ALIASED physical lanes over the 6 logical queues (slot-diet r2;
 // mirror of CBTLayout.h WQ*Offset). The six queues' live spans over the per-frame kernel sequence
@@ -570,6 +572,9 @@ struct CBTFrameSlot
 {
     CBTFrameParams frame;
     uvec4 analyticCellMask[48];
+    // Each cube face's dirty rect in face-local UV (minU, minV, maxU, maxV); empty when z <= x
+    // (mirror CBTLayout.h SphereDirty).
+    vec4 sphereDirty[6];
 };
 
 layout(std140, set = CBT_DESCRIPTOR_SET, binding = 14) uniform CBTFrameParamsBuffer
@@ -734,10 +739,7 @@ float CBT_AtlasCoarseSample(vec2 uv, float coarseDim, uint frameSlot)
 // Layout (mirror CBTLayout.h): [0, 4) CBTPageField's shape, [4] the cache's slot count, [5, 8) the
 // floor level, the tier count and the floor directory's offset (all 0 for a dense table),
 // [8, 8 + 4 * CBT_PAGE_MAX_LEVELS) one CBTPageLevel per level, then one arrival fade per cache slot
-// (float bits), then the table's words (TerrainECS PageTable).
-#define CBT_PAGE_HEADER_WORDS 8u
-#define CBT_PAGE_MAX_LEVELS 32u
-#define CBT_PAGE_FADE_OFFSET (CBT_PAGE_HEADER_WORDS + 4u * CBT_PAGE_MAX_LEVELS)
+// (float bits), then the table's words (TerrainECS PageTable). The word offsets are in cbt_page.glsl.
 #define CBT_PAGE_RING_WORDS_LANE 2
 layout(std430, set = CBT_DESCRIPTOR_SET, binding = 22) CBT_SSBO_QUAL buffer CBTPageTableBuffer
 {
@@ -775,10 +777,8 @@ layout(push_constant) uniform CBTPushConstants
     float dirtyMinV;
     float dirtyMaxU;
     float dirtyMaxV;
-    // Planet-editing v1 (plan §planet-editing): on the sphere the dirty rect above is a
-    // FACE-LOCAL UV rect and dirtyFace selects the cube face; sphereSculptEnabled gates
-    // the additive sculpt sample in VertexEval. Both ignored in planar mode.
-    uint dirtyFace;
+    // The planar dirty rect above; the sphere's face rects are CBTFrameSlot.sphereDirty.
+    // sphereSculptEnabled gates the additive sculpt sample in VertexEval.
     uint sphereSculptEnabled;
     // Quiescence gate for VertexEval (plan §planet-shading perf). 0 = evaluate the whole live
     // pool (the pre-slice behavior; used for the force-eval frame after init / a param change).
@@ -1064,6 +1064,11 @@ uint CBT_PageTableWord(uint index)
 {
     uint base = CBT_PageRingBase();
     return gPageTable.Words[base + CBT_PAGE_FADE_OFFSET + gPageTable.Words[base + 4u] + index];
+}
+
+void CBT_PageUnresolved()
+{
+    atomicAdd(gQueue.WorkQueue[CBT_WQ_UNRESOLVED_PAGE_SAMPLES], 1);
 }
 
 float CBT_PageSlotFade(uint slot)

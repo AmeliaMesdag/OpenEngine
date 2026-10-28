@@ -14,7 +14,7 @@
 #include "Components/Rendering/SkyEnvironment.h"
 #include "Components/Rendering/SkySunPath.h"
 #include "Components/Transform.h"
-#include "Editor/Hierarchy/HierarchyEntityIcon.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h"
 #include "Engine/Rendering/PrimitiveGenerator.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "PhysicsECS/Components/PlaneColliderShape.h"

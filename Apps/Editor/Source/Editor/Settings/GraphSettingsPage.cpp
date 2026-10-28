@@ -3,7 +3,7 @@
 #include "Editor/Settings/EditorSettingsRegistry.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Graph/GraphCanvas.h"
-#include "Graph/GraphNodeRegistry.h"
+#include "Graph/GraphNode/GraphNodeRegistry.h"
 #include "Graph/GraphTypeRegistry.h"
 #include "Graph/NodeColorSettings.h"
 #include "Mathematics/Interpolation.h"

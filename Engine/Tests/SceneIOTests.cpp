@@ -1,4 +1,4 @@
-#include "Particles/ParticleStackAuthoring.h"
+#include "Particles/ParticleStack/ParticleStackAuthoring.h"
 #include <gtest/gtest.h>
 
 #include "EngineLogCapture.h"
@@ -76,9 +76,9 @@
 #include "Components/Terrain/TerrainPlanetRelief.h"
 #include "Components/Transform.h"
 #include "Components/Video/VideoTextureComponent.h"
-#include "ECS/ComponentFactory.h"
-#include "ECS/ComponentFieldRegistry.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentFactory.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "ECS/UnresolvedComponentStore.h"
@@ -6744,7 +6744,11 @@ TEST(SceneIO, TerrainGrassPresetRoundTripsThroughTheScene)
         "\n"
         "[entity id=\"lawn\"]\n"
         "TerrainGrass.enabled = true\n"
-        "TerrainGrass.preset = 2\n";
+        "TerrainGrass.preset = 2\n"
+        "\n"
+        "[entity id=\"stylized\"]\n"
+        "TerrainGrass.enabled = true\n"
+        "TerrainGrass.preset = stylized\n";
     ASSERT_TRUE(WriteFile(scenePath, src));
 
     ECS::World w;
@@ -6762,6 +6766,7 @@ TEST(SceneIO, TerrainGrassPresetRoundTripsThroughTheScene)
     ASSERT_TRUE(ReadFile(resavedPath, saved));
     EXPECT_NE(saved.find("TerrainGrass.preset = Lawn"), std::string::npos);
     EXPECT_NE(saved.find("TerrainGrass.preset = Steppe"), std::string::npos);
+    EXPECT_NE(saved.find("TerrainGrass.preset = Stylized"), std::string::npos);
 
     ECS::World reloaded;
     ASSERT_TRUE(Scene::LoadSceneFromFile(reloaded, resavedPath, Scene::LoadOptions{Scene::LoadMode::Replace}))
@@ -6772,6 +6777,9 @@ TEST(SceneIO, TerrainGrassPresetRoundTripsThroughTheScene)
     ASSERT_NE(steppeAgain, nullptr);
     EXPECT_EQ(lawnAgain->Preset, Components::TerrainGrassPreset::Lawn);
     EXPECT_EQ(steppeAgain->Preset, Components::TerrainGrassPreset::Steppe);
+    const auto* stylizedAgain = reloaded.GetComponent<Components::TerrainGrass>(FindByTag(reloaded, "stylized"));
+    ASSERT_NE(stylizedAgain, nullptr);
+    EXPECT_EQ(stylizedAgain->Preset, Components::TerrainGrassPreset::Stylized);
     EXPECT_EQ(lawnAgain->TipColor, picked.TipColor);
     EXPECT_FLOAT_EQ(lawnAgain->BladesPerSquareMeter, picked.BladesPerSquareMeter);
     EXPECT_FLOAT_EQ(lawnAgain->BladeHeight, picked.BladeHeight);

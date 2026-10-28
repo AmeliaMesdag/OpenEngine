@@ -3,7 +3,7 @@
 #include "Core/Engine.h"
 #include "Editor/Entities/ComponentEnabledToggle.h"
 #include "Editor/Settings/SceneViewSettings.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "UI/Controls/SceneViewToolbar.h"
 #include "UI/EditorIcons.h"
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Docking/FloatingFrameHost.h"
-#include "EditorApplication.h" // EditorApplication::EditorWindowContext
+#include "EditorApplication/EditorApplication.h" // EditorApplication::EditorWindowContext
 
 #include <functional>
 #include <memory>

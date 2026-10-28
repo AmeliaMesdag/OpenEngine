@@ -9,7 +9,7 @@
 
 #include "Mathematics/Matrix4x4.h"
 #include "Mathematics/Vector3.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "SceneViewEvents.h"
 #include "Types/Color.h"
 

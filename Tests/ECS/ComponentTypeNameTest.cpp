@@ -2,7 +2,7 @@
 // Static assertions enforce the current compiler's spelling; literals exercise
 // every supported signature format regardless of the compiler running the test.
 
-#include "ECS/ComponentTypeName.h"
+#include "ECS/Component/ComponentTypeName.h"
 
 #include "ECS/Components.h"
 

@@ -1,5 +1,5 @@
 #include "UI/Controls/SceneViewToolbar.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include "Editor/Settings/SceneViewSettings.h"
 #include "UI/Controls/Button.h"

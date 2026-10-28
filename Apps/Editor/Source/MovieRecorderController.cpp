@@ -3,7 +3,7 @@
 #include "Core/ApplicationPaths.h"
 #include "Core/Engine.h"
 #include "Editor/Settings/EditorSettingsRegistry.h"
-#include "Editor/Settings/RenderPipelineSettings.h"
+#include "Editor/Settings/Render/RenderPipelineSettings.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Engine/Build/GameConfig.h"
 #include "Engine/GameUI/UIScaleProjectSettings.h"

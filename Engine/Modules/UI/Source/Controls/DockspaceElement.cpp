@@ -429,6 +429,16 @@ bool DockspaceElement::RequestTabReorder(const std::string& leafPath)
     return true;
 }
 
+void DockspaceElement::RequestTabClose(const std::string& panelId)
+{
+    if (m_OnTabCloseRequested)
+    {
+        m_OnTabCloseRequested(panelId);
+        return;
+    }
+    (void)RequestTabRemoval(panelId);
+}
+
 bool DockspaceElement::RequestTabRemoval(const std::string& panelId)
 {
     if (!m_Model)

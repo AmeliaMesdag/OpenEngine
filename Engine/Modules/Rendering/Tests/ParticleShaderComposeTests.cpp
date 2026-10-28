@@ -316,7 +316,7 @@ TEST(ParticleShaderCompose, NoDerivativeReadFollowsADiscardInAFoggedVariant)
 
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/CommandList.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include <array>
 
 TEST(ParticleShaderCompose, SixWayResponseReadsBackEverySignedAxis)

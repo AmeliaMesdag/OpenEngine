@@ -6,8 +6,8 @@
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/BarrierMapping.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineTypes.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Core/ApplicationPaths.h"
 #include "Logger/Logger.h"
 
@@ -1713,6 +1713,14 @@ std::vector<TerrainInstanceInfo> TerrainRenderFeature::GetActiveTerrains() const
 {
     std::lock_guard<std::mutex> lock(m_Mutex);
     return m_ActiveTerrains;
+}
+
+std::optional<TerrainInstanceInfo> TerrainRenderFeature::GetDrawnTerrain() const
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    if (m_ActiveTerrains.empty())
+        return std::nullopt;
+    return m_ActiveTerrains.front();
 }
 
 TerrainRenderFeature::ActiveHeightSource TerrainRenderFeature::GetActiveHeightSource() const

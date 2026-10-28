@@ -11,10 +11,10 @@
 #include "Panels/CameraCustomAspectModal.h"
 
 #include "Inspectors/ExposureCompensationCurveRow.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
-#include "Inspectors/RenderLayersRow.h"
+#include "Inspectors/RenderLayers/RenderLayersRow.h"
 
 #include "UI/UIManager.h"
 #include "UI/ExposureMeterText.h"

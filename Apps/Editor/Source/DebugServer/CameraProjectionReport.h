@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Components/Rendering/Camera.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 #include <nlohmann/json.hpp>
 

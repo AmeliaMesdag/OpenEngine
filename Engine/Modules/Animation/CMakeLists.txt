@@ -10,8 +10,8 @@ set(ANIMATION_SOURCES
     Source/AnimationEvent.cpp
     Source/AnimationEventCollectorStore.cpp
     Source/AnimationController.cpp
-    Source/AnimationGraphSerializer.cpp
-    Source/AnimationGraphStore.cpp
+    Source/AnimationGraph/AnimationGraphSerializer.cpp
+    Source/AnimationGraph/AnimationGraphStore.cpp
     Source/AnimationLibrary.cpp
     Source/AnimationMontage.cpp
     Source/AnimationPlayer.cpp
@@ -19,12 +19,12 @@ set(ANIMATION_SOURCES
     Source/AnimationTimeline.cpp
     Source/BoneMask.cpp
     Source/HumanBone.cpp
-    Source/HumanoidImport.cpp
-    Source/HumanoidNameMatcher.cpp
-    Source/HumanoidRig.cpp
-    Source/HumanoidRigEdit.cpp
-    Source/KHRHumanoidImporter.cpp
-    Source/KHRHumanoidShared.cpp
+    Source/Humanoid/HumanoidImport.cpp
+    Source/Humanoid/HumanoidNameMatcher.cpp
+    Source/Humanoid/HumanoidRig.cpp
+    Source/Humanoid/HumanoidRigEdit.cpp
+    Source/KHRHumanoid/KHRHumanoidImporter.cpp
+    Source/KHRHumanoid/KHRHumanoidShared.cpp
     Source/MontageInstance.cpp
     Source/OpStackNode.cpp
     Source/OpStackRegistration.cpp
@@ -34,9 +34,9 @@ set(ANIMATION_SOURCES
     Source/RetargetMap.cpp
     Source/RootMotion.cpp
     Source/RootMotionExtractor.cpp
-    Source/SkeletonData.cpp
-    Source/SkeletonModifierStack.cpp
-    Source/SkeletonProfile.cpp
+    Source/Skeleton/SkeletonData.cpp
+    Source/Skeleton/SkeletonModifierStack.cpp
+    Source/Skeleton/SkeletonProfile.cpp
     Source/SpriteFrames.cpp
     Source/TweenService.cpp
     Source/VRM1Importer.cpp

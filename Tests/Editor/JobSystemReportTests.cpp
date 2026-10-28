@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include "DebugServer/JobSystemReport.h"
+#include "DebugServer/JobSystem/JobSystemReport.h"
 #include "JobSystem/JobSystemStatistics.h"
 
 namespace

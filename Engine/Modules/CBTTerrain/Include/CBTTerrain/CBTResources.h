@@ -24,6 +24,7 @@ namespace GameEngine::CBTTerrain
 {
 
 class CBTKernelSet;
+struct SphereEditRegions;
 
 class CBTResources
 {
@@ -96,7 +97,7 @@ class CBTResources
     // Classify (screen-space error) and VertexEval (displacement). Host-visible,
     // ring-buffered over kCBTFrameParamsRing frames. Write one slot per frame.
     Rendering::BufferHandle GetFrameParamsBuffer() const { return m_FrameParams; }
-    void UploadFrameParams(uint32_t frameCounter, const CBTFrameParams& params);
+    void UploadFrameParams(uint32_t frameCounter, const CBTFrameParams& params, const SphereEditRegions& sphereDirty);
 
     // C4 terrain height source (binding 15, a CBTTextureRingFor ring). Rebinds ONE
     // ring element — this frame's, per CBTFrameRingSlot — to the terrain's heightmap (or
@@ -188,6 +189,7 @@ class CBTResources
     // this frame's ring slot, clamped to the slot. Empty words write an empty field.
     void UploadPageTable(uint32_t frameCounter, std::span<const uint32_t> words);
     uint32_t PageTableSlotWords() const { return m_PageTableSlotWords; }
+    Rendering::BufferHandle GetPageTableBuffer() const { return m_PageTable; }
     Rendering::TextureHandle GetDefaultAtlasHeightTexture() const { return m_DefaultAtlasHeight; }
     Rendering::TextureHandle GetDefaultAtlasCoarseTexture() const { return m_DefaultAtlasCoarse; }
     Rendering::BufferHandle GetAtlasRowsBuffer() const { return m_AtlasRows; }

@@ -5,9 +5,9 @@
 
 #include <gtest/gtest.h>
 
-#include "DebugServer/FramePhaseReport.h"
-#include "Diagnostics/FramePhaseHistory.h"
-#include "Diagnostics/FramePhaseRecorder.h"
+#include "DebugServer/FramePhase/FramePhaseReport.h"
+#include "Diagnostics/FramePhase/FramePhaseHistory.h"
+#include "Diagnostics/FramePhase/FramePhaseRecorder.h"
 
 #include <algorithm>
 #include <initializer_list>

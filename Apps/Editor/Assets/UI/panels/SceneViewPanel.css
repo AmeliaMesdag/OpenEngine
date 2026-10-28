@@ -377,7 +377,7 @@ button.scene-tool-btn.icon-active:active,
 .rotate-tool-icon    { background-image: url("editor:Icons/GizmoRotate.svg"); background-size: 16px 16px; background-repeat: no-repeat; background-position: center; }
 .scale-tool-icon     { background-image: url("editor:Icons/Giszmo_scale.svg"); background-size: 16px 16px; background-repeat: no-repeat; background-position: center; }
 .ruler-tool-icon     { background-image: url("editor:Icons/Ruler.svg"); background-size: 16px 16px; background-repeat: no-repeat; background-position: center; }
-/* The spline tool's registered button (SceneView/SplineToolStripEntry.cpp) keeps its own
+/* The spline tool's registered button (SceneView/SplineTool/SplineToolStripEntry.cpp) keeps its own
    active color. Every Button carries .button, so the shared active rule's .button variant
    (0,3,0) is the one to outrank. */
 .button.scene-tool-btn.spline-tool-btn.icon-active {

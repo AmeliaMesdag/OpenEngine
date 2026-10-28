@@ -20,14 +20,12 @@ struct EntityHandle;
 namespace GameEngine::CBTTerrainECS
 {
 
-// The active terrain's entity — the first enabled, live terrain in chunk order (liveness =
-// single OR tiled handle set), or an invalid handle when none is live. THE liveness resolver
-// FindActiveTerrain / ResolveActivePlanetRelief share. The CBT update system keys the service-
-// global sculpt layer's reset on this so a deleted/recreated planet re-derives fresh geometry.
+// The active terrain's entity: the drawn terrain (TerrainECS::FindDrawnTerrain), or an invalid
+// handle when no terrain is live. FindActiveTerrain and ResolveActivePlanetRelief share it. The
+// CBT update system keys the sculpt layer's reset on it, so a recreated planet gets fresh geometry.
 ECS::EntityHandle FindActiveTerrainEntity(ECS::World& world);
 
-// Copies the single active terrain — the first enabled, live terrain in chunk
-// order (liveness = single OR tiled handle set) — into `out` and returns true.
+// Copies the active terrain (FindActiveTerrainEntity) into `out` and returns true.
 // Returns false (leaving `out` untouched) when none is live. This is THE terrain
 // resolver: the renderer's tuning read and the editor's brush domain check both
 // use it, so they never disagree about which terrain is active. Documented

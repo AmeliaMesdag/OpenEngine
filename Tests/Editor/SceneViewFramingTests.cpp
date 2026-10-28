@@ -5,7 +5,7 @@
 
 #include "SceneView/SceneViewFraming.h"
 #include "SceneView/SceneViewCameraRig.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include "Components/Hierarchy.h"
 #include "Components/Rendering/LocalBounds.h"

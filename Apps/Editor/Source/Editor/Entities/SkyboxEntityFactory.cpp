@@ -1,8 +1,8 @@
 #include "Editor/Entities/SkyboxEntityFactory.h"
 
 #include "Assets/AssetManager.h"
-#include "Assets/PolyhavenDownloadManager.h"
-#include "Assets/PolyhavenService.h"
+#include "Assets/Polyhaven/PolyhavenDownloadManager.h"
+#include "Assets/Polyhaven/PolyhavenService.h"
 #include "Components/Name.h"
 #include "Components/Rendering/Skybox.h"
 #include "Components/Transform.h"

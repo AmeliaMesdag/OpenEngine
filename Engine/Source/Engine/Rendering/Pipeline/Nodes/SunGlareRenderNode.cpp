@@ -9,7 +9,7 @@
 #include "Mathematics/Interpolation.h"
 #include "Mathematics/Vector3.h"
 #include "Mathematics/Vector4.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/Sky/SkyRenderer.h"

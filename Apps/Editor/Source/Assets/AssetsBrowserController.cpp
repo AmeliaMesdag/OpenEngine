@@ -3,15 +3,15 @@
 #include "Assets/AssetDeletePathGuard.h"
 #include "Assets/AssetPathKey.h"
 #include "Assets/AssetsDataProviders.h"
-#include "Assets/PolyhavenDownloadManager.h"
-#include "Assets/PolyhavenService.h"
+#include "Assets/Polyhaven/PolyhavenDownloadManager.h"
+#include "Assets/Polyhaven/PolyhavenService.h"
 #include "UI/Controls/GridView.h"
 #include "UI/Controls/ListView.h"
 #include "UI/Controls/Label.h"
 #include "UI/Controls/TreeView.h"
 #include "UI/UIElement.h"
 #include "UI/UIManager.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/StyleProperties.h"
 #include "UI/Layout/ElementOverrideHelpers.h"
 
@@ -44,7 +44,7 @@
 #include "Platform/ContextMenu.h"
 
 #include "Thumbnails/IThumbnailProvider.h"
-#include "Thumbnails/ModelThumbnailHandler.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
 #include "Thumbnails/ThumbnailService.h"
 
 #include "Types/StringUtils.h"

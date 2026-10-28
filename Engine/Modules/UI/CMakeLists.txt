@@ -4,11 +4,11 @@ project(UI LANGUAGES CXX)
 # Headers and sources
 file(GLOB_RECURSE UI_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/Include/UI/*.h)
 set(UI_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/DefaultStylesheet.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_Update.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_Input.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_Assets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_Update.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_Input.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_Assets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIElement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ElementIdIndex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ModuleOwnedHandlers.cpp
@@ -25,32 +25,32 @@ set(UI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/TransitionEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UITransform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ResolvedStyle.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_StyleResolve.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_StyleAnalysis.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_HoverAndEvents.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_AttachEvents.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_StyleResolve.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_StyleAnalysis.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_HoverAndEvents.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_AttachEvents.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UiDispatcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UiContext.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UiPostTarget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UiPostHandle.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UiCoalescedPost.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManagerRef.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManagerRef.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ModifierKeyState.cpp
 
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/UILayoutAsset.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/UIStyleAsset.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Assets/CssImports.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BackgroundImageCache.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BackgroundImageGeometry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BackgroundImageUpload.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BackgroundImage/BackgroundImageCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BackgroundImage/BackgroundImageGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BackgroundImage/BackgroundImageUpload.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/SvgBackgroundRaster.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/XMLParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSValueParsers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSVarResolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/CSSStylesheetParser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/MarkdownParser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/MarkdownInlineParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/Markdown/MarkdownParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parsers/Markdown/MarkdownInlineParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Layout/YogaLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Label.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/BaseField.cpp
@@ -100,22 +100,22 @@ set(UI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DismissablePopup.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/FocusQueries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/ItemResizeGesture.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DragDropManager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DragDropOverlay.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DragDropGhostRendererRegistry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DragDrop/DragDropManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DragDrop/DragDropOverlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/DragDrop/DragDropGhostRendererRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Interaction/TooltipOverlay.cpp
 
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UICompatDrawRuns.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UITextureRegistry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_RenderPrep.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_RenderRG.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_PrimitiveGen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_RenderPrep.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_RenderRG.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_PrimitiveGen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/NineSliceLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/TextSegmentation.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_Layout.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_CascadeProbe.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_Fonts.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager_Debug.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_Layout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_CascadeProbe.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_Fonts.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_Debug.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/SlotAllocator.cpp
 )
 
@@ -345,10 +345,9 @@ if(BUILD_TESTING)
     # directory through ge_stage_test_asset. Without them the resolver falls
     # through to a system face — Segoe UI on Windows — and every test that lays
     # out text would measure whatever font the host happens to have instead of the
-    # one its expected numbers were derived from. RobotoMono rides along because
-    # UIFontLoadingTests needs a SECOND, visibly different face to tell "the
-    # default atlas" from "an arbitrary loaded one"; unstaged, that test resolved
-    # nothing and skipped.
+    # one its expected numbers were derived from. Stage every shipped weight and
+    # style so bold and italic requests cannot silently measure the regular face.
+    # RobotoMono also provides a distinct face for font substitution tests.
     #
     # Engine ONLY — UI / AssetCore / AssetRuntime / GameEngineRendering are
     # OBJECT modules already spliced into Engine.dll; linking them here as
@@ -360,7 +359,7 @@ if(BUILD_TESTING)
     # imports the same Engine.dll, so linking it adds an import, not a second
     # copy of any engine module.
     #
-    # Include roots: UI/Source for UIManager_Internal.h (surgical-op tests inspect
+    # Include roots: UI/Source for UIManager/UIManager_Internal.h (surgical-op tests inspect
     # NodeRec scratch vectors), Engine/Source for GameUI/SessionEvent.h (the
     # session-gated event registration, deliberately not public C++ API), and
     # Rendering/Tests for ScopedEnvVar, the RAII guard the device-loss pins use.
@@ -407,12 +406,14 @@ if(BUILD_TESTING)
             UNITY_BUILD OFF)
         ge_set_output_tests(${target_name})
         ge_stage_runtime_dependencies(${target_name})
-        ge_stage_test_asset(${target_name}
-            "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/Fonts/Roboto-Regular.ttf"
-            "Assets/Fonts/Roboto-Regular.ttf")
-        ge_stage_test_asset(${target_name}
-            "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/Fonts/RobotoMono-Regular.ttf"
-            "Assets/Fonts/RobotoMono-Regular.ttf")
+        foreach(face IN ITEMS
+                Roboto-Regular Roboto-Bold Roboto-Italic Roboto-BoldItalic
+                Roboto-Medium Roboto-MediumItalic
+                RobotoMono-Regular RobotoMono-Bold RobotoMono-Italic RobotoMono-BoldItalic)
+            ge_stage_test_asset(${target_name}
+                "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/Fonts/${face}.ttf"
+                "Assets/Fonts/${face}.ttf")
+        endforeach()
         if(MSVC)
             target_compile_options(${target_name} PRIVATE /wd6326 /wd6011)
         endif()
@@ -598,6 +599,7 @@ if(BUILD_TESTING)
     # list, grid, tree and table views, popups, docking and focus hand-off.
     ge_add_ui_test(UIControlTests
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/DockingTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/DockTabCloseTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/DockPanelDefaultTabIconTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/DockingHitTestTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ButtonTests.cpp

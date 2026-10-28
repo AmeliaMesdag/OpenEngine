@@ -2,7 +2,7 @@
 #include "ECS/ChunkCallAdapter.h"
 
 #include "ECS/ChangeFilter.h"
-#include "ECS/ComponentConcepts.h"
+#include "ECS/Component/ComponentConcepts.h"
 #include "ECS/ECS.h"
 #include "ECS/Entity.h"
 #include "ECS/QueryAccessProbe.h"

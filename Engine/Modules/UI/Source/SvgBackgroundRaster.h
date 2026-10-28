@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Rendering/Core/Device.h"
-#include "BackgroundImageGeometry.h"
+#include "BackgroundImage/BackgroundImageGeometry.h"
 
 #include <cstddef>
 #include <cstdint>

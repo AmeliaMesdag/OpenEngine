@@ -38,7 +38,7 @@
 #include "JobSystem/JobCounter.h"
 #include "JobSystem/TaskTypes.h"
 #include "Rendering/Materials/MaterialBuildService.h" // MaterialBuildContext
-#include "Rendering/Materials/ShaderVariantKey.h" // MaterialKeyword
+#include "Rendering/Materials/Shader/ShaderVariantKey.h" // MaterialKeyword
 #include "Types/StringId.h"
 
 #include <atomic>

@@ -131,12 +131,15 @@ void InspectorSection::SetHeaderBadge(const std::string& text, const std::string
     m_HeaderBadge->RemoveClass("inspector-section-header-badge-error");
     m_HeaderBadge->RemoveClass("inspector-section-header-badge-success");
     m_HeaderBadge->RemoveClass("inspector-section-header-badge-neutral");
+    m_HeaderBadge->RemoveClass("inspector-section-header-badge-override");
     if (kind == BadgeKind::Error)
         m_HeaderBadge->AddClass("inspector-section-header-badge-error");
     else if (kind == BadgeKind::Success)
         m_HeaderBadge->AddClass("inspector-section-header-badge-success");
     else if (kind == BadgeKind::Neutral)
         m_HeaderBadge->AddClass("inspector-section-header-badge-neutral");
+    else if (kind == BadgeKind::Override)
+        m_HeaderBadge->AddClass("inspector-section-header-badge-override");
     if (text.empty())
     {
         m_HeaderBadge->AddClass("hidden");

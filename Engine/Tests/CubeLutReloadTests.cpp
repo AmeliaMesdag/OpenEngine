@@ -13,7 +13,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/TextureService.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Utils/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
 #include "TestDeviceHelper.h"
 #include "TestTempDir.h"
 

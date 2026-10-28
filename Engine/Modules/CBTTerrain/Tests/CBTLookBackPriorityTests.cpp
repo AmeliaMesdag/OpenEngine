@@ -308,16 +308,11 @@ TEST_F(CBTLookBackPriority, LookBackRefinesLargestFacetsFirstAtSaturatedPose)
 
         // Land the plateau + converge while looking AT it.
         const CBTFrameParams look = makeParams(surf, priorityOn, keepLarge);
-        c.DirtyFace = regions.Rects[0].Face;
-        c.DirtyMinU = regions.Rects[0].MinU;
-        c.DirtyMinV = regions.Rects[0].MinV;
-        c.DirtyMaxU = regions.Rects[0].MaxU;
-        c.DirtyMaxV = regions.Rects[0].MaxV;
+        c.SphereDirty = regions;
         c.GateVertexEval = 0u; // force a full eval the frame the sculpt lands
         RunFrame(inst, layer, /*uploadSculpt=*/true, c, look, 0u);
         c.GateVertexEval = 1u;
-        c.DirtyFace = 0u;
-        c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+        c.SphereDirty = {};
         constexpr uint32_t kConvergeFrames = 70u;
         for (uint32_t f = 1; f <= kConvergeFrames; ++f)
             RunFrame(inst, layer, /*uploadSculpt=*/true, c, look, f);

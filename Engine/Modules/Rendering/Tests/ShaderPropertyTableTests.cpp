@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "Rendering/Materials/MaterialParamsLayout.h"
-#include "Rendering/Materials/ShaderPropertyTable.h"
+#include "Rendering/Materials/Shader/ShaderPropertyTable.h"
 
 #include <string>
 #include <vector>

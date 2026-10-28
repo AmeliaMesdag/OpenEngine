@@ -7,9 +7,9 @@
 #include "EditorContext.h"
 #include "Graph/GraphModel.h"
 #include "Graph/GraphTypeRegistry.h"
-#include "Graph/GraphNodeRegistry.h"
+#include "Graph/GraphNode/GraphNodeRegistry.h"
 #include "Graph/GraphKindChrome.h"
-#include "Graph/GraphNodeIcons.h"
+#include "Graph/GraphNode/GraphNodeIcons.h"
 #include "Graph/GraphSubgraphStore.h"
 #include "Graph/GraphNest.h"
 #include "Graph/GraphTransitionStore.h"
@@ -57,6 +57,7 @@
 #include <iomanip>
 #include <memory>
 #include <limits>
+#include <span>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -65,6 +66,23 @@
 namespace GameEngine {
 
 namespace {
+
+// True when a node parameter that holds an asset GUID names a GUID in `assets`.
+bool NodeReferencesAnyAsset(const Graph::Node& node, std::string_view kindId, std::span<const GUID> assets)
+{
+    const NodeTypeMeta* meta = GraphNodeRegistry::Get().FindNodeMeta(kindId, node.TypeId);
+    if (!meta)
+        return false;
+    for (const NodeParamSpec& spec : meta->Parameters)
+    {
+        if (spec.AssetReference == AssetType::Unknown)
+            continue;
+        const GUID referenced(node.Parameters.GetString(spec.Id, ""));
+        if (!referenced.IsNull() && std::find(assets.begin(), assets.end(), referenced) != assets.end())
+            return true;
+    }
+    return false;
+}
 
 constexpr float kNodePaletteCollapsedHeight = 48.f;
 constexpr float kNodePaletteWidth = 220.f;
@@ -1039,6 +1057,9 @@ GraphPanel::~GraphPanel()
     if (g_InspectorGraphPanel == this)
         g_InspectorGraphPanel = nullptr;
     g_LiveGraphPanels.erase(this);
+    // FilesChanged and the queued rebind both run on this thread, so no call is in flight here.
+    m_AssetFilesRebind.Cancel();
+    m_AssetFilesSubscription.Reset();
     if (m_PaletteSearchField && m_PaletteSearchField->GetParent())
         EditorSearchBars::UnregisterFocusTarget(m_PaletteSearchField->GetParent());
     if (m_VariablesSearchField && m_VariablesSearchField->GetParent())
@@ -1091,7 +1112,49 @@ void GraphPanel::SetContext(const EditorContext* ctx)
         m_Canvas->SetAssetServices(
             m_Context && m_Context->Assets ? &m_Context->Assets->GetRegistry() : nullptr,
             m_Context ? m_Context->Thumbnails : nullptr);
+    SubscribeAssetFiles();
     Notify(GraphPanelEvent::ContextChanged);
+}
+
+void GraphPanel::SubscribeAssetFiles()
+{
+    m_AssetFilesRebind.Cancel();
+    m_AssetFilesSubscription.Reset();
+    if (!m_Context || !m_Context->Assets)
+        return;
+    m_AssetFilesRebind = UI::UiCoalescedPost(GetPostHandle(), [this]() {
+        if (m_Canvas)
+            m_Canvas->RebindVisibleNodes();
+    });
+    // FilesChanged fires on the main thread, which is this panel's UI thread.
+    m_AssetFilesSubscription = m_Context->Assets->FilesChanged.Subscribe(
+        [this](std::span<const GUID> changed) { OnAssetFilesChanged(changed); });
+}
+
+void GraphPanel::OnAssetFilesChanged(std::span<const GUID> changed)
+{
+    const Graph::Model* model = m_Canvas ? m_Canvas->GetModel() : nullptr;
+    if (!model)
+        return;
+    bool anyNode = false;
+    for (const Graph::Node& node : model->Nodes)
+    {
+        if (!NodeReferencesAnyAsset(node, model->KindId, changed))
+            continue;
+        anyNode = true;
+        // The Update refresh pushes the selected node to the Inspector again, so its rows resolve too.
+        if (node.Id == m_Canvas->GetSelectedNodeId())
+            m_InspectorRefreshDeferred = true;
+    }
+    if (anyNode)
+        m_AssetFilesRebind.Request();
+}
+
+void GraphPanel::SetPingAsset(std::function<void(const std::filesystem::path&)> ping)
+{
+    m_PingAsset = std::move(ping);
+    if (m_Canvas)
+        m_Canvas->SetPingAsset(m_PingAsset);
 }
 
 void GraphPanel::Update()
@@ -4153,6 +4216,7 @@ void GraphPanel::SetupUI()
         Notify(GraphPanelEvent::NodeDragEnded);
     });
     m_Canvas = canvas.get();
+    m_Canvas->SetPingAsset(m_PingAsset);
     canvasWrapper->AddChild(std::move(canvas));
     SyncCanvasNodeFactory();
     SyncConnectionStyleButton();

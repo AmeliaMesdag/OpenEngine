@@ -1269,6 +1269,20 @@ add_custom_command(
   COMMENT "Extracting the equal-angle map from cbt_deep_decode.glsl"
   VERBATIM)
 list(APPEND _GE_PAGE_RESOLVE_HEADERS ${_GE_EQUAL_ANGLE_HEADER})
+# The planet fragment's page point and height gradient.
+set(_GE_PLANET_PAGE_GLSL ${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Shaders/CBT/cbt_planet_page.glsl)
+set(_GE_PLANET_PAGE_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/PlanetPageExtracted.h)
+add_custom_command(
+  OUTPUT ${_GE_PLANET_PAGE_HEADER}
+  COMMAND ${CMAKE_COMMAND} -DSRC=${_GE_PLANET_PAGE_GLSL}
+                           -DOUT=${_GE_PLANET_PAGE_HEADER}
+                           "-DBEGIN_MARKER=// GE_SHARED_PLANET_PAGE_BEGIN"
+                           "-DEND_MARKER=// GE_SHARED_PLANET_PAGE_END"
+                           -P ${_GE_EXTRACT_SHADER_BLOCK}
+  DEPENDS ${_GE_PLANET_PAGE_GLSL} ${_GE_EXTRACT_SHADER_BLOCK}
+  COMMENT "Extracting the planet page block from cbt_planet_page.glsl"
+  VERBATIM)
+list(APPEND _GE_PAGE_RESOLVE_HEADERS ${_GE_PLANET_PAGE_HEADER})
 
 # The resolve's device probe: cbt_page.glsl in a compute kernel, so the device parity test runs the
 # shipped resolve with the hardware's bilinear tap.
@@ -1291,6 +1305,8 @@ add_executable(TerrainAtlasTests
   TerrainPageResolveGpuTests.cpp
   # The GLSL equal-angle map against the page store's CPU map.
   TerrainEqualAngleMapTests.cpp
+  # The planet fragment's height gradient from its pages against the provider's central difference.
+  TerrainPlanetPageNormalTests.cpp
   # The height source of a tiled terrain and the main-thread half of its height pages.
   TerrainHeightPagesTests.cpp
   # The CPU height pages and the query the CPU readers sample them through.
@@ -1465,7 +1481,7 @@ set_tests_properties(TerrainZoneTests PROPERTIES
 
 # TerrainModifierGizmoTests: editor terrain-modifier volume gizmo geometry —
 # planar footprint outlines + spherical (planet) projection. The geometry
-# (Apps/Editor/Include/SceneView/TerrainModifierGizmoGeometry.h) is header-only
+# (Apps/Editor/Include/Terrain/TerrainModifier/TerrainModifierGizmoGeometry.h) is header-only
 # and pure, so the test compiles it directly; Engine is linked only to satisfy
 # the CBTTerrain header include path the same way the other terrain tests do.
 add_executable(TerrainModifierGizmoTests

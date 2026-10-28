@@ -13,8 +13,8 @@
 #include <gtest/gtest.h>
 
 #include "Rendering/Core/HotReloadIntegration.h"
-#include "Source/Materials/ShaderIncludeClosure.h"
-#include "Source/Materials/ShaderSourceCache.h"
+#include "Source/Materials/Shader/ShaderIncludeClosure.h"
+#include "Source/Materials/Shader/ShaderSourceCache.h"
 
 #include <algorithm>
 #include <atomic>

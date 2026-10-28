@@ -4,7 +4,7 @@
 #include "ECS/Entity.h" // full World definition
 #include "Editor/DragDropPayloads.h"
 #include "Editor/Entities/EntityDisplayName.h"
-#include "Editor/Hierarchy/HierarchyEntityDecode.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityDecode.h"
 #include "UI/Controls/SearchDialog.h"
 #include "UI/Interaction/Payload.h"
 
@@ -86,7 +86,6 @@ private:
 EntityField::EntityField()
 {
     AddClass("entity-field");
-    BuildNameAndClearButton();
 }
 
 void EntityField::SetWorld(ECS::World* world)
@@ -129,7 +128,23 @@ void EntityField::UpdateDisplay()
     if (!valid)
         ShowEmpty();
     else
-        ShowNamed(Editor::EntityDisplayName(*m_World, m_Value));
+        ShowNamed(Editor::EntityDisplayName(*m_World, m_Value), {});
+}
+
+void EntityField::SetOnReveal(RevealCallback cb)
+{
+    m_OnReveal = std::move(cb);
+    RefreshLinkStyle();
+}
+
+bool EntityField::CanReveal() const
+{
+    return m_OnReveal && m_Value.IsValid() && m_World && m_World->IsValid(m_Value);
+}
+
+void EntityField::Reveal()
+{
+    m_OnReveal(m_Value);
 }
 
 std::unique_ptr<ISearchProvider> EntityField::CreateProvider()

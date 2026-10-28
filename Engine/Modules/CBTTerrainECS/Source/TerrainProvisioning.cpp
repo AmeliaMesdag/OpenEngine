@@ -6,6 +6,7 @@
 
 #include "ECS/ECS.h"
 #include "ECS/ECSTemplates.h"
+#include "TerrainECS/TerrainRenderPublication.h"
 #include "TerrainECS/TerrainSizingPlan.h"
 #include "Terrain/TerrainTypes.h" // TerrainNeedsTiling
 
@@ -134,28 +135,11 @@ uint32 ResolveTerrainMaxDepth(const Components::Terrain& terrain, ImportedHeight
     return std::min(latticeCap, importedCap);
 }
 
-// The one liveness predicate: the first enabled terrain whose single OR tiled handle
-// is set, in chunk order. Both FindActiveTerrain and ResolveActivePlanetRelief resolve
-// off this so the Terrain and its companion relief always come from the same entity.
-// Exported so the CBT update system can key the service-global sculpt layer's reset on the
-// planet's entity identity (a delete/recreate must not inherit the old planet's frozen geometry).
+// The drawn terrain (TerrainECS::FindDrawnTerrain). FindActiveTerrain and ResolveActivePlanetRelief
+// resolve off this, so the Terrain and its relief come from the entity the renderer draws.
 ECS::EntityHandle FindActiveTerrainEntity(ECS::World& world)
 {
-    ECS::EntityHandle found{};
-    world.Query<ECS::Read<Components::Terrain>>().Each(
-        [&](ECS::EntityHandle entity, const Components::Terrain& terrain)
-        {
-            if (found.IsValid())
-                return;
-            const bool singleLive =
-                terrain.TerrainDataHandle != 0 || terrain.TerrainDataGeneration != 0;
-            const bool tiledLive =
-                terrain.TiledTerrainHandle != 0 || terrain.TiledTerrainGeneration != 0;
-            if (!(singleLive || tiledLive))
-                return;
-            found = entity;
-        });
-    return found;
+    return TerrainECS::FindDrawnTerrain(world);
 }
 
 bool FindActiveTerrain(ECS::World& world, Components::Terrain& out)

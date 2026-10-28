@@ -22,11 +22,11 @@
 #include "UI/Controls/IntField.h"
 #include "UI/Controls/TextField.h"
 #include "UI/Controls/Toggle.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/Interaction/DropTarget.h"
 #include "UI/Interaction/Payload.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Materials/ShaderMetaValidation.h"
+#include "Rendering/Materials/Shader/ShaderMetaValidation.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 #include "UI/Controls/Label.h"

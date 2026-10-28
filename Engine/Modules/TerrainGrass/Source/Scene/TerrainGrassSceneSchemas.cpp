@@ -144,8 +144,8 @@ static bool ParseRenderMode(std::string_view value, Components::TerrainGrassRend
     return false;
 }
 
-// Parses a TerrainGrass preset: the enum NAME (Custom / Meadow / Lawn / Steppe) or a bare integer
-// (0 to 3). Case-insensitive and quote-tolerant.
+// Parses a TerrainGrass preset: the enum NAME (Custom / Meadow / Lawn / Steppe / Stylized) or a bare
+// integer (0 to 4). Case-insensitive and quote-tolerant.
 static bool ParsePreset(std::string_view value, Components::TerrainGrassPreset& out, std::string* outError)
 {
     const std::string v = NormalizeEnumToken(value);
@@ -154,7 +154,8 @@ static bool ParsePreset(std::string_view value, Components::TerrainGrassPreset& 
     if (v == "meadow" || v == "1") { out = Components::TerrainGrassPreset::Meadow; return true; }
     if (v == "lawn" || v == "2") { out = Components::TerrainGrassPreset::Lawn; return true; }
     if (v == "steppe" || v == "3") { out = Components::TerrainGrassPreset::Steppe; return true; }
-    if (outError) *outError = "preset must be custom/meadow/lawn/steppe or 0 to 3";
+    if (v == "stylized" || v == "4") { out = Components::TerrainGrassPreset::Stylized; return true; }
+    if (outError) *outError = "preset must be custom/meadow/lawn/steppe/stylized or 0 to 4";
     return false;
 }
 
@@ -165,6 +166,7 @@ static const char* PresetName(Components::TerrainGrassPreset preset)
     case Components::TerrainGrassPreset::Meadow: return "Meadow";
     case Components::TerrainGrassPreset::Lawn: return "Lawn";
     case Components::TerrainGrassPreset::Steppe: return "Steppe";
+    case Components::TerrainGrassPreset::Stylized: return "Stylized";
     case Components::TerrainGrassPreset::Custom: break;
     }
     return "Custom";

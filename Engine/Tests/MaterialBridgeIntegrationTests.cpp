@@ -30,8 +30,8 @@
 #include "SceneDrawWarm.h"
 #include "Engine/Rendering/SceneProbeRecaptureSchedule.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineCache.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineCache.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
 #include "Logger/CallbackSink.h"
 #include "Logger/Logger.h"
@@ -39,7 +39,7 @@
 #include "Engine/Rendering/ShaderGraphMaterial.h"
 #include "Rendering/Materials/MaterialBuildService.h"
 #include "Rendering/Materials/MaterialDocument.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 using namespace GameEngine;

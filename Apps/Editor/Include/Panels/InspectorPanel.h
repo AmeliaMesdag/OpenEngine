@@ -15,7 +15,7 @@
 #include "InspectorRegistry.h"
 #include "Inspectors/InspectorEntityActivity.h"
 #include "Types/Types.h"
-#include "VersionControl/SceneDiff.h"
+#include "VersionControl/SceneDiff/SceneDiff.h"
 
 #include "UI/Controls/DockPanel.h"
 #include "Audio/AudioHandles.h"

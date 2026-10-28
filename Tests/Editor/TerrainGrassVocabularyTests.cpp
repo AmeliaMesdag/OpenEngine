@@ -19,7 +19,7 @@
 #include <string>
 #include <utility>
 
-#include "Terrain/TerrainGrassVocabulary.h"
+#include "Terrain/TerrainGrass/TerrainGrassVocabulary.h"
 
 using namespace GameEngine;
 namespace GrassVocab = GameEngine::Editor::TerrainGrassVocabulary;
@@ -153,6 +153,16 @@ TEST(TerrainGrassVocabulary, AShortenedRangeNamesWhatIsDeliveredAndWhatWasAsked)
     EXPECT_TRUE(GrassHas(note, "369 m")) << note;
     EXPECT_TRUE(GrassHas(note, "500 m")) << note;
     EXPECT_TRUE(GrassHas(GrassLower(note), "budget")) << note;
+}
+
+// The note names Density Falloff: it buys range at the same near density, so it is the fix a
+// field that must reach the hills needs.
+TEST(TerrainGrassVocabulary, AShortenedRangeNamesDensityFalloffAsAFix)
+{
+    const std::string note = GrassVocab::RangeFitNote(500.0f, 150.0f, /*textureCards=*/false);
+    ASSERT_FALSE(note.empty());
+    EXPECT_TRUE(GrassHas(note, "Density Falloff")) << note;
+    EXPECT_TRUE(GrassHas(note, "Grass reaches about 150 m of the 500 m range")) << note;
 }
 
 // The note names the density the fit was actually run on. The placement compute fits a texture-card

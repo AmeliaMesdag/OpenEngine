@@ -60,6 +60,25 @@ class FeatureFolderRuleTests(unittest.TestCase):
                                                              "P/SplineRecipe.h"])
         self.assertEqual([site.piece for site in sites], ["the folder P/SplineFence/"] * 3 + ["the folder P/Spline/"])
 
+    def test_a_prefixed_sub_feature_inside_its_parent_folder_counts_zero(self):
+        self.assertEqual(loose_paths(["Sky/SkySun/SkySunRow.h", "Sky/SkySun/SkySunPathCaptions.h", "Sky/SkySun/SkySunPathRows.h",
+                                      "Sky/SkySun/SkySunPathSwitch.h"]), [])
+
+    def test_a_prefixed_sub_feature_in_a_flat_folder_counts(self):
+        self.assertEqual(loose_paths(["Sky/SkyDayCurveRow.h", "Sky/SkySunPathCaptions.h", "Sky/SkySunPathRows.h", "Sky/SkySunPathSwitch.h"]),
+                         ["Sky/SkySunPathCaptions.h", "Sky/SkySunPathRows.h", "Sky/SkySunPathSwitch.h"])
+
+    def test_a_feature_that_does_not_start_with_its_folder_name_counts(self):
+        self.assertEqual(loose_paths(["Humanoid/HumanoidRig.h", "Humanoid/KHRHumanoidImporter.h", "Humanoid/KHRHumanoidShared.cpp",
+                                      "Humanoid/KHRHumanoidShared.h"]),
+                         ["Humanoid/KHRHumanoidImporter.h", "Humanoid/KHRHumanoidShared.cpp", "Humanoid/KHRHumanoidShared.h"])
+
+    def test_a_feature_inside_a_plural_or_scope_root_folder_counts(self):
+        self.assertEqual(len(loose_paths(["Assets/AssetBrowserCard.h", "Assets/AssetBrowserGrid.h", "Assets/AssetBrowserRow.h",
+                                          "Assets/TextureImporter.h"])), 3)
+        self.assertEqual(len(loose_paths(["M/Source/Other.cpp", "M/Source/SourceControlA.cpp", "M/Source/SourceControlB.cpp",
+                                          "M/Source/SourceControlC.cpp"])), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

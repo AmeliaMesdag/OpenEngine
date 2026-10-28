@@ -1,6 +1,6 @@
 #include "Panels/DownloadInProgressModal.h"
 
-#include "Assets/PolyhavenDownloadManager.h"
+#include "Assets/Polyhaven/PolyhavenDownloadManager.h"
 #include "Input/KeyCodes.h"
 #include "UI/ControlLayoutLoader.h"
 #include "UI/Controls/Button.h"

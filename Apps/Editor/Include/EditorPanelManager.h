@@ -1,6 +1,6 @@
 #pragma once
 
-#include "EditorApplication.h" // EditorApplication::EditorWindowContext
+#include "EditorApplication/EditorApplication.h" // EditorApplication::EditorWindowContext
 
 #include <cstdint>
 #include <functional>
@@ -62,6 +62,10 @@ class EditorPanelManager
     void ShowOrActivatePanel(EditorWindowContext* ctx, const std::string& panelId,
                              const std::string& preferredLeafPanelId = {});
 
+    /// Brings an open panel to the front: raises its floating frame or activates its dock tab.
+    /// Never opens a closed panel. False when the panel is not open in `ctx`.
+    bool ActivateOpenPanel(EditorWindowContext* ctx, const std::string& panelId);
+
     /// Opens a panel in its preferred workspace section. This placement is
     /// independent of the authored startup layout.
     void ShowOrActivatePanelAtDefaultPlacement(EditorWindowContext* ctx,
@@ -110,7 +114,12 @@ class EditorPanelManager
                       Rendering::RenderGraph::RGFrame* rg2Frame);
 
     // -- Panel closing --
+    /// Closes the tab that holds the focus in ctx, else the active tab of its first leaf, through
+    /// ClosePanelTab. A floating window with no tab closes.
     void CloseActiveTabOrWindow(EditorWindowContext* ctx);
+    /// Closes one panel's tab in ctx: the menu's Close, the middle click and Ctrl+W all come here.
+    /// It clears a focus held inside the panel. A floating window closes with its last tab.
+    void ClosePanelTab(EditorWindowContext* ctx, const std::string& panelId);
 
     // -- Dock tree helpers --
     static DockNode* FindFirstLeaf(DockNode* n);
@@ -123,6 +132,7 @@ class EditorPanelManager
   private:
     friend class EditorApplication;
     void ClearUpdateCallbacks();
+    bool IsMainWindow(const EditorWindowContext* ctx) const;
 
     /// Rebuild the "dock" DockspaceElement inside ctx after a model change.
     static void RebuildDockspace(EditorWindowContext* ctx);

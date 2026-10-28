@@ -5,14 +5,14 @@
 // request path does not emit a log line per call.
 
 #include "Prefabs/PrefabThumbnailHandler.h"
-#include "Thumbnails/CubeLutStripBands.h"
-#include "Thumbnails/CubeLutStripRequest.h"
-#include "Thumbnails/CubeLutThumbnailHandler.h"
+#include "Inspectors/CubeLut/CubeLutStripBands.h"
+#include "Inspectors/CubeLut/CubeLutStripRequest.h"
+#include "Inspectors/CubeLut/CubeLutThumbnailHandler.h"
 #include "Thumbnails/FolderBakeReport.h"
 #include "Thumbnails/TextureThumbnailHandler.h"
 #include "Thumbnails/ThumbnailService.h"
-#include "Thumbnails/ModelThumbnailHandler.h"
-#include "Thumbnails/ModelThumbnailCachePolicy.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailCachePolicy.h"
 
 #include "Image/Encode.h"
 #include "JobSystem/WorkStealingThreadPool.h"

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "Rendering/Utils/CubeLutColorDomain.h"
-#include "Rendering/Utils/CubeLutFileParser.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutFileParser.h"
 
 #include <filesystem>
 #include <fstream>

@@ -1,7 +1,7 @@
 #include "EditorToolbar/EditorToolbar.h"
 #include "Core/Engine.h"
 #include "Editor/Registries/EditorMenuRegistry.h"
-#include "EditorApplication.h"
+#include "EditorApplication/EditorApplication.h"
 #include "EditorPanelManager.h"
 #include "Platform/Toolbar.h"
 #include "Platform/Window.h"

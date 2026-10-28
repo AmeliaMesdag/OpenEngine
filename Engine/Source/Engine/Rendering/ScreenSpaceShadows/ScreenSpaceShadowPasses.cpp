@@ -8,7 +8,7 @@
 #include "Engine/Rendering/Pipeline/Nodes/PipelineNodeUtils.h"
 #include "Engine/Rendering/ScreenSpaceShadows/ScreenSpaceShadowDispatch.h"
 #include "Logger/Logger.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/NamedDescriptorWriter.h"
 #include "Rendering/Core/PassPhase.h"

@@ -1,4 +1,4 @@
-<!-- CreatePrefabDialog (Apps/Editor/Source/Prefabs/CreatePrefabDialog.h): the name, or the file names for
+<!-- CreatePrefabDialog (Apps/Editor/Source/Prefabs/CreatePrefab/CreatePrefabDialog.h): the name, or the file names for
      several roots, and the folder of the new prefabs, their entity count, the references that leave them,
      and a message line. The ids are the contract with CreatePrefabDialog.cpp. -->
 <UIElement class="modal-backdrop">

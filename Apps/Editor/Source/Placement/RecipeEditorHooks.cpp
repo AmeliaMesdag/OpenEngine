@@ -2,8 +2,8 @@
 
 #include "Editor/Registries/EditorServiceRegistry.h"
 #include "Placement/FenceSpanOverrideRemap.h"
-#include "UndoRedo/SplineGroundCleanupCommand.h"
-#include "UndoRedo/SplinePointEdits.h"
+#include "UndoRedo/Spline/SplineGroundCleanupCommand.h"
+#include "UndoRedo/Spline/SplinePointEdits.h"
 #include "UndoRedo/UndoRedoService.h"
 
 #include "ECS/Systems.h"

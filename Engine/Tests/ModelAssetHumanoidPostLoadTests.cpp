@@ -17,10 +17,10 @@
 #include "Assets/ModelAsset.h"
 #include "AssetCore/GUID.h"
 
-#include "Animation/HumanoidImport.h"
-#include "Animation/HumanoidNameMatcher.h"
-#include "Animation/HumanoidRig.h"
-#include "Animation/SkeletonProfile.h"
+#include "Animation/Humanoid/HumanoidImport.h"
+#include "Animation/Humanoid/HumanoidNameMatcher.h"
+#include "Animation/Humanoid/HumanoidRig.h"
+#include "Animation/Skeleton/SkeletonProfile.h"
 #include "ECSModules/Rendering/SkeletonStore.h"
 #include "Logger/Logger.h"
 

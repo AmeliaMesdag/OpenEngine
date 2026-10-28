@@ -1,7 +1,7 @@
 #include "Engine/Rendering/Camera.h"
 #include "Engine/Rendering/CameraAspectRatio.h"
 #include "Engine/Rendering/RenderServices.h"
-#include "Rendering/CameraPixelGrid.h"
+#include "Rendering/Camera/CameraPixelGrid.h"
 #include <gtest/gtest.h>
 #include <array>
 #include <cmath>

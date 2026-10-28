@@ -10,15 +10,15 @@
 
 #include "Rendering/Materials/MaterialKeywordDerivation.h"
 #include "Rendering/Materials/MaterialShaderIncludeRoots.h"
-#include "Rendering/Materials/ShaderCapabilityDetector.h"
-#include "Rendering/Materials/ShaderCompileService.h"
-#include "Rendering/Materials/ShaderComposer.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderCapabilityDetector.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderComposer.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Logger/Logger.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 #include "Rendering/ShaderCache/ShaderProgramIndex.h"
-#include "ShaderIncludeClosure.h"
-#include "ShaderSourceCache.h"
+#include "Shader/ShaderIncludeClosure.h"
+#include "Shader/ShaderSourceCache.h"
 
 #include <atomic>
 

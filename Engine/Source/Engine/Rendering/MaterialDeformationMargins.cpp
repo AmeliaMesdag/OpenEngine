@@ -3,7 +3,7 @@
 #include "Engine/Rendering/Material.h"
 #include "Engine/Rendering/MaterialVertexAnimation.h"
 #include "Logger/Logger.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Types/StringId.h"
 
 #include <cmath>

@@ -9,7 +9,7 @@
 #include "Assets/CubeLutColorSettings.h"
 #include "Components/Rendering/PostProcessEffects/CubeLutEffect.h"
 #include "Core/Engine.h"
-#include "Rendering/Utils/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
 #include "UI/Controls/InspectorNotice.h"
 
 #include <cstdio>

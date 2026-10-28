@@ -6,7 +6,7 @@
 #include "ECS/Entity.h"
 #include "MarkupECS/MarkupService.h"
 #include "Mathematics/Interpolation.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "Types/Color.h"
 #include "Types/ColorUtils.h"
 #include "Types/StringUtils.h"

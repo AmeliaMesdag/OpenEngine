@@ -5,7 +5,7 @@
 #include "Engine/Rendering/ShaderGraphMaterial.h"
 #include "Logger/Logger.h"
 #include "Rendering/Materials/MaterialDocument.h"
-#include "Thumbnails/ModelThumbnailHandler.h"
+#include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
 
 #include <fstream>
 #include <algorithm>

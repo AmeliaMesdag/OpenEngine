@@ -5,7 +5,7 @@
 
 #include "Engine/Rendering/Material.h"
 #include "Rendering/Materials/MaterialParamsLayout.h"
-#include "Rendering/Materials/ShaderComposer.h"
+#include "Rendering/Materials/Shader/ShaderComposer.h"
 #include "AssetCore/GUID.h"
 #include "Logger/CallbackSink.h"
 #include "Logger/Logger.h"

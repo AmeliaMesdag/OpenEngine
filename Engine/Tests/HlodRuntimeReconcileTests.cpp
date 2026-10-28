@@ -32,7 +32,7 @@
 #include "ECS/Entity.h"
 #include "ECS/World.h"
 
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 #include <cstring>
 #include <filesystem>

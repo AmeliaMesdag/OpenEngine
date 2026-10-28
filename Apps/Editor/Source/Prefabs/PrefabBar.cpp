@@ -33,8 +33,14 @@ namespace
 constexpr const char* kLayoutAssetPath = "UI/controls/PrefabBar/PrefabBar.uxml";
 constexpr const char* kStyleAssetPath = "UI/controls/PrefabBar/PrefabBar.css";
 // The ids the constructor looks up. A layout that lacks one does not load.
-constexpr std::array<std::string_view, 3> kRequiredIds = {"prefab-bar-title", "prefab-bar-select-asset",
-                                                          "prefab-bar-count"};
+constexpr std::array<std::string_view, 8> kRequiredIds = {
+    "prefab-bar-title",      "prefab-bar-glyph",        "prefab-bar-title-lead", "prefab-bar-prefab",
+    "prefab-bar-title-tail", "prefab-bar-select-asset", "prefab-bar-count",      "prefab-bar-instance-count"};
+// The glyph shows the Hierarchy's instance glyph, or the missing glyph when the prefab file is not in the
+// project; the name takes its missing class then.
+constexpr const char* kPrefabGlyphClass = "hierarchy-entity-prefab";
+constexpr const char* kMissingGlyphClass = "prefab-bar-glyph-missing";
+constexpr const char* kMissingNameClass = "prefab-bar-prefab-missing";
 
 // The asset record of the prefab of the instance root `root`; false when the file is not in the project.
 bool FindPrefabMetadata(ECS::World& world, ECS::EntityHandle root, AssetMetadata& out)
@@ -64,23 +70,34 @@ std::vector<Scene::PrefabOverride> OwnOverridesOf(ECS::World& world, ECS::Entity
     return described ? described->Overrides : std::vector<Scene::PrefabOverride>();
 }
 
+// The first line in three phrases, so the prefab's name takes its own color.
+struct TitleParts
+{
+    std::string Lead;
+    std::string Prefab;
+    std::string Tail;
+    // True when the prefab file is not in the project.
+    bool PrefabMissing = false;
+};
+
 // The first line for `entity`: "Instance of House" on an outermost instance root, "Added to House_01" on
 // an entity the instance added, "Part of Porch in House_01" on any other entity of an instance, empty
 // outside every instance.
-std::string DescribeTitle(ECS::World& world, ECS::EntityHandle entity)
+TitleParts DescribeTitle(ECS::World& world, ECS::EntityHandle entity)
 {
     const ECS::EntityHandle nearest = FindInstanceRoot(world, entity);
     const ECS::EntityHandle outermost = FindOutermostInstanceRoot(world, entity);
     if (!nearest.IsValid())
         return {};
     const std::string prefabName = PrefabNameOf(world, nearest);
-    const std::string shownPrefab = prefabName.empty() ? std::string("a missing prefab") : prefabName;
+    const bool missing = prefabName.empty();
+    const std::string shownPrefab = missing ? std::string("a missing prefab") : prefabName;
     if (entity == outermost)
-        return "Instance of " + shownPrefab;
+        return {"Instance of", shownPrefab, {}, missing};
     const Scene::PrefabInstanceEntity* described = PrefabInstanceDescriptions::Get().FindEntity(world, entity);
     if (described && described->AddedOnInstance)
-        return "Added to " + EntityNameOf(world, outermost);
-    return std::format("Part of {} in {}", shownPrefab, EntityNameOf(world, outermost));
+        return {"Added to", {}, EntityNameOf(world, outermost), false};
+    return {"Part of", shownPrefab, "in " + EntityNameOf(world, outermost), missing};
 }
 
 // The number of overrides of the outermost instance that holds `entity`: each changed field, added or
@@ -96,17 +113,17 @@ std::size_t CountInstanceOverrides(ECS::World& world, ECS::EntityHandle entity)
     return count;
 }
 
-// The count line and its tooltip.
-struct CountLine
+// The count lines: the entity's line, and the instance's line under it.
+struct CountLines
 {
-    std::string Text;
-    std::string Tooltip;
+    std::string Entity;
+    std::string Instance;
 };
 
-// The count line. On the outermost root it counts the whole instance; on any other entity it counts the
-// entity's own overrides, and its tooltip names the instance's count when only other entities have some.
-// Empty on an entity the instance added: that entity is one of the root's overrides and has none of its own.
-CountLine DescribeCount(ECS::World& world, ECS::EntityHandle entity)
+// On the outermost root the first line counts the whole instance. On any other entity it counts the
+// entity's own overrides, and the second line counts the instance's when only other entities have some.
+// Both are empty on an entity the instance added: it is one of the root's overrides and has none of its own.
+CountLines DescribeCounts(ECS::World& world, ECS::EntityHandle entity)
 {
     const ECS::EntityHandle outermost = FindOutermostInstanceRoot(world, entity);
     const std::size_t total = CountInstanceOverrides(world, entity);
@@ -122,6 +139,16 @@ CountLine DescribeCount(ECS::World& world, ECS::EntityHandle entity)
         return {"No overrides on " + EntityNameOf(world, entity),
                 std::format("{} on {}", FormatCount(total, "override", "overrides"), EntityNameOf(world, outermost))};
     return {"No overrides", {}};
+}
+
+// Shows `text` on `label`; an empty `text` hides the label, so it takes no space.
+void SetLine(Label& label, const std::string& text)
+{
+    label.SetText(text);
+    if (text.empty())
+        label.AddClass("hidden");
+    else
+        label.RemoveClass("hidden");
 }
 
 // The components the overrides `overrides` remove from the entity; the Inspector shows a header for each.
@@ -148,8 +175,12 @@ PrefabBar::PrefabBar(ECS::World& world, ECS::EntityHandle entity, EditorChangeNo
     std::unique_ptr<UIElement> layout = ControlLayoutLoader::Load(kLayoutAssetPath, kRequiredIds);
     if (!layout)
         return;
-    m_Title = dynamic_cast<Label*>(layout->FindById("prefab-bar-title"_sid));
+    m_Glyph = layout->FindById("prefab-bar-glyph"_sid);
+    m_TitleLead = dynamic_cast<Label*>(layout->FindById("prefab-bar-title-lead"_sid));
+    m_TitlePrefab = dynamic_cast<Label*>(layout->FindById("prefab-bar-prefab"_sid));
+    m_TitleTail = dynamic_cast<Label*>(layout->FindById("prefab-bar-title-tail"_sid));
     m_Count = dynamic_cast<Label*>(layout->FindById("prefab-bar-count"_sid));
+    m_InstanceCount = dynamic_cast<Label*>(layout->FindById("prefab-bar-instance-count"_sid));
     m_SelectAssetButton = dynamic_cast<Button*>(layout->FindById("prefab-bar-select-asset"_sid));
     AddChild(std::move(layout));
     if (m_SelectAssetButton)
@@ -175,17 +206,29 @@ PrefabBar::~PrefabBar()
 
 void PrefabBar::Refresh()
 {
-    if (!m_Title || !m_Count || !m_World.IsValid(m_Entity))
+    if (!m_Glyph || !m_TitleLead || !m_TitlePrefab || !m_TitleTail || !m_Count || !m_InstanceCount ||
+        !m_World.IsValid(m_Entity))
         return;
     m_Root = FindOutermostInstanceRoot(m_World, m_Entity);
-    m_Title->SetText(DescribeTitle(m_World, m_Entity));
-    const CountLine count = DescribeCount(m_World, m_Entity);
-    m_Count->SetText(count.Text);
-    m_Count->SetTooltip(count.Tooltip);
-    if (count.Text.empty())
-        m_Count->AddClass("hidden");
+    const TitleParts title = DescribeTitle(m_World, m_Entity);
+    SetLine(*m_TitleLead, title.Lead);
+    SetLine(*m_TitlePrefab, title.Prefab);
+    SetLine(*m_TitleTail, title.Tail);
+    if (title.PrefabMissing)
+    {
+        m_Glyph->RemoveClass(kPrefabGlyphClass);
+        m_Glyph->AddClass(kMissingGlyphClass);
+        m_TitlePrefab->AddClass(kMissingNameClass);
+    }
     else
-        m_Count->RemoveClass("hidden");
+    {
+        m_Glyph->RemoveClass(kMissingGlyphClass);
+        m_Glyph->AddClass(kPrefabGlyphClass);
+        m_TitlePrefab->RemoveClass(kMissingNameClass);
+    }
+    const CountLines counts = DescribeCounts(m_World, m_Entity);
+    SetLine(*m_Count, counts.Entity);
+    SetLine(*m_InstanceCount, counts.Instance);
     if (!m_SelectAssetButton)
         return;
     const ECS::EntityHandle nearest = FindInstanceRoot(m_World, m_Entity);

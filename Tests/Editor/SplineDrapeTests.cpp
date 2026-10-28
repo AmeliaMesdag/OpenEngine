@@ -19,7 +19,7 @@
 #include "Mathematics/Vector3.h"
 #include "Placement/CenterlineSampling.h"
 #include "SplineRecipes/SplineSurfaceConform.h"
-#include "SceneView/SplineDrapePolylines.h"
+#include "SceneView/SplineTool/SplineDrapePolylines.h"
 #include "Scripting/ScriptsConfig.h"
 #include "ECSModules/Rendering/Systems/RenderExtractionSystem.h"
 #include "Scene/SceneTlas.h"

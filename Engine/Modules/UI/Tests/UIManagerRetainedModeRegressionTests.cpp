@@ -454,7 +454,7 @@ TEST(UIRegressions, CompositeSetValueKeepsTheBaseDirtyContract)
 // slot range. With both axes pinned to px, the first SetText takes the
 // content-only pipeline (MarkContentDirty), whose drain can only rewrite
 // slots an element already owns — the producer must escalate a rangeless
-// element to a full regen (cause 0x800), or the text never paints for as
+// element to a full regen (RangelessContent), or the text never paints for as
 // long as nothing else dirties the tree.
 //
 // The root's background-color is load-bearing: it keeps the DrawOrder
@@ -500,7 +500,7 @@ TEST(UIRegressions, FirstTextOnAnEmptyFixedSizeLabelPaints)
             causeOr |= profile.GenAllPrimitivesRegenCause;
     }
 
-    EXPECT_TRUE(causeOr & 0x800u)
+    EXPECT_TRUE(causeOr & static_cast<uint32_t>(UIManager::PrimitiveRegenCause::RangelessContent))
         << "the paint must come from the rangeless-content escalation, not a fallback regen";
     EXPECT_FALSE(fx.Primitives("status", UI::PrimitiveMode::Slug).empty())
         << "first text on an initially-empty label was never emitted";

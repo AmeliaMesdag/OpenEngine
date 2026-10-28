@@ -7,7 +7,7 @@
 #include "Engine/Rendering/ScreenSpaceShadows/ScreenSpaceShadowPasses.h"
 #include "Engine/Rendering/ShadowMapRenderFeature.h"
 #include "Mathematics/MatrixOps.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "TestDeviceHelper.h"

@@ -419,6 +419,16 @@ struct CBTSurfaceParamsData
     uint SphereAnalyticCount;
     uint SphereAnalyticDabCount;
     CBTSphereAnalyticFlatten SphereAnalytic[CBT_MAX_SPHERE_ANALYTIC];
+    // The planet's height pages (mirror the CBTSurfaceParams tail, cbt_planet_page.glsl): per cube face
+    // the anchor (x, y its texels, z, w the bits of its fractions), the eye planet-local and relative to
+    // the render origin, and PlanetPaged 1 when the fragment shades from the pages.
+    ivec4 PageAnchors[6];
+    vec4 PageEye;
+    vec4 PageEyeRelative;
+    uint PlanetPaged;
+    uint PlanetPagePad0;
+    uint PlanetPagePad1;
+    uint PlanetPagePad2;
 };
 
 // CBT debug visualization modes (mirror TerrainDebugView in Terrain.h — keep in lockstep).
@@ -475,6 +485,79 @@ layout(std430, set = 2, binding = 7) readonly buffer CBTAtlasRowsSurfBuffer
     CBTTileAtlasSlot Rows[];
 } gAtlasRows;
 // CBT_ATLAS_MAX_TILES comes from cbt_atlas.glsl (included above) — single-sourced with the compute path.
+
+#if !defined(GE_COMPAT_PROFILE)
+// The planet's height pages (cbt_page.glsl, cbt_planet_page.glsl), the compute's bindings 22 and 23 here
+// on set 2: gPageTable is offset-bound to this frame's ring slot, gPageCache is this frame's cache texture
+// (CBTRenderFeature). Read only when gCbtSurf.Params.PlanetPaged is 1.
+layout(std430, set = 2, binding = 22) readonly buffer CBTPageTableBuffer
+{
+    uint Words[];
+} gPageTable;
+layout(set = 2, binding = 23) uniform sampler2D gPageCache;
+
+#include "cbt_page.glsl"
+#include "cbt_planet_page.glsl"
+
+uint CBT_PageTableWord(uint index)
+{
+    return gPageTable.Words[CBT_PAGE_FADE_OFFSET + gPageTable.Words[4u] + index];
+}
+
+float CBT_PageSlotFade(uint slot)
+{
+    return uintBitsToFloat(gPageTable.Words[CBT_PAGE_FADE_OFFSET + slot]);
+}
+
+// The update's VertexEval counts the walks that find no page; the fragment reads the same table.
+void CBT_PageUnresolved()
+{
+}
+
+CBTPageLevel CBT_PageLevelShape(uint level)
+{
+    uint at = CBT_PAGE_HEADER_WORDS + 4u * level;
+    CBTPageLevel shape;
+    shape.FirstEntry = gPageTable.Words[at];
+    shape.PagesX = gPageTable.Words[at + 1u];
+    shape.PagesZ = gPageTable.Words[at + 2u];
+    shape.Pad = 0u;
+    return shape;
+}
+
+float CBT_PageCacheBilinear(float texelX, float texelZ)
+{
+    return textureLod(gPageCache, CBT_PageCacheUV(texelX, texelZ, vec2(textureSize(gPageCache, 0))), 0.0).r;
+}
+
+CBTPageField CBT_SurfPageField()
+{
+    CBTPageField field;
+    field.Level0SamplesX = gPageTable.Words[0];
+    field.Level0SamplesZ = gPageTable.Words[1];
+    field.LevelCount = gPageTable.Words[2];
+    field.SlotsPerRow = gPageTable.Words[3];
+    field.FloorLevel = gPageTable.Words[5];
+    field.TierCount = gPageTable.Words[6];
+    field.DirectoryOffset = gPageTable.Words[7];
+    field.Pad = 0u;
+    return field;
+}
+
+// The planet's paged height and gradient at a fragment whose pixel spans `pixelArc` radians: the level
+// of one level-0 texel of arc per pixel, so the central difference steps one pixel's footprint.
+CBTPlanetPageSurface CBT_SurfPlanetPages(SurfaceInput sIn, float pixelArc, CBTSurfaceParamsData sp)
+{
+    CBTPageField field = CBT_SurfPageField();
+    float texelArc = 1.5707963 / float(max(field.Level0SamplesX, 2u) - 1u);
+    float lambda = log2(max(pixelArc / texelArc, 1.0));
+    uint face = CBT_PlanetFaceOf(sIn.positionWS);
+    ivec4 anchor = sp.PageAnchors[face];
+    return CBT_PlanetPageSurfaceAt(sIn.positionWS, sIn.positionRelWS - sp.PageEyeRelative.xyz, sp.PageEye.xyz,
+                                   anchor.x, anchor.y, intBitsToFloat(anchor.z), intBitsToFloat(anchor.w),
+                                   lambda, field);
+}
+#endif
 
 // Build the atlas params from the surface params (mirror CBTRenderFeature::BuildFrameParams).
 CBTAtlasParams CBT_SurfAtlasParams(CBTSurfaceParamsData sp)
@@ -748,20 +831,27 @@ bool CBT_SphereAnalyticCoversSurf(CBTSurfaceParamsData sp, vec3 dir)
     return false;
 }
 
-// COMPOSED sculpt sample for the gradient stencil taps: store + the analytic set, the fragment twin
-// of the CPU chokepoint SampleSphereSculptComposed. The analytic term needs the closed-form base
-// relief at the TAP direction (a flatten's offset cancels it, so the finite-difference gradient of
-// the composed field flattens the pad's shading exactly like its geometry) — evaluated here only
-// when a set exists, so a store-only planet pays no extra relief eval per tap.
-float CBT_SampleSculptComposedSurf(CBTSurfaceParamsData sp, CBTSculptGeom g, vec3 d)
+// The base relief at a tap's unit direction `ud`: the closed form, or on the paged arm the fragment's
+// paged relief `base` at `center` carried along its gradient `slope`, so a flatten cancels the gradient
+// the fragment shades with.
+float CBT_SurfTapRelief(CBTSurfaceParamsData sp, vec3 ud, vec3 center, float base, vec3 slope)
+{
+    if (sp.PlanetPaged != 0u)
+        return base + dot(slope, ud - center);
+    return CBT_PlanetRelief(ud, sp.ReliefAmplitude, sp.ReliefFrequency, max(sp.ReliefOctaves, 1u));
+}
+
+// The composed sculpt sample for the gradient stencil taps: the store plus the analytic set, the fragment twin
+// of SampleSphereSculptComposed. The analytic term takes the base relief at the tap direction, so a flatten's
+// offset cancels it and the composed gradient flattens the pad's shading; a store-only planet reads no relief.
+float CBT_SampleSculptComposedSurf(CBTSurfaceParamsData sp, CBTSculptGeom g, vec3 d, vec3 center, float base,
+                                   vec3 slope)
 {
     float s = CBT_SampleSculptDirSurf(d, g);
     if (CBT_SphereAnalyticTotalSurf(sp) != 0u)
     {
         vec3 ud = normalize(d);
-        float reliefAtTap = CBT_PlanetRelief(ud, sp.ReliefAmplitude, sp.ReliefFrequency,
-                                             max(sp.ReliefOctaves, 1u));
-        s += CBT_SphereAnalyticOffsetSurf(sp, ud, reliefAtTap);
+        s += CBT_SphereAnalyticOffsetSurf(sp, ud, CBT_SurfTapRelief(sp, ud, center, base, slope));
     }
     return s;
 }
@@ -1037,14 +1127,9 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
 #endif
     if (isSphere)
     {
-        // Spherical planet (plan §planet-shading): per-pixel ANALYTIC normal. The surface is
-        // dir*(R + h(dir)) with h = multi-octave relief (+ the editable sculpt layer); its
-        // outward normal is normalize(dir - gradTangential(h)/(R+h)). The relief gradient is
-        // closed-form (CBT_PlanetReliefGradient); the sculpt gradient is a central finite
-        // difference of the direction-sampled sculpt height along an orthonormal tangent frame
-        // (seam-free — sampling by direction agrees across cube faces). This kills the facet
-        // look the old screen-space-derivative normal produced, and reveals the relief/sculpt
-        // detail between vertices. Falls back to the pure radial normal where h is smooth.
+        // Spherical planet: the surface is dir * (R + h(dir)), h the relief plus the sculpt, and its
+        // outward normal is normalize(dir - gradTangential(h) / (R + h)). The relief and its gradient come
+        // from the height pages or the closed form; the sculpt adds a central difference by direction.
         CBTSurfaceParamsData sp = gCbtSurf.Params;
         vec3 dir = normalize(sIn.positionWS);
 #if defined(GE_COMPAT_PROFILE)
@@ -1058,10 +1143,27 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
         float pixelArc = length(fwidth(dir));
 #endif
         pixelFootprintWS = pixelArc * sp.Radius; // arc (rad) * radius (m) = surface footprint (m)
-        uint oct = max(sp.ReliefOctaves, 1u);
-        float h = CBT_PlanetRelief(dir, sp.ReliefAmplitude, sp.ReliefFrequency, oct);
-        vec3 g3 = CBT_PlanetReliefGradient(dir, sp.ReliefAmplitude, sp.ReliefFrequency, oct);
-        vec3 gradTangential = g3 - dot(g3, dir) * dir;
+        float h;
+        vec3 gradTangential;
+#if !defined(GE_COMPAT_PROFILE)
+        if (sp.PlanetPaged != 0u)
+        {
+            // The relief from the planet's height pages, as VertexEval draws it (planets 3.6).
+            CBTPlanetPageSurface paged = CBT_SurfPlanetPages(sIn, pixelArc, sp);
+            h = paged.Height;
+            gradTangential = paged.Gradient;
+        }
+        else
+#endif
+        {
+            // The closed-form relief (the narrow arm, and a planet before its pages are drawn).
+            uint oct = max(sp.ReliefOctaves, 1u);
+            h = CBT_PlanetRelief(dir, sp.ReliefAmplitude, sp.ReliefFrequency, oct);
+            vec3 g3 = CBT_PlanetReliefGradient(dir, sp.ReliefAmplitude, sp.ReliefFrequency, oct);
+            gradTangential = g3 - dot(g3, dir) * dir;
+        }
+        const float reliefBase = h;
+        const vec3 reliefSlope = gradTangential;
         if (sp.SphereSculptEnabled != 0u)
         {
             // Sample the sculpt height at the pixel once (needed for the R+h scale + the splat
@@ -1071,9 +1173,8 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
             // so the taps are skipped (the perf gate the old height threshold stood in for).
             CBTSculptGeom sg = CBT_SurfSculptGeom(sp);
             float centerSculpt = CBT_SampleSculptDirSurf(dir, sg);
-            // Analytic sphere modifiers (S2/S3): compose the closed-form set on the closed-form relief h.
-            // VertexEval composes the same set on its base height: h, or the page height on the paged wide arm.
-            // An empty set adds no float op.
+            // Analytic sphere modifiers (S2/S3): compose the closed-form set on the relief h, the pages or
+            // the closed form, as VertexEval composes it on its base height. An empty set adds no float op.
             if (CBT_SphereAnalyticTotalSurf(sp) != 0u)
                 centerSculpt += CBT_SphereAnalyticOffsetSurf(sp, dir, h);
             h += centerSculpt;
@@ -1103,11 +1204,13 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
                 // so a flatten's gradient cancels the relief gradient on the pad interior (flat
                 // shading on the flat pad) and tilts the rim exactly where the geometry does. With
                 // no analytic set the composed tap IS the plain store tap — byte-identical.
-                float g1 = (CBT_SampleSculptComposedSurf(sp, sg, dir + t1 * sculptStep) -
-                            CBT_SampleSculptComposedSurf(sp, sg, dir - t1 * sculptStep)) /
+                vec3 s1 = t1 * sculptStep;
+                vec3 s2 = t2 * sculptStep;
+                float g1 = (CBT_SampleSculptComposedSurf(sp, sg, dir + s1, dir, reliefBase, reliefSlope) -
+                            CBT_SampleSculptComposedSurf(sp, sg, dir - s1, dir, reliefBase, reliefSlope)) /
                            (2.0 * sculptStep);
-                float g2 = (CBT_SampleSculptComposedSurf(sp, sg, dir + t2 * sculptStep) -
-                            CBT_SampleSculptComposedSurf(sp, sg, dir - t2 * sculptStep)) /
+                float g2 = (CBT_SampleSculptComposedSurf(sp, sg, dir + s2, dir, reliefBase, reliefSlope) -
+                            CBT_SampleSculptComposedSurf(sp, sg, dir - s2, dir, reliefBase, reliefSlope)) /
                            (2.0 * sculptStep);
                 gradTangential += g1 * t1 + g2 * t2;
             }

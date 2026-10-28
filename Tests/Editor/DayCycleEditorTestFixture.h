@@ -12,7 +12,7 @@
 #include "Components/Name.h"
 #include "Components/Rendering/SkyEnvironment.h"
 #include "DayCycle/DayCycleEditorServices.h"
-#include "DayCycle/DayCycleProfileInspector.h"
+#include "DayCycle/DayCycleProfile/DayCycleProfileInspector.h"
 #include "DayCycle/DayCycleWorkingCopy.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"

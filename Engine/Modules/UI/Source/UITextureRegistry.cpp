@@ -2,7 +2,7 @@
 
 #include "Logger/Logger.h"
 #include "Rendering/Core/CommandList.h"
-#include "Rendering/Materials/ShaderProfileDefines.h"
+#include "Rendering/Materials/Shader/ShaderProfileDefines.h"
 #include "Rendering/Text/FontAtlas.h"
 
 #include <algorithm>

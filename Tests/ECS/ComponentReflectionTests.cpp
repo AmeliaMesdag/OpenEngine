@@ -9,7 +9,7 @@
 
 #include "ECS/Reflection.h"
 #include "ECS/ReflectionJson.h"
-#include "ECS/ComponentFieldRegistry.h"  // Register / Get / SetFieldFlags
+#include "ECS/Component/ComponentFieldRegistry.h"  // Register / Get / SetFieldFlags
 #include "ECS/ECS.h"            // EntityHandle (complete) for offsetof/sizeof
 #include "ECS/Entity.h"         // World + Entity for the handler-integration test
 #include "ECS/World.h"

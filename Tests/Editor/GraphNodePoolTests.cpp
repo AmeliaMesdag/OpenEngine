@@ -1,21 +1,28 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 
+#include "AssetCore/Asset.h"
+#include "Assets/AssetManager.h"
+#include "Assets/AssetRegistry.h"
+#include "Core/Engine.h"
+#include "Editor/DragDropPayloads.h"
 #include "Editor/EditorPaths.h"
 
 #include "Graph/GraphModel.h"
-#include "Graph/GraphNodeMetrics.h"
-#include "Graph/GraphPortLabels.h"
-#include "ShaderGraph/MaterialGraphNode.h"
-#include "Graph/GraphNode.h"
-#include "Graph/GraphNodePool.h"
+#include "Graph/GraphNode/GraphNodeMetrics.h"
+#include "Graph/GraphPort/GraphPortLabels.h"
+#include "ShaderGraph/MaterialGraph/MaterialGraphNode.h"
+#include "Graph/GraphNode/GraphNode.h"
+#include "Graph/GraphNode/GraphNodePool.h"
 #include "Graph/GraphOverlay.h"
-#include "Graph/GraphPort.h"
+#include "Graph/GraphPort/GraphPort.h"
 #include "Graph/GraphPortedNode.h"
 #include "Types/StringUtils.h"
+#include "UI/AssetField.h"
 #include "UI/Controls/FloatField.h"
 #include "UI/Controls/Label.h"
 #include "UI/Layout/ElementOverrideHelpers.h"
@@ -23,6 +30,8 @@
 #include "UI/StyleProperties.h"
 #include "UI/UIStyle.h"
 #include "UI/UIElement.h"
+#include "UI/Interaction/DropTarget.h"
+#include "UI/Interaction/Payload.h"
 
 #include <string>
 #include <vector>
@@ -277,6 +286,146 @@ TEST(GraphNodePoolTests, FindByModelIdAndBindModelSetsRealPortIds)
     const std::optional<DisplayMode> usedDisplay = slot->InputPortAt(0)->Overrides().Get(Style::Display);
     EXPECT_TRUE(!usedDisplay.has_value() || *usedDisplay != DisplayMode::None);
     EXPECT_TRUE(slot->GetId().empty());
+}
+
+namespace
+{
+// The asset field on an input port's row, or null when the row shows none.
+AssetField* PinAssetField(GraphPort& port)
+{
+    for (const auto& host : port.GetChildren())
+    {
+        if (!host || !host->HasClass("graph-inline-editors"))
+            continue;
+        for (const auto& child : host->GetChildren())
+        {
+            if (auto* field = dynamic_cast<AssetField*>(child.get()))
+                return field;
+        }
+    }
+    return nullptr;
+}
+
+const Label* FieldName(AssetField& field)
+{
+    for (const auto& child : field.GetChildren())
+    {
+        if (child && child->HasClass("asset-field-name"))
+            return dynamic_cast<const Label*>(child.get());
+    }
+    return nullptr;
+}
+
+AssetRegistry& StartedRegistry()
+{
+    EngineCore& engine = EngineCore::GetInstance();
+    if (!engine.IsInitialized())
+    {
+        ApplicationConfig config{};
+        config.AssetDirectory = ".";
+        config.WorkspaceDirectory = ".";
+        config.EnableEditor = true;
+        EXPECT_TRUE(engine.Initialize(config));
+    }
+    return engine.GetAssetManager().GetRegistry();
+}
+
+Graph::Node SpawnPrefabNode(const std::string& prefabGuid)
+{
+    Graph::Node node;
+    node.Id = "spawn";
+    node.TypeId = "SpawnPrefab";
+    node.Ports.push_back({"in", Graph::PortDirection::In, "flow", "In"});
+    node.Ports.push_back({"prefab", Graph::PortDirection::In, "string", "Prefab"});
+    node.Ports.push_back({"out", Graph::PortDirection::Out, "flow", "Out"});
+    node.Parameters["prefab"] = prefabGuid;
+    return node;
+}
+} // namespace
+
+TEST(GraphNodePoolTests, SpawnPrefabPinIsAnAssetFieldShowingThePrefab)
+{
+    UIRegistration::RegisterBuiltInControls();
+    AssetRegistry& registry = StartedRegistry();
+    AssetMetadata meta{};
+    meta.Guid = GUID::Generate();
+    meta.Type = AssetType::Prefab;
+    meta.Name = "Squad";
+    meta.Extension = ".prefab";
+    meta.Path = registry.GetAssetRoot() / "Squad.prefab";
+    ASSERT_TRUE(registry.RegisterAssetMetadata(meta));
+
+    UIElement layer;
+    GraphNodePool pool(&layer, nullptr);
+    GraphPortedNode* slot = pool.Acquire();
+    ASSERT_NE(slot, nullptr);
+    GraphNodeEditHost host;
+    host.Assets = &registry;
+    slot->EnsurePortCount(2, 1);
+    Graph::Node node = SpawnPrefabNode(meta.Guid.ToString());
+    slot->BindModel(node, Graph::kKindIdGameLogic, GraphNodeVisualState{false, false, false, false, false}, &host);
+
+    GraphPort* prefab = slot->FindPort("prefab");
+    ASSERT_NE(prefab, nullptr);
+    AssetField* field = PinAssetField(*prefab);
+    ASSERT_NE(field, nullptr) << "the prefab pin is not the asset reference field";
+    EXPECT_EQ(field->GetValue(), meta.Guid);
+    ASSERT_NE(FieldName(*field), nullptr);
+    EXPECT_EQ(FieldName(*field)->GetText(), "Squad");
+
+    node.Parameters["prefab"] = "";
+    slot->BindModel(node, Graph::kKindIdGameLogic, GraphNodeVisualState{false, false, false, false, false}, &host);
+    EXPECT_EQ(PinAssetField(*prefab), field) << "a rebind reuses the field";
+    EXPECT_EQ(FieldName(*field)->GetText(), "None");
+}
+
+TEST(GraphNodePoolTests, DroppingAPrefabOnThePinAssignsTheNodeParameter)
+{
+    UIRegistration::RegisterBuiltInControls();
+    AssetRegistry& registry = StartedRegistry();
+    const std::filesystem::path prefabFile = registry.GetAssetRoot() / "PinDropTest.prefab";
+    {
+        std::ofstream out(prefabFile);
+        out << "[prefab name=\"PinDropTest\" version=1]\n\n[entity id=\"root\"]\n";
+    }
+
+    Graph::Model model;
+    model.Nodes.push_back(SpawnPrefabNode(""));
+    int changes = 0;
+    GraphNodeEditHost host;
+    host.Model = &model;
+    host.Assets = &registry;
+    host.OnChanged = [&changes]() { ++changes; };
+
+    UIElement layer;
+    GraphNodePool pool(&layer, nullptr);
+    GraphPortedNode* slot = pool.Acquire();
+    ASSERT_NE(slot, nullptr);
+    slot->EnsurePortCount(2, 1);
+    slot->BindModel(model.Nodes.front(), Graph::kKindIdGameLogic,
+                    GraphNodeVisualState{false, false, false, false, false}, &host);
+    AssetField* field = PinAssetField(*slot->FindPort("prefab"));
+    ASSERT_NE(field, nullptr);
+
+    // The pin takes prefabs only: a graph file is refused and the parameter stays empty.
+    const std::filesystem::path graphFile = registry.GetAssetRoot() / "PinDropTest.graph";
+    std::ofstream(graphFile) << "{}";
+    UI::Interaction::DropRequest refused{};
+    refused.payload = UI::Interaction::DragPayload::Create(Editor::AssetPathsDragPayload{{graphFile}, {}, false});
+    EXPECT_FALSE(field->CanDrop(refused).Allowed);
+    std::filesystem::remove(graphFile);
+
+    UI::Interaction::DropRequest request{};
+    request.payload = UI::Interaction::DragPayload::Create(Editor::AssetPathsDragPayload{{prefabFile}, {}, false});
+    ASSERT_TRUE(field->CanDrop(request).Allowed);
+    field->PerformDrop(request);
+
+    const GUID assigned = field->GetValue();
+    EXPECT_FALSE(assigned.IsNull());
+    EXPECT_EQ(model.Nodes.front().Parameters.GetString("prefab", ""), assigned.ToString())
+        << "the drop on the node's field writes the node parameter the Inspector reads";
+    EXPECT_EQ(changes, 1) << "the host hears the change, which refreshes the Inspector";
+    std::filesystem::remove(prefabFile);
 }
 
 TEST(GraphNodePoolTests, RecycleClearsFindByModelIdAndHidesDisplayNone)

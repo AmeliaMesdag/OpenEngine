@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Ocean/OceanTypes.h"
-#include "Ocean/OceanPresetCache.h"
-#include "Ocean/OceanPresetOverrideValidator.h"
+#include "Ocean/OceanPreset/OceanPresetCache.h"
+#include "Ocean/OceanPreset/OceanPresetOverrideValidator.h"
 #include "Ocean/OceanTime.h"
 
 #include "AssetCore/GUID.h"

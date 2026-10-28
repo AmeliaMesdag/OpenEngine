@@ -7,7 +7,7 @@
 #include "Components/Transform.h"
 #include "Engine/Rendering/HlodRuntime.h"
 #include "Engine/Rendering/RenderServices.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/GPUScene.h"
 
 #include "ECS/ECSTemplates.h"

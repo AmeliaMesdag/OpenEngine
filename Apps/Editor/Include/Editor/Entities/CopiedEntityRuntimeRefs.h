@@ -378,6 +378,7 @@ class CopiedEntityRuntimeRefs
         updated.TerrainDataGeneration = 0;
         updated.TiledTerrainHandle = 0;
         updated.TiledTerrainGeneration = 0;
+        updated.DrawOrderFrame = 0;
         world.AddComponentImmediate(copy, updated);
     }
 

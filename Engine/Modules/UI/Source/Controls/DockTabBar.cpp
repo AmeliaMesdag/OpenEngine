@@ -1,4 +1,6 @@
 #include "UI/Controls/DockTabBar.h"
+#include "UI/Controls/DockTab.h"
+#include "Input/KeyCodes.h"
 #include "UI/Internal/LayoutAccess.h"
 #include "UI/UIPrimitive.h"
 #include "UI/ResolvedStyle.h"
@@ -179,32 +181,81 @@ void DockTabBar::EnsureTabVisible(const std::string& panelId)
     }
 }
 
+UIElement* DockTabBar::FindTabAt(float x, float y) const
+{
+    // The scroll controls cover the end of an overflowing strip. A tab under them is hidden.
+    if (IsOverflowing() && x >= GetLayoutX() + GetLayoutWidth() - kOverflowControlsWidthPx)
+        return nullptr;
+    for (const auto& child : GetChildren())
+    {
+        if (child && child->HasClass("tab") && child->ContainsPoint(x, y))
+            return child.get();
+    }
+    return nullptr;
+}
+
+bool DockTabBar::IsPastMiddleClickSlop(float x, float y) const
+{
+    const float dx = x - m_MiddlePressX;
+    const float dy = y - m_MiddlePressY;
+    return dx * dx + dy * dy > kClickSlopPx * kClickSlopPx;
+}
+
+void DockTabBar::EndMiddlePress()
+{
+    m_MiddlePressed = false;
+    m_MiddlePanning = false;
+    RemoveClass("middle-panning");
+}
+
 void DockTabBar::OnEvent(UIEvent& e)
 {
-    if (e.Id == kEventMouseDown && e.Button == 2 && IsOverflowing())
+    if (e.Id == kEventMouseDown && e.Button == Input::kMouseButton_Middle)
     {
-        m_MiddlePanning = true;
-        m_MiddlePanStartX = e.X;
+        const UIElement* tab = FindTabAt(e.X, e.Y);
+        const bool overflowing = IsOverflowing();
+        if (!tab && !overflowing)
+            return;
+        m_MiddlePressed = true;
+        m_MiddlePanning = overflowing;
+        m_MiddleDragged = false;
+        m_MiddlePressTabInstanceId = tab ? tab->GetInstanceId() : 0;
+        m_MiddlePressX = e.X;
+        m_MiddlePressY = e.Y;
         m_MiddlePanStartOffset = m_ScrollOffset;
-        AddClass("middle-panning");
+        if (overflowing)
+            AddClass("middle-panning");
         e.Capture(this);
         e.Stop();
         return;
     }
-    if (e.Id == kEventMouseMove && m_MiddlePanning)
+    if (e.Id == kEventMouseMove && m_MiddlePressed)
     {
-        SetScrollOffset(m_MiddlePanStartOffset - (e.X - m_MiddlePanStartX));
+        if (IsPastMiddleClickSlop(e.X, e.Y))
+            m_MiddleDragged = true;
+        if (m_MiddlePanning)
+            SetScrollOffset(m_MiddlePanStartOffset - (e.X - m_MiddlePressX));
         e.Stop();
         return;
     }
-    if (e.Id == kEventMouseUp && e.Button == 2 && m_MiddlePanning)
+    // A cancelled press ends the gesture with no close.
+    if (e.Id == kEventMouseCancel && m_MiddlePressed)
     {
-        m_MiddlePanning = false;
-        RemoveClass("middle-panning");
-        e.Stop();
+        EndMiddlePress();
         return;
     }
-
+    if (e.Id == kEventMouseUp && e.Button == Input::kMouseButton_Middle && m_MiddlePressed)
+    {
+        EndMiddlePress();
+        e.Stop();
+        // A release near the press on the pressed tab is a click: it closes the tab.
+        if (m_MiddleDragged || IsPastMiddleClickSlop(e.X, e.Y))
+            return;
+        auto* tab = dynamic_cast<DockTab*>(FindTabAt(e.X, e.Y));
+        if (tab && tab->GetInstanceId() == m_MiddlePressTabInstanceId)
+            tab->RequestClose();
+        return;
+    }
 }
 
 static void ShiftSubtree(UIElement* el, float dx) {

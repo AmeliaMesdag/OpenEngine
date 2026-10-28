@@ -6,7 +6,7 @@
 #include "Components/Transform.h"
 #include "ECS/ECSTemplates.h"
 #include "Logger/Logger.h"
-#include "ParticleProcessorRevision.h"
+#include "ParticleProcessor/ParticleProcessorRevision.h"
 #include "Particles/Assets/ParticleStackAsset.h"
 #include "PhysicsECS/PhysicsWorldService.h"
 

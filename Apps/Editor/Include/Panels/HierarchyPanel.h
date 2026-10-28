@@ -7,11 +7,11 @@
 #include "UI/Interaction/Types.h"
 #include "ECS/ChangeFilter.h"
 #include "ECS/ECS.h"
-#include "Editor/Hierarchy/HierarchyEntityRename.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityRename.h"
 #include "Editor/Hierarchy/HierarchyRowActivity.h"
 #include "EditorChangeNotifications.h"
 #include "Scene/SceneIO.h"
-#include "VersionControl/SceneDiff.h"
+#include "VersionControl/SceneDiff/SceneDiff.h"
 
 #include <filesystem>
 #include <functional>

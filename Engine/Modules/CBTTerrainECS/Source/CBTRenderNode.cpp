@@ -14,7 +14,7 @@
 #include "Engine/Rendering/Pipeline/ForwardFogKeywords.h"
 #include "Engine/Rendering/Pipeline/ReflectionsProvider.h"
 
-#include "Rendering/CameraTypes.h" // ViewPurpose
+#include "Rendering/Camera/CameraTypes.h" // ViewPurpose
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 
@@ -124,6 +124,13 @@ void EmitCbtForwardDraw(Pipeline::ViewDeclare& d, CBTRenderFeature& feature)
     // The surface samples the far-field normal chain the update writes (fragment stage, world pass).
     if (outputs.NormalChain.IsValid())
         rs.EmitForwardSampledRead(d.Frame, d.View.id, outputs.NormalChain);
+    // The planet surface samples the page cache the update samples (gPageCache, full profile only). The import
+    // dedups by handle, so the world pass reads the update's "CBT.HeightSource".
+    const TextureHandle pageCache = feature.GetDrawPageCache();
+    if (pageCache.IsValid() && !rs.GetProfile().IsCompat())
+        rs.EmitForwardSampledRead(
+            d.Frame, d.View.id,
+            d.Frame.ImportExternalTexture("CBT.HeightSource", pageCache, ResourceState::ShaderResource));
 }
 
 // The terrain's shadow on the directional light (TerrainShadowBake): declares this frame's bake
@@ -241,9 +248,9 @@ void CBTRenderNode::DeclareForView(Pipeline::ViewDeclare& d)
     // write-after-fence margin (see CBTFrameRingSlot). Per view, so idempotent within a frame.
     const uint32_t frameCounter = feature.GetInstance().AdvanceFrameCounter(device->GetFrameIndex());
 
-    // Restart the tree from its roots when the domain changed, a terrain was retired above, or
-    // the depth cap was lowered: at once, or, for repeats within CBTTreeSeed's window, once they
-    // settle. Waits only its graphics submissions; no-op when nothing changed.
+    // Restart the tree from its roots when the domain changed, the drawn terrain was retired above or
+    // replaced in the last BuildFrameParams, or the depth cap was lowered. Repeats within CBTTreeSeed's
+    // window wait until they settle. Waits only its graphics submissions; no-op when nothing changed.
     feature.EnsureSeeded(frameCounter);
 
     // C4: gather this view's camera + the active terrain's heightmap/world-size (the
@@ -360,15 +367,13 @@ void CBTRenderNode::DeclareForView(Pipeline::ViewDeclare& d)
         {
             const CBTTerrain::CBTClassifyDesc& c = classify;
             if (c.DirtyMaxU > c.DirtyMinU && c.DirtyMaxV > c.DirtyMinV)
+                Logger::Log::Info("CBT.Edit rect=({},{},{},{})", c.DirtyMinU, c.DirtyMinV, c.DirtyMaxU,
+                                  c.DirtyMaxV);
+            // The sphere names the cube face each face-local rect lies on.
+            for (uint32_t i = 0; i < c.SphereDirty.Count; ++i)
             {
-                // Planet editing (plan §planet-editing): the spherical form names the cube
-                // face the (face-local) rect lies on; planar keeps the rect-only form.
-                if (feature.GetDomainConfig().DomainMode == CBTTerrain::kDomainSpherical)
-                    Logger::Log::Info("CBT.Edit face={} rect=({},{},{},{})", c.DirtyFace,
-                                      c.DirtyMinU, c.DirtyMinV, c.DirtyMaxU, c.DirtyMaxV);
-                else
-                    Logger::Log::Info("CBT.Edit rect=({},{},{},{})", c.DirtyMinU, c.DirtyMinV,
-                                      c.DirtyMaxU, c.DirtyMaxV);
+                const CBTTerrain::SphereFaceUVRect& r = c.SphereDirty.Rects[i];
+                Logger::Log::Info("CBT.Edit face={} rect=({},{},{},{})", r.Face, r.MinU, r.MinV, r.MaxU, r.MaxV);
             }
         }
     }

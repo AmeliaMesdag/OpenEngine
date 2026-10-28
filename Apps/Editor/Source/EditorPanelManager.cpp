@@ -17,7 +17,7 @@
 #include "Panels/BuildPanel.h"
 #include "Panels/SettingsPanel.h"
 #include "Panels/WebPanel.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "Editor/Settings/SceneViewSettings.h"
 
 #include "Core/CpuProfiler.h"
@@ -27,7 +27,6 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
-#include <functional>
 #include <string>
 #include <typeinfo>
 
@@ -92,30 +91,27 @@ std::vector<EditorPanelManager::PanelMenuEntry> EditorPanelManager::GetPanelMenu
 
 // ---- Static helpers ----
 
+using EditorWindowContext = EditorPanelManager::EditorWindowContext;
+
+static DockspaceElement* FindDockspace(const EditorWindowContext& ctx)
+{
+    if (!ctx.ui)
+        return nullptr;
+    UIElement* rootEl = ctx.ui->GetRootElement();
+    return rootEl ? dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid)) : nullptr;
+}
+
 void EditorPanelManager::RebuildDockspace(EditorWindowContext* ctx)
 {
-    if (!ctx || !ctx->ui)
-        return;
-    if (auto* rootEl = ctx->ui->GetRootElement())
-    {
-        if (auto* el = rootEl->FindById("dock"_sid))
-        {
-            if (auto* ds = dynamic_cast<DockspaceElement*>(el))
-            {
-                ds->RequestRebuildFromModel();
-            }
-        }
-    }
+    if (DockspaceElement* dockspace = ctx ? FindDockspace(*ctx) : nullptr)
+        dockspace->RequestRebuildFromModel();
 }
 
 void EditorPanelManager::RebuildDockspaceNow(EditorWindowContext* ctx, DockingManager* model)
 {
-    if (!ctx || !ctx->ui || !model)
+    if (!ctx || !model)
         return;
-    UIElement* rootEl = ctx->ui->GetRootElement();
-    if (!rootEl)
-        return;
-    auto* dockspace = dynamic_cast<DockspaceElement*>(rootEl->FindById("dock"_sid));
+    DockspaceElement* dockspace = FindDockspace(*ctx);
     if (!dockspace)
         return;
 
@@ -190,6 +186,59 @@ static bool FindPathToLeafContainingPanel(DockNode* n, const std::string& panelI
     return FindPathToLeafContainingPanel(n->Second(), panelId, pathSoFar + "1", outPath);
 }
 
+static size_t CountDockTabs(const DockNode* node)
+{
+    if (!node)
+        return 0;
+    if (node->IsLeaf())
+        return node->GetTabs().size();
+    return CountDockTabs(node->First()) + CountDockTabs(node->Second());
+}
+
+static bool FindPanelContainingElement(const DockingManager& docking, const DockNode* node, StringId elementId,
+                                       std::string& outPanelId)
+{
+    if (!node)
+        return false;
+    if (!node->IsLeaf())
+    {
+        return FindPanelContainingElement(docking, node->First(), elementId, outPanelId) ||
+               FindPanelContainingElement(docking, node->Second(), elementId, outPanelId);
+    }
+    for (const std::string& tabId : node->GetTabs())
+    {
+        UIElement* panel = tabId.empty() ? nullptr : docking.GetPanel(tabId);
+        if (panel && panel->FindById(elementId))
+        {
+            outPanelId = tabId;
+            return true;
+        }
+    }
+    return false;
+}
+
+// The id of the panel in ctx that holds the UI focus: its tab, its mount or an element inside it.
+static std::string FindFocusedPanelId(const EditorWindowContext& ctx)
+{
+    if (!ctx.ui || !ctx.docking)
+        return {};
+    const std::string& focusId = ctx.ui->GetFocusedElementId();
+    if (focusId.empty())
+        return {};
+    DockNode* root = ctx.docking->GetRoot();
+    for (std::string_view prefix : {std::string_view("tab:"), std::string_view("mount:")})
+    {
+        if (!std::string_view(focusId).starts_with(prefix))
+            continue;
+        std::string panelId = focusId.substr(prefix.size());
+        if (EditorPanelManager::FindLeafContainingPanel(root, panelId))
+            return panelId;
+    }
+    std::string panelId;
+    (void)FindPanelContainingElement(*ctx.docking, root, HashStringId(focusId), panelId);
+    return panelId;
+}
+
 static const char* DefaultPanelLeafAnchor(const std::string& panelId)
 {
     if (panelId == EditorPanelIds::Hierarchy ||
@@ -260,34 +309,30 @@ void EditorPanelManager::ShowOrActivatePanelAtDefaultPlacement(
     ShowOrActivatePanel(ctx, panelId, DefaultPanelLeafAnchor(panelId));
 }
 
+bool EditorPanelManager::ActivateOpenPanel(EditorWindowContext* ctx, const std::string& panelId)
+{
+    if (!ctx || !ctx->docking)
+        return false;
+    if (m_FloatingFrames && m_FloatingFrames->Raise(panelId))
+        return true;
+    if (!ctx->docking->ActivateTab(panelId))
+        return false;
+
+    // Try localized activation patch; fall back to full rebuild.
+    DockspaceElement* dockspace = FindDockspace(*ctx);
+    const bool patched = dockspace && dockspace->RequestActivationPatch(panelId);
+    if (!patched)
+        RebuildDockspace(ctx);
+    return true;
+}
+
 void EditorPanelManager::ShowOrActivatePanel(EditorWindowContext* ctx, const std::string& panelId,
                                              const std::string& preferredLeafPanelId)
 {
     if (!ctx || !ctx->docking)
         return;
 
-    if (m_FloatingFrames && m_FloatingFrames->Raise(panelId))
-        return;
-
-    if (ctx->docking->ActivateTab(panelId))
-    {
-        // Try localized activation patch; fall back to full rebuild.
-        bool patched = false;
-        if (ctx->ui)
-        {
-            if (auto* rootEl = ctx->ui->GetRootElement())
-            {
-                if (auto* el = rootEl->FindById("dock"_sid))
-                {
-                    if (auto* ds = dynamic_cast<DockspaceElement*>(el))
-                        patched = ds->RequestActivationPatch(panelId);
-                }
-            }
-        }
-        if (!patched)
-            RebuildDockspace(ctx);
-    }
-    else
+    if (!ActivateOpenPanel(ctx, panelId))
     {
         if (m_IsLayoutDirty && m_IsLayoutDirty() && ctx->docking->RestoreLastClosedTab(panelId))
         {
@@ -542,112 +587,59 @@ void EditorPanelManager::CloseActiveTabOrWindow(EditorWindowContext* ctx)
 {
     if (!ctx || !ctx->docking)
         return;
-
-    auto* root = ctx->docking->GetRoot();
+    DockNode* root = ctx->docking->GetRoot();
     if (!root)
         return;
 
-    auto rebuildDockspace = [&]()
+    // Close the tab that holds the focus. With no focus in a panel, close the active tab of the first leaf.
+    std::string panelId = FindFocusedPanelId(*ctx);
+    if (panelId.empty())
     {
-        // Clearing focus is important: UIManager consumes keys whenever focusId is non-empty.
-        // If the focused element lived inside a closed tab, focusId can become stale and "eat" keyboard input.
-        if (ctx->ui)
-        {
-            ctx->ui->ClearFocus();
-        }
+        if (DockNode* leaf = FindFirstLeaf(root))
+            panelId = leaf->GetActivePanelId();
+    }
+    if (!panelId.empty())
+    {
+        ClosePanelTab(ctx, panelId);
+        return;
+    }
+
+    if (!IsMainWindow(ctx) && ctx->window)
+        ctx->window->RequestClose();
+}
+
+void EditorPanelManager::ClosePanelTab(EditorWindowContext* ctx, const std::string& panelId)
+{
+    if (!ctx || !ctx->docking || panelId.empty() || !FindLeafContainingPanel(ctx->docking->GetRoot(), panelId))
+        return;
+
+    // UIManager consumes every key while its focus id is set, so a focus left inside a closed panel eats input.
+    if (ctx->ui && FindFocusedPanelId(*ctx) == panelId)
+        ctx->ui->ClearFocus();
+
+    const bool isFloatingWindow = !IsMainWindow(ctx);
+    if (isFloatingWindow && CountDockTabs(ctx->docking->GetRoot()) <= 1)
+    {
+        if (ctx->window)
+            ctx->window->RequestClose();
+        return;
+    }
+
+    if (DockspaceElement* dockspace = FindDockspace(*ctx))
+        (void)dockspace->RequestTabRemoval(panelId);
+    // The patch can refuse before it changes the model; the model then removes the tab and the view rebuilds.
+    if (FindLeafContainingPanel(ctx->docking->GetRoot(), panelId))
+    {
+        (void)ctx->docking->RemoveTab(panelId);
         RebuildDockspace(ctx);
-    };
-
-    auto closePanelId = [&](const std::string& panelId) -> bool
-    {
-        if (panelId.empty())
-            return false;
-        if (!ctx->docking->RemoveTab(panelId))
-            return false;
-
-        rebuildDockspace();
-
-        // If the docking tree is now empty and this is a floating window, close it.
-        if (m_Windows && ctx->docking->IsEmpty() && !m_Windows->empty() && ctx != (*m_Windows)[0].get())
-        {
-            if (ctx->window)
-                ctx->window->RequestClose();
-        }
-        return true;
-    };
-
-    // Prefer closing the tab that currently owns focus (e.g., focused TextField in Inspector).
-    if (ctx->ui)
-    {
-        const std::string& focusId = ctx->ui->GetFocusedElementId();
-        if (!focusId.empty())
-        {
-            // Fast-path: focus may be on a dock UI element id that encodes the panel id.
-            auto stripPrefix = [&](const std::string& full, const char* prefix) -> std::string
-            {
-                const size_t n = std::strlen(prefix);
-                if (full.size() >= n && full.rfind(prefix, 0) == 0)
-                    return full.substr(n);
-                return {};
-            };
-
-            std::string direct = stripPrefix(focusId, "tab:");
-            if (direct.empty())
-                direct = stripPrefix(focusId, "mount:");
-            if (!direct.empty() && closePanelId(direct))
-            {
-                return;
-            }
-
-            // Otherwise, search the docking tree for a panel subtree containing the focused element id.
-            std::function<bool(DockNode*, std::string&)> findFocusedPanel = [&](DockNode* n, std::string& outPanelId) -> bool
-            {
-                if (!n)
-                    return false;
-                if (n->IsLeaf())
-                {
-                    for (const auto& tabId : n->GetTabs())
-                    {
-                        if (tabId.empty())
-                            continue;
-                        UIElement* panel = ctx->docking->GetPanel(tabId);
-                        if (panel && panel->FindById(HashStringId(focusId)))
-                        {
-                            outPanelId = tabId;
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                return findFocusedPanel(n->First(), outPanelId) || findFocusedPanel(n->Second(), outPanelId);
-            };
-
-            std::string focusedPanelId;
-            if (findFocusedPanel(root, focusedPanelId) && closePanelId(focusedPanelId))
-            {
-                return;
-            }
-        }
     }
+    if (isFloatingWindow && ctx->docking->IsEmpty() && ctx->window)
+        ctx->window->RequestClose();
+}
 
-    // Fallback: close the active tab in the first leaf.
-    DockNode* leaf = FindFirstLeaf(root);
-    if (!leaf)
-        return;
-
-    const std::string& activePanelId = leaf->GetActivePanelId();
-    if (activePanelId.empty())
-    {
-        // No active tab to close; if this is a floating window, close the window itself.
-        if (m_Windows && !m_Windows->empty() && ctx != (*m_Windows)[0].get()) // Don't close main window
-        {
-            if (ctx->window)
-                ctx->window->RequestClose();
-        }
-        return;
-    }
-
-    (void)closePanelId(activePanelId);
+bool EditorPanelManager::IsMainWindow(const EditorWindowContext* ctx) const
+{
+    return m_Windows && !m_Windows->empty() && ctx == m_Windows->front().get();
 }
 
 void EditorPanelManager::RegisterUpdateCallback(UIElement* panel, UpdateCallback callback, bool alwaysUpdate)

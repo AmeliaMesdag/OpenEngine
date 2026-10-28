@@ -102,7 +102,7 @@ GraphInspectorRowKind ScalarKindFromSchemaOrText(const NodeParamSpec* spec, cons
 {
     if (spec)
     {
-        if (spec->Default.IsGuid() && spec->Id == "clipGuid")
+        if (spec->AssetReference != AssetType::Unknown)
             return GraphInspectorRowKind::NodeAsset;
         if (spec->Default.IsInt())
             return GraphInspectorRowKind::NodeInt;
@@ -117,6 +117,15 @@ GraphInspectorRowKind ScalarKindFromSchemaOrText(const NodeParamSpec* spec, cons
     if (FloatField::TryParseFloat(text, floatValue))
         return GraphInspectorRowKind::NodeFloat;
     return GraphInspectorRowKind::NodeText;
+}
+
+// An asset row reads its key without the "Guid" suffix: "clipGuid" is the "Clip" row.
+std::string AssetRowLabel(std::string_view key)
+{
+    constexpr std::string_view kGuidSuffix = "Guid";
+    if (key.size() > kGuidSuffix.size() && key.ends_with(kGuidSuffix))
+        key.remove_suffix(kGuidSuffix.size());
+    return IdentifierToWords(key);
 }
 
 } // namespace
@@ -230,7 +239,15 @@ std::vector<GraphInspectorRow> PlanGraphInspectorRows(
         row.Kind = (spec && !spec->Options.empty()) ? GraphInspectorRowKind::NodeEnum
                                                     : ScalarKindFromSchemaOrText(spec, value);
         row.Key = key;
-        row.Label = (row.Kind == GraphInspectorRowKind::NodeAsset) ? "Clip" : IdentifierToWords(key);
+        if (row.Kind == GraphInspectorRowKind::NodeAsset)
+        {
+            row.AssetReference = spec->AssetReference;
+            row.Label = AssetRowLabel(key);
+        }
+        else
+        {
+            row.Label = IdentifierToWords(key);
+        }
         rows.push_back(std::move(row));
     };
 

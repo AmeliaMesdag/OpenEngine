@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Mathematics/Vector3.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 #include <optional>
 

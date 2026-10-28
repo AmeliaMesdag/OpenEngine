@@ -11,6 +11,7 @@
 #include "CBTTerrain/CBTKernelSet.h"
 #include "CBTTerrain/CBTLayout.h"
 #include "CBTTerrain/CBTResources.h"
+#include "CBTTerrain/CBTSphereFaceMap.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
 
@@ -47,11 +48,11 @@ struct CBTClassifyDesc
     float DirtyMaxU = 0.0f;
     float DirtyMaxV = 0.0f;
 
-    // Planet-editing v1 (plan §planet-editing). On the SPHERE, the dirty rect above is a
-    // FACE-LOCAL UV rect and DirtyFace selects the cube face — Classify reclassifies only
-    // bisectors on that face. SphereSculptEnabled gates VertexEval's additive sculpt
-    // sample (true once any dab has landed). Both ignored in planar mode.
-    uint32_t DirtyFace = 0u;
+    // On the sphere the rect above stays empty: each changed face carries its own face-local UV rect
+    // here, at most one per face, and Classify reclassifies the bisectors of every listed face in the
+    // same update. Planar ignores it.
+    SphereEditRegions SphereDirty{};
+    // Gates VertexEval's additive sculpt sample on the sphere (1 once any dab has landed).
     uint32_t SphereSculptEnabled = 0u;
 
     // Quiescence gate for VertexEval (plan §planet-shading perf). 0 (default) evaluates the
@@ -95,6 +96,17 @@ struct CBTClassifyDesc
     // band that stops a moving camera from churning the boundary. Chosen per recorded update by the
     // render feature (CBTRenderFeature::InputsHeld); not an input of the rest gate.
     uint32_t Settle = 0u;
+
+    /// True when a planar rect or any sphere face rect is dirty this frame.
+    bool HasDirtyRegion() const
+    {
+        if (DirtyMaxU > DirtyMinU && DirtyMaxV > DirtyMinV)
+            return true;
+        for (uint32_t i = 0; i < SphereDirty.Count; ++i)
+            if (!SphereDirty.Rects[i].IsEmpty())
+                return true;
+        return false;
+    }
 };
 
 // Inert classify (nothing to split or merge): leaves the tree unchanged.

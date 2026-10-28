@@ -9,7 +9,7 @@
 #include "ECS/Query.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Logger/Logger.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "MarkupECS/MarkupService.h"
 #include "Markups/MarkupPresentation.h"
 #include "Spline/SplineData.h"

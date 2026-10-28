@@ -79,8 +79,8 @@ Engine/Modules/Rendering/Source/Metal/MetalCommandList.cpp:raw_array:4          
 Engine/Modules/Rendering/Source/Metal/MetalCommandList.h:raw_array:2                         # a GPU backend: the graphics API's own form, or the CommandList interface's signature it overrides
 Engine/Modules/Rendering/Source/Vulkan/VulkanCommandList.cpp:raw_array:1                     # a GPU backend: the graphics API's own form, or the CommandList interface's signature it overrides
 Engine/Modules/Rendering/Source/Vulkan/VulkanCommandList.h:raw_array:1                       # a GPU backend: the graphics API's own form, or the CommandList interface's signature it overrides
-Engine/Modules/Rendering/Source/Vulkan/VulkanDevice.cpp:raw_array:1                          # a GPU backend: the graphics API's own form, or the CommandList interface's signature it overrides
-Engine/Modules/Rendering/Source/Vulkan/VulkanPipelineCache.cpp:malloc_free:2                 # frees the buffer the C runtime's _dupenv_s allocated
+Engine/Modules/Rendering/Source/Vulkan/VulkanDevice/VulkanDevice.cpp:raw_array:1                          # a GPU backend: the graphics API's own form, or the CommandList interface's signature it overrides
+Engine/Modules/Rendering/Source/Vulkan/VulkanPipelineCache/VulkanPipelineCache.cpp:malloc_free:2                 # frees the buffer the C runtime's _dupenv_s allocated
 Engine/Modules/Rendering/Source/Vulkan/VulkanSharedInstance.cpp:raw_new:1                    # a process-lifetime registry, never destroyed, so it outlives static destruction
 Engine/Modules/Rendering/Source/WebGPU/WebGpuCommandList.h:raw_array:1                       # a GPU backend: the graphics API's own form, or the CommandList interface's signature it overrides
 Engine/Modules/Rendering/Source/WebGPU/WebGpuDevice.cpp:raw_delete:1                         # user data for a WebGPU C callback, freed by that callback

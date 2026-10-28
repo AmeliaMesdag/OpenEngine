@@ -1,7 +1,7 @@
 #include "Particles/ParticleValue.h"
 
 #include "Mathematics/Interpolation.h"
-#include "Particles/ParticleProcessorRegistry.h"
+#include "Particles/ParticleProcessor/ParticleProcessorRegistry.h"
 
 #include <array>
 #include <cmath>

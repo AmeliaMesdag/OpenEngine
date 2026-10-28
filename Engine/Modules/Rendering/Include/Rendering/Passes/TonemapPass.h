@@ -2,7 +2,7 @@
 
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/Passes/FinalizeContract.h"
-#include "Rendering/Utils/CubeLutGpuBinding.h"
+#include "Rendering/Utils/CubeLut/CubeLutGpuBinding.h"
 
 #include <cstdint>
 

@@ -1,9 +1,9 @@
-// The Terrain Grass Preset row (Terrain/TerrainGrassPresetRow): the list holds the three presets, each
+// The Terrain Grass Preset row (Terrain/TerrainGrass/TerrainGrassPresetRow): the list holds the four presets, each
 // with a picture; the field reads Custom once a dial differs from the preset, without a
 // Custom entry; a pick applies the preset as one undo step; and the pictures were taken with the
 // presets' values.
 
-#include "Terrain/TerrainGrassPresetRow.h"
+#include "Terrain/TerrainGrass/TerrainGrassPresetRow.h"
 
 #include "AssetCore/SharedFileRead.h"
 #include "Components/Terrain/TerrainGrass.h"
@@ -78,6 +78,59 @@ std::string RecordedColor(uint32 color)
     return color == Components::kTerrainGrassAutoRootColor ? std::string("auto") : std::format("{:08X}", color);
 }
 
+// The record's key for each look dial: the scene file's field name.
+template <typename Field>
+struct RecordedDial
+{
+    Field Components::TerrainGrass::*Dial;
+    const char* Key;
+};
+
+constexpr RecordedDial<float32> kRecordedFloatDials[] = {
+    {&Components::TerrainGrass::BladesPerSquareMeter, "bladesPerSquareMeter"},
+    {&Components::TerrainGrass::ClumpSize, "clumpSize"},
+    {&Components::TerrainGrass::ClumpHeightVariance, "clumpHeightVariance"},
+    {&Components::TerrainGrass::ClumpAlignment, "clumpAlignment"},
+    {&Components::TerrainGrass::ClumpTaper, "clumpTaper"},
+    {&Components::TerrainGrass::BladeHeight, "bladeHeight"},
+    {&Components::TerrainGrass::BladeWidth, "bladeWidth"},
+    {&Components::TerrainGrass::BladeTilt, "bladeTilt"},
+    {&Components::TerrainGrass::BladeBend, "bladeBend"},
+    {&Components::TerrainGrass::BladeTwist, "bladeTwist"},
+    {&Components::TerrainGrass::BladeTaperStart, "bladeTaperStart"},
+    {&Components::TerrainGrass::TuftFan, "tuftFan"},
+    {&Components::TerrainGrass::RandomScale, "randomScale"},
+    {&Components::TerrainGrass::WindRestingLean, "windRestingLean"},
+    {&Components::TerrainGrass::WindFlutterAmount, "windFlutterAmount"},
+    {&Components::TerrainGrass::WindFlutterSpeed, "windFlutterSpeed"},
+    {&Components::TerrainGrass::Brightness, "brightness"},
+    {&Components::TerrainGrass::RandomBrightness, "randomBrightness"},
+    {&Components::TerrainGrass::HueVariation, "hueVariation"},
+    {&Components::TerrainGrass::RootFadeStart, "rootFadeStart"},
+    {&Components::TerrainGrass::RootFadeEnd, "rootFadeEnd"},
+    {&Components::TerrainGrass::GroundingStrength, "groundingStrength"},
+    {&Components::TerrainGrass::GroundTintHeight, "groundTintHeight"},
+    {&Components::TerrainGrass::CanopyShade, "canopyShade"},
+    {&Components::TerrainGrass::Translucency, "translucency"},
+};
+
+constexpr RecordedDial<uint32> kRecordedColorDials[] = {
+    {&Components::TerrainGrass::RootColor, "rootColor"},
+    {&Components::TerrainGrass::TipColor, "tipColor"},
+    {&Components::TerrainGrass::BacklightColor, "backlightColor"},
+};
+
+template <typename Field, size_t Count>
+const char* RecordKey(const RecordedDial<Field> (&dials)[Count], Field Components::TerrainGrass::*dial)
+{
+    for (const RecordedDial<Field>& recorded : dials)
+    {
+        if (recorded.Dial == dial)
+            return recorded.Key;
+    }
+    return nullptr;
+}
+
 std::string ShownText(const Dropdown& presets)
 {
     return presets.GetHeaderLabel() ? presets.GetHeaderLabel()->GetText() : std::string();
@@ -117,26 +170,26 @@ struct GrassRow
 
 } // namespace
 
-// Meadow, Lawn and Steppe in that order, each with its picture; Custom is not an entry.
-TEST(TerrainGrassPresetRow, TheListIsTheThreePresetsEachWithAPicture)
+// Meadow, Lawn, Steppe and Stylized in that order, each with its picture; Custom is not an entry.
+TEST(TerrainGrassPresetRow, TheListIsTheFourPresetsEachWithAPicture)
 {
     GrassRow row;
     ASSERT_NE(row.Presets, nullptr);
     EXPECT_EQ(row.Presets->GetSelectedIndex(), 0) << "new grass is Meadow";
     EXPECT_EQ(ShownText(*row.Presets), "Meadow");
-    const char* names[] = {"Meadow", "Lawn", "Steppe"};
+    const char* names[] = {"Meadow", "Lawn", "Steppe", "Stylized"};
     const char* pictures[] = {"option-picture--grass-meadow", "option-picture--grass-lawn",
-                              "option-picture--grass-steppe"};
+                              "option-picture--grass-steppe", "option-picture--grass-stylized"};
     UIElement* picture = ChildWithClass(*row.Presets->GetHeaderContainer(), "dropdown-header-picture");
     ASSERT_NE(picture, nullptr) << "the closed field shows the selected preset's picture";
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         row.Presets->SetSelectedIndexWithoutNotify(i);
         EXPECT_EQ(row.Presets->GetSelectedLabel(), names[i]);
         EXPECT_TRUE(picture->HasClass(pictures[i])) << names[i];
     }
-    row.Presets->SetSelectedIndexWithoutNotify(3);
-    EXPECT_EQ(row.Presets->GetSelectedIndex(), -1) << "the list offers only the three presets";
+    row.Presets->SetSelectedIndexWithoutNotify(4);
+    EXPECT_EQ(row.Presets->GetSelectedIndex(), -1) << "the list offers only the four presets";
 }
 
 // A dial moved away from the preset shows Custom as the field's state, with nothing selected in the list.
@@ -176,9 +229,9 @@ TEST(TerrainGrassPresetRow, PickingAPresetAppliesItAsOneUndoStep)
     EXPECT_EQ(ShownText(*row.Presets), "Custom");
 }
 
-// Every preset's picture has a line in grass-pictures.txt with the dials it was taken with, and each
-// line's dials are its preset's: a retuned preset fails here until its picture is retaken. The line
-// also holds Ground Tint Height, which no preset sets but which changes how every preset looks.
+// Every preset's picture has a line in grass-pictures.txt with the look dials it was taken with,
+// keyed by the scene file's field names. Each look dial of the preset table is on the line, so a
+// change to any of them fails here until the picture is retaken.
 TEST(TerrainGrassPresetRow, ThePicturesWereTakenWithThePresetsValues)
 {
     const std::filesystem::path record =
@@ -193,9 +246,13 @@ TEST(TerrainGrassPresetRow, ThePicturesWereTakenWithThePresetsValues)
     };
     const Picture pictures[] = {{Components::TerrainGrassPreset::Meadow, "Meadow", "grass-meadow.png: "},
                                 {Components::TerrainGrassPreset::Lawn, "Lawn", "grass-lawn.png: "},
-                                {Components::TerrainGrassPreset::Steppe, "Steppe", "grass-steppe.png: "}};
+                                {Components::TerrainGrassPreset::Steppe, "Steppe", "grass-steppe.png: "},
+                                {Components::TerrainGrassPreset::Stylized, "Stylized", "grass-stylized.png: "}};
     ASSERT_EQ(std::size(pictures), std::size(TerrainGrass::kTerrainGrassPresets)) << "one picture per preset";
-    const Components::TerrainGrass defaults{};
+    for (const auto dial : TerrainGrass::Detail::kTerrainGrassPresetFloatDials)
+        ASSERT_NE(RecordKey(kRecordedFloatDials, dial), nullptr) << "a float look dial has no record key";
+    for (const auto dial : TerrainGrass::Detail::kTerrainGrassPresetColorDials)
+        ASSERT_NE(RecordKey(kRecordedColorDials, dial), nullptr) << "a color look dial has no record key";
     for (const Picture& picture : pictures)
     {
         const size_t start = text.find(std::string("\n") + picture.File);
@@ -208,13 +265,12 @@ TEST(TerrainGrassPresetRow, ThePicturesWereTakenWithThePresetsValues)
         TerrainGrass::ApplyTerrainGrassPreset(preset, picture.Preset);
         EXPECT_EQ(RecordValue(line, "preset"), picture.Name) << line;
         ExpectRecordedNumber(line, "gain", 1.0f);
-        EXPECT_EQ(RecordValue(line, "tip"), RecordedColor(preset.TipColor)) << line;
-        EXPECT_EQ(RecordValue(line, "root"), RecordedColor(preset.RootColor)) << line;
-        EXPECT_EQ(RecordValue(line, "backlight"), RecordedColor(preset.BacklightColor)) << line;
-        ExpectRecordedNumber(line, "density", preset.BladesPerSquareMeter);
-        ExpectRecordedNumber(line, "height", preset.BladeHeight);
-        ExpectRecordedNumber(line, "width", preset.BladeWidth);
-        ExpectRecordedNumber(line, "tilt", preset.BladeTilt);
-        ExpectRecordedNumber(line, "ground-tint-height", defaults.GroundTintHeight);
+        for (const auto dial : TerrainGrass::Detail::kTerrainGrassPresetColorDials)
+        {
+            const char* key = RecordKey(kRecordedColorDials, dial);
+            EXPECT_EQ(RecordValue(line, key), RecordedColor(preset.*dial)) << key << " in: " << line;
+        }
+        for (const auto dial : TerrainGrass::Detail::kTerrainGrassPresetFloatDials)
+            ExpectRecordedNumber(line, RecordKey(kRecordedFloatDials, dial), preset.*dial);
     }
 }

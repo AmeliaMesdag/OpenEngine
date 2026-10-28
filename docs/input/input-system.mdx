@@ -243,6 +243,9 @@ public class MouseLook : GameSystem
 ## In the editor
 
 - The game's input is live while play runs and the Game View is the active tab of its window.
+- Entering play brings the Game View to the front of its tab group and gives it the keyboard focus, so the game's keys do not go to the panel you used last. A closed Game View stays closed.
+- A key goes first to the editor control that has the keyboard focus. If you click a text field or a panel during play, that control takes the keys it uses.
+- Stopping play brings back the tab that was in front of the Game View before play and gives the keyboard focus back to the control that had it. If you picked another tab or moved the focus during play, your choice stays.
 - The pointer is locked while play runs unpaused, the game asks, and the Game View's window has focus.
 - <kbd>Esc</kbd> hands the pointer back to the editor. The game still receives the key, and its request stands.
 - Leaving the window while locked (switching to another application) also hands the pointer back, so coming back with a click on another panel uses that panel.

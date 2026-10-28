@@ -17,7 +17,7 @@
 #include "SceneView/SceneViewCameraRig.h"
 #include "SceneView/SceneViewFraming.h"
 #include "SceneView/SceneViewToolStripRegistry.h"
-#include "SceneView/SplineOwnerQuery.h"
+#include "SceneView/SplineTool/SplineOwnerQuery.h"
 #include "UI/EditorIcons.h"
 #include "UI/UIElement.h"
 #include "UI/ViewOverlayHost.h"

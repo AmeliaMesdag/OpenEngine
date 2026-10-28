@@ -4,8 +4,8 @@
 
 #include "Animation/AnimationEvent.h"
 #include "Animation/AnimationEventCollectorStore.h"
-#include "Animation/AnimationGraphPlayer.h"
-#include "Animation/AnimationGraphStore.h"
+#include "Animation/AnimationGraph/AnimationGraphPlayer.h"
+#include "Animation/AnimationGraph/AnimationGraphStore.h"
 #include "Animation/Nodes/ClipPlayerNode.h"
 #include "Assets/AnimationClip.h"
 #include "Components/Animation/Animator.h"

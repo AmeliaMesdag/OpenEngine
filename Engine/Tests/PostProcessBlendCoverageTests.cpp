@@ -16,11 +16,11 @@
 #include "Components/Rendering/Look.h"
 #include "Engine/Rendering/ColorGradeParamsUBO.h"
 #include "Engine/Rendering/TextureService.h"
-#include "Rendering/Utils/CubeLutColorDomain.h"
+#include "Rendering/Utils/CubeLut/CubeLutColorDomain.h"
 #include "Rendering/Core/NamedPushConstantWriter.h"
 #include "Rendering/Passes/TonemapPass.h"
-#include "Rendering/Materials/ShaderMeta.h"
-#include "ECS/ComponentFactory.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
+#include "ECS/Component/ComponentFactory.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
 
@@ -1394,7 +1394,7 @@ TEST(PostProcessFogGlowControls, UnrelatedVolumeDoesNotDisableFogGlow)
 TEST(PostProcessExposureControls, SceneViewToggleOverridesStickyViewState)
 {
     const std::filesystem::path sourcePath = std::filesystem::path(GE_RENDERER_REPO_ROOT) /
-        "Apps/Editor/Source/SceneViewController.cpp";
+        "Apps/Editor/Source/SceneView/SceneViewController.cpp";
     std::ifstream stream(sourcePath);
     ASSERT_TRUE(stream.is_open()) << sourcePath;
     const std::string source((std::istreambuf_iterator<char>(stream)),

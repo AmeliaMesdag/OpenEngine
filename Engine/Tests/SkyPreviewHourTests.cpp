@@ -8,7 +8,7 @@
 #include <cmath>
 
 #include "Assets/DayCycleProfile.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Sky/SkySunState.h"
 #include "SkySunAnchorHarness.h"
 

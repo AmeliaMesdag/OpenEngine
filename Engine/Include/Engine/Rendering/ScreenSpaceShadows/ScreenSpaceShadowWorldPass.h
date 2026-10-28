@@ -2,7 +2,7 @@
 
 #include "Engine/Rendering/ResolvedShadowSettings.h"
 #include "Engine/Rendering/ScreenSpaceShadows/ScreenSpaceShadowPasses.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 namespace GameEngine::Engine::Renderer
 {

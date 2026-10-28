@@ -314,7 +314,7 @@ TimelineApi.SetMethodListener((entity, method, args) => { /* method track */ });
 
 :::meta
 
-- **Header**: `Apps/Editor/Include/Panels/AnimationWindowPanel.h`
+- **Header**: `Apps/Editor/Include/Panels/Animation/AnimationWindowPanel.h`
 - **Overview doc**: [Animation window](animation-window.mdx)
 
 :::
@@ -344,7 +344,7 @@ Owned by the panel; advanced each frame via `TickTimeline(deltaTime)` when `play
 | `fps` | Frames per second (frame ruler) |
 | `playing` / `paused` / `loop` / `reverse` | Transport flags |
 
-```cpp title="Panels/AnimationWindowPanel.h"
+```cpp title="Panels/Animation/AnimationWindowPanel.h"
 const TimelineState& GetTimelineState() const;
 TimelineState& GetTimelineState();
 void TickTimeline(float deltaTimeSeconds);
@@ -363,7 +363,7 @@ void TickTimeline(float deltaTimeSeconds);
 
 ### Child views (getters)
 
-```cpp title="Panels/AnimationWindowPanel.h"
+```cpp title="Panels/Animation/AnimationWindowPanel.h"
 TimelineBarElement* GetTimelineBarElement() const;
 DopeSheetView* GetDopeSheetView() const;
 CurvesGraphView* GetCurvesGraphView() const;
@@ -421,8 +421,8 @@ All elements draw via `OnGeneratePrimitives` (custom UI primitives, not textured
 | `Engine/Modules/Animation/Tests/AnimationTimelineTests.cpp` | Unit tests / JSON examples |
 | `Engine/Include/Assets/TimelineAsset.h` | Asset wrapper |
 | `Engine/Include/Components/Animation/Animator.h` | `PlayTimeline` |
-| `Apps/Editor/Include/Panels/AnimationWindowPanel.h` | Editor panel + `TimelineState` |
-| `Apps/Editor/Source/Panels/AnimationWindowPanel.cpp` | Implementation |
+| `Apps/Editor/Include/Panels/Animation/AnimationWindowPanel.h` | Editor panel + `TimelineState` |
+| `Apps/Editor/Source/Panels/Animation/AnimationWindowPanel.cpp` | Implementation |
 | `Apps/Editor/Include/Panels/TimelineBarElement.h` | Ruler UI controls |
 | `Apps/Editor/Source/PlayMode/ModelAnimationPlayMode.cpp` | Runtime resolve example |
 | [Animation window](animation-window.mdx) | Short editor overview |

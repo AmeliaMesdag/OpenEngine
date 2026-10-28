@@ -1,6 +1,6 @@
 #include "SceneView/NavGridBrushTool.h"
 
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "Core/Engine.h"
 #include "ECS/ECS.h"
 #include "ECS/Query.h"

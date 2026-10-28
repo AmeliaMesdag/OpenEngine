@@ -1,6 +1,6 @@
 #include "VulkanDescriptorBufferPool.h"
 
-#include "VulkanDevice.h"
+#include "VulkanDevice/VulkanDevice.h"
 #include "Logger/Logger.h"
 
 #include <algorithm>

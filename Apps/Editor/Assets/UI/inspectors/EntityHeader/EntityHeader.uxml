@@ -3,7 +3,7 @@
      selection history. The ids are the contract with the code. -->
 <UIElement class="inspector-header-trailing">
   <Label id="inspector-header-badge"
-         class="inspector-section-header-badge inspector-section-header-badge-neutral hidden" />
+         class="inspector-section-header-badge inspector-section-header-badge-override hidden" />
   <UIElement id="inspector-header-history" class="inspector-header-history">
     <Button id="inspector-history-back"
             class="icon-button inspector-header-history-icon inspector-history-back-btn" />

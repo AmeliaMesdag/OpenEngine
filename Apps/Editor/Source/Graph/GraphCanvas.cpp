@@ -4,17 +4,17 @@
 #include "Graph/GraphRouteSolver.h"
 
 #include "Graph/NodeColorSettings.h"
-#include "Graph/GraphNodeOverlap.h"
+#include "Graph/GraphNode/GraphNodeOverlap.h"
 #include "Mathematics/Interpolation.h"
 #include "Platform/SystemMetrics.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Graph/GraphCanvasEditKeys.h"
 #include "Editor/Shortcuts/EditorShortcuts.h"
 #include "Graph/GraphModel.h"
-#include "Graph/GraphNodePool.h"
-#include "Graph/GraphNodeRegistry.h"
+#include "Graph/GraphNode/GraphNodePool.h"
+#include "Graph/GraphNode/GraphNodeRegistry.h"
 #include "Graph/GraphOverlay.h"
-#include "Graph/GraphPort.h"
+#include "Graph/GraphPort/GraphPort.h"
 #include "Graph/GraphPortedNode.h"
 #include "Mathematics/Rect.h"
 #include "Mathematics/Vector2.h"
@@ -1145,6 +1145,7 @@ void GraphCanvas::FillNodeEditHost(GraphNodeEditHost& host)
     host.ExpandedView = m_ExpandedNodes;
     host.Assets = m_AssetRegistry;
     host.Thumbnails = m_ThumbnailProvider;
+    host.PingAsset = m_PingAsset;
     host.OnChanged = [this]() { NotifyGraphChanged(); };
     host.IsInputConnected = [this](const std::string& nodeId, const std::string& portId)
     {

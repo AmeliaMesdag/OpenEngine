@@ -774,7 +774,7 @@ public:
 
     // A producer that temporarily deferred misses can ask visible primitives
     // to resolve their external images again without rebuilding layout.
-    void RequestExternalTextureRefresh() { MarkPrimitivesNeedRegen(0x200u); }
+    void RequestExternalTextureRefresh() { MarkPrimitivesNeedRegen(PrimitiveRegenCause::TextureSlots); }
 
     // ---------------------------------------------------------------------
     // Font loading (host-resolved, async-capable)
@@ -964,6 +964,23 @@ public:
     void SetCorrectnessModeAssertsEnabled(bool enabled) { m_CorrectnessModeAssertsEnabled = enabled; }
     bool IsCorrectnessModeAssertsEnabled() const { return m_CorrectnessModeAssertsEnabled; }
 
+    // One bit per trigger that asks for a full primitive regeneration.
+    // UpdateProfileFrame::GenAllPrimitivesRegenCause holds the bits seen in a frame.
+    enum class PrimitiveRegenCause : uint32_t
+    {
+        MarkDirty         = 0x1u,    // style, layout or children dirty mark
+        TreeRebuilt       = 0x2u,    // element added or removed
+        ForceGlobalStyle  = 0x4u,
+        ViewportChanged   = 0x8u,
+        RelayoutRequested = 0x10u,
+        ActiveTransitions = 0x40u,
+        NewlyVisibleRect  = 0x80u,   // rect change on an element with no primitive capacity
+        TextureSlots      = 0x200u,  // texture slot indices in cached primitives became stale
+        DrainBail         = 0x400u,  // invariant break, or a culled element became visible
+        RangelessContent  = 0x800u,  // content mark on an element that owns no primitive range
+        FontResolved      = 0x1000u, // a font install changed text measurement or glyphs
+    };
+
     // Update profiling (CPU-side). Populated when update profiling is enabled.
     struct UpdateProfileFrame
     {
@@ -1008,20 +1025,8 @@ public:
         uint32_t DrainItems         = 0;
         uint32_t DrainParallelTasks = 0;
         uint32_t DrainEscalated     = 0;
-        // Bitmask of which trigger(s) flipped m_PrimitivesNeedRegen this
-        // frame. Lets us see why sweep scenarios force full regen.
-        //   1  = MarkDirty (Style/Layout/ChildrenDirty)
-        //   2  = treeRebuiltThisFrame (AddChild/Remove/AddElement)
-        //   4  = forceGlobalStyle
-        //   8  = viewportChanged
-        //   16 = relayoutRequestedPre
-        //   32 = retired (scroll translation is drain-only)
-        //   64 = HasActiveTransitions
-        //   128 = writeBack rectChanged with cap == 0 (newly visible)
-        //   256 = retired (override-rect patches are drain-only)
-        //   1024 = drain bail (invariant break or culled element became visible)
-        //   2048 = content mark on an element that owns no primitive range
-        //          (never emitted, or emitted nothing and its range was freed)
+        // OR of the PrimitiveRegenCause bits that asked for a full primitive
+        // regeneration this frame.
         uint32_t GenAllPrimitivesRegenCause = 0;
         uint32_t LateRelayoutCount = 0;
         // Time spent specifically in the late-relayout's BuildYoga + Yoga
@@ -1185,11 +1190,9 @@ private:
     // unclipped empty box still descends into children that paint.
     void NotifyDirty_UpdateRegenFlag(UIElement* el, unsigned flags);
 
-    // Block E1 instrumentation. Sets m_PrimitivesNeedRegen and OR-folds
-    // `causeBit` into the current frame's regen-cause bitmask so the
-    // perf scenarios can attribute "why didn't this frame skip" to a
-    // specific trigger. See UpdateProfileFrame::genAllPrimitivesRegenCause.
-    void MarkPrimitivesNeedRegen(uint32_t causeBit);
+    // Sets m_PrimitivesNeedRegen and adds `cause` to the last pushed profile
+    // frame. A cause raised inside Update lands on the previous frame's record.
+    void MarkPrimitivesNeedRegen(PrimitiveRegenCause cause);
     // The content-only pipeline escalates rangeless elements straight to a
     // full regen (see the definition in UIManager.cpp), which needs the
     // private mark above.
@@ -2635,13 +2638,11 @@ public:
     bool m_DirtyTraceEnabled = false;
     std::unordered_map<UIElement*, std::pair<uint32_t, unsigned>> m_PerFrameDirtyCount;
 
-    // Font resolution can complete asynchronously (posted via the dispatcher). A font completion
-    // affects text measurement and rendering, but forcing a full rebuild for *every* completion
-    // can cause rebuild storms during editor startup when multiple font keys resolve over time.
-    //
-    // We coalesce: mark that a font resolved, and only invalidate cached geometry once the
-    // current in-flight batch finishes (in-flight becomes empty).
+    // A font change that can affect any text: the default face changed or a font asset reloaded.
+    // The next heavy pass rechecks every retained text input and regenerates all primitives.
     bool m_FontResolvedDirty = false;
+    // Font keys installed since the last Update. Update marks only the text that resolves through them.
+    std::vector<std::string> m_FontKeysInstalled;
 
 #if defined(GE_HAVE_YOGA) && GE_HAVE_YOGA
   public:
@@ -3005,6 +3006,12 @@ public:
     // never runs. Schedules a restyle at backoff expiry so the retry can
     // actually fire (the scheduler drains before the idle gate).
     void ScheduleFontRetryRestyle(std::chrono::milliseconds backoff);
+
+    // Marks layout and visual dirty on each text whose font stack reaches an installed key
+    // before a loaded one, so the text that drew with a fallback face is included.
+    void MarkTextUsingInstalledFonts();
+    // True when an installed key comes before every other loaded key of the style's font stack.
+    bool FontStackReachesInstalledKey(const VisualStyle& visual) const;
 
     // Internal helper: run scheduler/dispatcher, rebuild Yoga layout, handle
     // input + events, and generate per-frame geometry into the CPU caches.

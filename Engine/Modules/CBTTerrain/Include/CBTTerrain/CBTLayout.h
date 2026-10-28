@@ -300,6 +300,8 @@ inline uint32_t PackSectorPair(int32_t lo, int32_t hi)
 inline int32_t UnpackSectorLo(uint32_t v) { return static_cast<int32_t>(v << 16) >> 16; }
 inline int32_t UnpackSectorHi(uint32_t v) { return static_cast<int32_t>(v) >> 16; }
 
+inline constexpr uint32_t kCubeFaceCount6 = 6u; // 6 cube faces (matches CBTSphereRoots kCubeFaceCount)
+
 // Per-frame camera + terrain params consumed by Classify (screen-space error) and
 // VertexEval (world-space height displacement). std140 mirror of CBTFrameParams in
 // cbt_layout.glsl — mat4 + 13 vec4 + the 16 x 3 vec4 analytic modifier set + the
@@ -423,6 +425,10 @@ struct CBTFrameParams
     // copies the params by value per thread and folding the 768 B mask into that copy measured
     // ~7x on CBT.Update. All-zero when no placements exist (the dark-ship bytes).
     uint32_t AnalyticCellMask[kSphereAnalyticCellMaskWords] = {};
+    // The sphere's dirty rect of each cube face in face-local UV: (minU, minV, maxU, maxV), empty
+    // when maxU <= minU. Classify reclassifies the bisectors of every face with a rect. A sibling of
+    // the frame struct on the GLSL side (CBTFrameSlot), like the cell masks. Written by RecordUpdate.
+    Mathematics::Vector4 SphereDirty[kCubeFaceCount6];
 };
 
 // ---------------------------------------------------------------------------
@@ -469,7 +475,11 @@ inline constexpr uint32_t kWQOffFrustumKeepStep = 15u;
 // and at rest follows only a move larger than poolSize / kRestLatchDeadbandDivisor.
 inline constexpr uint32_t kWQRestLiveCount = 16u;
 inline constexpr uint32_t kRestLatchDeadbandDivisor = 1024u;
-inline constexpr uint32_t kWQCounterSlots = 17u;
+// The page samples of this update whose walk to the top level found no resident page (cbt_layout.glsl
+// CBT_WQ_UNRESOLVED_PAGE_SAMPLES). A drawn planet's pinned levels are resident, so a count above 0 is a
+// pinning defect. Kernel_Reset clears it.
+inline constexpr uint32_t kWQUnresolvedPageSamples = 17u;
+inline constexpr uint32_t kWQCounterSlots = 18u;
 
 // Payload lanes — 3 ALIASED physical lanes over the 6 logical queues (slot-diet r2).
 // The six work queues never all hold live data at once: each is written by one kernel
@@ -667,7 +677,6 @@ inline constexpr uint32_t kCBTHeightTextureBinding = 15;  // CombinedImageSample
 // the class of bug that caused the tiled-upload device-losts). Sphere VertexEval samples the
 // pool through the table (paged bilinear) only when SphereSculptEnabled; planar never touches
 // them. Kept OUT of CBTBinding for the same reason as 14/15 (no zero-fill/UAV-barrier).
-inline constexpr uint32_t kCubeFaceCount6 = 6u; // 6 cube faces (matches CBTSphereRoots kCubeFaceCount)
 
 // A physical page is kSculptPageDim^2 texels (128^2 R32F = 64 KiB). The page table maps up to
 // kSculptMaxPagesPerFaceAxis pages/axis per face (128 -> Dv up to 16384 -> R up to ~83 km at
@@ -1044,6 +1053,19 @@ constexpr CBTHeightBuildRegion CBTHeightBuildRegionUnion(const CBTHeightBuildReg
 // layout is untouched. Host-visible ring: the render feature writes slot (frameIndex % ring)
 // each frame, and the fragment offset-binds that one slot (kCBTSurfaceParamsSlotStride) so it
 // always reads element [0]. Mirror of CBTSurfaceParamsData in cbt_surface.glsl.
+// The anchor of one cube face for the planet fragment's page point (cbt_planet_page.glsl, planets 3.7): the
+// level-0 lattice point of the eye's projection on the face, as texels and the fractions past them. The
+// texels may lie outside the face. TexelX kCBTPlanetPageNoAnchor: the face has no anchor.
+struct CBTPlanetPageAnchor
+{
+    int32_t TexelX = 0;
+    int32_t TexelZ = 0;
+    float FractionX = 0.0f;
+    float FractionZ = 0.0f;
+};
+static_assert(sizeof(CBTPlanetPageAnchor) == 16, "CBTPlanetPageAnchor mirrors one GLSL ivec4");
+inline constexpr int32_t kCBTPlanetPageNoAnchor = 0x7FFFFFFF;
+
 struct CBTSurfaceParams
 {
     float Radius = 0.0f;
@@ -1096,10 +1118,20 @@ struct CBTSurfaceParams
     uint32_t SphereAnalyticCount = 0u;
     uint32_t SphereAnalyticDabCount = 0u;
     float SphereAnalytic[kMaxSphereAnalyticModifiers * kSphereAnalyticFloatsPerModifier] = {};
+    // The planet's height pages in the fragment (cbt_planet_page.glsl): one anchor per cube face, the
+    // eye planet-local and relative to the render origin, and PlanetPaged 1 when the fragment shades
+    // from the pages (gPageTable, gPageCache).
+    CBTPlanetPageAnchor PageAnchors[kCubeFaceCount6] = {};
+    Mathematics::Vector4 PageEye;
+    Mathematics::Vector4 PageEyeRelative;
+    uint32_t PlanetPaged = 0u;
+    uint32_t PlanetPagePad0 = 0u; // scalars, not an array: a std140 array strides 16 B a scalar
+    uint32_t PlanetPagePad1 = 0u;
+    uint32_t PlanetPagePad2 = 0u;
 };
-static_assert(sizeof(CBTSurfaceParams) == 880,
-              "CBTSurfaceParams must be 880B (26 scalars + count/pad + 16 x 3 vec4 analytic set, "
-              "std430 mirror)");
+static_assert(sizeof(CBTSurfaceParams) == 1024,
+              "CBTSurfaceParams must be 1024B (26 scalars + count/pad + 16 x 3 vec4 analytic set + the "
+              "planet page tail, std430 mirror)");
 static_assert(offsetof(CBTSurfaceParams, SphereAnalyticCount) == 104 &&
                   offsetof(CBTSurfaceParams, SphereAnalytic) == 112,
               "analytic tail is appended after the leading 104B block, array 16-aligned (std430)");
@@ -1167,15 +1199,8 @@ struct CBTPushConstants
     float DirtyMinV = 0.0f;
     float DirtyMaxU = 0.0f;
     float DirtyMaxV = 0.0f;
-    // Planet-editing v1 (plan §planet-editing): the (face,rect) region identity. On the
-    // SPHERE, the dirty rect above is a FACE-LOCAL UV rect and DirtyFace selects which
-    // cube face it lies on — Classify flags MODIFIED only for bisectors on that face whose
-    // face-local UV AABB overlaps it (region-proportional per face; a cross-face edit is
-    // handed one face per update, the others re-refine via the normal metric). Ignored in
-    // planar mode (DirtyFace unused; the rect is a whole-terrain UV rect). SphereSculptEnabled
-    // gates the VertexEval additive sculpt sample (0 = pure procedural relief, the C7 default
-    // — zero overhead and byte-identical to pre-edit).
-    uint32_t DirtyFace = 0u;
+    // The planar dirty rect above; the sphere's face rects ride CBTFrameParams::SphereDirty.
+    // SphereSculptEnabled gates the VertexEval additive sculpt sample (0 = pure procedural relief).
     uint32_t SphereSculptEnabled = 0u;
     // Quiescence gate for VertexEval (plan §planet-shading perf). 0 = evaluate the whole live
     // pool (pre-slice behavior; the force pass after init / a param change). 1 = evaluate only
@@ -1247,9 +1272,9 @@ static_assert(sizeof(CBTVertexData) == 96,
 static_assert(offsetof(CBTVertexData, Meta) == 48, "legacy corner/meta offsets must not move (dark-ship)");
 static_assert(offsetof(CBTVertexData, Sector0) == 64 && offsetof(CBTVertexData, DeepTag) == 88,
               "sector tail is appended after the legacy 64B block (uvec2-aligned)");
-static_assert(sizeof(CBTFrameParams) == 1824,
+static_assert(sizeof(CBTFrameParams) == 1920,
               "CBTFrameParams must be mat4 + 13 vec4 + 16 x 3 vec4 analytic set + the height-chain vec4 + "
-              "48 uvec4 cell masks (1824B std140)");
+              "48 uvec4 cell masks + 6 face dirty rects (1920B std140)");
 static_assert(offsetof(CBTFrameParams, WaterPlane) == 240 &&
                   offsetof(CBTFrameParams, AnalyticParams) == 256 &&
                   offsetof(CBTFrameParams, SphereAnalytic) == 272,
@@ -1258,6 +1283,7 @@ static_assert(offsetof(CBTFrameParams, HeightChain) == 1040,
               "the height-chain vec4 follows the analytic set (vec4-aligned, std140)");
 static_assert(offsetof(CBTFrameParams, AnalyticCellMask) == 1056,
               "the S3 cell-mask tail is appended after the 1056B frame block (uvec4-aligned, std140)");
+static_assert(offsetof(CBTFrameParams, SphereDirty) == 1824, "the face dirty rects follow the cell masks");
 
 static_assert((kDefaultBisectorPoolSize & (kDefaultBisectorPoolSize - 1u)) == 0u,
               "pool size must be a power of two");
@@ -1265,8 +1291,8 @@ static_assert(kDefaultBisectorPoolSize % 32u == 0u, "pool size must be a multipl
 static_assert(kDefaultBaseDepth == CBTLog2(kRootHalfedgeCount), "baseDepth = log2(halfedges)");
 static_assert(kRootHalfedgeCount == 2u, "C2 conforming base = 2 twin triangles");
 static_assert(kDefaultBaseDepth == 1u, "log2(2) = 1");
-static_assert(sizeof(CBTPushConstants) == 100,
-              "push constants must stay 100B (10 u32 + 4 f32 dirty-rect + 2 u32 sphere face/enable + "
+static_assert(sizeof(CBTPushConstants) == 96,
+              "push constants must stay 96B (10 u32 + 4 f32 dirty-rect + 1 u32 sphere sculpt enable + "
               "1 u32 vertex-eval gate + 1 u32 edit-retess enable + 1 u32 near-field gate + 1 u32 "
               "region-free mask + 1 u32 deep-decode (S2a) + 1 u32 pool-pressure + 2 u32 height-chain "
               "region + 1 u32 settle; GLSL mirror; <= 128B policy)");

@@ -23,8 +23,8 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Materials/ShaderMeta.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 #include "Types/StringId.h"
 
 #include "TestDeviceHelper.h"

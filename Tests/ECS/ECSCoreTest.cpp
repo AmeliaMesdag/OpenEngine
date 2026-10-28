@@ -9,7 +9,7 @@
 #include "ECS/Entity.h"
 #include "ECS/World.h"
 #include "ECS/Components.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/ECSTemplates.h"  // Enable auto-registration for components
 #include "Logger/Logger.h"
 #include "TestComponents.h"

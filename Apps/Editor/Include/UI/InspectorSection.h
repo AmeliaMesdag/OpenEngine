@@ -43,13 +43,15 @@ public:
     const std::string& AssignHeaderIconId(const std::string& id);
 
     // How a header badge reads: amber asks for attention, red says something failed, green
-    // says the state is good, neutral is information (work in progress).
+    // says the state is good, neutral is information (work in progress), override names how the
+    // component differs from the entity's source, in the color of the override edge.
     enum class BadgeKind : std::uint8_t
     {
         Warning,
         Error,
         Success,
         Neutral,
+        Override,
     };
 
     // Show a small status badge in the header (e.g. "Not Loaded") after the title: on the value

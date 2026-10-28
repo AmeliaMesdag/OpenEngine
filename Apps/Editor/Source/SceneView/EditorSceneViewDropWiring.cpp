@@ -1,7 +1,7 @@
 #include "SceneView/EditorSceneViewDropWiring.h"
 
 #include "Panels/HierarchyPanel.h"
-#include "Panels/SceneViewPanel.h"
+#include "SceneView/SceneViewPanel.h"
 #include "EditorChangeNotifications.h"
 #include "UndoRedo/SceneViewDropUndoCommand.h"
 #include "UndoRedo/UndoRedoService.h"

@@ -7,7 +7,7 @@
 #include "Components/Rendering/PostProcessEffects/AtmosphericCloudLayer.h"
 #include "Editor/Entities/EditorECSHelpers.h"
 
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "UndoRedo/UndoRedoService.h"

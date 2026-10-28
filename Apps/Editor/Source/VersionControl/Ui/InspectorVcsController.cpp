@@ -1,8 +1,8 @@
 #include "VersionControl/Ui/InspectorVcsController.h"
 
 #include "Components/SceneEntityTag.h"
-#include "ECS/ComponentFieldRegistry.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/World.h"
 #include "Editor/Vcs/EditorVcsProviderRegistry.h"
 #include "Editor/Vcs/VcsStatusUi.h"
@@ -24,7 +24,7 @@
 #include "UI/UIEvents.h"
 #include "UndoRedo/UndoRedoService.h"
 #include "VersionControl/EditorVersionControlService.h"
-#include "VersionControl/SceneDiffLiveOverlay.h"
+#include "VersionControl/SceneDiff/SceneDiffLiveOverlay.h"
 
 #include <algorithm>
 #include <cctype>

@@ -402,11 +402,7 @@ TEST_F(CBTEditDrivenRetess, StationaryEditRefinesCliffCreaseWithoutCameraMotion)
     // Classify the edit's dirty rect this ONE frame (the transient pulse the editor emits).
     c.SphereSculptEnabled = 1u;
     c.GateVertexEval = 0u;
-    c.DirtyFace = regions.Rects[0].Face;
-    c.DirtyMinU = regions.Rects[0].MinU;
-    c.DirtyMinV = regions.Rects[0].MinV;
-    c.DirtyMaxU = regions.Rects[0].MaxU;
-    c.DirtyMaxV = regions.Rects[0].MaxV;
+    c.SphereDirty = regions;
     RunFrame(inst, layer, /*uploadSculpt=*/true, c, p, 90u);
 
     uint32_t creaseBefore = 0;
@@ -423,8 +419,7 @@ TEST_F(CBTEditDrivenRetess, StationaryEditRefinesCliffCreaseWithoutCameraMotion)
     // ---- Phase 3: hold the camera DEAD STILL, gated re-eval, EMPTY dirty rect (no transient pulse).
     // With no camera motion and no dirty pulse, only the persistent crease term can drive refinement. ----
     c.GateVertexEval = 1u;
-    c.DirtyFace = 0u;
-    c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+    c.SphereDirty = {};
     constexpr uint32_t kStationaryFrames = 24u;
     for (uint32_t f = 0; f < kStationaryFrames; ++f)
     {
@@ -619,18 +614,13 @@ TEST_F(CBTEditDrivenRetess, InteriorEditRefinesFlatFacetWithoutCameraMotion)
     c.SphereSculptEnabled = 1u;
     c.EditRetessEnabled = 0u;
     c.GateVertexEval = 0u;
-    c.DirtyFace = regions.Rects[0].Face;
-    c.DirtyMinU = regions.Rects[0].MinU;
-    c.DirtyMinV = regions.Rects[0].MinV;
-    c.DirtyMaxU = regions.Rects[0].MaxU;
-    c.DirtyMaxV = regions.Rects[0].MaxV;
+    c.SphereDirty = regions;
     RunFrame(inst, layer, /*uploadSculpt=*/true, c, p, 110u);
 
     // ---- Phase "before": hold DEAD STILL with the crease term OFF. The interior plateau must stay
     // UNREFINED (this is what main does to an interior edit — the corner gate never fires). ----
     c.GateVertexEval = 1u;
-    c.DirtyFace = 0u;
-    c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+    c.SphereDirty = {};
     for (uint32_t f = 0; f < 12u; ++f)
         RunFrame(inst, layer, /*uploadSculpt=*/true, c, p, 111u + f);
 
@@ -928,17 +918,12 @@ TEST_F(CBTSaturationRetess, EditRetessellatesUnderSaturationStaticCamera)
         // Edit lands: enable sculpt, force a full re-eval, hand Classify the dirty rect this frame.
         c.SphereSculptEnabled = 1u;
         c.GateVertexEval = 0u;
-        c.DirtyFace = regions.Rects[0].Face;
-        c.DirtyMinU = regions.Rects[0].MinU;
-        c.DirtyMinV = regions.Rects[0].MinV;
-        c.DirtyMaxU = regions.Rects[0].MaxU;
-        c.DirtyMaxV = regions.Rects[0].MaxV;
+        c.SphereDirty = regions;
         RunFrame(inst, layer, true, c, p, frame++);
 
         // Hold the camera DEAD STILL, gated re-eval, empty dirty rect: only the crease term can refine.
         c.GateVertexEval = 1u;
-        c.DirtyFace = 0u;
-        c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+        c.SphereDirty = {};
         for (uint32_t f = 0; f < 48u; ++f, ++frame)
             RunFrame(inst, layer, true, c, p, frame);
 
@@ -1024,14 +1009,9 @@ TEST_F(CBTSaturationRetess, ModifierDeleteRestoresFootprintHeightStaticCamera)
     });
     c.SphereSculptEnabled = 1u;
     c.GateVertexEval = 0u;
-    c.DirtyFace = regions.Rects[0].Face;
-    c.DirtyMinU = regions.Rects[0].MinU;
-    c.DirtyMinV = regions.Rects[0].MinV;
-    c.DirtyMaxU = regions.Rects[0].MaxU;
-    c.DirtyMaxV = regions.Rects[0].MaxV;
+    c.SphereDirty = regions;
     RunFrame(inst, layer, true, c, p, frame++);
-    c.DirtyFace = 0u;
-    c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+    c.SphereDirty = {};
     c.GateVertexEval = 1u;
     for (uint32_t f = 0; f < 8u; ++f, ++frame)
         RunFrame(inst, layer, true, c, p, frame);
@@ -1064,14 +1044,9 @@ TEST_F(CBTSaturationRetess, ModifierDeleteRestoresFootprintHeightStaticCamera)
     // version, force a full re-eval — exactly the editor's delete path. Camera never moves.
     layer.BakeModifierLayer(regions, [](float, float, float) { return 0.0f; });
     c.GateVertexEval = 0u; // force-full re-eval (the sculpt-version-change behavior)
-    c.DirtyFace = regions.Rects[0].Face;
-    c.DirtyMinU = regions.Rects[0].MinU;
-    c.DirtyMinV = regions.Rects[0].MinV;
-    c.DirtyMaxU = regions.Rects[0].MaxU;
-    c.DirtyMaxV = regions.Rects[0].MaxV;
+    c.SphereDirty = regions;
     RunFrame(inst, layer, true, c, p, frame++);
-    c.DirtyFace = 0u;
-    c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+    c.SphereDirty = {};
     c.GateVertexEval = 1u;
     for (uint32_t f = 0; f < 8u; ++f, ++frame)
         RunFrame(inst, layer, true, c, p, frame);
@@ -1136,14 +1111,9 @@ TEST_F(CBTSaturationRetess, PropertyChangeRetessellatesStaticCamera)
     auto applyEdit = [&](const SphereEditRegions& regions) {
         c.SphereSculptEnabled = 1u;
         c.GateVertexEval = 0u; // force-full re-eval (the sculpt-version-change behavior)
-        c.DirtyFace = regions.Rects[0].Face;
-        c.DirtyMinU = regions.Rects[0].MinU;
-        c.DirtyMinV = regions.Rects[0].MinV;
-        c.DirtyMaxU = regions.Rects[0].MaxU;
-        c.DirtyMaxV = regions.Rects[0].MaxV;
+        c.SphereDirty = regions;
         RunFrame(inst, layer, true, c, p, frame++);
-        c.DirtyFace = 0u;
-        c.DirtyMinU = c.DirtyMinV = c.DirtyMaxU = c.DirtyMaxV = 0.0f;
+        c.SphereDirty = {};
         c.GateVertexEval = 1u;
         for (uint32_t f = 0; f < 10u; ++f, ++frame)
             RunFrame(inst, layer, true, c, p, frame);

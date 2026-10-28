@@ -182,6 +182,7 @@ inline float sqrt(float v) { return std::sqrt(v); }
 inline float pow(float x, float y) { return std::pow(x, y); }
 inline float ceil(float v) { return std::ceil(v); }
 inline float log2(float v) { return std::log2(v); }
+inline float exp2(float v) { return std::exp2(v); }
 // GLSL smoothstep: the Hermite ramp over [edge0, edge1], clamped outside it.
 inline float smoothstep(float edge0, float edge1, float x)
 {

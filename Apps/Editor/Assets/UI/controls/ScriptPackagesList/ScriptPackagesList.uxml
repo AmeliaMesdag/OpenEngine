@@ -1,4 +1,4 @@
-<!-- ScriptPackagesList (Apps/Editor/Source/Editor/Settings/ScriptPackagesList.h): the Script Packages
+<!-- ScriptPackagesList (Apps/Editor/Source/Editor/Settings/ScriptPackages/ScriptPackagesList.h): the Script Packages
      page's list of the scripts csproj's packages (one ScriptPackageRow.uxml each), the row that adds
      a package, and the status line. The classes are the contract with ScriptPackagesList.cpp. -->
 <UIElement class="script-packages">

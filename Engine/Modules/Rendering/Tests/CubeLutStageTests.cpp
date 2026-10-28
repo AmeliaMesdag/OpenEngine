@@ -16,15 +16,15 @@
 #include "Rendering/Passes/CubeLutPreviewSources.h"
 #include "Rendering/Passes/HdrColorFxPass.h"
 #include "Rendering/Passes/TonemapPass.h"
-#include "Rendering/Utils/CubeLutFileParser.h"
+#include "Rendering/Utils/CubeLut/CubeLutFileParser.h"
 #include "Rendering/Core/NamedDescriptorWriter.h"
 #include "Rendering/Core/NamedPushConstantWriter.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Materials/MaterialHelper.h"
-#include "Rendering/Materials/ShaderMeta.h"
+#include "Rendering/Materials/Shader/ShaderMeta.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 #include "Rendering/Utils/BufferHelpers.h"
-#include "Rendering/Utils/CubeLutGpuUpload.h"
+#include "Rendering/Utils/CubeLut/CubeLutGpuUpload.h"
 
 #include <gtest/gtest.h>
 

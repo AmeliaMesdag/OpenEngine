@@ -4,7 +4,7 @@
 #include "Ocean/OceanFrameStamp.h"
 #include "Ocean/OceanInputDrawSource.h"
 #include "Ocean/OceanSettingsAsset.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include <memory>
 #include <unordered_map>
 #include <vector>

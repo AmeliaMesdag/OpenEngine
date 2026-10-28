@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "DebugServer/PhysicsRaycastRequest.h"
+#include "DebugServer/Physics/PhysicsRaycastRequest.h"
 
 #include <nlohmann/json.hpp>
 

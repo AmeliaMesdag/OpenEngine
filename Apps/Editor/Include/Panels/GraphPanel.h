@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Events/Event.h"
 #include "Graph/GraphModel.h"
 #include "Graph/GraphCanvas.h"
 #include "Graph/GraphNest.h"
@@ -8,6 +9,7 @@
 #include "InspectorRegistry.h"
 #include "UI/Controls/DockPanel.h"
 #include "UI/UIElement.h"
+#include "UI/UiCoalescedPost.h"
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -15,6 +17,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -184,6 +187,9 @@ public:
                                     bool commitUndo = true);
 
     void SetContext(const EditorContext* ctx);
+    /** Selects an asset in the Assets panel and keeps the Inspector, for the asset
+        reference fields on the canvas's pins. */
+    void SetPingAsset(std::function<void(const std::filesystem::path&)> ping);
     /** Model of the graph currently in view (the deepest open nest). */
     Graph::Model* ActiveGraphModel();
     const Graph::Model* ActiveGraphModel() const;
@@ -298,12 +304,19 @@ private:
     Editor::UndoRedoService::InteractiveEdit BeginGraphParameterEdit(const char* actionName);
     Editor::UndoRedoService::InteractiveEdit BeginGraphVariableEdit(const char* actionName);
 
+    void SubscribeAssetFiles();
+    void OnAssetFilesChanged(std::span<const GUID> changed);
+
     static bool MatchSearch(const std::string& displayName, const std::string& typeId,
                             const std::string& search);
 
     const EditorContext* m_Context = nullptr;
     Editor::UndoRedoService* m_Undo = nullptr;
     OpenColorPickerWindowFn m_OpenColorPickerWindow;
+    std::function<void(const std::filesystem::path&)> m_PingAsset;
+    // A changed-file batch that names an asset a node references rebinds the bound nodes once.
+    UI::UiCoalescedPost m_AssetFilesRebind;
+    EventSubscription m_AssetFilesSubscription;
     Editor::UndoRedoService::InteractiveEdit m_GraphDragEdit{};
 
     Editor::UndoRedoService::InteractiveEdit m_GraphParameterEdit{};

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Thumbnails/CubeLutStripRequest.h"
+#include "Inspectors/CubeLut/CubeLutStripRequest.h"
 
 #include <functional>
 #include <memory>

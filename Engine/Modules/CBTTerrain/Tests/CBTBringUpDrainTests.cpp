@@ -32,7 +32,7 @@
 #include "CBTReliefHeightSource.h"
 #include "CBTTestHarness.h"
 #include "../../Rendering/Source/Vulkan/VulkanCommandList.h"
-#include "../../Rendering/Source/Vulkan/VulkanDevice.h"
+#include "../../Rendering/Source/Vulkan/VulkanDevice/VulkanDevice.h"
 
 using namespace GameEngine::CBTTerrain;
 using namespace GameEngine::CBTTerrain::Test;

@@ -1,5 +1,6 @@
 /* PrefabBar: two lines under the entity header, so the title never breaks the actions. The bar has no
-   edge: in the Inspector a teal edge marks only an override. */
+   edge: in the Inspector a teal edge marks only an override. The glyph and the prefab's name take the
+   prefab color, as the instance's row in the Hierarchy does. */
 
 .prefab-bar {
 	display: flex;
@@ -11,16 +12,71 @@
 	background-color: var(--ui_color_bg_field);
 }
 
+/* The title's phrases wrap as whole phrases on a narrow Inspector. */
 .prefab-bar-title {
-	font-size: 13px;
-	color: var(--ui_color_text);
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 4px;
+	row-gap: 2px;
 }
 
+/* The glyph is the Hierarchy's instance glyph (.entity-icon.hierarchy-entity-prefab sets the image and the tint).
+   PrefabBar.cpp swaps that class for .prefab-bar-glyph-missing when the prefab file is not in the project. */
+.prefab-bar-glyph {
+	width: 16px;
+	height: 16px;
+	min-width: 16px;
+	flex-shrink: 0;
+	margin-right: 2px;
+	background-size: 16px 16px;
+	background-position: center;
+	background-repeat: no-repeat;
+}
+
+.prefab-bar-title-text {
+	font-size: 13px;
+	color: var(--ui_color_text);
+	white-space: nowrap;
+}
+
+/* After .prefab-bar-title-text, so the name's color wins at the same specificity. */
+.prefab-bar-prefab {
+	color: var(--ui_color_prefab);
+}
+
+/* A prefab file that is not in the project: the question mark and red, as in the Hierarchy. */
+.prefab-bar-glyph-missing {
+	background-image: url("editor:Icons/help.svg");
+	background-image-tint: var(--ui_color_error_text);
+}
+
+.prefab-bar-prefab-missing {
+	color: var(--ui_color_error_text);
+}
+
+/* The button text sits on the baseline of the first count line.
+   The button keeps its one height when the count lines wrap. */
 .prefab-bar-actions {
 	display: flex;
 	flex-direction: row;
-	align-items: center;
+	align-items: baseline;
 	gap: 8px;
+}
+
+.prefab-bar-select {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+/* The entity's count, then the instance's count when only other entities of the instance have overrides. */
+.prefab-bar-counts {
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 1;
+	min-width: 0;
+	gap: 2px;
 }
 
 .prefab-bar-count {

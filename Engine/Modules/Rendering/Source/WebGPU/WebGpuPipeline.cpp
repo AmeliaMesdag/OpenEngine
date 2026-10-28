@@ -5,7 +5,7 @@
 #include "WebGpuDevice.h"
 #include "WebGpuUnsupported.h"
 
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Geometry/VertexLayoutBuilder.h"
 
 #include "Logger/Logger.h"

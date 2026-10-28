@@ -8,7 +8,7 @@
 #pragma once
 
 #include "Engine/Rendering/RenderServices.h" // WorldPassTargetsRG
-#include "Rendering/Materials/ShaderVariantKey.h" // MaterialKeyword
+#include "Rendering/Materials/Shader/ShaderVariantKey.h" // MaterialKeyword
 
 namespace GameEngine::Engine::Renderer::Pipeline
 {

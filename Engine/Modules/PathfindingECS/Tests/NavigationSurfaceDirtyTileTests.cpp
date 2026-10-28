@@ -13,7 +13,7 @@
 #include "PathfindingECS/Systems/NavigationWorldHooks.h"
 
 #include "Components/Terrain/Terrain.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "Pathfinding/DetourNavMap.h"
 #include "Pathfinding/NavigationWorld.h"
 #include "Pathfinding/PathBuffer.h"

@@ -14,7 +14,7 @@
 #include "Rendering/Core/GPUDrawStreamBuilder.h"
 #include "Rendering/Core/GPUScene.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Materials/MaterialDocument.h"
 #include "AssetCore/GUID.h"
 #include "Types/StringId.h"

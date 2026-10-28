@@ -3,7 +3,7 @@
 #include "AssetDatabase/AssetStore_TextJsonl.h"
 #include "Assets/TextureCook.h"
 #include "Core/ApplicationPaths.h"
-#include "ECS/ComponentFactory.h"
+#include "ECS/Component/ComponentFactory.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/SystemScheduling.h"
 #include "ECS/Systems.h"

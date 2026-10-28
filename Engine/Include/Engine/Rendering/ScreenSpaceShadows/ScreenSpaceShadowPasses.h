@@ -1,8 +1,8 @@
 #pragma once
 
 #include <memory>
-#include "Rendering/CameraTypes.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Camera/CameraTypes.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 
 namespace GameEngine::Rendering

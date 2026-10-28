@@ -4,12 +4,12 @@
 #include "Engine/Rendering/RenderServices.h"
 
 #include "Logger/Logger.h"
-#include "Rendering/CameraDerivation.h"
+#include "Rendering/Camera/CameraDerivation.h"
 #include "Rendering/Common/Frustum.h"
 #include "Rendering/Core/BindlessResourceManager.h"
 #include "Rendering/Core/GPUCulling.h"
 #include "Rendering/Core/GPUScene.h"
-#include "Rendering/Materials/ShaderProfileDefines.h"
+#include "Rendering/Materials/Shader/ShaderProfileDefines.h"
 #include "Mathematics/MatrixOps.h"
 #include "Mathematics/Vector4.h"
 

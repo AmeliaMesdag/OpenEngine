@@ -7,7 +7,7 @@
 
 #include "Rendering/Common/Utils.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineCache.h"
+#include "Rendering/Core/Pipeline/PipelineCache.h"
 #include "Rendering/Materials/MaterialBuilder.h"
 #include "TestUtils.h"
 

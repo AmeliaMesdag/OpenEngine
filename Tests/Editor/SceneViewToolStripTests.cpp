@@ -6,8 +6,8 @@
 
 #include "SceneView/SceneViewToolStrip.h"
 #include "SceneView/SceneViewToolStripRegistry.h"
-#include "SceneView/SplineToolStripEntry.h"
-#include "SceneView/TerrainBrushToolStripEntry.h"
+#include "SceneView/SplineTool/SplineToolStripEntry.h"
+#include "Terrain/TerrainBrushToolStripEntry.h"
 
 #include "Components/Terrain/Terrain.h"
 #include "ECS/Entity.h"

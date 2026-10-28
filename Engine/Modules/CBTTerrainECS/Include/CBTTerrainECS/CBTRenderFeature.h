@@ -25,7 +25,7 @@
 #include "Components/Terrain/Terrain.h" // kNoTerrainSeaLevel
 #include "Engine/Rendering/DrawBindings.h"
 #include "Engine/Rendering/IRenderFeature.h"
-#include "Rendering/Materials/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
 
 namespace GameEngine::Rendering
 {
@@ -98,7 +98,7 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     {
         // A drive change or an edited region makes this frame's update run, which the depth-derived
         // elision readers learn from WritesDynamicDepth before the update is declared.
-        const bool edited = classify.DirtyMaxU > classify.DirtyMinU && classify.DirtyMaxV > classify.DirtyMinV;
+        const bool edited = classify.HasDirtyRegion();
         if (edited || active != m_Active ||
             std::memcmp(&classify, &m_Classify, sizeof(classify)) != 0 ||
             targetPixelError != m_TargetPixelError || terrainSeaLevel != m_TerrainSeaLevel ||
@@ -200,18 +200,9 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // drifting on the analytic base sphere (#488 follow-up). `dir` need not be unit.
     float SampleSphereSurfaceHeight(float dx, float dy, float dz) const;
 
-    // Restarts the tree from its roots when it no longer matches what it tessellates: the desired
-    // domain (from the Terrain component) differs from the seeded one, a terrain was retired since
-    // the seed (ConsumeTerrainRetire), or the depth cap fell below the deepest cap the tree was
-    // allowed (CBTTreeSeed). The first request restarts at once; repeats within CBTTreeSeed's
-    // window wait until they settle, so an inspector drag restarts the tree at its first step
-    // and once when it ends. A restarted tree is refined to CBTTreeSeed::kRestartSeedDepth (or the
-    // cap) before its first draw, so no frame draws the bare roots. The re-seed also zeroes the work-queue
-    // counters, the overflow total included. `frameCounter` is this frame's value from
-    // CBTInstance::AdvanceFrameCounter. Called render-side after EnsureInitialized and
-    // ConsumeTerrainRetire (owns the device + command lists). No-op when nothing changed. Logs a
-    // GE_CBT.Planet line on every (re)seed so a verify can grep the active domain, the roots and
-    // the reason.
+    // Restarts the tree from its roots when CBTTreeSeed names a reason: a domain change, a retire
+    // (ConsumeTerrainRetire), a drawn-terrain switch (the last BuildFrameParams) or a lowered cap.
+    // `frameCounter` is this frame's CBTInstance::AdvanceFrameCounter value. Logs one GE_CBT.Planet line per seed.
     void EnsureSeeded(uint32_t frameCounter);
 
     // In-place re-provision safety. A SamplesPerMeter/size edit that preserves the runtime tiled
@@ -250,6 +241,8 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // uploaded yet). CBTRenderNode forwards this to CBTUpdateNode so the update pass
     // can declare its read edge on the texture VertexEval samples (plan §8 C5).
     Rendering::TextureHandle GetBoundHeightmap() const { return m_BoundHeightmap; }
+    // The page cache the full-profile draw binds as gPageCache this frame, or an invalid handle (the flat default).
+    Rendering::TextureHandle GetDrawPageCache() const { return m_DrawPageCache; }
     // The terrain's shadow source set by the most recent BuildFrameParams (no height texture when
     // none is bound or the terrain is atlas-backed), and the bake that turns it into the map.
     const TerrainShadowSource& GetTerrainShadowSource() const { return m_TerrainShadowSource; }
@@ -284,6 +277,11 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // a stale read self-corrects by re-arming one more frame.
     void NotifyUpdateRecorded() { m_UpdateRecordCount.fetch_add(1u, std::memory_order_relaxed); }
     uint64_t GetUpdateRecordCount() const { return m_UpdateRecordCount.load(std::memory_order_relaxed); }
+    /// The page samples of the newest read update that no resident page answered. A drawn planet's
+    /// pinned levels are resident, so a value above 0 is a pinning defect.
+    uint32_t GetUnresolvedPageSamples() const { return m_UnresolvedPageSamples.load(std::memory_order_relaxed); }
+    /// The read updates with an unresolved page sample since the feature started.
+    uint64_t GetUnresolvedPageUpdates() const { return m_UnresolvedPageUpdates.load(std::memory_order_relaxed); }
 
     // Builds the indexed-indirect CBT DrawCommand for `viewId`. Returns false without
     // logging while the material's base compile is in flight (the terrain draws once
@@ -342,6 +340,9 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // bytes compared each frame (a member so the comparison allocates nothing), and the last answer.
     CBTTerrain::CBTUpdateRestGate m_RestGate;
     CBTTerrain::CBTActivityReadback m_ActivityReadback;
+    // The unresolved page counter of the read updates (render thread writes, the stats reply reads).
+    std::atomic<uint32_t> m_UnresolvedPageSamples{0};
+    std::atomic<uint64_t> m_UnresolvedPageUpdates{0};
     std::vector<uint8_t> m_UpdateInputs;
     std::atomic<bool> m_UpdateAtRest{false};
     // GE_CBT_VALIDATE's counter readback; destroyed with the feature, before the device.
@@ -351,9 +352,10 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // The CBT buffer handles are persistent, so this is built once and its span
     // stays valid every frame (no per-view scratch needed).
     std::vector<Engine::Renderer::DrawBindings::BufferEntry> m_DrawBuffers;
-    // Compat only: cbt_surface declares its terrain maps as named set-2 bindings there, because
-    // WebGPU exposes no binding array to index. Empty on the bindless profile.
+    // The named set-2 textures cbt_surface declares: the compat terrain maps (WebGPU has no binding array
+    // to index), or the full profile's normal chain and page cache.
     std::vector<Engine::Renderer::DrawBindings::TextureEntry> m_DrawTextures;
+    Rendering::TextureHandle m_DrawPageCache; // the page cache the update samples this frame, if any
     CBTTerrain::CBTClassifyDesc m_Classify{};
     // Planet-editing sculpt upload gate (v2): the authoritative paged sculpt store lives in
     // TerrainService (dab + baked modifier stack, shared across modules); the feature only uploads
@@ -410,7 +412,6 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // to force a full-pool VertexEval (the quiescence gate skips unchanged bisectors).
     std::atomic<bool> m_ForceVertexEval{true};
     bool m_SphereShadingSignalLogged = false; // one-shot GE_CBT.SphereShading signal
-    bool m_MultiTerrainWarned = false; // warn-once: CBT renders only terrain 0
     // The real terrain heightmap bound this frame (invalid = flat default). Set by
     // BuildFrameParams, read by CBTRenderNode for the CBT.Update read edge.
     Rendering::TextureHandle m_BoundHeightmap{};

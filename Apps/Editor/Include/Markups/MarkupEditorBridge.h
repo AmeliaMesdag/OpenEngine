@@ -5,7 +5,7 @@
 #include "EditorChangeNotifications.h"
 #include "MarkupECS/MarkupRegionDisplayCache.h"
 #include "Markups/MarkupHighlightState.h"
-#include "Markups/MarkupRegionDisplay.h"
+#include "Markups/MarkupRegion/MarkupRegionDisplay.h"
 
 #include <cstddef>
 #include <filesystem>

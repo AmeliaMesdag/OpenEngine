@@ -20,7 +20,7 @@
 #include "UndoRedo/DeleteEntitiesCommand.h"
 #include "UndoRedo/UndoRedoService.h"
 #include "VersionControl/EditorVersionControlService.h"
-#include "VersionControl/SceneDiffLiveOverlay.h"
+#include "VersionControl/SceneDiff/SceneDiffLiveOverlay.h"
 
 #include <algorithm>
 #include <cstring>

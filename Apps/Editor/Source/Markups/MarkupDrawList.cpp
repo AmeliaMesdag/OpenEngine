@@ -8,7 +8,7 @@
 #include "ECS/World.h"
 #include "Components/Spline/SplineComponent.h"
 #include "Markups/MarkupEditorBridge.h"
-#include "Markups/MarkupRegionDisplay.h"
+#include "Markups/MarkupRegion/MarkupRegionDisplay.h"
 #include "Mathematics/Geometry.h"
 #include "Mathematics/Matrix4x4.h"
 #include "Mathematics/Vector4.h"

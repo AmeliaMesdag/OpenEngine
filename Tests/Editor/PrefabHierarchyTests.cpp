@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "Editor/EditorTreeTitleIconVars.h"
-#include "Editor/Hierarchy/HierarchyEntityIcon.h"
+#include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityIcon.h"
 #include "Editor/Registries/EditorPluginRegistry.h"
 #include "Editor/Shortcuts/EditorShortcuts.h"
 #include "RecordingContextMenu.h"

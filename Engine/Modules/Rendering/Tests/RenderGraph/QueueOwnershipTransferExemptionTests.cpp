@@ -34,7 +34,7 @@
 // spec defines it, or the layer does not implement it and no arm discriminates).
 
 #include "Rendering/Core/Device.h"
-#include "VulkanDevice.h"
+#include "VulkanDevice/VulkanDevice.h"
 
 #include "Logger/Logger.h"
 

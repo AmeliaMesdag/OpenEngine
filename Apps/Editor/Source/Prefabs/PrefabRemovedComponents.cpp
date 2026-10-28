@@ -32,7 +32,7 @@ PrefabRemovedComponents::PrefabRemovedComponents(const std::vector<std::string>&
         section->Fade();
         section->HideOptions();
         section->SetHeaderTooltip(kRemovedTooltip);
-        section->SetHeaderBadge("Removed", kRemovedTooltip, InspectorSection::BadgeKind::Neutral);
+        section->SetHeaderBadge("Removed", kRemovedTooltip, InspectorSection::BadgeKind::Override);
         AddChild(std::move(section));
     }
 }

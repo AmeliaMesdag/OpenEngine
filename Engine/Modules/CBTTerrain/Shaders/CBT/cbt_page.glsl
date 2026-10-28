@@ -17,10 +17,11 @@
 // TerrainAtlasTests (GlslShim.h) and swept against the mirror: write it component-wise (no
 // swizzles), float literals suffixed `f`, no out parameters.
 //
-// Pure math, no bindings. The consumer defines the four taps declared below, after including this
+// Pure math, no bindings. The consumer defines the five taps declared below, after including this
 // file (GLSL resolves a prototype at link):
 //   uint CBT_PageTableWord(uint index);        // word `index` of the table's words (PageTable::Words)
 //   float CBT_PageSlotFade(uint slot);         // the arrival fade of a slot: 0 just assigned, 1 settled
+//   void CBT_PageUnresolved();                 // a level's walk found no resident page up to the top
 //   CBTPageLevel CBT_PageLevelShape(uint level);
 //   float CBT_PageCacheBilinear(float texelX, float texelZ);
 // The last one reads the cache bilinearly at absolute texel coordinates (an integer is a texel's
@@ -72,9 +73,17 @@ struct CBTPageLevelSample
 };
 // GE_SHARED_PAGE_TYPES_END
 
+// The words of a page-table ring slot (mirror CBTLayout.h kCBTPageHeaderWords, kCBTPageMaxLevels,
+// kCBTPageFadeOffsetWords): the field's header, one CBTPageLevel per level, one arrival fade per cache
+// slot, then the table's words. Every consumer's taps read a slot through these offsets.
+#define CBT_PAGE_HEADER_WORDS 8u
+#define CBT_PAGE_MAX_LEVELS 32u
+#define CBT_PAGE_FADE_OFFSET (CBT_PAGE_HEADER_WORDS + 4u * CBT_PAGE_MAX_LEVELS)
+
 // The consumer's taps (see the header).
 uint CBT_PageTableWord(uint index);
 float CBT_PageSlotFade(uint slot);
+void CBT_PageUnresolved();
 CBTPageLevel CBT_PageLevelShape(uint level);
 float CBT_PageCacheBilinear(float texelX, float texelZ);
 
@@ -232,6 +241,8 @@ CBTPageLevelSample CBT_PageSampleLevel(CBTPagePoint point, uint level, CBTPageFi
         result.Height = result.Height + remaining * fade * own;
         remaining = remaining * (1.0f - fade);
     }
+    if (result.Level == field.LevelCount)
+        CBT_PageUnresolved();
     return result;
 }
 
@@ -250,6 +261,122 @@ float CBT_PageSamplePoint(CBTPagePoint point, float lambda, CBTPageField field)
         return own.Height; // the fallback ancestor answers alone: its own parent is coarser still
     CBTPageLevelSample parent = CBT_PageSampleLevel(point, base + 1u, field);
     return own.Height + (parent.Height - own.Height) * w;
+}
+
+// A central difference's five points on one face: the center and its four taps.
+struct CBTPageCross
+{
+    CBTPagePoint Center;
+    CBTPagePoint PlusX;
+    CBTPagePoint MinusX;
+    CBTPagePoint PlusZ;
+    CBTPagePoint MinusZ;
+};
+
+// The heights of a CBTPageCross's five points, and the resident level that answered the center.
+struct CBTPageCrossSample
+{
+    float Center;
+    float PlusX;
+    float MinusX;
+    float PlusZ;
+    float MinusZ;
+    uint Level;
+};
+
+// Whether `tap` lies in the page of `level` that holds `center`. It then lies in the same page of every
+// coarser level too, so the center's walk of the table is the tap's walk.
+bool CBT_PageSharesWalk(CBTPagePoint center, CBTPagePoint tap, uint level)
+{
+    uint shift = level + CBT_PAGE_OWNED_SHIFT;
+    return tap.Face == center.Face && (tap.TexelX >> shift) == (center.TexelX >> shift) &&
+           (tap.TexelZ >> shift) == (center.TexelZ >> shift);
+}
+
+// CBT_PageSampleLevel at the five points of `points` in one walk, with the same operations per point. A tap
+// not marked shared is not sampled and answers 0.
+CBTPageCrossSample CBT_PageSampleLevelCross(CBTPageCross points, bool sharesPlusX, bool sharesMinusX,
+                                            bool sharesPlusZ, bool sharesMinusZ, uint level, CBTPageField field)
+{
+    CBTPageCrossSample result;
+    result.Center = 0.0f;
+    result.PlusX = 0.0f;
+    result.MinusX = 0.0f;
+    result.PlusZ = 0.0f;
+    result.MinusZ = 0.0f;
+    result.Level = field.LevelCount;
+    float remaining = 1.0f;
+    for (uint walk = level; walk < field.LevelCount; ++walk)
+    {
+        uint entry = CBT_PageEntryAt(points.Center, walk, field);
+        if (entry == CBT_PAGE_NO_PAGE)
+            continue;
+        uint slot = entry & CBT_PAGE_SLOT_MASK;
+        float fade = CBT_PageSlotFade(slot);
+        bool settles = fade >= 1.0f || walk + 1u >= field.LevelCount;
+        float weight = settles ? remaining : remaining * fade;
+        result.Center = result.Center + weight * CBT_PageSampleSlot(points.Center, walk, slot, field);
+        if (sharesPlusX)
+            result.PlusX = result.PlusX + weight * CBT_PageSampleSlot(points.PlusX, walk, slot, field);
+        if (sharesMinusX)
+            result.MinusX = result.MinusX + weight * CBT_PageSampleSlot(points.MinusX, walk, slot, field);
+        if (sharesPlusZ)
+            result.PlusZ = result.PlusZ + weight * CBT_PageSampleSlot(points.PlusZ, walk, slot, field);
+        if (sharesMinusZ)
+            result.MinusZ = result.MinusZ + weight * CBT_PageSampleSlot(points.MinusZ, walk, slot, field);
+        if (result.Level == field.LevelCount)
+            result.Level = walk;
+        if (settles)
+            return result;
+        remaining = remaining * (1.0f - fade);
+    }
+    if (result.Level == field.LevelCount)
+        CBT_PageUnresolved();
+    return result;
+}
+
+// Each point of `points` at continuous level `lambda`, equal to its own CBT_PageSamplePoint. One walk (two in
+// a level's blend quarter) serves every tap in the center's page of the sampled level; a tap past that page's
+// edge takes its own walk.
+CBTPageCrossSample CBT_PageSampleCross(CBTPageCross points, float lambda, CBTPageField field)
+{
+    CBTPageCrossSample result;
+    result.Center = 0.0f;
+    result.PlusX = 0.0f;
+    result.MinusX = 0.0f;
+    result.PlusZ = 0.0f;
+    result.MinusZ = 0.0f;
+    result.Level = field.LevelCount;
+    if (field.LevelCount == 0u)
+        return result;
+    uint top = field.LevelCount - 1u;
+    float clamped = clamp(lambda, 0.0f, float(top));
+    uint base = min(uint(clamped), top);
+    bool sharesPlusX = CBT_PageSharesWalk(points.Center, points.PlusX, base);
+    bool sharesMinusX = CBT_PageSharesWalk(points.Center, points.MinusX, base);
+    bool sharesPlusZ = CBT_PageSharesWalk(points.Center, points.PlusZ, base);
+    bool sharesMinusZ = CBT_PageSharesWalk(points.Center, points.MinusZ, base);
+    result = CBT_PageSampleLevelCross(points, sharesPlusX, sharesMinusX, sharesPlusZ, sharesMinusZ, base, field);
+    float w = base < top ? CBT_PageParentBlend(clamped) : 0.0f;
+    if (w > 0.0f && result.Level <= base)
+    {
+        CBTPageCrossSample parent =
+            CBT_PageSampleLevelCross(points, sharesPlusX, sharesMinusX, sharesPlusZ, sharesMinusZ, base + 1u, field);
+        result.Center = result.Center + (parent.Center - result.Center) * w;
+        result.PlusX = result.PlusX + (parent.PlusX - result.PlusX) * w;
+        result.MinusX = result.MinusX + (parent.MinusX - result.MinusX) * w;
+        result.PlusZ = result.PlusZ + (parent.PlusZ - result.PlusZ) * w;
+        result.MinusZ = result.MinusZ + (parent.MinusZ - result.MinusZ) * w;
+    }
+    if (!sharesPlusX)
+        result.PlusX = CBT_PageSamplePoint(points.PlusX, lambda, field);
+    if (!sharesMinusX)
+        result.MinusX = CBT_PageSamplePoint(points.MinusX, lambda, field);
+    if (!sharesPlusZ)
+        result.PlusZ = CBT_PageSamplePoint(points.PlusZ, lambda, field);
+    if (!sharesMinusZ)
+        result.MinusZ = CBT_PageSamplePoint(points.MinusZ, lambda, field);
+    return result;
 }
 
 // The height at terrain UV (u, v) of a planar field at continuous level `lambda`.

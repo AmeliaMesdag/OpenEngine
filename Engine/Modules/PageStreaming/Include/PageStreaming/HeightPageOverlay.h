@@ -20,6 +20,11 @@ bool PageReadsLevel0Rect(const PageAddress& address, const PageSampleRect& level
 PageSampleRect Level0RectReach(std::span<const PageStoreLevel> levels, const PageSampleRect& level0Rect,
                                uint32 level);
 
+/// True when no level of `levels` reads an edge sample of the face under `level0Rect` (Level0RectReach
+/// stays inside the face at every level). An overlay stops at its face's edge, so only such a rect is
+/// finished on a planet: past the edge it would rise as a wall.
+bool Level0RectStaysInsideFace(std::span<const PageStoreLevel> levels, const PageSampleRect& level0Rect);
+
 /// The height a terrain's modifiers add to its base pages (the baked-page cache of the
 /// page-streaming design, 3.8): level 0 holds the baked height minus the base over the rect the
 /// modifiers reach, every coarser level the [1 2 1] / 4 tent of the level below with the store's
@@ -34,10 +39,10 @@ PageSampleRect Level0RectReach(std::span<const PageStoreLevel> levels, const Pag
 class HeightPageOverlay
 {
 public:
-    /// The overlay of a pyramid of `levels` (the store's, BuildPageStoreLevels) whose level-0
-    /// delta is `level0Delta` (row-major over `level0Rect`, which lies inside level 0). Zero
-    /// outside the rect.
-    HeightPageOverlay(std::span<const PageStoreLevel> levels, const PageSampleRect& level0Rect,
+    /// The overlay of face `face` of a pyramid of `levels` (the store's, BuildPageStoreLevels) whose
+    /// level-0 delta is `level0Delta` (row-major over `level0Rect`, which lies inside level 0). Zero
+    /// outside the rect and on every other face; a flat terrain has face 0 only.
+    HeightPageOverlay(uint8 face, std::span<const PageStoreLevel> levels, const PageSampleRect& level0Rect,
                       std::vector<float32> level0Delta);
 
     /// The bytes the overlay of `levels` over `level0Rect` holds: the rect's samples at every level,
@@ -48,11 +53,15 @@ public:
     /// (row-major over `changed`) and refilters the coarser levels only where `changed` reaches them.
     void Rebake(const PageSampleRect& changed, std::span<const float32> changedDelta);
 
-    /// Adds this overlay to page `address`'s kPageSampleCount samples (row-major, apron included).
-    /// Returns false, leaving them untouched, when the page reads no sample of the overlay.
+    /// Adds this overlay to page `address`'s kPageSampleCount samples (row-major, apron included);
+    /// false, and no change, for a page of another face or one that reads no sample of the overlay.
+    /// An apron past the face's edge takes the edge sample's delta: an overlay stops at its face's edge.
     bool ApplyToPage(const PageAddress& address, std::span<float32> samples) const;
 
-    /// The level-0 rect the overlay covers.
+    /// True when the overlay was made for the pyramid `levels`: the same levels and level-0 samples.
+    bool FitsLevels(std::span<const PageStoreLevel> levels) const;
+    /// The face and the level-0 rect the overlay covers.
+    uint8 Face() const { return m_Face; }
     const PageSampleRect& Level0Rect() const { return m_Levels.front().Rect; }
     /// The delta at level `level`'s sample (x, z): zero outside the overlay.
     float32 Delta(uint32 level, uint32 x, uint32 z) const;
@@ -69,6 +78,7 @@ private:
     void FilterLevel(uint32 level, const PageSampleRect& finerChanged);
 
     std::vector<Level> m_Levels;
+    uint8 m_Face = 0;
 };
 
 } // namespace GameEngine::PageStreaming

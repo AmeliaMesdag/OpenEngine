@@ -137,19 +137,19 @@ add_executable(EditorThumbnailRoutingTests
     ThumbnailServiceRoutingTests.cpp
     ThumbnailResultCacheTests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ThumbnailService.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/CubeLutStripBands.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/CubeLutStripRequest.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/CubeLutThumbnailHandler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Inspectors/CubeLut/CubeLutStripBands.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Inspectors/CubeLut/CubeLutStripRequest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Inspectors/CubeLut/CubeLutThumbnailHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/FolderBakeReport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/TextureThumbnailHandler.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailHandler.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailBakeQueue.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailBakedImages.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailCacheFiles.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailImports.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailPngPersistence.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailPreviewScene.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnailRenderLanes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailHandler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailBakeQueue.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailBakedImages.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailCacheFiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailImports.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailPngPersistence.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailPreviewScene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/ModelThumbnailRenderLanes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ShaderGraphThumbnailMaterial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Prefabs/PrefabThumbnailHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Editor/Assets/ShaderGlslOpen.cpp
@@ -180,7 +180,7 @@ add_test(NAME EditorThumbnailRoutingTests COMMAND EditorThumbnailRoutingTests)
 # folder-bake queue methods with deterministic hosts.
 # This standalone target needs no full Editor or GPU to catch a whole-sweep return.
 set(THUMBNAIL_CACHE_TEST_HEADERS)
-# Each phase is extracted from the file that owns it: <phase>:<file under Source/Thumbnails>.
+# Each phase is extracted from the file that owns it: <phase>:<file under Source/Thumbnails/ModelThumbnail>.
 foreach(entry IN ITEMS Schedule:ModelThumbnailPngPersistence.cpp Persist:ModelThumbnailPngPersistence.cpp
                        Release:ModelThumbnailBakedImages.cpp Imports:ModelThumbnailImports.cpp
                        Idle:ModelThumbnailHandler.cpp Bakes:ModelThumbnailBakeQueue.cpp)
@@ -192,12 +192,12 @@ foreach(entry IN ITEMS Schedule:ModelThumbnailPngPersistence.cpp Persist:ModelTh
     add_custom_command(OUTPUT "${header}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
         COMMAND ${CMAKE_COMMAND}
-            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/${phase_source}
+            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/ModelThumbnail/${phase_source}
             -DOUT=${header}
             "-DBEGIN_MARKER=// GE_THUMBNAIL_CACHE_${phase_upper}_BEGIN"
             "-DEND_MARKER=// GE_THUMBNAIL_CACHE_${phase_upper}_END"
             -P ${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Tests/ExtractShaderBlock.cmake
-        DEPENDS ../Source/Thumbnails/${phase_source}
+        DEPENDS ../Source/Thumbnails/ModelThumbnail/${phase_source}
             ${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Tests/ExtractShaderBlock.cmake
         VERBATIM)
     list(APPEND THUMBNAIL_CACHE_TEST_HEADERS "${header}")
@@ -209,7 +209,8 @@ target_include_directories(EditorThumbnailPersistenceTests PRIVATE
     ../Include ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${CMAKE_SOURCE_DIR}/Engine/Modules/AssetCore/Include)
 # Image: the extracted block's resample and encode, and the readback's decode.
-target_link_libraries(EditorThumbnailPersistenceTests PRIVATE Image Logger GTest::gtest_main)
+# Mathematics: the extracted block's Clamp01.
+target_link_libraries(EditorThumbnailPersistenceTests PRIVATE Image Logger Mathematics GTest::gtest_main)
 target_compile_features(EditorThumbnailPersistenceTests PRIVATE cxx_std_20)
 if(MSVC)
     target_compile_definitions(EditorThumbnailPersistenceTests PRIVATE _CRT_SECURE_NO_WARNINGS)

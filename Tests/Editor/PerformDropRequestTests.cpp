@@ -8,7 +8,7 @@
 #include "../TestTempDir.h"
 #include "DebugServer/PerformDropRequest.h"
 #include "Editor/DragDropPayloads.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/Interaction/DropTarget.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIElement.h"

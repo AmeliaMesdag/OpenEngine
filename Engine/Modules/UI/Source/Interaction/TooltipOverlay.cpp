@@ -7,7 +7,7 @@
 #include "UI/Internal/LayoutAccess.h"
 
 #include "UI/UIPrimitive.h"
-#include "../UIManager_Internal.h"
+#include "../UIManager/UIManager_Internal.h"
 
 #include <algorithm>
 #include <cmath>

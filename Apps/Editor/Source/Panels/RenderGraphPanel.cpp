@@ -15,7 +15,7 @@
 #include "Assets/AssetManager.h"
 #include "Core/Application.h"
 #include "Core/Engine.h"
-#include "DebugServer/RenderDocCapture.h"
+#include "DebugServer/Capture/RenderDocCapture.h"
 #include "Engine/Rendering/FrameOrchestrator.h"
 #include "Engine/Rendering/Pipeline/RenderPipeline.h"
 #include "Engine/Rendering/RenderServices.h"

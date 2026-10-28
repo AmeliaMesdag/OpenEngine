@@ -22,7 +22,7 @@
 #include "Markups/MarkupEditorBridge.h"
 #include "Markups/MarkupEditorSurfaces.h"
 #include "SceneView/SceneViewFraming.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 #include "Scripting/ScriptsConfig.h"
 #include "SplineECS/SplineService.h"
 #include "Terrain/TerrainTypes.h"

@@ -1,9 +1,9 @@
 #include "Engine/Rendering/RetargetGPUDataStore.h"
 
 #include "Animation/AnimationClip.h"
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 #include "Animation/Nodes/RetargetNode.h"
-#include "Animation/SkeletonData.h"
+#include "Animation/Skeleton/SkeletonData.h"
 #include "AssetCore/AssetEvents.h"
 #include "AssetCore/AssetTypes.h"
 #include "AssetCore/GUID.h"

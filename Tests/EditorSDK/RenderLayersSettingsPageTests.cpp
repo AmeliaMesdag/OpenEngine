@@ -2,7 +2,7 @@
 // workspace: the 32 name rows, the placeholders, a refused duplicate with its message, and a rename that
 // reaches the project file and the names a game reads.
 
-#include "Editor/Settings/RenderLayersSettingsPage.h"
+#include "Editor/Settings/Render/RenderLayersSettingsPage.h"
 
 #include "Core/Engine.h"
 #include "Editor/Settings/EditorSettingsRegistry.h"

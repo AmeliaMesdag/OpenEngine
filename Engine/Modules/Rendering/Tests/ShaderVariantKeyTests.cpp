@@ -2,8 +2,8 @@
 
 #include <gtest/gtest.h>
 
-#include "Rendering/Materials/ShaderVariantKey.h"
-#include "Rendering/Materials/ShaderComposer.h"
+#include "Rendering/Materials/Shader/ShaderVariantKey.h"
+#include "Rendering/Materials/Shader/ShaderComposer.h"
 #include "Rendering/Materials/UserKeyword.h"
 #include "Rendering/Materials/MaterialDocument.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"

@@ -7,12 +7,12 @@ project(ECS LANGUAGES CXX)
 set(ECS_SOURCES
     Source/World.cpp
     Source/Entity.cpp
-    Source/ComponentRegistry.cpp
-    Source/ComponentHandler.cpp
+    Source/Component/ComponentRegistry.cpp
+    Source/Component/ComponentHandler.cpp
     Source/ModuleRegistration.cpp
-    Source/ComponentFieldRegistry.cpp
-    Source/ComponentFactory.cpp
-    Source/ComponentLayoutReloadMigrator.cpp
+    Source/Component/ComponentFieldRegistry.cpp
+    Source/Component/ComponentFactory.cpp
+    Source/Component/ComponentLayoutReloadMigrator.cpp
     Source/BlobComponent.cpp
     Source/CachedQuery.cpp
     Source/UnresolvedComponentStore.cpp
@@ -30,20 +30,20 @@ set(ECS_HEADERS
     Include/ECS/ClonePlan.h
     Include/ECS/EntityRemap.h
     Include/ECS/Query.h
-    Include/ECS/ComponentFlags.h
+    Include/ECS/Component/ComponentFlags.h
     Include/ECS/Components.h
-    Include/ECS/ComponentRegistry.h
+    Include/ECS/Component/ComponentRegistry.h
     Include/ECS/IComponentHandler.h
-    Include/ECS/ComponentHandler.h
-    Include/ECS/ComponentHook.h
-    Include/ECS/ComponentFieldRegistry.h
-    Include/ECS/ComponentFactory.h
-    Include/ECS/ComponentLayoutReloadMigrator.h
-    Include/ECS/ComponentBase.h
+    Include/ECS/Component/ComponentHandler.h
+    Include/ECS/Component/ComponentHook.h
+    Include/ECS/Component/ComponentFieldRegistry.h
+    Include/ECS/Component/ComponentFactory.h
+    Include/ECS/Component/ComponentLayoutReloadMigrator.h
+    Include/ECS/Component/ComponentBase.h
     Include/ECS/BlobComponent.h
     Include/ECS/CachedQuery.h
     Include/ECS/ChangeFilter.h
-    Include/ECS/ComponentConcepts.h
+    Include/ECS/Component/ComponentConcepts.h
     Include/ECS/QueryAccessProbe.h
     Include/ECS/AutoRegistration.h
     Include/ECS/ECSTemplates.h

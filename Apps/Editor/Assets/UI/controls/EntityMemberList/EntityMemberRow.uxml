@@ -1,0 +1,16 @@
+<!-- One row of EntityMemberList: the member checkbox, the glyph, the title and its note, and the
+     mode as two segments or as one label. The control hides the parts a row does not use. The
+     classes are the contract with EntityMemberList.cpp. -->
+<UIElement class="entity-member-row">
+  <Toggle class="entity-member-toggle" />
+  <UIElement class="entity-member-glyph" />
+  <UIElement class="entity-member-text">
+    <Label class="entity-member-title" />
+    <Label class="entity-member-note" />
+  </UIElement>
+  <UIElement class="entity-member-mode">
+    <Button class="segmented-button entity-member-segment" />
+    <Button class="segmented-button entity-member-segment" />
+    <Label class="entity-member-mode-label" />
+  </UIElement>
+</UIElement>

@@ -23,6 +23,7 @@ namespace GameEngine.Scripting
         Meadow = 1,
         Lawn = 2,
         Steppe = 3,
+        Stylized = 4,
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 252)]
@@ -52,9 +53,9 @@ namespace GameEngine.Scripting
         public TerrainGrassPreset Preset
         {
             readonly get => m_Preset;
-            set => m_Preset = (byte)value <= 3
+            set => m_Preset = (byte)value <= 4
                 ? value
-                : throw new ArgumentOutOfRangeException(nameof(value), value, "TerrainGrass.Preset is Custom, Meadow, Lawn or Steppe.");
+                : throw new ArgumentOutOfRangeException(nameof(value), value, "TerrainGrass.Preset is Custom, Meadow, Lawn, Steppe or Stylized.");
         }
 
         [FieldOffset(4)]

@@ -6,7 +6,7 @@
 #include "ECS/World.h"
 #include "Editor/Entities/EditorECSHelpers.h"
 
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "UI/Controls/TextField.h"

@@ -5,8 +5,8 @@
 #include "Engine/Rendering/SkyEnvironmentSource.h"
 #include "Mathematics/Vector3.h"
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
+#include "Rendering/Camera/CameraTypes.h"
 
 #include <cstdint>
 

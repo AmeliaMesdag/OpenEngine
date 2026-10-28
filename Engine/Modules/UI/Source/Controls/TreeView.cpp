@@ -8,7 +8,7 @@
 #include "UI/UIManager.h"
 #include "UI/StyleProperties.h"
 #include "UI/VirtualizationCoordinator.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/Interaction/ItemResizeGesture.h"
 #include "Input/InputSystem.h"
 #include "Input/KeyCodes.h"

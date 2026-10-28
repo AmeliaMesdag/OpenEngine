@@ -3,7 +3,7 @@
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Inspectors/InspectorColorSwatchRow.h"
 #include "Inspectors/InspectorDragHelpers.h"
-#include "Inspectors/Particles/ParticleStackEditor.h"
+#include "Inspectors/Particles/ParticleStack/ParticleStackEditor.h"
 #include "Panels/ColorPicker.h"
 #include "Particles/ParticleParameterAccess.h"
 #include "Types/Color.h"

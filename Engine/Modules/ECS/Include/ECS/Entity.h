@@ -2,12 +2,12 @@
 
 #include "ECS/ECS.h"
 #include "ECS/ChangeFilter.h"
-#include "ECS/ComponentConcepts.h"
-#include "ECS/ComponentFlags.h"
-#include "ECS/ComponentHook.h"
+#include "ECS/Component/ComponentConcepts.h"
+#include "ECS/Component/ComponentFlags.h"
+#include "ECS/Component/ComponentHook.h"
 #include "ECS/Components.h"
 #include "Types/ScopedSubscription.h"
-#include "ECS/ComponentDirtyFeed.h"
+#include "ECS/Component/ComponentDirtyFeed.h"
 #include "ECS/LifecycleEvents.h"
 #include "ECS/AutoRegistration.h"
 #include "ECS/QueryPolicy.h"
@@ -29,9 +29,9 @@ class World;
 class UnresolvedComponentStore; // ECS/UnresolvedComponentStore.h
 class ClonePlan;                // ECS/ClonePlan.h
 class EntityRemap;              // ECS/EntityRemap.h
-struct ScriptWritableRange;     // ECS/ComponentFieldRegistry.h
-struct ComponentLayoutChange;   // ECS/ComponentMigration.h
-struct FieldByteMove;           // ECS/ComponentMigration.h
+struct ScriptWritableRange;     // ECS/Component/ComponentFieldRegistry.h
+struct ComponentLayoutChange;   // ECS/Component/ComponentMigration.h
+struct FieldByteMove;           // ECS/Component/ComponentMigration.h
 struct ComponentHookSubscriptionState;
 
 template<QualifiedComponent... Ts> class Query;
@@ -324,7 +324,7 @@ private:
     // Relaxed ordering: consumers order through wave joins, not this counter.
     std::atomic<uint64> m_GlobalSystemVersion{1};
 
-    // Per-entity dirty feed (ECS/ComponentDirtyFeed.h, change-signaling §5
+    // Per-entity dirty feed (ECS/Component/ComponentDirtyFeed.h, change-signaling §5
     // as amended): one subscribed component type per World, set once at
     // world bootstrap before systems run and immutable afterwards (the
     // m_SetHookSignature shape; P3's lifecycle events reuse the pattern).
@@ -1062,7 +1062,7 @@ public:
                                   ComponentTypeId typeId);
 
     // ------------------------------------------------------------------
-    // Per-entity component dirty feed (ECS/ComponentDirtyFeed.h, §5 P2).
+    // Per-entity component dirty feed (ECS/Component/ComponentDirtyFeed.h, §5 P2).
     // ------------------------------------------------------------------
 
     // Subscribe the feed to ONE component type (WorldTransform in P2). Call

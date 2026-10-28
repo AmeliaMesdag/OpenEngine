@@ -5,7 +5,7 @@
 #include "DebugServer/EditorDebugServer.h"
 #include "Markups/MarkupEditorSurfaces.h"
 #include "Markups/MarkupRequests.h"
-#include "SceneViewController.h"
+#include "SceneView/SceneViewController.h"
 
 #include <nlohmann/json.hpp>
 

@@ -21,7 +21,7 @@
 //   Binding 8..13: vec2 uv2..uv7  (if HasUV2..HasUV7)
 
 #include "Rendering/Core/Device.h"
-#include "Rendering/Core/PipelineTypes.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
 
 #include <cstdint>

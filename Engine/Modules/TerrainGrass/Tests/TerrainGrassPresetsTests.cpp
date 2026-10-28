@@ -1,7 +1,7 @@
 // The grass palette and presets: the automatic root and the default palette in linear light (the
 // surface's decode is ColorSRGB's, GrassColorDecodeTests.cpp), and the presets
-// (TerrainGrass/TerrainGrassPresets.h): Meadow is the component's defaults, a preset writes exactly
-// its own dials, and an edit away from the picked preset reads Custom.
+// (TerrainGrass/TerrainGrassPresets.h): Meadow is the component's defaults, a preset writes its whole
+// look and no scene dial, and an edit away from the picked preset reads Custom.
 
 #include <gtest/gtest.h>
 
@@ -25,6 +25,15 @@ ColorLinear DecodeArgb(uint32 argb)
 float32 Luminance(const ColorLinear& c)
 {
     return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+}
+
+// Every look dial a preset writes, field for field.
+void ExpectSameLook(const Components::TerrainGrass& actual, const Components::TerrainGrass& expected)
+{
+    for (const auto dial : Detail::kTerrainGrassPresetFloatDials)
+        EXPECT_FLOAT_EQ(actual.*dial, expected.*dial);
+    for (const auto dial : Detail::kTerrainGrassPresetColorDials)
+        EXPECT_EQ(actual.*dial, expected.*dial);
 }
 
 } // namespace
@@ -67,33 +76,90 @@ TEST(TerrainGrassPresets, MeadowIsTheComponentDefaults)
     EXPECT_EQ(defaults.Preset, Components::TerrainGrassPreset::Meadow);
     Components::TerrainGrass picked{};
     ApplyTerrainGrassPreset(picked, Components::TerrainGrassPreset::Meadow);
-    EXPECT_EQ(picked.TipColor, defaults.TipColor);
-    EXPECT_EQ(picked.RootColor, defaults.RootColor);
-    EXPECT_EQ(picked.BacklightColor, defaults.BacklightColor);
-    EXPECT_FLOAT_EQ(picked.BladesPerSquareMeter, defaults.BladesPerSquareMeter);
-    EXPECT_FLOAT_EQ(picked.BladeHeight, defaults.BladeHeight);
-    EXPECT_FLOAT_EQ(picked.BladeWidth, defaults.BladeWidth);
-    EXPECT_FLOAT_EQ(picked.BladeTilt, defaults.BladeTilt);
+    ExpectSameLook(picked, defaults);
 }
 
-TEST(TerrainGrassPresets, APresetWritesItsDialsAndAnEditAwayFromItReadsCustom)
+// Lawn and Steppe set their palette, density, height, width and tilt, and every other look dial is
+// the component's default.
+TEST(TerrainGrassPresets, LawnAndSteppeSetTheirPaletteAndBladesOverTheDefaults)
 {
-    for (const TerrainGrassPresetValues& values : kTerrainGrassPresets)
+    Components::TerrainGrass lawn{};
+    lawn.BladesPerSquareMeter = 64.0f;
+    lawn.BladeHeight = 0.4f;
+    lawn.BladeWidth = 0.024f;
+    lawn.BladeTilt = 0.1f;
+    lawn.TipColor = 0xFF6C8E4Bu;
+    lawn.BacklightColor = 0xFFAAC859u;
+    Components::TerrainGrass picked{};
+    ApplyTerrainGrassPreset(picked, Components::TerrainGrassPreset::Lawn);
+    ExpectSameLook(picked, lawn);
+
+    Components::TerrainGrass steppe{};
+    steppe.BladesPerSquareMeter = 12.0f;
+    steppe.BladeHeight = 0.9f;
+    steppe.BladeWidth = 0.02f;
+    steppe.BladeTilt = 0.35f;
+    steppe.TipColor = 0xFFA29B61u;
+    steppe.BacklightColor = 0xFFCEC581u;
+    picked = {};
+    ApplyTerrainGrassPreset(picked, Components::TerrainGrassPreset::Steppe);
+    ExpectSameLook(picked, steppe);
+}
+
+// Stylized is short, dense and moss green, with a set root color in place of the automatic one, little
+// color variation, large soft clumps, a small flutter and less light through the blades.
+TEST(TerrainGrassPresets, StylizedIsAnEvenMossGreenFieldInSoftClumps)
+{
+    Components::TerrainGrass picked{};
+    ApplyTerrainGrassPreset(picked, Components::TerrainGrassPreset::Stylized);
+    EXPECT_EQ(picked.Preset, Components::TerrainGrassPreset::Stylized);
+    EXPECT_EQ(picked.TipColor, 0xFF507338u);
+    EXPECT_EQ(picked.RootColor, 0xFF4C702Eu);
+    EXPECT_EQ(picked.BacklightColor, 0xFF708E54u);
+    EXPECT_FLOAT_EQ(picked.BladesPerSquareMeter, 128.0f);
+    EXPECT_FLOAT_EQ(picked.BladeHeight, 0.5f);
+    EXPECT_FLOAT_EQ(picked.BladeWidth, 0.032f);
+    EXPECT_FLOAT_EQ(picked.BladeTilt, 0.2f);
+    EXPECT_FLOAT_EQ(picked.ClumpSize, 1.8f);
+    EXPECT_FLOAT_EQ(picked.ClumpHeightVariance, 0.45f);
+    EXPECT_FLOAT_EQ(picked.ClumpAlignment, 0.3f);
+    EXPECT_FLOAT_EQ(picked.BladeBend, 0.25f);
+    EXPECT_FLOAT_EQ(picked.BladeTwist, 0.1f);
+    EXPECT_FLOAT_EQ(picked.BladeTaperStart, 0.55f);
+    EXPECT_FLOAT_EQ(picked.TuftFan, 0.15f);
+    EXPECT_FLOAT_EQ(picked.RandomScale, 0.3f);
+    EXPECT_FLOAT_EQ(picked.WindRestingLean, 0.19f);
+    EXPECT_FLOAT_EQ(picked.WindFlutterAmount, 0.1f);
+    EXPECT_FLOAT_EQ(picked.RandomBrightness, 0.1f);
+    EXPECT_FLOAT_EQ(picked.HueVariation, 0.035f);
+    EXPECT_FLOAT_EQ(picked.Translucency, 0.35f);
+    EXPECT_FLOAT_EQ(picked.RootFadeEnd, 0.3f);
+    EXPECT_FLOAT_EQ(picked.CanopyShade, 0.85f);
+}
+
+TEST(TerrainGrassPresets, APresetWritesItsLookAndNoSceneDialAndAnEditAwayFromItReadsCustom)
+{
+    for (const Components::TerrainGrass& look : kTerrainGrassPresets)
     {
         Components::TerrainGrass grass{};
+        grass.HueVariation = 0.9f;
+        grass.Range = 80.0f;
+        grass.MaskThreshold = 0.1f;
+        grass.WindDirection = 1.0f;
         grass.WindStrength = 0.4f;
-        grass.CanopyShade = 0.5f;
-        ApplyTerrainGrassPreset(grass, values.Preset);
-        EXPECT_EQ(grass.Preset, values.Preset);
-        EXPECT_EQ(grass.TipColor, values.TipColor);
-        EXPECT_FLOAT_EQ(grass.BladesPerSquareMeter, values.BladesPerSquareMeter);
-        EXPECT_FLOAT_EQ(grass.BladeTilt, values.BladeTilt);
-        EXPECT_FLOAT_EQ(grass.WindStrength, 0.4f) << "a preset wrote a dial it does not own";
-        EXPECT_FLOAT_EQ(grass.CanopyShade, 0.5f) << "a preset wrote a dial it does not own";
+        grass.DensityFalloff = 3.0f;
+        ApplyTerrainGrassPreset(grass, look.Preset);
+        EXPECT_EQ(grass.Preset, look.Preset);
+        ExpectSameLook(grass, look);
+        EXPECT_FLOAT_EQ(grass.Range, 80.0f) << "a preset wrote a scene dial";
+        EXPECT_FLOAT_EQ(grass.MaskThreshold, 0.1f) << "a preset wrote a scene dial";
+        EXPECT_FLOAT_EQ(grass.WindDirection, 1.0f) << "a preset wrote a scene dial";
+        EXPECT_FLOAT_EQ(grass.WindStrength, 0.4f) << "a preset wrote a scene dial";
+        EXPECT_FLOAT_EQ(grass.DensityFalloff, 3.0f) << "a preset wrote a scene dial";
 
         ReconcileTerrainGrassPreset(grass);
-        EXPECT_EQ(grass.Preset, values.Preset) << "an unedited preset reads Custom";
-        grass.BladeWidth += 0.004f;
+        EXPECT_EQ(grass.Preset, look.Preset) << "an unedited preset reads Custom";
+        grass.HueVariation += 0.05f;
         ReconcileTerrainGrassPreset(grass);
         EXPECT_EQ(grass.Preset, Components::TerrainGrassPreset::Custom);
     }

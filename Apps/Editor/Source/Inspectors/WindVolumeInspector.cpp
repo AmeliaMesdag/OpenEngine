@@ -3,7 +3,7 @@
 #include "Components/Rendering/WindVolume.h"
 #include "Editor/Entities/EditorECSHelpers.h"
 #include "InspectorRegistry.h"
-#include "Inspectors/InspectorComponentRowHelpers.h"
+#include "Inspectors/InspectorComponent/InspectorComponentRowHelpers.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Mathematics/Interpolation.h"

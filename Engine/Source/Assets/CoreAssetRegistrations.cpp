@@ -1,10 +1,10 @@
 #include "Assets/CoreAssetRegistrations.h"
 
-#include "Animation/HumanoidRig.h"
+#include "Animation/Humanoid/HumanoidRig.h"
 #include "Animation/AnimationController.h"
 #include "Animation/AnimationLibrary.h"
 #include "Animation/RetargetMap.h"
-#include "Animation/SkeletonProfile.h"
+#include "Animation/Skeleton/SkeletonProfile.h"
 #include "Animation/SpriteFrames.h"
 #include "Assets/AudioAsset.h"
 #include "Assets/AnimationClip.h"

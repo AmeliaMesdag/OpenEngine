@@ -2,11 +2,13 @@
 #include "Editor/Registries/BuildExporterRegistry.h"
 #include "Editor/Settings/BuildFolderDefaults.h"
 #include "Editor/Settings/BuildRenderPipelineSettings.h"
+#include "Editor/Settings/BuildSettingsStore.h"
 #include "Core/ApplicationPaths.h"
 #include "Core/Engine.h"
 #include "Core/EngineVersion.h"
-#include "Editor/Settings/RenderPipelineSettings.h"
+#include "Editor/Settings/Render/RenderPipelineSettings.h"
 #include "Editor/Settings/SettingsStore.h"
+#include "Projects/ProjectStartupScene.h"
 #include "Engine/Build/BuildPipeline.h"
 #include "Engine/Build/PlayerSourcePreparation.h"
 #include "Engine/Build/BuildPlatforms.h"
@@ -799,33 +801,6 @@ void BuildPanel::ApplyColumnWidths()
 // Build Pipeline Integration
 // ---------------------------------------------------------------------------
 
-// Helper: load build scenes for the first enabled platform.
-static std::vector<std::string> ParseSceneList(const std::string& raw)
-{
-    if (raw.empty())
-        return {};
-    std::vector<std::string> out;
-    for (size_t start = 0; start < raw.size(); )
-    {
-        size_t end = raw.find('\n', start);
-        if (end == std::string::npos)
-            end = raw.size();
-        std::string line = raw.substr(start, end - start);
-        // Trim whitespace
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
-            line.pop_back();
-        size_t s = 0;
-        while (s < line.size() && (line[s] == ' ' || line[s] == '\t'))
-            ++s;
-        if (s < line.size())
-            line = line.substr(s);
-        if (!line.empty())
-            out.push_back(std::move(line));
-        start = end + (end < raw.size() ? 1u : 0u);
-    }
-    return out;
-}
-
 static std::string LoadBuildIconForPlatform(const std::string& platformName)
 {
     const auto& root = EngineCore::GetInstance().GetWorkspaceRoot();
@@ -849,33 +824,19 @@ static std::string LoadBuildIconForPlatform(const std::string& platformName)
     return iconPath;
 }
 
-static std::vector<std::string> LoadBuildScenesForPlatform(const std::string& platformName)
+// The refusal of a build with no scene: the list the platform reads, and a startup scene that is gone.
+static std::string DescribeMissingBuildScene(const std::string& platformName)
 {
-    const auto& root = EngineCore::GetInstance().GetWorkspaceRoot();
-    auto prefs = root.empty() ? Editor::OpenEditorPreferences() : Editor::OpenProjectSettings(root);
-    std::string err;
-    prefs.Load(&err);
-
-    // Check if this platform uses the global scene list (default: true).
-    std::string useGlobalKey = "build.platform." + platformName + ".useGlobalScenes";
-    bool useGlobal = true;
-    prefs.TryGetBool(useGlobalKey, useGlobal);
-
-    if (useGlobal)
-    {
-        // Read from global scene list.
-        std::string raw;
-        prefs.TryGetString("build.globalScenes", raw);
-        auto scenes = ParseSceneList(raw);
-        if (!scenes.empty())
-            return scenes;
-    }
-
-    // Read from platform-specific scene list.
-    std::string raw;
-    std::string prefKey = "build.platform." + platformName + ".scenes";
-    prefs.TryGetString(prefKey, raw);
-    return ParseSceneList(raw);
+    const std::string sceneList = Editor::LoadBuildPlatformUseGlobalScenes(platformName)
+                                      ? std::string("the Global scene list")
+                                      : "the " + BuildPlatformDisplayName(platformName) + " scene list";
+    std::string message = "No scene to build. In Settings > Build, drop a scene on " + sceneList + ".";
+    const std::string startupScene = Editor::LoadBuildStringSetting(Editor::kProjectStartupSceneKey);
+    if (!startupScene.empty())
+        message += " The project's startup scene '" + startupScene +
+                   "' is not a scene file in the Assets folder: correct " + Editor::kProjectStartupSceneKey +
+                   " in .Editor/ProjectSettings.json.";
+    return message;
 }
 
 static bool RelativePathStartsWithParentTraversal(const std::filesystem::path& rel)
@@ -964,7 +925,7 @@ BuildSettings BuildPanel::GatherBuildSettings()
         if (plat.Enabled)
         {
             settings.platformName = plat.Name;
-            settings.scenes = LoadBuildScenesForPlatform(plat.Name);
+            settings.scenes = Editor::LoadEffectiveBuildScenes(plat.Name);
             break;
         }
     }
@@ -972,7 +933,7 @@ BuildSettings BuildPanel::GatherBuildSettings()
     {
         // Fallback to first platform if none enabled.
         settings.platformName = m_Platforms[0].Name;
-        settings.scenes = LoadBuildScenesForPlatform(settings.platformName);
+        settings.scenes = Editor::LoadEffectiveBuildScenes(settings.platformName);
     }
 
     settings.applicationIconPath = LoadBuildIconForPlatform(settings.platformName);
@@ -1194,14 +1155,15 @@ void BuildPanel::OnBuildClicked()
 
     if (settings.scenes.empty())
     {
-        Logger::Log::Warning("Build: No scenes configured for platform '{}'. Add scenes in Build Settings.", settings.platformName);
+        const std::string message = DescribeMissingBuildScene(settings.platformName);
+        Logger::Log::Error("Build: {}", message);
         if (m_StatusLabel)
-            m_StatusLabel->SetText("No scenes configured. Add scenes in Settings > Build > " +
-                                   BuildPlatformDisplayName(settings.platformName) + ".");
+            m_StatusLabel->SetText(message);
         {
             std::lock_guard<std::mutex> lock(m_ProgressMutex);
             m_LatestProgress.currentStage = BuildProgress::Stage::Failed;
-            m_LatestProgress.statusMessage = "No scenes configured in Build Settings";
+            m_LatestProgress.statusMessage = message;
+            m_LatestProgress.errors.push_back(message);
             m_BuildRunning.store(false);
         }
         return;

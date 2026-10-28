@@ -78,9 +78,9 @@
 #include "Components/Components.h"
 #include "Components/Audio/AudioEmitter.h"
 #include "Components/Hierarchy.h" // Components::Parent — lifecycle-event subscription (hierarchy incremental sync)
-#include "ECS/ComponentFieldRegistry.h" // C12 load-abort purge
-#include "ECS/ComponentRegistry.h"
-#include "Particles/ParticleProcessorRegistry.h" // C12 load-abort purge, unload ledger
+#include "ECS/Component/ComponentFieldRegistry.h" // C12 load-abort purge
+#include "ECS/Component/ComponentRegistry.h"
+#include "Particles/ParticleProcessor/ParticleProcessorRegistry.h" // C12 load-abort purge, unload ledger
 #include "ECS/ECS.h"
 #include "ECS/Entity.h"
 #include "ECS/SystemScheduling.h"

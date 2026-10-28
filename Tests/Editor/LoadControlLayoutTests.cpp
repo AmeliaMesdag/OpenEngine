@@ -44,7 +44,7 @@ void PrintTo(const ControlLayout& control, std::ostream* stream)
     *stream << control.Name;
 }
 
-const std::array<ControlLayout, 42> kControlLayouts = {{
+const std::array<ControlLayout, 44> kControlLayouts = {{
     {"ConfirmActionModal",
      "UI/controls/ConfirmActionModal/ConfirmActionModal.uxml",
      {"confirm-action-title", "confirm-action-message", "confirm-action-detail", "confirm-action-closing",
@@ -100,6 +100,8 @@ const std::array<ControlLayout, 42> kControlLayouts = {{
       "vpm-time", "vpm-play-pause", "vpm-stop", "vpm-fullscreen"}},
     {"InspectorNotice", "UI/controls/InspectorNotice/InspectorNotice.uxml", {}},
     {"ListItemActions", "UI/controls/ListItemActions/ListItemActions.uxml", {}},
+    {"EntityMemberList", "UI/controls/EntityMemberList/EntityMemberList.uxml", {}},
+    {"EntityMemberRow", "UI/controls/EntityMemberList/EntityMemberRow.uxml", {}},
     {"PictureChoiceField", "UI/controls/PictureChoiceField/PictureChoiceField.uxml", {}},
     {"SplineFencePartRow", "UI/inspectors/SplineFencePartRow/SplineFencePartRow.uxml", {}},
     {"SplineFenceOverrideRow", "UI/inspectors/SplineFenceOverrideRow/SplineFenceOverrideRow.uxml", {}},
@@ -119,7 +121,8 @@ const std::array<ControlLayout, 42> kControlLayouts = {{
      {"vcs-commit-dialog", "commit-message-field", "commit-button", "cancel-button"}},
     {"PrefabBar",
      "UI/controls/PrefabBar/PrefabBar.uxml",
-     {"prefab-bar-title", "prefab-bar-select-asset", "prefab-bar-count"}},
+     {"prefab-bar-title", "prefab-bar-glyph", "prefab-bar-title-lead", "prefab-bar-prefab", "prefab-bar-title-tail",
+      "prefab-bar-select-asset", "prefab-bar-count", "prefab-bar-instance-count"}},
     {"ProjectPickerNewProjectView",
      "UI/controls/ProjectPicker/ProjectPickerNewProjectView.uxml",
      {"new-project-view", "new-project-top", "new-project-title", "new-project-back", "new-project-tabs",

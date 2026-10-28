@@ -8,7 +8,7 @@
 #include "Rendering/Materials/MaterialBuildService.h"
 #include "Rendering/Materials/MaterialBuilder.h"
 #include "Rendering/Materials/MaterialKeywordDerivation.h"
-#include "Rendering/Materials/ShaderComposer.h"
+#include "Rendering/Materials/Shader/ShaderComposer.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 #include <algorithm>

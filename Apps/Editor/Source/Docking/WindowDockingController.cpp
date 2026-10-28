@@ -7,7 +7,7 @@
 #include "Platform/Window.h"
 #include "UI/Controls/DockOverlay.h"
 #include "UI/Controls/DockspaceElement.h"
-#include "UI/Interaction/DragDropManager.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
 #include "UI/Layout/DockingHitTest.h"
 #include "UI/UIManager.h"
 

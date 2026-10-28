@@ -288,7 +288,7 @@ TEST(GraphInspectorRowsTests, ClipGuidSchemaPlansAssetRow)
     NodeTypeMeta schema;
     schema.TypeId = "ClipPlayer";
     schema.Parameters = {
-        {"clipGuid", Graph::GraphValue::FromGuid("")},
+        {.Id = "clipGuid", .Default = Graph::GraphValue::FromGuid(""), .AssetReference = AssetType::Animation},
         {"speed", 1.0f},
         {"looping", true},
     };
@@ -304,6 +304,7 @@ TEST(GraphInspectorRowsTests, ClipGuidSchemaPlansAssetRow)
     }
     ASSERT_NE(clip, nullptr);
     EXPECT_EQ(clip->Label, "Clip");
+    EXPECT_EQ(clip->AssetReference, AssetType::Animation);
     EXPECT_TRUE(HasKeyKind(rows, "speed", GraphInspectorRowKind::NodeFloat));
 }
 
@@ -342,6 +343,25 @@ TEST(GraphInspectorRowsTests, RegistryClipPlayerPlansClipAssetRow)
     }
     ASSERT_NE(clip, nullptr);
     EXPECT_EQ(clip->Label, "Clip");
+    EXPECT_EQ(clip->AssetReference, AssetType::Animation);
+}
+
+TEST(GraphInspectorRowsTests, RegistrySpawnPrefabPlansPrefabAssetRow)
+{
+    (void)GraphNodeRegistry::Get();
+    const NodeTypeMeta* meta = FindNodeTypeMeta("game_logic", "SpawnPrefab");
+    ASSERT_NE(meta, nullptr);
+    const auto parameters = GraphNodeRegistry::Get().GetDefaultParameters("game_logic", "SpawnPrefab");
+    const auto rows = PlanGraphInspectorRows(parameters, meta);
+    EXPECT_TRUE(HasKeyKind(rows, "prefab", GraphInspectorRowKind::NodeAsset));
+    EXPECT_FALSE(HasKeyKind(rows, "prefab", GraphInspectorRowKind::NodeText));
+    for (const GraphInspectorRow& row : rows)
+    {
+        if (row.Key != "prefab")
+            continue;
+        EXPECT_EQ(row.Label, "Prefab");
+        EXPECT_EQ(row.AssetReference, AssetType::Prefab);
+    }
 }
 
 TEST(GraphInspectorRowsTests, FindUniqueReturnsNullOnKindCollision)

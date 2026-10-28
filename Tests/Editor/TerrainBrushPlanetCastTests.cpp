@@ -29,7 +29,7 @@
 TEST(TerrainPickingRay, SphereBrushCursorCastsThroughTheBrushsOwnPlanetRaycast)
 {
     const std::filesystem::path brushSource = std::filesystem::path(GE_EDITOR_SOURCE_DIR) /
-                                              "Source" / "SceneView" / "TerrainBrushTool.cpp";
+                                              "Source" / "Terrain" / "TerrainBrushTool.cpp";
     std::ifstream in(brushSource, std::ios::binary);
     ASSERT_TRUE(in.good()) << "cannot read " << brushSource.string();
     std::ostringstream buffer;

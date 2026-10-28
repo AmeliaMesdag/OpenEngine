@@ -17,9 +17,9 @@
 #include "ECSModules/Rendering/ClipStore.h"
 #include "ECSModules/Rendering/SkeletonStore.h"
 
-#include "Animation/HumanoidImport.h"
-#include "Animation/HumanoidRig.h"
-#include "Animation/SkeletonProfile.h"
+#include "Animation/Humanoid/HumanoidImport.h"
+#include "Animation/Humanoid/HumanoidRig.h"
+#include "Animation/Skeleton/SkeletonProfile.h"
 #include "Assets/RuntimeHumanoidProfile.h"
 
 #include <glm/glm.hpp>

@@ -19,7 +19,7 @@
 
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/HotReloadIntegration.h"
-#include "Rendering/Materials/ShaderCompileService.h"
+#include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/ShaderGraph/SgGraphFileIO.h"
 
 #include <atomic>

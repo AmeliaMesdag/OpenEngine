@@ -6,8 +6,8 @@
 
 #include "Animation/AnimationEvent.h"
 #include "Animation/AnimationEventCollectorStore.h"
-#include "Animation/AnimationGraphPlayer.h"
-#include "Animation/AnimationGraphStore.h"
+#include "Animation/AnimationGraph/AnimationGraphPlayer.h"
+#include "Animation/AnimationGraph/AnimationGraphStore.h"
 #include "Animation/AnimationMontage.h"
 #include "Animation/AnimationPose.h"
 #include "Animation/EvaluationContext.h"

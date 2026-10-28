@@ -1,6 +1,6 @@
-/* The Day Cycle window (DayCycle/DayCycleWindow.cpp) and the Day Cycle profile's inspector
-   (DayCycle/DayCycleProfileInspector.cpp): the toolbar, the scrub and the track rows both build
-   (DayCycle/DayCycleTrackRows.cpp, DayCycle/DayCycleProfileControls.cpp). */
+/* The Day Cycle window (DayCycle/DayCycleWindow/DayCycleWindow.cpp) and the Day Cycle profile's inspector
+   (DayCycle/DayCycleProfile/DayCycleProfileInspector.cpp): the toolbar, the scrub and the track rows both build
+   (DayCycle/DayCycleTrackRows.cpp, DayCycle/DayCycleProfile/DayCycleProfileControls.cpp). */
 
 .day-cycle-window {
 	flex-direction: column;

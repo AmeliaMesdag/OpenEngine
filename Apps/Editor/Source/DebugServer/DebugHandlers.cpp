@@ -38,15 +38,15 @@
 #include "DebugServer/BuildStatusReport.h"
 #include "DebugServer/CameraProjectionReport.h"
 #include "Editor/CaptureOutputDirectory.h"
-#include "DebugServer/ComponentValueReader.h"
+#include "DebugServer/Components/ComponentValueReader.h"
 #include "Mathematics/Interpolation.h"
-#include "DebugServer/RenderLayerMaskValue.h"
+#include "DebugServer/Components/RenderLayerMaskValue.h"
 #include "DebugServer/DebugServerReply.h"
 #include "DebugServer/EditorDebugServer.h"
 #include "DebugServer/ElementPointerTarget.h"
 #include "DebugServer/GpuToolingHandlers.h"
 #include "DebugServer/GroundQueryDebugHandlers.h"
-#include "DebugServer/JobSystemDebugHandlers.h"
+#include "DebugServer/JobSystem/JobSystemDebugHandlers.h"
 #include "DebugServer/LogQueryReport.h"
 #include "DebugServer/NavigationDebugHandlers.h"
 #include "DebugServer/MarkupDebugHandlers.h"
@@ -56,39 +56,40 @@
 #include "DebugServer/ThumbnailDebugHandlers.h"
 #include "DebugServer/InjectedInput.h"
 #include "DebugServer/OpenAssetPath.h"
-#include "DebugServer/ParallaxDebugHandlers.h"
-#include "DebugServer/PhysicsDebugHandlers.h"
+#include "DebugServer/Parallax/ParallaxDebugHandlers.h"
+#include "DebugServer/Physics/PhysicsDebugHandlers.h"
 #include "DebugServer/PlayModeRequest.h"
 #include "PlayMode/PlayModeEntryGate.h"
 #include "DebugServer/PointerCoordsRequest.h"
 #include "DebugServer/SceneDegradedReport.h"
 #include "DebugServer/SceneHierarchyReport.h"
-#include "DebugServer/SchemaComponentApply.h"
-#include "DebugServer/RenderDocCapture.h"
-#include "DebugServer/FramePhaseDebugHandlers.h"
+#include "DebugServer/Components/SchemaComponentApply.h"
+#include "DebugServer/Capture/RenderDocCapture.h"
+#include "DebugServer/FramePhase/FramePhaseDebugHandlers.h"
 #include "DebugServer/RenderGraphResourceFilter.h"
 #include "DebugServer/ScreenshotCaptureWait.h"
-#include "DebugServer/TerrainDebugHandlers.h"
+#include "DebugServer/Terrain/TerrainDebugHandlers.h"
 #include "DebugServer/UITreeDump.h"
 #include "DebugServer/ViewFocusRequest.h"
-#include "DebugServer/WindowPrintCapture.h"
-#include "UI/Interaction/DragDropManager.h"
-#include "ECS/ComponentFactory.h"
+#include "DebugServer/Capture/WindowPrintCapture.h"
+#include "UI/Interaction/DragDrop/DragDropManager.h"
+#include "ECS/Component/ComponentFactory.h"
 #include "ECS/Systems.h"
 #include "ECSModules/Rendering/RenderingLoop.h"
-#include "ECS/ComponentFieldRegistry.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentFieldRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "ECS/FieldAccess.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/ReflectionJson.h"
 #include "ECSModules/Rendering/ClipStore.h"
 #include "ECSModules/Rendering/SkeletonStore.h"
 #include "Editor/Hierarchy/HierarchyEnableState.h"
+#include "Editor/Settings/BuildSettingsStore.h"
 #include "Editor/Settings/FbxImportSettings.h"
-#include "Editor/Settings/RenderProjectSettings.h"
+#include "Editor/Settings/Render/RenderProjectSettings.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Editor/Assets/ShaderGlslOpen.h"
-#include "EditorApplication.h"
+#include "EditorApplication/EditorApplication.h"
 #include "Search/UniversalSearchController.h"
 #include "EditorChangeNotifications.h"
 #include "GameViewController.h"
@@ -127,7 +128,7 @@
 #include "Input/InputSystem.h"
 #include "Logger/LogLevel.h"
 #include "Logger/RingBufferSink.h"
-#include "Panels/AnimationWindowPanel.h"
+#include "Panels/Animation/AnimationWindowPanel.h"
 #include "Panels/AssetViewPanel.h"
 #include "Panels/AssetsPanel.h"
 #include "Panels/BuildPanel.h"
@@ -137,7 +138,7 @@
 #include "Graph/GraphKindChrome.h"
 #include "Graph/GraphPanelFactory.h"
 #include "Panels/SettingsPanel.h"
-#include "Panels/SceneViewPanel.h"
+#include "SceneView/SceneViewPanel.h"
 #include "PhysicsECS/Components/BoxColliderShape.h"
 #include "PhysicsECS/Components/CapsuleColliderShape.h"
 #include "PhysicsECS/Components/HeightFieldColliderShape.h"
@@ -155,8 +156,8 @@
 #include "SceneView/SceneViewFraming.h"
 #include "SceneView/SceneViewRenderCoordinator.h"
 #include "SceneView/SceneViewToolStripRegistry.h"
-#include "SceneViewController.h"
-#include "SceneView/TerrainBrushTool.h"
+#include "SceneView/SceneViewController.h"
+#include "Terrain/TerrainBrushTool.h"
 #include "Spline/SplineData.h"
 #include "Spline/SplineEvaluator.h"
 #include "SplineECS/SplineService.h"
@@ -182,7 +183,7 @@
 #include "UndoRedo/DuplicateEntitiesCommand.h"
 #include "UndoRedo/EntityComponentsEdit.h"
 #include "UndoRedo/GenericEditUndo.h"
-#include "UndoRedo/SplineUndoHelpers.h"
+#include "UndoRedo/Spline/SplineUndoHelpers.h"
 #include "UndoRedo/UndoRedoService.h"
 
 #include <nlohmann/json.hpp>
@@ -2387,31 +2388,6 @@ static json SerializeEntityComponents(ECS::World* world, ECS::EntityHandle entit
     }
 
     return components;
-}
-
-static std::vector<std::string> ParseDebugBuildSceneList(const std::string& raw)
-{
-    std::vector<std::string> out;
-    for (size_t start = 0; start < raw.size();)
-    {
-        size_t end = raw.find('\n', start);
-        if (end == std::string::npos)
-            end = raw.size();
-
-        std::string line = raw.substr(start, end - start);
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
-            line.pop_back();
-        size_t first = 0;
-        while (first < line.size() && (line[first] == ' ' || line[first] == '\t'))
-            ++first;
-        if (first < line.size())
-            line = line.substr(first);
-        if (!line.empty())
-            out.push_back(std::move(line));
-
-        start = end + (end < raw.size() ? 1u : 0u);
-    }
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -9775,9 +9751,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         if (!settingsError.empty())
             buildSettings["settingsError"] = settingsError;
 
-        std::string globalScenesRaw;
-        prefs.TryGetString("build.globalScenes", globalScenesRaw);
-        buildSettings["globalScenes"] = ParseDebugBuildSceneList(globalScenesRaw);
+        buildSettings["globalScenes"] = Editor::LoadGlobalBuildScenes();
 
         if (const auto& rootJson = prefs.Json(); rootJson.is_object())
         {
@@ -9804,12 +9778,8 @@ void RegisterDebugHandlers(EditorDebugServer& server,
             prefs.TryGetBool(prefix + "useGlobalScenes", useGlobalScenes);
             platformSettings["useGlobalScenes"] = useGlobalScenes;
 
-            std::string scenesRaw;
-            prefs.TryGetString(prefix + "scenes", scenesRaw);
-            platformSettings["platformScenes"] = ParseDebugBuildSceneList(scenesRaw);
-            platformSettings["effectiveScenes"] = useGlobalScenes
-                ? ParseDebugBuildSceneList(globalScenesRaw)
-                : ParseDebugBuildSceneList(scenesRaw);
+            platformSettings["platformScenes"] = Editor::LoadBuildScenes(platform);
+            platformSettings["effectiveScenes"] = Editor::LoadEffectiveBuildScenes(platform);
 
             std::string outputDir;
             prefs.TryGetString(prefix + "outputDir", outputDir);

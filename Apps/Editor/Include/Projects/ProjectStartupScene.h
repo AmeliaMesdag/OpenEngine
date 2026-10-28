@@ -24,6 +24,11 @@ struct ProjectStartupSceneCandidates
     std::vector<std::filesystem::path> RecentScenes;
 };
 
+// The absolute scene an asset-relative name refers to, when it is a scene file inside
+// `assetsRoot`. Otherwise none, and a warning names `source` (the setting that holds the name).
+std::optional<std::filesystem::path> ResolveNamedScene(const std::filesystem::path& assetsRoot,
+                                                       const std::string& assetRelative, const char* source);
+
 // The scene opening `projectRoot` loads: the first build scene, else the
 // project's startupScene, else its last-opened scene, else none (the caller
 // opens an empty scene). A named scene that is missing or outside the

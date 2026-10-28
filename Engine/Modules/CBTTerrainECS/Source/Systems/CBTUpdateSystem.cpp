@@ -153,7 +153,7 @@ void CBTUpdateSystem::Update(ECS::World& world, float32 /*deltaTime*/)
     }
 
     // C7: the rendering domain + planet tuning. The feature re-seeds the tree on a
-    // planar<->spherical switch, a retired terrain or a lowered depth cap (EnsureSeeded,
+    // planar<->spherical switch, a retired or replaced drawn terrain or a lowered depth cap (EnsureSeeded,
     // render-side).
     CBTRenderFeature::DomainConfig domain{};
     const bool spherical = (tuning.Domain == Components::TerrainDomain::Spherical);
@@ -323,7 +323,7 @@ void CBTUpdateSystem::ConsumeSphereSculpt(uint64 sphereVersion, uint64 updateRec
     for (uint32 ri = 0; ri < regions.Count; ++ri)
     {
         const CBTTerrain::SphereFaceUVRect& r = regions.Rects[ri];
-        if (r.IsEmpty() || r.Face >= kSphereFaceCount)
+        if (r.IsEmpty() || r.Face >= CBTTerrain::kCubeFaceCount)
             continue;
         SphereFaceDirty& f = m_SphereFaces[r.Face];
         if (!f.Pending)
@@ -339,57 +339,34 @@ void CBTUpdateSystem::ConsumeSphereSculpt(uint64 sphereVersion, uint64 updateRec
         }
     }
 
-    // Confirm the in-flight face once a CBT.Update recorded its rect (the record count advanced
-    // past what we saw when we pushed). If the accumulated rect did not grow since the push it is
-    // fully consumed (clear Pending); if a later dab extended it before it recorded, leave it
-    // Pending so the grown extent re-pushes. Release the in-flight slot so a different pending
-    // face drains next (round-robin).
-    if (m_SphereInFlightFace >= 0 && updateRecordCount != m_SphereInFlightRecordCount)
+    // An update recorded since the last push: a face whose pushed rect did not grow since is done; a
+    // grown one stays pending and goes again at its new extent.
+    if (m_SpherePushed.Count != 0u && updateRecordCount != m_SpherePushedRecordCount)
     {
-        SphereFaceDirty& f = m_SphereFaces[static_cast<uint32>(m_SphereInFlightFace)];
-        const bool grew = f.MinU != m_SphereInFlightMinU || f.MinV != m_SphereInFlightMinV ||
-                          f.MaxU != m_SphereInFlightMaxU || f.MaxV != m_SphereInFlightMaxV;
-        if (!grew)
-            f.Pending = false;
-        m_SphereInFlightFace = -1;
+        for (uint32 i = 0; i < m_SpherePushed.Count; ++i)
+        {
+            const CBTTerrain::SphereFaceUVRect& pushed = m_SpherePushed.Rects[i];
+            SphereFaceDirty& f = m_SphereFaces[pushed.Face];
+            if (f.MinU == pushed.MinU && f.MinV == pushed.MinV && f.MaxU == pushed.MaxU && f.MaxV == pushed.MaxV)
+                f.Pending = false;
+        }
+        m_SpherePushed = {};
     }
 
-    // Re-push the in-flight face every frame until it is recorded (the no-scene-view re-arm the
-    // planar path also carries).
-    if (m_SphereInFlightFace >= 0)
+    // Every pending face goes to Classify in this update; the list is rebuilt each update. With no face
+    // pending the list is empty, so Classify skips its dirty branch and the work stays quiescent.
+    classify.SphereDirty = {};
+    for (uint32 face = 0; face < CBTTerrain::kCubeFaceCount; ++face)
     {
-        const SphereFaceDirty& f = m_SphereFaces[static_cast<uint32>(m_SphereInFlightFace)];
-        classify.DirtyFace = static_cast<uint32>(m_SphereInFlightFace);
-        classify.DirtyMinU = f.MinU;
-        classify.DirtyMinV = f.MinV;
-        classify.DirtyMaxU = f.MaxU;
-        classify.DirtyMaxV = f.MaxV;
-        return;
+        const SphereFaceDirty& f = m_SphereFaces[face];
+        if (f.Pending)
+            classify.SphereDirty.Rects[classify.SphereDirty.Count++] =
+                CBTTerrain::SphereFaceUVRect{face, f.MinU, f.MinV, f.MaxU, f.MaxV};
     }
-
-    // Pick the next pending face round-robin (no face starves while a fast drag re-dirties one)
-    // and push it. Nothing pending => leave the rect empty (quiescent) so Classify's dirty branch
-    // is skipped and the work-quiescence invariant holds.
-    for (uint32 k = 0; k < kSphereFaceCount; ++k)
-    {
-        const uint32 face = (m_SphereDrainCursor + k) % kSphereFaceCount;
-        SphereFaceDirty& f = m_SphereFaces[face];
-        if (!f.Pending)
-            continue;
-        classify.DirtyFace = face;
-        classify.DirtyMinU = f.MinU;
-        classify.DirtyMinV = f.MinV;
-        classify.DirtyMaxU = f.MaxU;
-        classify.DirtyMaxV = f.MaxV;
-        m_SphereInFlightFace = static_cast<int32>(face);
-        m_SphereInFlightRecordCount = updateRecordCount;
-        m_SphereInFlightMinU = f.MinU;
-        m_SphereInFlightMinV = f.MinV;
-        m_SphereInFlightMaxU = f.MaxU;
-        m_SphereInFlightMaxV = f.MaxV;
-        m_SphereDrainCursor = (face + 1u) % kSphereFaceCount;
+    if (classify.SphereDirty.Count == 0u)
         return;
-    }
+    m_SpherePushed = classify.SphereDirty;
+    m_SpherePushedRecordCount = updateRecordCount;
 }
 
 bool CBTUpdateSystem::ComputeTerrainActive(ECS::World& world)
@@ -416,36 +393,24 @@ bool CBTUpdateSystem::ComputeTerrainActive(ECS::World& world)
 void CBTUpdateSystem::ConsumeDirtyRegion(ECS::World& world, uint64 updateRecordCount,
                                          CBTTerrain::CBTClassifyDesc& classify)
 {
-    // C5 (plan §8): consume CBT's OWN cursor into the first terrain's region-dirty
+    // C5 (plan §8): consume CBT's OWN cursor into the drawn terrain's region-dirty
     // log (E0), map the edited texel rect to UV, and hand it to Classify so the
     // overlapping bisectors reclassify this update — the new heights arrive through
     // the region heightmap upload (E2), which the CBT.Update read edge orders before
     // VertexEval. CollectSince never clears the log, so extraction's and physics'
-    // cursors are untouched. Single-terrain scope: CBT renders terrain 0 (the render
-    // feature warns on multi-terrain), so this tracks the first enabled terrain.
+    // cursors are untouched. The CBT draws one terrain, so this tracks the drawn terrain
+    // (FindActiveTerrainEntity) when it has a single-terrain handle.
     auto* service = TerrainECS::TerrainService::TryGet();
     if (!service)
         return;
 
-    bool found = false;
-    TerrainECS::TerrainHandle handle{};
-    world.Query<ECS::Read<Components::Terrain>>().Each(
-        [&](const Components::Terrain& terrain)
-        {
-            // Disambiguate the handle the SAME way TerrainExtractionSystem does
-            // (TerrainExtractionSystem.cpp / TerrainSceneSchemas.cpp): a terrain is
-            // live when index OR generation is non-zero. TerrainService hands the
-            // first terrain slot index 0 / generation 1, so a `handle == 0` test
-            // would treat that valid terrain as unset and make CBT's default
-            // single-terrain scene early-return every frame (an empty rect that never
-            // reclassifies — C5 inert in its default config).
-            if (found || (terrain.TerrainDataHandle == 0 && terrain.TerrainDataGeneration == 0))
-                return;
-            handle = TerrainECS::TerrainHandle{terrain.TerrainDataHandle, terrain.TerrainDataGeneration};
-            found = true;
-        });
-    if (!found)
+    const ECS::EntityHandle drawn = FindActiveTerrainEntity(world);
+    const auto* terrain = drawn.IsValid() ? world.GetComponent<Components::Terrain>(drawn) : nullptr;
+    // A terrain is live when index OR generation is non-zero: TerrainService hands the first
+    // terrain slot index 0 and generation 1, so a `handle == 0` test misses that valid terrain.
+    if (!terrain || (terrain->TerrainDataHandle == 0 && terrain->TerrainDataGeneration == 0))
         return;
+    const TerrainECS::TerrainHandle handle{terrain->TerrainDataHandle, terrain->TerrainDataGeneration};
 
     const TerrainECS::TerrainData* data = service->GetTerrainData(handle);
     if (!data)

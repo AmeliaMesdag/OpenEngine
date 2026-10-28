@@ -16,7 +16,7 @@
 
 #include "Mathematics/Matrix4x4.h"
 #include "Mathematics/MatrixOps.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Common/Frustum.h"     // ExtractFrustumPlanes
 #include "Rendering/Core/GPUCulling.h"    // MakeFrustumPlanesCameraRelative
 #include "Types/FormatNumber.h"           // FormatFloat (Inspector compose-display)

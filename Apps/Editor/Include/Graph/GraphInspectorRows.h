@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Graph/GraphNodeRegistry.h"
+#include "Graph/GraphNode/GraphNodeRegistry.h"
 
 #include <string>
 #include <string_view>
@@ -30,6 +30,8 @@ struct GraphInspectorRow
     std::string Key;
     int VecAxis = -1;
     int VecCount = 0;
+    /* NodeAsset rows: the asset type the field accepts. */
+    AssetType AssetReference = AssetType::Unknown;
 };
 
 /** Null when `typeId` is missing or registered under more than one kind. */

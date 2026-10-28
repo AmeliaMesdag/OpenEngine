@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "Rendering/Core/Handle.h"
-#include "Rendering/Core/PipelineIdentifiers.h"
+#include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include <functional>
 
 namespace GameEngine
@@ -3063,7 +3063,7 @@ class IDevice
     PipelineHandle CreateAndPublishComputePipeline(ComputePipelineId id, uint64_t invalidationEpoch,
                                                    bool& published);
 
-    // Queued, running and failed builds by cache key (Source/Core/PipelineBuildTable.h).
+    // Queued, running and failed builds by cache key (Source/Core/Pipeline/PipelineBuildTable.h).
     // Shared with every dispatched job, which reaches the device only after
     // claiming its row: Shutdown cancels the queued rows, so a job that outlives
     // the device touches the table alone.

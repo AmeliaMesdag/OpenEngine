@@ -24,6 +24,7 @@ struct CBTUpdateActivity
     int32_t PressureStep = 0;       // kWQPressureStep: planar pool-pressure scale step
     int32_t OffFrustumKeepStep = 0; // kWQOffFrustumKeepStep
     int32_t VertexEvalCount = 0;    // kWQVertexEvalCounter: bisectors a gated VertexEval re-evaluated
+    int32_t UnresolvedPageSamples = 0; // kWQUnresolvedPageSamples: page samples no resident page answered
 };
 
 class CBTUpdateRestGate

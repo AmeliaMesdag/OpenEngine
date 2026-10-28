@@ -1,8 +1,8 @@
 #include "Rendering/Core/RenderGraph/RGFullscreen.h"
 
 #include "Rendering/Core/CommandList.h"
-#include "Rendering/Core/PipelineTypes.h"
-#include "Rendering/Materials/ShaderLayoutShape.h"
+#include "Rendering/Core/Pipeline/PipelineTypes.h"
+#include "Rendering/Materials/Shader/ShaderLayoutShape.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 
 #include "Logger/Logger.h"

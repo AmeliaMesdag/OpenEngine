@@ -18,6 +18,7 @@
 #include "AssetCore/GUID.h"
 #include "PageStreaming/HeightPageOverlay.h"
 #include "PageStreaming/PageAddress.h"
+#include "Types/FlatMap.h"
 #include "GenerationalVector/GenerationalVector.h"
 
 #include <algorithm>
@@ -567,6 +568,8 @@ struct TerrainHandle
 };
 
 class TerrainHeightPages;
+class TerrainRenderFeature;
+class TerrainHeightPageFeature;
 class HeightPageStoreLoader;
 struct HeightPageStoreLocation;
 
@@ -782,6 +785,19 @@ public:
     // discriminator bit. Used by the physics provider.
     const PageColliderData* ResolvePageCollider(uint32 handleIndex, uint32 generation) const;
 
+    // ---- Planet height page overlay ----
+    /// What one face of a planet's layers adds to its height pages, and the version the pages compare.
+    struct PlanetPageOverlay
+    {
+        std::shared_ptr<const PageStreaming::HeightPageOverlay> Overlay;
+        uint64 Version = 0;
+    };
+    /// Replaces the overlay of the planet whose terrain entity id is `planet` (null removes it). The
+    /// pages that either overlay reaches are rewritten. Main thread, as the page requests read it.
+    void SetPlanetPageOverlay(uint32 planet, std::shared_ptr<const PageStreaming::HeightPageOverlay> overlay);
+    /// The overlay of planet `planet`, or null when it has none.
+    const PlanetPageOverlay* FindPlanetPageOverlay(uint32 planet) const;
+
     // ---- Editable spherical sculpt (planet editing) ----
     //
     // TerrainService owns the AUTHORITATIVE sphere sculpt layer (dab layer + baked modifier
@@ -948,11 +964,6 @@ public:
     // at their own rates. The union also holds the planet's height page changes
     // (AccumulatePlanetPageDirtyRegions). Non-const — it clears what it returns.
     bool ConsumeSphereSculptDirtyRegions(CBTTerrain::SphereEditRegions& out);
-
-    /// Adds the planet's height page changes (TerrainHeightPages::PlanetDirtyRegions) to the render
-    /// per-face dirty union ConsumeSphereSculptDirtyRegions drains, so the CBT re-evaluates the
-    /// bisectors over them. The physics union does not take them: no collider reads the pages.
-    void AccumulatePlanetPageDirtyRegions(const CBTTerrain::SphereEditRegions& regions);
 
     // The CPU-authoritative sculpt height (metres) at a world direction — the editable layer
     // the GPU VertexEval also samples, COMPOSED with the analytic modifier set (S2). The editor
@@ -1285,6 +1296,16 @@ public:
     }
 
 private:
+    // UpdateHeightPages adds the planets' height page changes to the render dirty union.
+    friend void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature,
+                                  TerrainHeightPageFeature& pages, uint64 frameIndex, float32 deltaSeconds,
+                                  uint32 framesInFlight);
+
+    /// Adds the planet's height page changes (TerrainHeightPages::PlanetDirtyRegions) to the render
+    /// per-face dirty union ConsumeSphereSculptDirtyRegions drains, so the CBT re-evaluates the
+    /// bisectors over them. The physics union does not take them: no collider reads the pages.
+    void AccumulatePlanetPageDirtyRegions(const CBTTerrain::SphereEditRegions& regions);
+
     // Subscribe the texture + heightmap reload invalidators. No-op until the
     // engine (and its AssetManager) is initialized — unit tests construct the
     // service standalone and the lane stays inactive there.
@@ -1362,6 +1383,9 @@ private:
     GenerationalVector::GenerationalVector<PageColliderData> m_PagePhysicsSlots;
     // The page a refresh reads before it compares (RefreshPagePhysicsHandle), kept across calls.
     std::vector<float32> m_PageColliderScratch;
+
+    FlatMap<uint32, PlanetPageOverlay> m_PlanetPageOverlays; // by terrain entity id
+    uint64 m_PlanetPageOverlayVersion = 0;                   // the last version given, from 1
 
     // The authoritative editable sphere sculpt layer (dab + baked modifier stack). Guarded so
     // the render-thread GPU upload (CopySphereSculptUpload) never tears against a main-thread

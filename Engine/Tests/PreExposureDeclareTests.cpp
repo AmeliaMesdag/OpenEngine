@@ -13,7 +13,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Mathematics/HalfFloat.h"
 #include "RGPassQuery.h"
-#include "Rendering/CameraTypes.h"
+#include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"

@@ -3064,7 +3064,7 @@ TEST(Physics, APageEditUpdatesItsBodyInPlace)
     constexpr float32 kRaise = 0.25f; // normalized: 16 m at a height scale of 64
     PagedTE::PagedTerrainRequest& request = terrain.Paged.Request;
     request.Overlay = std::make_shared<const PageStreaming::HeightPageOverlay>(
-        PageStreaming::BuildPageStoreLevels(request.Shape.SamplesX, request.Shape.SamplesZ), rect,
+        uint8{0}, PageStreaming::BuildPageStoreLevels(request.Shape.SamplesX, request.Shape.SamplesZ), rect,
         std::vector<float32>(static_cast<std::size_t>(rect.Width()) * rect.Height(), kRaise));
     request.OverlayVersion = 1;
     request.OverlayChanged = rect;

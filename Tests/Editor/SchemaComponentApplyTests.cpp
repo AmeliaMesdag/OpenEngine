@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "DebugServer/SchemaComponentApply.h"
+#include "DebugServer/Components/SchemaComponentApply.h"
 
 #include "Components/Terrain/Terrain.h"
 #include "Components/Terrain/TerrainGrass.h"

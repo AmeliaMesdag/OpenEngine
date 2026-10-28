@@ -383,7 +383,7 @@ std::shared_ptr<const PageStreaming::HeightPageOverlay> RaisedOverlay(const Page
                                                                       float32 delta)
 {
     return std::make_shared<const PageStreaming::HeightPageOverlay>(
-        PageStreaming::BuildPageStoreLevels(kSamples, kSamples), rect,
+        uint8{0}, PageStreaming::BuildPageStoreLevels(kSamples, kSamples), rect,
         std::vector<float32>(static_cast<std::size_t>(rect.Width()) * rect.Height(), delta));
 }
 

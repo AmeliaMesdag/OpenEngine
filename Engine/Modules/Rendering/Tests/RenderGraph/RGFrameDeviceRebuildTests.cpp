@@ -15,7 +15,7 @@
 #include "Rendering/Core/Device.h"
 #include "Tests/ScopedEnvVar.h"
 #if defined(RENDERING_HAS_VULKAN)
-#include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanDevice/VulkanDevice.h"
 #endif
 
 #include <gtest/gtest.h>

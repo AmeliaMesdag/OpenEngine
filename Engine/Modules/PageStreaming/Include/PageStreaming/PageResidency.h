@@ -126,12 +126,10 @@ public:
     /// thread, between Updates.
     bool FetchCpuPage(uint32 stream, const PageAddress& address);
 
-    /// The content of stream `stream`'s pages over level-0 samples `level0Rect` changed in place
-    /// (a modifier edit; its owner applies the change when it uploads a page). Each resident page
-    /// that reads the rect (PageReadsLevel0Rect) is loaded again and rewritten into its slot
-    /// (PageCache::Rewrite) once loaded, ahead of the wanted pages' loads; until then it keeps its
-    /// slot and its old content, so an edit never opens a hole.
-    void Refresh(uint32 stream, const PageSampleRect& level0Rect);
+    /// Stream `stream`'s pages over level-0 samples `level0Rect` of face `face` changed in place; the owner applies
+    /// the change when it uploads a page. Each resident page of that face that reads the rect reloads and is rewritten
+    /// in its slot (PageCache::Rewrite) ahead of the wanted loads, keeping its old content until then: no hole opens.
+    void Refresh(uint32 stream, uint8 face, const PageSampleRect& level0Rect);
 
     /// One frame for every stream. `teleport` raises the upload cap for the frames after a jump.
     void Update(uint64 frameIndex, float32 deltaSeconds, bool teleport);

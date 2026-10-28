@@ -14,7 +14,7 @@
 #include "ECS/ChangeFilter.h"
 #include "ECS/ECSTemplates.h"
 #include "TestComponents.h"
-#include "ECS/ComponentRegistry.h"
+#include "ECS/Component/ComponentRegistry.h"
 #include "JobSystem/WorkStealingThreadPool.h"
 
 #include <atomic>
