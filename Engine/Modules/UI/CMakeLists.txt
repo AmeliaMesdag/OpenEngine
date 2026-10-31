@@ -681,6 +681,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIBackgroundTextureMipTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/SvgBackgroundRasterTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UISvgBackgroundVariantTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/BackgroundMinificationTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/GameUIHostTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/GameUIHostKeyboardTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/GameUIElementHandleTests.cpp
