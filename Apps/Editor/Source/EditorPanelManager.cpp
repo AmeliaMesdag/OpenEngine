@@ -443,9 +443,8 @@ void EditorPanelManager::ShowOrActivateBuildPanel(EditorWindowContext* ctx)
     if (!ctx || !ctx->docking)
         return;
 
-    if (ctx->docking->ActivateTab(EditorPanelIds::Build))
+    if (ActivateOpenPanel(ctx, EditorPanelIds::Build))
     {
-        RebuildDockspace(ctx);
         RefreshPanelUI(ctx, EditorPanelIds::Build);
         // Defer version refresh so opening the Build tab doesn't stall the editor (avoids
         // synchronous settings I/O and RebuildRows in the same call stack).
@@ -511,9 +510,8 @@ void EditorPanelManager::ShowOrActivateMixerPanel(EditorWindowContext* ctx)
     if (!ctx || !ctx->docking)
         return;
 
-    if (ctx->docking->ActivateTab(EditorPanelIds::Mixer))
+    if (ActivateOpenPanel(ctx, EditorPanelIds::Mixer))
     {
-        RebuildDockspace(ctx);
         RefreshPanelUI(ctx, EditorPanelIds::Mixer);
         return;
     }

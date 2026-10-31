@@ -70,6 +70,7 @@ If scenarios include `pixelHash`, this script will also compare mode0 vs mode1 h
 
 - Create a JSON file under `Tests/UIReplay/`.
 - Prefer asserting invariants (e.g. `paintOffsetsMatch`, `visibleTextNotFullyClipped`, `layoutConverged`) over pixel hashes when possible—hashes are more environment-sensitive.
+- `elementInstanceUnchanged` records an element's instance on `frameStart` and requires that same instance through `frameEnd`, inclusive. Use it to detect unnecessary subtree replacement after a panel is open; `elementVisible` checks initial opening and structural changes.
 - Add it to:
   - `Tests/run_ui_replay_tests_safe.ps1` for the default suite, and/or
   - `Tests/run_ui_replay_compare_modes_safe.ps1` if it should pass in both cached + correctness modes.

@@ -4084,12 +4084,11 @@ bool EditorApplication::Initialize()
                 if (auto* dock = dynamic_cast<DockspaceElement*>(el))
                 {
                     dock->SetOnPostRebuild([this]() {
-                        // Re-mount the lock icon on every inspector tab — both Inspector and Inspector 2
-                        // (and any future instances) need their tab chrome restored after a rebuild.
+                        // Restore tab chrome before the rebuilt dockspace is laid out and rendered.
                         for (const auto& panel : m_PanelStorage)
                         {
                             if (auto* ip = dynamic_cast<InspectorPanel*>(panel.get()))
-                                ip->PostAction([ip]() { ip->EnsureInspectorTabLockMounted(); });
+                                ip->EnsureInspectorTabLockMounted();
                         }
                     });
                     dock->SetOnTabContextMenu([this, main](const std::string& panelId, float x, float y) {

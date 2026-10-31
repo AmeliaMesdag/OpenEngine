@@ -120,6 +120,7 @@ constexpr FallbackDockPanel kFallbackDockPanels[] = {
     {EditorPanelIds::Web, "WebPanel"},
     {EditorPanelIds::NodeGraph, "NodeGraphPanel"},
     {EditorPanelIds::Build, "BuildPanel"},
+    {EditorPanelIds::Mixer, "MixerPanel"},
     {EditorPanelIds::Animation, "AnimationWindowPanel"},
     {EditorPanelIds::Timeline, "AnimationTimelinePanel"},
     {EditorPanelIds::ClipEditor, "AnimationClipEditorPanel"},
