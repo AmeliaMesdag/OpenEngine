@@ -3,7 +3,7 @@
 #include "ScopedEnvVar.h"
 #include "TestUtils.h"
 #include "Vulkan/VulkanCommandList.h"
-#include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanDevice/VulkanDevice.h"
 
 #include <algorithm>
 #include <array>
