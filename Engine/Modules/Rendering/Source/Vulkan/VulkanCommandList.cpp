@@ -4686,49 +4686,57 @@ void VulkanCommandList::ReleaseTextureUpload(TextureHandle texture, uint32_t mip
     if (!m_IsRecording || m_CommandBuffer == VK_NULL_HANDLE || !uploaded)
         return;
 
-    VkImageMemoryBarrier2 release{};
-    release.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    release.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    release.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    release.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
-    release.dstAccessMask = VK_ACCESS_2_NONE;
-    release.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    release.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    release.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    release.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    release.image = uploaded->image;
-    release.subresourceRange = {GetVkImageAspectFlags(texture), mip, 1, layer, 1};
+    const VkImageMemoryBarrier2 release
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+        .dstAccessMask = VK_ACCESS_2_NONE,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = uploaded->image,
+        .subresourceRange = {GetVkImageAspectFlags(texture), mip, 1, layer, 1},
+    };
     WatchImageBarrierIfWatched(release.image, release.oldLayout, release.newLayout,
                                release.subresourceRange, "ReleaseTextureUpload");
 
     if (m_Device->SupportsSynchronization2() && m_Device->GetCmdPipelineBarrier2())
     {
-        VkDependencyInfo dependency{};
-        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependency.imageMemoryBarrierCount = 1;
-        dependency.pImageMemoryBarriers = &release;
+        const VkDependencyInfo dependency
+        {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &release,
+        };
         m_Device->GetCmdPipelineBarrier2()(m_CommandBuffer, &dependency);
         m_Device->DebugIncPipelineBarrier2Calls();
         m_Device->DebugSetLastDependencyCounts(1, 0, 0);
 #if GE_ENABLE_DEBUG_BARRIERS
-        VulkanDevice::DebugBarrierInfo debug{};
-        debug.isImage = true;
-        debug.image2 = release;
+        const VulkanDevice::DebugBarrierInfo debug
+        {
+            .isImage = true,
+            .image2 = release,
+        };
         m_Device->PushDebugBarrier(debug);
 #endif
     }
     else
     {
-        VkImageMemoryBarrier legacy{};
-        legacy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        legacy.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        legacy.dstAccessMask = 0;
-        legacy.oldLayout = release.oldLayout;
-        legacy.newLayout = release.newLayout;
-        legacy.srcQueueFamilyIndex = release.srcQueueFamilyIndex;
-        legacy.dstQueueFamilyIndex = release.dstQueueFamilyIndex;
-        legacy.image = release.image;
-        legacy.subresourceRange = release.subresourceRange;
+        const VkImageMemoryBarrier legacy
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = 0,
+            .oldLayout = release.oldLayout,
+            .newLayout = release.newLayout,
+            .srcQueueFamilyIndex = release.srcQueueFamilyIndex,
+            .dstQueueFamilyIndex = release.dstQueueFamilyIndex,
+            .image = release.image,
+            .subresourceRange = release.subresourceRange,
+        };
         vkCmdPipelineBarrier(m_CommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                              0, 0, nullptr, 0, nullptr, 1, &legacy);
     }
