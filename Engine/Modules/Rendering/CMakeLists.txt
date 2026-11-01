@@ -380,6 +380,7 @@ if(GLSLC_EXECUTABLE)
         spec_constants.comp
         brdf_lut.comp
         ubo_copy.comp
+        texture_upload_readback.comp
         msm_cascade.comp
         runtime_array_stride.comp
     )
@@ -3170,6 +3171,14 @@ if(GTest_FOUND)
     set_target_properties(ImageCopyMipReadbackTests PROPERTIES
         FOLDER "Rendering/Tests")
     add_test(NAME ImageCopyMipReadbackTests COMMAND $<TARGET_FILE:ImageCopyMipReadbackTests>)
+
+    add_executable(TextureUploadSynchronizationTests Tests/TextureUploadSynchronizationTests.cpp)
+    target_link_libraries(TextureUploadSynchronizationTests PRIVATE GameEngineRendering FileSystemObjects GTest::gtest GTest::gtest_main)
+    rendering_test_shader_paths(TextureUploadSynchronizationTests)
+    target_include_directories(TextureUploadSynchronizationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Source)
+    set_target_properties(TextureUploadSynchronizationTests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON FOLDER "Rendering/Tests")
+    add_test(NAME TextureUploadSynchronizationTests COMMAND $<TARGET_FILE:TextureUploadSynchronizationTests>)
+    set_tests_properties(TextureUploadSynchronizationTests PROPERTIES TIMEOUT 60 LABELS "Headless;Vulkan")
 
     # Named push constant writer tests
     add_executable(NamedPushConstantWriterTests Tests/NamedPushConstantWriterTests.cpp)

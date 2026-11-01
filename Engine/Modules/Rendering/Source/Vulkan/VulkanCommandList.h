@@ -197,6 +197,8 @@ namespace Rendering {
         void BarrierBatch(const std::vector<ResourceBarrier>& barriers) override;
 
         void RecordStateAfterBarriers(const std::vector<ResourceBarrier>& barriers) override;
+        // The consuming queue must wait for the upload submission's timeline token.
+        void ReleaseTextureUpload(TextureHandle texture, uint32_t mip, uint32_t layer);
 
         // Debug events
         void BeginEvent(const char* name) override;

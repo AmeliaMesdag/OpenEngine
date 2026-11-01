@@ -4635,11 +4635,11 @@ void VulkanCommandList::CopyBufferToTextureSubresource(BufferHandle srcBuffer, T
             width, height, mipW, mipH);
     }
 
-    const SrcStageAccess src = SrcMasksForOldLayout(oldLayout);
+    SrcStageAccess sourceAccess = SrcMasksForOldLayout(oldLayout);
 
     VkImageMemoryBarrier toDst{};
     toDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    toDst.srcAccessMask = src.Access;
+    toDst.srcAccessMask = sourceAccess.Access;
     toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     toDst.oldLayout = oldLayout;
     toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -4647,9 +4647,16 @@ void VulkanCommandList::CopyBufferToTextureSubresource(BufferHandle srcBuffer, T
     toDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toDst.image = dstImage;
     toDst.subresourceRange = range;
+    // Other queues' shader accesses are ordered by submission waits.
+    // A transfer list only orders its own copies here.
+    if (m_QueueType == IDevice::QueueType::Transfer && oldLayout != VK_IMAGE_LAYOUT_UNDEFINED)
+    {
+        sourceAccess.Stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        toDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    }
     vkCmdPipelineBarrier(
         m_CommandBuffer,
-        src.Stage,
+        sourceAccess.Stage,
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         0,
         0, nullptr,
@@ -4671,6 +4678,63 @@ void VulkanCommandList::CopyBufferToTextureSubresource(BufferHandle srcBuffer, T
                           is3DTexture ? static_cast<int32_t>(layer) : 0};
     region.imageExtent = {width, height, is3DTexture ? depth : 1u};
     vkCmdCopyBufferToImage(m_CommandBuffer, srcVkBuffer, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+}
+
+void VulkanCommandList::ReleaseTextureUpload(TextureHandle texture, uint32_t mip, uint32_t layer)
+{
+    VulkanTexture* uploaded = GetVulkanTexture(texture);
+    if (!m_IsRecording || m_CommandBuffer == VK_NULL_HANDLE || !uploaded)
+        return;
+
+    VkImageMemoryBarrier2 release{};
+    release.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    release.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    release.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    release.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+    release.dstAccessMask = VK_ACCESS_2_NONE;
+    release.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    release.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    release.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    release.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    release.image = uploaded->image;
+    release.subresourceRange = {GetVkImageAspectFlags(texture), mip, 1, layer, 1};
+    WatchImageBarrierIfWatched(release.image, release.oldLayout, release.newLayout,
+                               release.subresourceRange, "ReleaseTextureUpload");
+
+    if (m_Device->SupportsSynchronization2() && m_Device->GetCmdPipelineBarrier2())
+    {
+        VkDependencyInfo dependency{};
+        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dependency.imageMemoryBarrierCount = 1;
+        dependency.pImageMemoryBarriers = &release;
+        m_Device->GetCmdPipelineBarrier2()(m_CommandBuffer, &dependency);
+        m_Device->DebugIncPipelineBarrier2Calls();
+        m_Device->DebugSetLastDependencyCounts(1, 0, 0);
+#if GE_ENABLE_DEBUG_BARRIERS
+        VulkanDevice::DebugBarrierInfo debug{};
+        debug.isImage = true;
+        debug.image2 = release;
+        m_Device->PushDebugBarrier(debug);
+#endif
+    }
+    else
+    {
+        VkImageMemoryBarrier legacy{};
+        legacy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        legacy.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        legacy.dstAccessMask = 0;
+        legacy.oldLayout = release.oldLayout;
+        legacy.newLayout = release.newLayout;
+        legacy.srcQueueFamilyIndex = release.srcQueueFamilyIndex;
+        legacy.dstQueueFamilyIndex = release.dstQueueFamilyIndex;
+        legacy.image = release.image;
+        legacy.subresourceRange = release.subresourceRange;
+        vkCmdPipelineBarrier(m_CommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &legacy);
+    }
+    m_SubresourceLayouts[MakeSubKey(texture, mip, layer)] = release.newLayout;
+    if (uploaded->mipLevels == 1 && uploaded->arrayLayers == 1)
+        uploaded->trackedLayout = release.newLayout;
 }
 
 void VulkanCommandList::BlitImageMip(TextureHandle texture, uint32_t srcMip, uint32_t dstMip, uint32_t layer)

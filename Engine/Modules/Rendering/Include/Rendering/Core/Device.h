@@ -2205,6 +2205,8 @@ class IDevice
     // Returns a GpuSyncToken that becomes signaled when all transfers complete
     // on the GPU. Poll via QueryGpuSyncToken() or block via WaitGpuSyncToken().
     // After the token is signaled the textures are in ShaderResource state.
+    // Another queue must wait on this token in its submission, including
+    // when the host has already observed completion.
     //
     // Thread safety: may be called from any thread.
     //

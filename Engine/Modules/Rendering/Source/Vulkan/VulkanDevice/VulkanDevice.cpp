@@ -7129,6 +7129,7 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
     // CopyBufferToTextureSubresource handles Undefined → CopyDest internally,
     // so only the post-copy CopyDest → ShaderResource barrier is needed.
     auto cl = CreateCommandList(QueueType::Transfer);
+    auto* vulkanCommands = static_cast<VulkanCommandList*>(cl.get());
     cl->Begin();
     for (uint32_t i = 0; i < count; ++i)
     {
@@ -7138,15 +7139,12 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
         cl->CopyBufferToTextureSubresource(
             staging[i], req.Texture, req.MipLevel, req.ArrayLayer,
             req.Width, req.Height, 0, req.RowPitchBytes);
-        cl->Barrier(ResourceBarrier::CreateTextureBarrier(
-            req.Texture, ResourceState::CopyDest, ResourceState::ShaderResource,
-            req.MipLevel, 1, req.ArrayLayer, 1));
+        vulkanCommands->ReleaseTextureUpload(req.Texture, req.MipLevel, req.ArrayLayer);
     }
     cl->End();
 
-    auto* vcl = static_cast<VulkanCommandList*>(cl.get());
-    VkCommandBuffer cb = vcl->GetVkCommandBuffer();
-    if (cb == VK_NULL_HANDLE || !vcl->IsReadyToSubmit())
+    VkCommandBuffer cb = vulkanCommands->GetVkCommandBuffer();
+    if (cb == VK_NULL_HANDLE || !vulkanCommands->IsReadyToSubmit())
     {
         for (uint32_t i = 0; i < count; ++i)
             if (staging[i].IsValid())
@@ -7217,7 +7215,7 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
     //    RouteThreadPoolCmdBufferForRecycle is not needed and not used).
     const SemaphoreHandle transferTimeline = transferContext.Timeline();
     {
-        auto* threadPool = static_cast<ThreadCommandPoolEntry*>(vcl->GetThreadPoolOwner());
+        auto* threadPool = static_cast<ThreadCommandPoolEntry*>(vulkanCommands->GetThreadPoolOwner());
         std::lock_guard<std::mutex> lock(m_DeferredStagingMutex);
         if (threadPool && cb != VK_NULL_HANDLE)
         {
@@ -7230,7 +7228,7 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
                 m_DeferredStagingBuffers.push_back({staging[i], transferTimeline, signaledValue});
         }
     }
-    vcl->OnSubmitted();
+    vulkanCommands->OnSubmitted();
 
     return GpuSyncToken{transferTimeline, signaledValue};
 }

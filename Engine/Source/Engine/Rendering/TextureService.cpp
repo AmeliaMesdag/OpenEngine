@@ -362,10 +362,7 @@ void TextureService::CreateDefaultTexturesAndLuts(Rendering::IDevice* dev)
             createDefaultTexture("DefaultWhite1x1Array", 1, 1, Rendering::TextureCreateFlags::ForceArrayView);
         m_DefaultBlackCubeTexture = CreateBlackCube1x1(dev);
 
-        // Batch-upload the default textures in a single command list submission.
-        // Note: SubmitTextureUploads (async transfer queue) causes VUID errors because
-        // the implementation transitions textures with shader-stage barriers that are
-        // invalid on the transfer queue. Use the synchronous graphics-queue path instead.
+        // Batch-upload the default textures on the graphics queue.
         uint32_t whitePixel = 0xFFFFFFFFu;
         uint32_t blackPixel = 0xFF000000u;
         uint32_t normalPixel = 0xFFFF8080u;
