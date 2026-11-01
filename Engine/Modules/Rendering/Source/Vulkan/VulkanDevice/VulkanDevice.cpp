@@ -7128,23 +7128,24 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
     // 2. Record transfer commands using per-thread command pool.
     // CopyBufferToTextureSubresource handles Undefined → CopyDest internally,
     // so only the post-copy CopyDest → ShaderResource barrier is needed.
-    auto cl = CreateCommandList(QueueType::Transfer);
-    auto* vulkanCommands = static_cast<VulkanCommandList*>(cl.get());
-    cl->Begin();
+    std::unique_ptr<VulkanCommandList> commandList{
+        static_cast<VulkanCommandList*>(CreateCommandList(QueueType::Transfer).release())};
+    commandList->Begin();
     for (uint32_t i = 0; i < count; ++i)
     {
         if (!staging[i].IsValid())
             continue;
         const auto& req = requests[i];
-        cl->CopyBufferToTextureSubresource(
+        commandList->CopyBufferToTextureSubresource(
             staging[i], req.Texture, req.MipLevel, req.ArrayLayer,
-            req.Width, req.Height, 0, req.RowPitchBytes);
-        vulkanCommands->ReleaseTextureUpload(req.Texture, req.MipLevel, req.ArrayLayer);
+            req.Width, req.Height, 0, req.RowPitchBytes,
+            1, 0, 0, 0, ResourceState::Undefined);
+        commandList->ReleaseTextureUpload(req.Texture, req.MipLevel, req.ArrayLayer);
     }
-    cl->End();
+    commandList->End();
 
-    VkCommandBuffer cb = vulkanCommands->GetVkCommandBuffer();
-    if (cb == VK_NULL_HANDLE || !vulkanCommands->IsReadyToSubmit())
+    VkCommandBuffer cb = commandList->GetVkCommandBuffer();
+    if (cb == VK_NULL_HANDLE || !commandList->IsReadyToSubmit())
     {
         for (uint32_t i = 0; i < count; ++i)
             if (staging[i].IsValid())
@@ -7215,7 +7216,7 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
     //    RouteThreadPoolCmdBufferForRecycle is not needed and not used).
     const SemaphoreHandle transferTimeline = transferContext.Timeline();
     {
-        auto* threadPool = static_cast<ThreadCommandPoolEntry*>(vulkanCommands->GetThreadPoolOwner());
+        auto* threadPool = static_cast<ThreadCommandPoolEntry*>(commandList->GetThreadPoolOwner());
         std::lock_guard<std::mutex> lock(m_DeferredStagingMutex);
         if (threadPool && cb != VK_NULL_HANDLE)
         {
@@ -7228,7 +7229,7 @@ IDevice::GpuSyncToken VulkanDevice::SubmitTextureUploads(const TextureUploadRequ
                 m_DeferredStagingBuffers.push_back({staging[i], transferTimeline, signaledValue});
         }
     }
-    vulkanCommands->OnSubmitted();
+    commandList->OnSubmitted();
 
     return GpuSyncToken{transferTimeline, signaledValue};
 }
