@@ -6,9 +6,13 @@
 
 #include <gtest/gtest.h>
 
+#include "Rendering/Core/HotReloadIntegration.h"
 #include "Rendering/Materials/MaterialParamsLayout.h"
 #include "Rendering/Materials/Shader/ShaderPropertyTable.h"
+#include "Rendering/Materials/Shader/ShaderPropertyTableCache.h"
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -467,4 +471,52 @@ TEST(ShaderDeformationEnvelope, ScaledByReachesLaneNamesOnlyOnAnUndeclaredSurfac
     const ShaderPropertyTable declared = BuildShaderPropertyTable(
         {Surface("// @property float roughness default=0.5\n"), Modifier(modifier)});
     EXPECT_FALSE(declared.DeformationEnvelope.Usable());
+}
+
+namespace
+{
+
+void WriteShader(const std::filesystem::path& path, const std::string& text)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+} // namespace
+
+// Material registration resolves a table per material, so a hit must touch no
+// file. Removing the surface from disk shows where a hit comes from.
+TEST(ShaderPropertyTableCache, AHitReadsNoFileUntilAnEditIsAnnounced)
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() /
+                          ("shader_property_table_cache_" +
+                           std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+    fs::remove_all(root);
+    fs::create_directories(root);
+    ShaderPropertyTableInputs inputs{};
+    inputs.AdapterPath = root / "adapter_forward.glsl";
+    inputs.SurfacePath = root / "surface.glsl";
+    WriteShader(inputs.AdapterPath, kAdapterDecls);
+    WriteShader(inputs.SurfacePath, "// @property color tint\n");
+    NotifyShaderSourcesChanged();
+    ShaderPropertyTableCache& cache = ShaderPropertyTableCache::Instance();
+
+    const auto first = cache.Resolve(inputs);
+    ASSERT_FALSE(first->Rejected()) << Errors(*first);
+    ASSERT_NE(first->Find("tint"), nullptr);
+
+    fs::remove(inputs.SurfacePath);
+    EXPECT_EQ(cache.Resolve(inputs), first) << "a hit is served from memory, not from the file";
+
+    NotifyShaderSourcesChanged();
+    EXPECT_TRUE(cache.Resolve(inputs)->Rejected()) << "an announced edit reads the surface again";
+
+    WriteShader(inputs.SurfacePath, "// @property float roughness\n");
+    const auto recreated = cache.Resolve(inputs);
+    ASSERT_FALSE(recreated->Rejected()) << Errors(*recreated);
+    EXPECT_NE(recreated->Find("roughness"), nullptr) << "a failed read is not stored";
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }

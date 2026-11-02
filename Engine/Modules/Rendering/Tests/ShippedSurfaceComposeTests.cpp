@@ -349,8 +349,8 @@ GrassComposeOutcome ComposeTerrainGrassSurface(bool withVertexModifier, const ch
     if (!StageShaderRoot(grassShaders, "TerrainGrass", shaderRoot, out.errors))
         return out;
 
-    // The surface resolves the ground splat through TerrainGrass/grass_atlas_splat.glsl, which is
-    // built on CBT/cbt_atlas.glsl — so the CBT mount has to be staged beside the grass one, exactly
+    // The surface resolves the ground splat through TerrainGrass/grass_surface_pages.glsl, which
+    // reads through CBT/cbt_atlas.glsl, so the CBT mount has to be staged beside the grass one, exactly
     // as Apps/Editor stages both under Assets/Shaders. Without it this gate would fail on a missing
     // include and report it as a broken shader.
     {

@@ -181,14 +181,9 @@ class CBTResources
     // Binding 23: rebind this frame's ring element to the height page cache texture (or the flat
     // default when invalid). Same per-slot in-flight safety as SetAtlasSource.
     void SetPageCacheSource(uint32_t frameCounter, Rendering::TextureHandle cacheTexture);
-    // Binding 22: grows the page-table ring so a slot holds `words` (the bound terrain's table), in
-    // steps of kCBTPageTableMinRingWords; the ring never shrinks. False when the allocation fails:
-    // the previous ring stays bound and the terrain must not page this frame.
-    bool ProvisionPageTableWords(uint32_t words);
-    // Binding 22: write the terrain's page-table words (the CBTLayout.h binding-22 layout) into
-    // this frame's ring slot, clamped to the slot. Empty words write an empty field.
-    void UploadPageTable(uint32_t frameCounter, std::span<const uint32_t> words);
-    uint32_t PageTableSlotWords() const { return m_PageTableSlotWords; }
+    // Binding 22: binds TerrainPageFeature's page-table ring, whose slot for this frame starts at word
+    // `firstWord`; an invalid ring binds the zeroed default. A new ring handle rewrites the sets.
+    void SetPageTable(Rendering::BufferHandle ring, uint32_t firstWord);
     Rendering::BufferHandle GetPageTableBuffer() const { return m_PageTable; }
     Rendering::TextureHandle GetDefaultAtlasHeightTexture() const { return m_DefaultAtlasHeight; }
     Rendering::TextureHandle GetDefaultAtlasCoarseTexture() const { return m_DefaultAtlasCoarse; }
@@ -293,8 +288,9 @@ class CBTResources
     std::array<Rendering::TextureHandle, kCBTTextureRingMax> m_BoundAtlasHeight{}; // per-ring-slot atlas texture (binding 18)
     Rendering::TextureHandle m_DefaultAtlasCoarse{}; // 1x1 flat fallback coarse field
     std::array<Rendering::TextureHandle, kCBTTextureRingMax> m_BoundAtlasCoarse{}; // per-ring-slot coarse field (binding 19)
-    Rendering::BufferHandle m_PageTable{};           // host-visible page-table ring (binding 22), wide arm only
-    uint32_t m_PageTableSlotWords = 0;               // words per ring slot of m_PageTable
+    Rendering::BufferHandle m_DefaultPageTable{};    // a zeroed table header (binding 22), wide arm only
+    Rendering::BufferHandle m_PageTable{};           // what binding 22 holds: the page ring or the default
+    uint32_t m_PageTableBaseWord = 0;                // this frame's first word in m_PageTable
     Rendering::TextureHandle m_DefaultPageCache{};   // 1x1 flat page cache (binding 23), wide arm only
     std::array<Rendering::TextureHandle, kCBTTextureRingMax> m_BoundPageCache{}; // per-ring-slot page cache (binding 23)
     uint32_t m_TextureRing = kCBTTextureRingMax; // elements the loaded kernels declare per texture
@@ -303,8 +299,7 @@ class CBTResources
     Rendering::DescriptorSetHandle m_DescriptorSet{};
     std::vector<Rendering::DescriptorSetHandle> m_KernelSets;
     std::vector<std::vector<uint32_t>> m_KernelSetBindings;
-    static size_t PageTableRingBytes(uint32_t slotWords);
-    Rendering::BufferHandle CreatePageTableRing(uint32_t slotWords);
+    Rendering::BufferHandle CreateDefaultPageTable();
     void WriteOneSet(Rendering::DescriptorSetHandle set, const std::vector<uint32_t>& only);
     // Rewrites one ring element of a terrain-source binding in every set that
     // binds it (the per-kernel sets, or the single shared set).

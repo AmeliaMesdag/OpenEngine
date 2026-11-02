@@ -1,9 +1,11 @@
 #include "Projects/ProjectStartupScene.h"
 
+#include "Editor/Settings/SettingsStore.h"
 #include "Engine/Build/GameConfig.h"
 #include "Logger/Logger.h"
 #include "Types/PathUtils.h"
 
+#include <format>
 #include <system_error>
 
 namespace GameEngine::Editor
@@ -33,6 +35,27 @@ bool IsSceneFile(const fs::path& path)
 }
 
 } // namespace
+
+std::string DescribeNestedProjectStartupScene(const SettingsStore& settings)
+{
+    const nlohmann::json& json = settings.Json();
+    const auto project = json.find("project");
+    if (project == json.end() || !project->is_object() || !project->contains("startupScene"))
+        return {};
+    return std::format("'{}' names the startup scene in a nested \"project\": {{ \"startupScene\" }} object, "
+                       "which the editor does not read; use the top-level key \"{}\"",
+                       settings.GetFilePath().string(), kProjectStartupSceneKey);
+}
+
+std::string ReadProjectStartupScene(const SettingsStore& settings)
+{
+    const std::string nestedFix = DescribeNestedProjectStartupScene(settings);
+    if (!nestedFix.empty())
+        Logger::Log::Warning("Editor: {}", nestedFix);
+    std::string startupScene;
+    settings.TryGetString(kProjectStartupSceneKey, startupScene);
+    return startupScene;
+}
 
 std::optional<fs::path> ResolveNamedScene(const fs::path& assetsRoot, const std::string& assetRelative,
                                           const char* source)

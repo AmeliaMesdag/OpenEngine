@@ -87,23 +87,24 @@ Because a card loses width as well as height, **card coverage falls with the squ
 
 Nothing is allocated while every target is `1` or no grass effect exists. The coarse field is evaluated on world coordinates, so a volume on a tile that has never streamed still suppresses grass there. A tile arriving after the modifier pass uploads that coarse field first and is replaced by native samples on the next pass. Native control lattices do not follow height LOD, so adjacent resident tiles share their boundary samples exactly.
 
-Entering or leaving the active atlas budget resizes the slot window and therefore reuploads existing terrain maps: a structural budget transition, not a heightfield edit. Content changes within the same budget upload control maps only. No per-blade instance bytes and no per-blade ECS query are added. The compat profile gains three named texture bindings, for twelve placement maps in total.
+Entering or leaving the active atlas budget resizes the slot window and therefore reuploads existing terrain maps: a structural budget transition, not a heightfield edit. Content changes within the same budget upload control maps only. No per-blade instance bytes and no per-blade ECS query are added. On the compat profile the placement reads four named maps: height, normal, splat and control.
 
 ## Limits
 
 - Planar terrain only, following the grass renderer itself. This does not enable spherical grass. The inspector says so on a sphere volume.
 - Targets are bounded by `1`: a volume can only reduce, never exceed the terrain's authored profile or its candidate budget.
 - Coarse controls outside tile residency are an approximation of the native samples, not a promise of native precision.
-- The existing single-grass-atlas-terrain limitation is unchanged.
+- Grass reads the surface pages of one terrain, the drawn one. On a terrain drawn from surface pages, the placement reads the control from the page's grass plane, at the level the ground reads.
+- An atlas-backed terrain places no grass where no surface page answers: before its surface is baked, while it is unsaved, and on the compat (web) profile.
 - Height and density only. There is no per-volume grass profile, no alternative blade mesh or card, and no general object scatter: a volume scales the terrain's grass, it cannot swap the artwork.
 - The pre-existing culling bound uses the global blade height without placement's random, clump, and card multipliers, so it can already underestimate blade height. The volumes' scales are bounded by one and cannot widen that gap.
 
 :::note[Extending the control field]
 
-Both channels are continuous and are sampled through a linear clamp sampler (`kTerrainGrassFieldChannels`, `Engine/Modules/TerrainECS/Include/TerrainECS/TerrainGrassField.h`). A discrete channel (a grass profile index, say) cannot simply join them: filtering would blend two indices into a third that names nothing. It needs a point-sampled fetch of its own, which is a change to how the field is read, not to how many fields exist.
+Both channels are continuous and are sampled through a linear clamp sampler (`kTerrainGrassFieldChannels`, `Engine/Modules/TerrainECS/Include/TerrainECS/TerrainGrass/TerrainGrassField.h`). A discrete channel (a grass profile index, say) cannot simply join them: filtering would blend two indices into a third that names nothing. It needs a point-sampled fetch of its own, which is a change to how the field is read, not to how many fields exist.
 
 :::
 
 ## Coverage
 
-`Tests/TerrainGrassRegionTests.cpp` drives the real scene schemas and the compositor. `Engine/Modules/Terrain/Tests/TerrainGrassRegionGpuTests.cpp` compiles the shipped placement shader and executes it on the device, asserting that neutral controls leave placement byte-identical. `Engine/Modules/CBTTerrain/Tests/CBTLayoutTests.cpp` anchors the new GPU field offset across all six shader mirrors of `TerrainParamsEntry`, and `Engine/Modules/TerrainGrass/Tests/GrassPlacementElisionTests.cpp` perturbs every atlas map index.
+`Tests/TerrainGrassRegionTests.cpp` drives the real scene schemas and the compositor. `Engine/Modules/Terrain/Tests/TerrainGrassRegionGpuTests.cpp` compiles the shipped placement shader and executes it on the device, asserting that neutral controls leave placement byte-identical. `Engine/Modules/CBTTerrain/Tests/CBTLayoutTests.cpp` anchors the new GPU field offset across all six shader mirrors of `TerrainParamsEntry`, and `Engine/Modules/TerrainGrass/Tests/GrassPlacementElisionTests.cpp` perturbs every page-table input of the placement.

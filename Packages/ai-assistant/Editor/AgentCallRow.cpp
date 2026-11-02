@@ -284,7 +284,7 @@ bool AgentCallRow::FitReason()
 bool AgentCallRow::FitDetailsToggle()
 {
     UIManager* ui = GetOwnerManager();
-    if (!ui || m_DetailsToggle->Overrides().Get(Style::MinWidth).has_value())
+    if (!ui || m_DetailsToggle->Style().Get(Style::MinWidth).has_value())
         return false;
     const float widest = std::max(ui->MeasureTextWidth(*m_DetailsToggle, kShowDetails),
                                   ui->MeasureTextWidth(*m_DetailsToggle, kHideDetails));
@@ -292,7 +292,7 @@ bool AgentCallRow::FitDetailsToggle()
         return false; // not laid out as text yet
     const auto& box = m_DetailsToggle->GetResolvedStyle().Layout;
     const float chrome = box.Padding.Left + box.Padding.Right + box.BorderWidth.Left + box.BorderWidth.Right;
-    m_DetailsToggle->Overrides().Set(Style::MinWidth, StyleLength::Px(std::ceil(widest) + chrome));
+    m_DetailsToggle->Style().Set(Style::MinWidth, StyleLength::Px(std::ceil(widest) + chrome));
     m_DetailsToggle->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty);
     return true;
 }

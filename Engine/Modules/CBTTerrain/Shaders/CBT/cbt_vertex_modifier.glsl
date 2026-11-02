@@ -65,12 +65,9 @@ void ModifyVertex(inout VertexOutput v, InstanceData inst)
     else if (corner == 1u) { pos = vd.corner1.xyz; uv = vec2(vd.corner1.w, vd.meta.y); packedSector = vd.sector1; }
     else                   { pos = vd.corner2.xyz; uv = vec2(vd.corner2.w, vd.meta.z); packedSector = vd.sector2; }
 
-    // Storage mode rides the per-slot deepTag (terrain S2a). Legacy slots (0): pos is the
-    // fp32 WORLD position and the adapter takes the GE_ClipFromWorld path — byte-identical
-    // to the pre-S2a draw (dark-ship). Deep slots (1): pos is the SECTOR-LOCAL offset and
-    // this corner's integer world sector rides v.sector, so the adapter projects through
-    // GE_ClipFromSectorLocal — the exact-integer-delta reconstruction that keeps Earth-
-    // magnitude geometry fp32-precise in clip space.
+    // deepTag 0: pos is the fp32 WORLD position and the adapter projects through GE_ClipFromWorld.
+    // deepTag 1: pos is the SECTOR-LOCAL offset and v.sector holds the corner's integer sector,
+    // so the adapter projects through GE_ClipFromSectorLocal (fp32-precise at Earth magnitude).
     v.position = pos;
     if (vd.deepTag.x != 0u)
     {

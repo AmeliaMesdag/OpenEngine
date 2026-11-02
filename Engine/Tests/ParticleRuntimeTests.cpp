@@ -6,6 +6,7 @@
 #include "ECS/ModuleRegistration.h"
 #include "ECS/Reflection.h"
 #include "ParticleProcessor/ParticleProcessorRevision.h"
+#include "Mathematics/Matrix4x4.h"
 #include "Particles/CompiledParticleStack.h"
 #include "Particles/ParticleFlipbook.h"
 #include "Particles/ParticleProcessor/ParticleProcessorRegistry.h"
@@ -64,6 +65,7 @@ GE_REFLECT(ParticleRuntimeTestTypes::GustySpinParameters, Rate, Gust);
 
 using namespace GameEngine;
 using namespace GameEngine::Particles;
+using Mathematics::Matrix4x4;
 using Mathematics::Vector3;
 using Mathematics::Vector4;
 
@@ -992,11 +994,11 @@ TEST(ParticleRuntime, SwitchedOffEmissionSpawnsNothingAndRestartsFromTheBeginnin
 
 TEST(ParticleRuntime, ViewDepthDoesNotConfuseSidewaysDistanceWithDepth)
 {
-    const float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    const Matrix4x4 view = Matrix4x4::Identity();
     const Vector3 nearSideways{100, 0, 2};
     const Vector3 farCentered{0, 0, 10};
     EXPECT_LT(ViewDepth(view, nearSideways), ViewDepth(view, farCentered));
-    const float turned[16] = {0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, -5, 1};
+    const Matrix4x4 turned{glm::mat4(0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, -5, 1)};
     EXPECT_GT(ViewDepth(turned, nearSideways), ViewDepth(turned, farCentered));
 }
 

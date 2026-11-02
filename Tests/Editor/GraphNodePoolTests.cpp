@@ -53,7 +53,7 @@ void ExpectNoSelectorAttributes(const UIElement& el)
 
 bool RowIsHidden(const UIElement& el)
 {
-    const std::optional<DisplayMode> display = el.Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> display = el.Style().Get(Style::Display);
     return display.has_value() && display.value() == DisplayMode::None;
 }
 
@@ -160,7 +160,7 @@ TEST(GraphNodePoolTests, GraphNodeIdentityIsModelIdNotElementId)
     EXPECT_TRUE(node.GetId().empty());
     EXPECT_FALSE(node.HasSelectorAttributes());
 
-    const std::optional<bool> pointerEvents = node.Overrides().Get(Style::PointerEvents);
+    const std::optional<bool> pointerEvents = node.Style().Get(Style::PointerEvents);
     EXPECT_FALSE(pointerEvents.has_value());
 
     node.SetModelNodeId("n1");
@@ -233,18 +233,18 @@ TEST(GraphNodePoolTests, SurplusSlotsUseDisplayNone)
 
     pool.Sync(1);
     ASSERT_EQ(pool.SlotCount(), 3u);
-    const std::optional<DisplayMode> visibleDisplay = layer.GetChildren()[0]->Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> visibleDisplay = layer.GetChildren()[0]->Style().Get(Style::Display);
     EXPECT_TRUE(!visibleDisplay.has_value() || *visibleDisplay != DisplayMode::None);
-    ASSERT_TRUE(layer.GetChildren()[1]->Overrides().Get(Style::Display).has_value());
-    EXPECT_EQ(*layer.GetChildren()[1]->Overrides().Get(Style::Display), DisplayMode::None);
-    ASSERT_TRUE(layer.GetChildren()[2]->Overrides().Get(Style::Display).has_value());
-    EXPECT_EQ(*layer.GetChildren()[2]->Overrides().Get(Style::Display), DisplayMode::None);
+    ASSERT_TRUE(layer.GetChildren()[1]->Style().Get(Style::Display).has_value());
+    EXPECT_EQ(*layer.GetChildren()[1]->Style().Get(Style::Display), DisplayMode::None);
+    ASSERT_TRUE(layer.GetChildren()[2]->Style().Get(Style::Display).has_value());
+    EXPECT_EQ(*layer.GetChildren()[2]->Style().Get(Style::Display), DisplayMode::None);
 
     GraphPortedNode* recycled = pool.SlotAt(1);
     ASSERT_NE(recycled, nullptr);
     pool.Recycle(recycled);
-    ASSERT_TRUE(recycled->Overrides().Get(Style::Display).has_value());
-    EXPECT_EQ(*recycled->Overrides().Get(Style::Display), DisplayMode::None);
+    ASSERT_TRUE(recycled->Style().Get(Style::Display).has_value());
+    EXPECT_EQ(*recycled->Style().Get(Style::Display), DisplayMode::None);
 }
 
 TEST(GraphNodePoolTests, FindByModelIdAndBindModelSetsRealPortIds)
@@ -280,10 +280,10 @@ TEST(GraphNodePoolTests, FindByModelIdAndBindModelSetsRealPortIds)
     EXPECT_EQ(slot->FindPort("missing"), nullptr);
 
     ASSERT_TRUE(slot->InputPortAt(2) != nullptr);
-    const std::optional<DisplayMode> extraDisplay = slot->InputPortAt(2)->Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> extraDisplay = slot->InputPortAt(2)->Style().Get(Style::Display);
     ASSERT_TRUE(extraDisplay.has_value());
     EXPECT_EQ(*extraDisplay, DisplayMode::None);
-    const std::optional<DisplayMode> usedDisplay = slot->InputPortAt(0)->Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> usedDisplay = slot->InputPortAt(0)->Style().Get(Style::Display);
     EXPECT_TRUE(!usedDisplay.has_value() || *usedDisplay != DisplayMode::None);
     EXPECT_TRUE(slot->GetId().empty());
 }
@@ -441,8 +441,8 @@ TEST(GraphNodePoolTests, RecycleClearsFindByModelIdAndHidesDisplayNone)
 
     pool.Recycle(slot);
     EXPECT_EQ(pool.FindByModelId("keep"), nullptr);
-    ASSERT_TRUE(slot->Overrides().Get(Style::Display).has_value());
-    EXPECT_EQ(*slot->Overrides().Get(Style::Display), DisplayMode::None);
+    ASSERT_TRUE(slot->Style().Get(Style::Display).has_value());
+    EXPECT_EQ(*slot->Style().Get(Style::Display), DisplayMode::None);
 }
 
 TEST(GraphNodePoolTests, DefaultFactoryAcquiresBaseNodes)
@@ -579,13 +579,13 @@ TEST(GraphNodePoolTests, ParameterNodeRowsStartAtAValueColumnItsLabelsFit)
     {
         auto* label = dynamic_cast<Label*>(FindByClass(*row, "graph-detail-label"));
         ASSERT_NE(label, nullptr);
-        const std::optional<StyleLength> maxWidth = label->Overrides().Get(Style::MaxWidth);
+        const std::optional<StyleLength> maxWidth = label->Style().Get(Style::MaxWidth);
         ASSERT_TRUE(maxWidth.has_value() && maxWidth->IsPercent());
         EXPECT_GT(maxWidth->Value, 0.f) << "label clamped to nothing: " << label->GetText();
 
         UIElement* editorHost = row->GetChildren()[1].get();
         ASSERT_NE(editorHost, nullptr);
-        const std::optional<StyleLength> left = editorHost->Overrides().Get(Style::PositionLeft);
+        const std::optional<StyleLength> left = editorHost->Style().Get(Style::PositionLeft);
         ASSERT_TRUE(left.has_value() && left->IsPercent());
         // One column: every row's box starts on the same edge, clear of the labels.
         EXPECT_FLOAT_EQ(left->Value, expectedStartPct);
@@ -704,7 +704,7 @@ TEST(GraphNodePoolTests, OverlayHasOffThreadClassAndNoFocus)
     GraphOverlay overlay;
     EXPECT_TRUE(overlay.HasClass("graph-overlay"));
     EXPECT_FALSE(overlay.IsFocusable());
-    const std::optional<bool> pointerEvents = overlay.Overrides().Get(Style::PointerEvents);
+    const std::optional<bool> pointerEvents = overlay.Style().Get(Style::PointerEvents);
     ASSERT_TRUE(pointerEvents.has_value());
     EXPECT_FALSE(*pointerEvents);
 }
@@ -713,6 +713,6 @@ TEST(GraphNodePoolTests, PointerEventsStayEnabledOnNodeAndPort)
 {
     GraphNode node;
     GraphPort port;
-    EXPECT_FALSE(node.Overrides().Has(Style::PointerEvents.id));
-    EXPECT_FALSE(port.Overrides().Has(Style::PointerEvents.id));
+    EXPECT_FALSE(node.Style().Has(Style::PointerEvents.id));
+    EXPECT_FALSE(port.Style().Has(Style::PointerEvents.id));
 }

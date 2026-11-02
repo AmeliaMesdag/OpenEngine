@@ -53,7 +53,7 @@ std::string FormatRgb(const float (&c)[3])
 
 void StyleSwatch(UIElement* swatch, uint32_t argb)
 {
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kSwatchSize))
         .Set(Style::Height, StyleLength::Px(kSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kSwatchSize))
@@ -115,7 +115,7 @@ void RegisterVignetteEffectInspector()
             Label* colorLabel = InspectorUI::AddLabel(row, "Color", "Tint the corners fade toward (click to pick; double-click to reset to black)");
             if (colorLabel) colorLabel->AddClass("inspector-label-no-drag");
             UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-            fieldContainer->Overrides()
+            fieldContainer->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -128,7 +128,7 @@ void RegisterVignetteEffectInspector()
             auto rgbLabel = std::make_unique<Label>();
             rgbLabel->AddClass("inspector-text");
             rgbLabel->SetText(FormatRgb(effect->Color));
-            rgbLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+            rgbLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
             Label* rgbLabelRaw = rgbLabel.get();
             fieldContainer->AddChild(std::move(rgbLabel));
 

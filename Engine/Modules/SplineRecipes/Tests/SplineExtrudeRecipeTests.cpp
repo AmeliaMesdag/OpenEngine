@@ -64,7 +64,7 @@ TEST(SplineExtrudeRecipe, EveryFieldParticipatesInEquality)
     };
     // If this fires you added a field: add it to the flip table below (and, if
     // it is a float, to SanitizeExtrudeRecipe), then re-baseline the size.
-    static_assert(sizeof(SplineExtrude) == 96u,
+    static_assert(sizeof(SplineExtrude) == 124u,
                   "SplineExtrude changed size: update the flip table beside this assert and "
                   "SanitizeExtrudeRecipe before re-baselining");
     const Case cases[] = {
@@ -90,12 +90,16 @@ TEST(SplineExtrudeRecipe, EveryFieldParticipatesInEquality)
         {"VerticalOffset", [](SplineExtrude& e) { e.VerticalOffset = 0.08f; }},
         {"TilesPerMetreU", [](SplineExtrude& e) { e.TilesPerMetreU = 0.35f; }},
         {"TilesPerMetreV", [](SplineExtrude& e) { e.TilesPerMetreV = 2.5f; }},
+        {"VergeWidth", [](SplineExtrude& e) { e.VergeWidth = 0.6f; }},
+        {"VergeHeight", [](SplineExtrude& e) { e.VergeHeight = 0.25f; }},
+        {"VergeMaterial", [](SplineExtrude& e) { e.VergeMaterial = MaterialTestRef(11); }},
         {"Material", [](SplineExtrude& e) { e.Material = MaterialTestRef(9); }},
         {"GroundAuthority",
          [](SplineExtrude& e)
          { e.GroundAuthority = Components::SplineGroundAuthority::None; }},
         {"CastShadows", [](SplineExtrude& e) { e.CastShadows = false; }},
         {"ReceiveShadows", [](SplineExtrude& e) { e.ReceiveShadows = false; }},
+        {"Verge", [](SplineExtrude& e) { e.Verge = true; }},
     };
 
     for (const Case& c : cases)
@@ -177,6 +181,8 @@ TEST(SplineExtrudeRecipe, SanitizeRepairsEveryFloatAndKeepsTheRest)
     poisoned.VerticalOffset = nan;
     poisoned.TilesPerMetreU = inf;
     poisoned.TilesPerMetreV = nan;
+    poisoned.VergeWidth = inf;
+    poisoned.VergeHeight = nan;
     poisoned.Profile = SplineExtrudeProfile::Crown;
     poisoned.Material = MaterialTestRef(5);
     poisoned.CastShadows = false;
@@ -196,6 +202,8 @@ TEST(SplineExtrudeRecipe, SanitizeRepairsEveryFloatAndKeepsTheRest)
     EXPECT_FLOAT_EQ(clean.VerticalOffset, defaults.VerticalOffset);
     EXPECT_FLOAT_EQ(clean.TilesPerMetreU, defaults.TilesPerMetreU);
     EXPECT_FLOAT_EQ(clean.TilesPerMetreV, defaults.TilesPerMetreV);
+    EXPECT_FLOAT_EQ(clean.VergeWidth, defaults.VergeWidth);
+    EXPECT_FLOAT_EQ(clean.VergeHeight, defaults.VergeHeight);
     // The repaired recipe is self-equal — buildable by the settle scheduler.
     EXPECT_TRUE(clean == clean);
     // Untouched fields survive verbatim.
@@ -203,6 +211,17 @@ TEST(SplineExtrudeRecipe, SanitizeRepairsEveryFloatAndKeepsTheRest)
     EXPECT_EQ(clean.Material.ToGuid(), poisoned.Material.ToGuid());
     EXPECT_FALSE(clean.CastShadows);
     EXPECT_TRUE(clean.ReceiveShadows);
+}
+
+// The verge's width and height clamp to the paving curb's range, 0.01 m to 10 m.
+TEST(SplineExtrudeRecipe, SanitizeClampsTheVergeToTheCurbsRange)
+{
+    SplineExtrude authored{};
+    authored.VergeWidth = 50.0f;
+    authored.VergeHeight = 0.0f;
+    const SplineExtrude clean = SanitizeExtrudeRecipe(authored);
+    EXPECT_FLOAT_EQ(clean.VergeWidth, 10.0f);
+    EXPECT_FLOAT_EQ(clean.VergeHeight, 0.01f);
 }
 
 TEST(SplineExtrudeRecipe, TheWaterCaseIsAuthorableWithoutANewProfileShape)

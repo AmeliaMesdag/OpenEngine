@@ -23,6 +23,7 @@
 #include "UI/Controls/IntField.h"
 #include "UI/Controls/Label.h"
 #include "UI/Controls/MaskField.h"
+#include "UI/Controls/PictureChoiceField.h"
 #include "UI/Controls/TextArea.h"
 #include "UI/Controls/TextField.h"
 #include "UI/Controls/Toggle.h"
@@ -129,6 +130,17 @@ inline void SetRowLabelsEnabled(UIElement* node, bool enabled)
     }
 }
 
+// Sets `tooltip` on every row label (class "inspector-label") under `node`.
+inline void SetRowLabelsTooltip(UIElement* node, const char* tooltip)
+{
+    for (const auto& child : node->GetChildren())
+    {
+        if (child->HasClass("inspector-label"))
+            child->SetTooltip(tooltip);
+        SetRowLabelsTooltip(child.get(), tooltip);
+    }
+}
+
 // Enables or disables `node` and every element under it.
 inline void SetSubtreeEnabled(UIElement* node, bool enabled)
 {
@@ -183,14 +195,16 @@ inline void DisableRowOfControl(UIElement* control, const char* reason = nullptr
 // Makes the inspector row `row` and everything in it inactive: the whole-row form of
 // DisableRowOfControl, for rows whose controls the caller does not hold (reflected rows). Every
 // element under the row is disabled, as each control's inactive look keys off its own state. A
-// non-empty `reason` becomes the row's tooltip.
+// non-empty `reason` becomes the tooltip of the row and of its labels, so a hover on the label shows it too.
 inline void DisableRow(UIElement* row, const char* reason = nullptr)
 {
     if (!row)
         return;
     SetSubtreeEnabled(row, false);
-    if (reason)
-        row->SetTooltip(reason);
+    if (!reason)
+        return;
+    row->SetTooltip(reason);
+    SetRowLabelsTooltip(row, reason);
 }
 
 inline FloatField* AddFloat(UIElement* parent, float value)
@@ -247,6 +261,18 @@ T* AddFieldRow(UIElement* parent, const std::string& labelText, std::unique_ptr<
     AddLabel(row, labelText, tooltip);
     T* raw = field.get();
     AddFieldContainer(row)->AddChild(std::move(field));
+    return raw;
+}
+
+// A row for a picture choice field. The row's modifier class keeps the label at the top of the
+// tiles, not at their middle. Returns the field, or null when `parent` is null.
+inline EditorUI::PictureChoiceField* AddPictureChoiceRow(UIElement* parent, const std::string& labelText,
+                                                         std::unique_ptr<EditorUI::PictureChoiceField> field,
+                                                         const char* tooltip = nullptr)
+{
+    EditorUI::PictureChoiceField* raw = AddFieldRow(parent, labelText, std::move(field), tooltip);
+    if (raw)
+        RowOfControl(raw)->AddClass("picture-choice-row");
     return raw;
 }
 

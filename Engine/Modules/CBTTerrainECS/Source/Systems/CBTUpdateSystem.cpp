@@ -77,22 +77,6 @@ bool PoolPressureEnabled()
     return enabled;
 }
 
-// Earth-scale (sector, local) gVertex storage (decode-precision arc S2a). Ships default-OFF:
-// GE_CBT_DEEP_DECODE=1 flips the spherical VertexEval to the df64 (sector, local) store and every
-// consumer to exact sector-delta reconstruction — the representation that carries walking-bar
-// precision at Earth radius (the S2b cap lift rides on it). Same truthiness as
-// DeepDecode::SubdivCap so the library and the pipeline read one contract; static-cached (the
-// pipeline reads it per frame — tests drive CBTClassifyDesc::DeepDecode directly instead).
-bool DeepDecodeEnabled()
-{
-    static const bool enabled = [] {
-        if (const char* v = std::getenv("GE_CBT_DEEP_DECODE"))
-            return v[0] != '\0' && v[0] != '0';
-        return false;
-    }();
-    return enabled;
-}
-
 // The imported heightmap's sample grid when one drives the terrain's heights
 // (ResolveTerrainMaxDepth caps at its spacing); {0, 0} when the terrain's own lattice is its
 // source, when the terrain tiles (ResolveTerrainMaxDepth keeps a tiled terrain's lattice cap: its
@@ -131,12 +115,6 @@ void CBTUpdateSystem::Update(ECS::World& world, float32 /*deltaTime*/)
     classify.EditRetessEnabled = EditRetessEnabled() ? 1u : 0u;
     classify.NearFieldGate = NearFieldGateEnabled() ? 1u : 0u;
     classify.PoolPressure = PoolPressureEnabled() ? 1u : 0u;
-    // ONE read feeds both the storage mode and the depth cap (ResolveTerrainMaxDepth
-    // below): the cap is a representation limit, so the two must flip together — cap 50
-    // with the fp32 world store would ship the measured Earth-magnitude degeneracy
-    // (decode-precision arc S2b; TerrainProvisioning.cpp SubdivCapFor).
-    const bool deepDecode = DeepDecodeEnabled();
-    classify.DeepDecode = deepDecode ? 1u : 0u;
 
     // The domain + refinement tuning come straight off the Terrain component now
     // (post-merge), via the shared active-terrain resolver so the renderer and the
@@ -258,13 +236,12 @@ void CBTUpdateSystem::Update(ECS::World& world, float32 /*deltaTime*/)
 
     // The refinement depth cap is auto-derived from the domain + size / radius and, for an
     // imported heightmap, the import's own spacing (or the internal MaxDepthOverride),
-    // already clamped to the ceiling the active gVertex representation carries (40 fp32-world
-    // / 50 deep — the deepDecode read above). Nobody tunes a heap depth: the correct value is
-    // computable.
+    // already clamped to the ceiling the domain's gVertex store carries on this arm (SubdivCapFor).
+    // Nobody tunes a heap depth: the correct value is computable.
     const ImportedHeightSource imported =
         active ? ResolveImportedHeightSource(tuning) : ImportedHeightSource{};
     classify.TargetDepth =
-        ResolveTerrainMaxDepth(tuning, imported, deepDecode, feature.UsesNarrowHeap());
+        ResolveTerrainMaxDepth(tuning, imported, feature.UsesNarrowHeap());
 
     feature.SetActive(active, classify, tuning.TargetPixelError, tuning.SeaLevel, domain,
                       static_cast<uint32>(tuning.DebugView));

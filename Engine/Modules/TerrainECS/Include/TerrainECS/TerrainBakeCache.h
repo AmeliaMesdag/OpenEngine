@@ -24,7 +24,9 @@ namespace GameEngine::TerrainECS
 /// header.
 /// v3: a colour section with its own key, so an edit that moves only the colour map
 /// (Darken Ground, Soil Color, a colour zone) misses the colour and hits the heights.
-inline constexpr uint32 kTerrainBakeFormatVersion = 3u;
+/// v4: modifiers of equal priority bake in scene-identity order, then entity order,
+/// never in the query's archetype order.
+inline constexpr uint32 kTerrainBakeFormatVersion = 4u;
 
 /// Accumulates a terrain bake's inputs into its content key: FNV-1a 64 over the
 /// bytes fed in, in order, seeded with kTerrainBakeFormatVersion. Feed only

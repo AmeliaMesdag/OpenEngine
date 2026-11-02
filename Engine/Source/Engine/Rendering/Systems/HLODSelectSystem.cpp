@@ -140,10 +140,10 @@ void HLODSelectSystem::Update(ECS::World& world, float32 /*deltaTime*/) {
     Hlod::ViewLod view;
     const Rendering::CameraId camId = m_RenderServices->Views().GetViewpointCamera();
     if (const Rendering::CameraData* cam = m_RenderServices->Views().FindCameraData(camId)) {
-        view.CameraPos[0] = cam->cameraPos[0];
-        view.CameraPos[1] = cam->cameraPos[1];
-        view.CameraPos[2] = cam->cameraPos[2];
-        view.ProjScaleY = (cam->cameraPos[3] == 1.0f) ? 0.0f : std::abs(cam->proj[5]);
+        view.CameraPos[0] = cam->cameraPos.x;
+        view.CameraPos[1] = cam->cameraPos.y;
+        view.CameraPos[2] = cam->cameraPos.z;
+        view.ProjScaleY = (cam->cameraPos.w == 1.0f) ? 0.0f : std::abs(cam->proj[1][1]);
     }
     view.LodBiasGlobal = m_RenderServices->GetLODGlobalBias();
 

@@ -692,14 +692,16 @@ BufferHandle ImageBasedLightingFeature::UploadEnvData(IDevice* device)
     {
         d.lowerHemisphereDarkness =
             Math::Clamp01(m_Source->LowerHemisphereDarkness());
-        float tintSky[3], tintEquator[3], tintGround[3];
-        m_Source->AmbientGradientTint(tintSky, tintEquator, tintGround);
-        for (int i = 0; i < 3; ++i)
-        {
-            d.ambientTintSky[i]     = tintSky[i];
-            d.ambientTintEquator[i] = tintEquator[i];
-            d.ambientTintGround[i]  = tintGround[i];
-        }
+        const EnvironmentAmbientGradientTint tint = m_Source->AmbientGradientTint();
+        d.ambientTintSky[0]     = tint.Sky.r;
+        d.ambientTintSky[1]     = tint.Sky.g;
+        d.ambientTintSky[2]     = tint.Sky.b;
+        d.ambientTintEquator[0] = tint.Equator.r;
+        d.ambientTintEquator[1] = tint.Equator.g;
+        d.ambientTintEquator[2] = tint.Equator.b;
+        d.ambientTintGround[0]  = tint.Ground.r;
+        d.ambientTintGround[1]  = tint.Ground.g;
+        d.ambientTintGround[2]  = tint.Ground.b;
         const EnvironmentLocalReflectionData local = m_Source->LocalReflectionData();
         if (local.BoxProjection)
         {

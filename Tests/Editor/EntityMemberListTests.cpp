@@ -1,6 +1,6 @@
-// The shared entity member list: the members first and the candidates after, each gesture one call
-// of the caller's handler with the row's entity, the mode as segments or as one label, the deleted
-// member's notice, and a note that wraps under the title when it does not fit beside it.
+// The shared entity member list: the rows in the caller's order with the caller's toggle state, each
+// gesture one call of the caller's handler with the row's entity, the mode as segments or as one label,
+// the deleted member's notice, and a note that wraps under the title when it does not fit beside it.
 
 #include <gtest/gtest.h>
 
@@ -53,13 +53,25 @@ std::vector<EntityMemberList::Mode> TwoModes()
     return {{kKeep, "Keep", "Keeps it", false}, {kCut, "Cut", "Cuts it", true}};
 }
 
+// A member of the owner's list, switched on.
 EntityMemberList::Row MakeRow(EntityHandle entity, std::string title, uint8 mode = kKeep)
 {
     EntityMemberList::Row row;
     row.Entity = entity;
+    row.On = true;
+    row.Member = true;
     row.Title = std::move(title);
     row.Modes = TwoModes();
     row.CurrentMode = mode;
+    return row;
+}
+
+// An entity the owner offers and does not hold, switched off.
+EntityMemberList::Row MakeCandidate(EntityHandle entity, std::string title)
+{
+    EntityMemberList::Row row = MakeRow(entity, std::move(title));
+    row.On = false;
+    row.Member = false;
     return row;
 }
 
@@ -77,8 +89,8 @@ EntityMemberList::Content MakeContent()
 // What the handlers were called with.
 struct Calls
 {
-    std::vector<EntityHandle> Added;
-    std::vector<EntityHandle> Removed;
+    std::vector<EntityHandle> SwitchedOn;
+    std::vector<EntityHandle> SwitchedOff;
     std::vector<std::pair<EntityHandle, uint8>> Switched;
     std::vector<EntityHandle> Selected;
 };
@@ -86,8 +98,9 @@ struct Calls
 EntityMemberList::Handlers Record(Calls& calls)
 {
     EntityMemberList::Handlers handlers;
-    handlers.Add = [&calls](EntityHandle entity) { calls.Added.push_back(entity); };
-    handlers.Remove = [&calls](EntityHandle entity) { calls.Removed.push_back(entity); };
+    handlers.SetOn = [&calls](EntityHandle entity, bool on) {
+        (on ? calls.SwitchedOn : calls.SwitchedOff).push_back(entity);
+    };
     handlers.SetMode = [&calls](EntityHandle entity, uint8 mode) { calls.Switched.emplace_back(entity, mode); };
     handlers.Select = [&calls](EntityHandle entity) { calls.Selected.push_back(entity); };
     return handlers;
@@ -156,17 +169,17 @@ class EntityMemberListTest : public ::testing::Test
 
 } // namespace
 
-// The members come first in their order, then the candidates, dimmed; checking a candidate calls
-// Add and unchecking a member calls Remove, each with the row's entity; a click on a title selects.
-// The glyph takes the caller's classes, and a row without them shows none.
-TEST_F(EntityMemberListTest, MembersComeFirstAndTheCheckboxesCallAddAndRemove)
+// The rows keep the caller's order, a row switched off dimmed; switching a row calls SetOn with the
+// row's entity and the new value; a click on a title selects. The glyph takes the caller's classes,
+// and a row without them shows none.
+TEST_F(EntityMemberListTest, RowsKeepTheCallersOrderAndTheTogglesCallSetOn)
 {
     Calls calls;
     EntityMemberList::Content content = MakeContent();
-    content.Members.push_back(MakeRow(Second, "Pond"));
-    content.Members.back().GlyphClasses = {"test-glyph", "test-glyph-pond"};
-    content.Members.back().GlyphTooltip = "Pond kind";
-    content.Candidates.push_back(MakeRow(First, "Shed"));
+    content.Rows.push_back(MakeRow(Second, "Pond"));
+    content.Rows.back().GlyphClasses = {"test-glyph", "test-glyph-pond"};
+    content.Rows.back().GlyphTooltip = "Pond kind";
+    content.Rows.push_back(MakeCandidate(First, "Shed"));
     EntityMemberList list(content, Record(calls));
 
     const std::vector<UIElement*> rows = Rows(list);
@@ -200,8 +213,8 @@ TEST_F(EntityMemberListTest, MembersComeFirstAndTheCheckboxesCallAddAndRemove)
 
     candidate->SetValue(true);
     member->SetValue(false);
-    EXPECT_EQ(calls.Added, std::vector<EntityHandle>{First});
-    EXPECT_EQ(calls.Removed, std::vector<EntityHandle>{Second});
+    EXPECT_EQ(calls.SwitchedOn, std::vector<EntityHandle>{First});
+    EXPECT_EQ(calls.SwitchedOff, std::vector<EntityHandle>{Second});
     EXPECT_TRUE(calls.Switched.empty());
 
     MouseUp(*candidateTitle);
@@ -214,8 +227,8 @@ TEST_F(EntityMemberListTest, TheFilledSegmentIsTheModeAndAnotherSegmentSwitchesI
 {
     Calls calls;
     EntityMemberList::Content content = MakeContent();
-    content.Members.push_back(MakeRow(First, "Pond", kCut));
-    content.Candidates.push_back(MakeRow(Second, "Shed"));
+    content.Rows.push_back(MakeRow(First, "Pond", kCut));
+    content.Rows.push_back(MakeCandidate(Second, "Shed"));
     EntityMemberList list(content, Record(calls));
 
     const std::vector<UIElement*> rows = Rows(list);
@@ -259,7 +272,7 @@ TEST_F(EntityMemberListTest, ARowWithOneModeShowsItAsALabel)
     EntityMemberList::Content content = MakeContent();
     EntityMemberList::Row row = MakeRow(First, "Bed", kCut);
     row.Modes = {{kCut, "Exclude", "Cuts it", true}};
-    content.Members.push_back(std::move(row));
+    content.Rows.push_back(std::move(row));
     EntityMemberList list(content, Record(calls));
 
     const std::vector<UIElement*> rows = Rows(list);
@@ -276,6 +289,40 @@ TEST_F(EntityMemberListTest, ARowWithOneModeShowsItAsALabel)
     EXPECT_TRUE(modes->HasClass("entity-member-mode-single"));
 }
 
+// The toggle reads the row's On whatever Member says: a member switched off (a spline left out) reads
+// off with its modes live, and a row the owner does not hold reads on. A row with no modes shows none.
+TEST_F(EntityMemberListTest, TheToggleReadsTheRowsOnAndAMemberSwitchedOffKeepsItsModes)
+{
+    Calls calls;
+    EntityMemberList::Content content = MakeContent();
+    content.Rows.push_back(MakeCandidate(First, "Lane"));
+    content.Rows.back().On = true;
+    content.Rows.back().Modes.clear();
+    content.Rows.push_back(MakeRow(Second, "Ring road", kCut));
+    content.Rows.back().On = false;
+    EntityMemberList list(content, Record(calls));
+
+    const std::vector<UIElement*> rows = Rows(list);
+    ASSERT_EQ(rows.size(), 2u);
+    Toggle* lane = Part<Toggle>(*rows[0], "entity-member-toggle");
+    Toggle* ringRoad = Part<Toggle>(*rows[1], "entity-member-toggle");
+    ASSERT_TRUE(lane && ringRoad);
+    EXPECT_TRUE(lane->IsChecked());
+    EXPECT_FALSE(ringRoad->IsChecked());
+    EXPECT_EQ(Part<Label>(*rows[0], "entity-member-title")->GetText(), "Lane") << "the list reordered the rows";
+    EXPECT_TRUE(Part<Label>(*rows[1], "entity-member-title")->HasClass("entity-member-title-out"));
+    EXPECT_TRUE(Part<UIElement>(*rows[0], "entity-member-mode")->HasClass("hidden")) << "a row with no modes shows one";
+    Button* keep = Segment(*rows[1], kKeep);
+    ASSERT_NE(keep, nullptr);
+    EXPECT_TRUE(keep->IsEnabled()) << "a member switched off cannot switch its mode";
+    EXPECT_TRUE(Segment(*rows[1], kCut)->HasClass("segmented-button-selected"));
+
+    lane->SetValue(false);
+    ringRoad->SetValue(true);
+    EXPECT_EQ(calls.SwitchedOff, std::vector<EntityHandle>{First});
+    EXPECT_EQ(calls.SwitchedOn, std::vector<EntityHandle>{Second});
+}
+
 // A member whose entity is deleted reads the caller's deleted title and says that undo restores it,
 // in place of the caller's note; a click on it selects nothing, and it can still be removed.
 TEST_F(EntityMemberListTest, ADeletedMemberSaysUndoRestoresItAndCannotBeSelected)
@@ -285,7 +332,7 @@ TEST_F(EntityMemberListTest, ADeletedMemberSaysUndoRestoresItAndCannotBeSelected
     EntityMemberList::Row row = MakeRow(First, "Pond");
     row.Live = false;
     row.Note = "outside";
-    content.Members.push_back(std::move(row));
+    content.Rows.push_back(std::move(row));
     EntityMemberList list(content, Record(calls));
 
     const std::vector<UIElement*> rows = Rows(list);
@@ -302,7 +349,7 @@ TEST_F(EntityMemberListTest, ADeletedMemberSaysUndoRestoresItAndCannotBeSelected
     MouseUp(*title);
     EXPECT_TRUE(calls.Selected.empty()) << "a deleted member was selected";
     member->SetValue(false);
-    EXPECT_EQ(calls.Removed, std::vector<EntityHandle>{First});
+    EXPECT_EQ(calls.SwitchedOff, std::vector<EntityHandle>{First});
 }
 
 // A refusal turns off every candidate's checkbox and is its tooltip; a member's checkbox stays on.
@@ -313,8 +360,8 @@ TEST_F(EntityMemberListTest, ARefusalStopsAddsAndAReadOnlyListStopsEveryEdit)
     Calls calls;
     {
         EntityMemberList::Content content = MakeContent();
-        content.Members.push_back(MakeRow(First, "Pond"));
-        content.Candidates.push_back(MakeRow(Second, "Shed"));
+        content.Rows.push_back(MakeRow(First, "Pond"));
+        content.Rows.push_back(MakeCandidate(Second, "Shed"));
         content.AddRefusal = "Full; take one out first";
         EntityMemberList list(content, Record(calls));
         const std::vector<UIElement*> rows = Rows(list);
@@ -332,8 +379,8 @@ TEST_F(EntityMemberListTest, ARefusalStopsAddsAndAReadOnlyListStopsEveryEdit)
     }
     {
         EntityMemberList::Content content = MakeContent();
-        content.Members.push_back(MakeRow(First, "Pond"));
-        content.Candidates.push_back(MakeRow(Second, "Shed"));
+        content.Rows.push_back(MakeRow(First, "Pond"));
+        content.Rows.push_back(MakeCandidate(Second, "Shed"));
         content.Editable = false;
         EntityMemberList list(content, Record(calls));
         const std::vector<UIElement*> rows = Rows(list);
@@ -358,10 +405,10 @@ TEST_F(EntityMemberListTest, ARefusalStopsAddsAndAReadOnlyListStopsEveryEdit)
     }
 }
 
-// Over the editor's sheets at a narrow inspector: a short note sits beside the title on its line; a
-// note that does not fit there takes the line under the title, wraps inside the row and is not cut,
-// and the mode keeps its place at the row's end.
-TEST_F(EntityMemberListTest, ANoteThatDoesNotFitWrapsUnderTheTitle)
+// Over the editor's sheets in a narrow inspector section: each title sits in the label column, and the
+// value columns line up. A short note sits beside the checkbox; a long note wraps inside the value
+// column and is not cut, and the mode keeps its place at the row's end.
+TEST_F(EntityMemberListTest, TheTitleSitsInTheLabelColumnAndALongNoteWrapsInTheValueColumn)
 {
     Calls calls;
     EntityMemberList::Content content = MakeContent();
@@ -369,36 +416,47 @@ TEST_F(EntityMemberListTest, ANoteThatDoesNotFitWrapsUnderTheTitle)
     shortRow.Note = "outside";
     EntityMemberList::Row longRow = MakeRow(Second, "Market Square");
     longRow.Note = "base outline only: its own 12 members do not apply here, and its height is its own";
-    content.Members.push_back(std::move(shortRow));
-    content.Members.push_back(std::move(longRow));
+    content.Rows.push_back(std::move(shortRow));
+    content.Rows.push_back(std::move(longRow));
     auto list = std::make_unique<EntityMemberList>(content, Record(calls));
     EntityMemberList* raw = list.get();
+    auto section = std::make_unique<UIElement>();
+    section->AddClass("inspector-section");
+    auto body = std::make_unique<UIElement>();
+    body->AddClass("inspector-section-body");
+    body->AddChild(std::move(list));
+    section->AddChild(std::move(body));
 
     InspectorLayoutFixture fixture;
     fixture.ViewportW = 320;
     fixture.ExtraSheets = kListSheets;
-    if (!fixture.Build(std::move(list)))
+    if (!fixture.Build(std::move(section)))
         GTEST_SKIP() << fixture.Diagnostic;
 
     const std::vector<UIElement*> rows = Rows(*raw);
     ASSERT_EQ(rows.size(), 2u);
     Label* shortTitle = Part<Label>(*rows[0], "entity-member-title");
+    Toggle* shortToggle = Part<Toggle>(*rows[0], "entity-member-toggle");
     Label* shortNote = Part<Label>(*rows[0], "entity-member-note");
+    UIElement* shortValue = Part<UIElement>(*rows[0], "entity-member-value");
     Label* longTitle = Part<Label>(*rows[1], "entity-member-title");
     Label* longNote = Part<Label>(*rows[1], "entity-member-note");
-    UIElement* longText = Part<UIElement>(*rows[1], "entity-member-text");
+    UIElement* longValue = Part<UIElement>(*rows[1], "entity-member-value");
     UIElement* longModes = Part<UIElement>(*rows[1], "entity-member-mode");
-    ASSERT_TRUE(shortTitle && shortNote && longTitle && longNote && longText && longModes);
+    ASSERT_TRUE(shortTitle && shortToggle && shortNote && shortValue && longTitle && longNote && longValue && longModes);
     const float lineHeight = shortNote->GetLayoutHeight();
     ASSERT_GT(lineHeight, 0.0f) << "no text measured, so a wrap cannot be told from a fixture without a font";
 
-    EXPECT_GE(shortNote->GetLayoutX(), Right(*shortTitle)) << "a short note left its title's line";
+    EXPECT_NEAR(shortValue->GetLayoutX(), longValue->GetLayoutX(), kLayoutTolerance) << "the value columns differ";
+    EXPECT_LE(Right(*shortTitle), shortValue->GetLayoutX() + kLayoutTolerance) << "a title runs into the value column";
+    EXPECT_LE(Right(*longTitle), longValue->GetLayoutX() + kLayoutTolerance) << "a title runs into the value column";
+    EXPECT_GE(shortNote->GetLayoutX(), Right(*shortToggle)) << "a short note left its checkbox's line";
     EXPECT_NEAR(shortNote->GetLayoutY() + 0.5f * shortNote->GetLayoutHeight(),
-                shortTitle->GetLayoutY() + 0.5f * shortTitle->GetLayoutHeight(), kLayoutTolerance);
+                shortToggle->GetLayoutY() + 0.5f * shortToggle->GetLayoutHeight(), kLayoutTolerance);
 
-    EXPECT_GE(longNote->GetLayoutY(), Bottom(*longTitle) - kLayoutTolerance) << "the long note is not under the title";
+    EXPECT_GE(longNote->GetLayoutX(), longValue->GetLayoutX() - kLayoutTolerance) << "the long note left its column";
     EXPECT_GE(longNote->GetLayoutHeight(), 2.0f * lineHeight - kLayoutTolerance) << "the long note did not wrap";
-    EXPECT_LE(Right(*longNote), Right(*longText) + kLayoutTolerance) << "the long note runs past its row";
+    EXPECT_LE(Right(*longNote), Right(*longValue) + kLayoutTolerance) << "the long note runs past its row";
     EXPECT_NEAR(Right(*rows[1]) - Right(*longModes), kRowPadding, kLayoutTolerance)
         << "the mode left the row's end";
     for (std::size_t index = 0; index < 2; ++index)
@@ -410,4 +468,41 @@ TEST_F(EntityMemberListTest, ANoteThatDoesNotFitWrapsUnderTheTitle)
         EXPECT_GE(segment->GetLayoutWidth(), words->GetLayoutWidth() + kSegmentPadding - kLayoutTolerance)
             << "segment " << index << " is narrower than its words";
     }
+}
+
+TEST_F(EntityMemberListTest, AListWithNoHeadingPutsItsRowsAndItsEmptyTextOnTheSectionsEdgeAndATitleNamesItsEntity)
+{
+    Calls calls;
+    EntityMemberList::Content withRow = MakeContent();
+    withRow.Text.Heading.clear();
+    withRow.Rows.push_back(MakeRow(First, "Village Square"));
+    EntityMemberList::Content empty = MakeContent();
+    empty.Text.Heading.clear();
+    auto rowList = std::make_unique<EntityMemberList>(withRow, Record(calls));
+    auto emptyList = std::make_unique<EntityMemberList>(empty, Record(calls));
+    EntityMemberList* rowRaw = rowList.get();
+    EntityMemberList* emptyRaw = emptyList.get();
+    auto section = std::make_unique<UIElement>();
+    section->AddClass("inspector-section");
+    auto body = std::make_unique<UIElement>();
+    body->AddClass("inspector-section-body");
+    body->AddChild(std::move(rowList));
+    body->AddChild(std::move(emptyList));
+    section->AddChild(std::move(body));
+
+    InspectorLayoutFixture fixture;
+    fixture.ViewportW = 320;
+    fixture.ExtraSheets = kListSheets;
+    if (!fixture.Build(std::move(section)))
+        GTEST_SKIP() << fixture.Diagnostic;
+
+    const std::vector<UIElement*> rows = Rows(*rowRaw);
+    ASSERT_EQ(rows.size(), 1u);
+    Label* title = Part<Label>(*rows[0], "entity-member-title");
+    Label* emptyText = Part<Label>(*emptyRaw, "entity-member-empty");
+    ASSERT_TRUE(title && emptyText);
+    EXPECT_NEAR(title->GetLayoutX(), rowRaw->GetLayoutX(), kLayoutTolerance) << "the row keeps the plate's padding";
+    EXPECT_NEAR(emptyText->GetLayoutX(), emptyRaw->GetLayoutX(), kLayoutTolerance)
+        << "the empty text keeps the plate's padding";
+    EXPECT_EQ(title->GetTooltip(), "Village Square. Click to select it.");
 }

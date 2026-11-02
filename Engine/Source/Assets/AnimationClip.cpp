@@ -2,6 +2,7 @@
 
 #include "AnimationClipSchema.h"
 #include "AssetCore/SharedFileRead.h"
+#include "Assets/AssetDecodeInputFiles.h"
 #include "Logger/Logger.h"
 #include "Mathematics/Interpolation.h"
 #include "Serialization/JsonRead.h"
@@ -406,6 +407,10 @@ bool AnimationClip::Load()
 {
     if (GetState() == AssetState::Loaded)
         return true;
+
+    // A synchronous load reads its own inputs; one nested in a decode must not take the
+    // decode's (ScopedAssetDecodeInputFiles).
+    const ScopedAssetDecodeInputFiles readsTheDisk(nullptr);
 
     // Reuse cached file data when switching animation indices to avoid
     // re-reading the (potentially large) model file from disk.

@@ -97,7 +97,7 @@ inline void ApplyInspectorSliderStyle(Slider* slider, float minWidthPx = kInspec
 
     slider->AddClass("property-slider");
     ApplyInspectorSliderTrackInset(slider);
-    slider->Overrides()
+    slider->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(minWidthPx));
 }
@@ -998,7 +998,7 @@ inline void ApplySliderWithValueContainerStyle(
         return;
 
     fieldContainer->AddClass("inspector-slider-with-value");
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(4.0f))
@@ -1014,7 +1014,7 @@ inline void ApplySliderFloatValueFieldStyle(
 
     valueField->AddClass("inspector-float-field");
     valueField->AddClass("inspector-slider-value-field");
-    valueField->Overrides()
+    valueField->Style()
         .Set(Style::Width, StyleLength::Px(widthPx))
         .Set(Style::MinWidth, StyleLength::Px(widthPx))
         .Set(Style::MaxWidth, StyleLength::Px(widthPx))
@@ -1030,7 +1030,7 @@ inline void ApplySliderIntValueFieldStyle(
 
     valueField->AddClass("inspector-int-field");
     valueField->AddClass("inspector-slider-value-field");
-    valueField->Overrides()
+    valueField->Style()
         .Set(Style::Width, StyleLength::Px(widthPx))
         .Set(Style::MinWidth, StyleLength::Px(widthPx))
         .Set(Style::MaxWidth, StyleLength::Px(widthPx))

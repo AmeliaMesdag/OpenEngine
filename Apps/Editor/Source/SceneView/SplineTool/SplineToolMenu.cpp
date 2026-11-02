@@ -196,7 +196,7 @@ std::vector<ContextMenuManipulator::Item> BuildSplineToolMenuItems(const OpenCol
                                  void (*apply)())
     { items.push_back({.Path = label, .IconPath = icon, .Flags = flags, .OnActivate = apply}); };
 
-    toggle("Auto-Connect to Nearby Spline", EditorIcons::kSplineCurve,
+    toggle("Snap Ends to Nearby Splines", EditorIcons::kSplineCurve,
            CheckedFlag(settings.GetAutoConnect()),
            []
            {
@@ -354,8 +354,6 @@ std::vector<ContextMenuManipulator::Item> BuildSplineToolMenuItems(const OpenCol
                          s.SetStickToMesh(true);
                          s.SetConformToSurface(false);
                          s.SetDrapeToSurface(true);
-                         s.SetAutoConnectTolerance(2.0f);
-                         s.SetCloseLoopTolerance(2.0f);
                      }});
 
     return items;

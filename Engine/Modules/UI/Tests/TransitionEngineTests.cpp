@@ -422,7 +422,7 @@ TEST_F(TransitionEngineTest, DiscreteDisplayTransitionDelaysNone)
     Tick(0.016f);
 
     // Set display:none via override — the delayed transition should hold flex.
-    box->Overrides().Set(Style::Display, DisplayMode::None);
+    box->Style().Set(Style::Display, DisplayMode::None);
     box->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty);
     Tick(0.016f);
 
@@ -702,7 +702,7 @@ TEST_F(TransitionEngineTest, ProjectCardHoverAnimatesWithInlineFrameOverrides)
     // Mirror ApplyProjectCardFrame + addCardOutline inline overrides.
     UIElement* cardEl = root->FindById("card"_sid);
     ASSERT_NE(cardEl, nullptr);
-    cardEl->Overrides()
+    cardEl->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::Width, StyleLength::Px(280.0f))
@@ -720,7 +720,7 @@ TEST_F(TransitionEngineTest, ProjectCardHoverAnimatesWithInlineFrameOverrides)
         .Set(Style::Cursor, CursorStyle::Pointer);
     UIElement* outlineEl = root->FindById("outline"_sid);
     ASSERT_NE(outlineEl, nullptr);
-    outlineEl->Overrides()
+    outlineEl->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionTop, StyleLength::Px(0.0f))
@@ -811,7 +811,7 @@ TEST_F(TransitionEngineTest, ProjectCardHoverAnimatesWhenCardAddedAfterAttach)
     auto card = std::make_unique<Button>();
     card->SetId("card");
     card->AddClass("project-card");
-    card->Overrides()
+    card->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::Width, StyleLength::Px(280.0f))
@@ -820,7 +820,7 @@ TEST_F(TransitionEngineTest, ProjectCardHoverAnimatesWhenCardAddedAfterAttach)
     auto preview = std::make_unique<UIElement>();
     preview->SetId("preview");
     preview->AddClass("project-card-empty-preview");
-    preview->Overrides()
+    preview->Style()
         .Set(Style::Width, StyleLength::Percent(100.0f))
         .Set(Style::Height, StyleLength::Px(132.0f));
     card->AddChild(std::move(preview));

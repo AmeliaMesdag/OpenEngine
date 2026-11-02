@@ -7,21 +7,14 @@ namespace GameEngine::Ocean
 OceanWaterMaterialGPU BuildOceanWaterMaterial(const Components::OceanSurface &s)
 {
     OceanWaterMaterialGPU m{};
-    const auto color = [](float *out, const auto &c) {
-        out[0] = c.r;
-        out[1] = c.g;
-        out[2] = c.b;
-        out[3] = c.a;
-    };
-    color(m.Deep, s.DeepColor);
-    color(m.Diffuse, s.Diffuse);
-    color(m.Grazing, s.DiffuseGrazing);
-    color(m.Shadow, s.DiffuseShadow);
-    color(m.Shallow, s.SubSurfaceShallowCol);
-    color(m.Subsurface, s.SubSurfaceColour);
-    color(m.Foam, s.FoamColor);
-    color(m.Fog, s.DepthFogDensity);
-    m.Fog[3] = s.RefractionStrength;
+    m.Deep = s.DeepColor;
+    m.Diffuse = s.Diffuse;
+    m.Grazing = s.DiffuseGrazing;
+    m.Shadow = s.DiffuseShadow;
+    m.Shallow = s.SubSurfaceShallowCol;
+    m.Subsurface = s.SubSurfaceColour;
+    m.Foam = s.FoamColor;
+    m.Fog = Mathematics::Vector4(s.DepthFogDensity.r, s.DepthFogDensity.g, s.DepthFogDensity.b, s.RefractionStrength);
     m.Surface[0] = std::max(s.NormalsStrength, 0.0f);
     m.Surface[1] = std::max(s.NormalsScale, 0.001f);
     m.Surface[2] = Math::Clamp01(s.Roughness);

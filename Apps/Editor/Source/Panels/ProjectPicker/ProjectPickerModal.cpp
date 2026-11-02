@@ -100,7 +100,7 @@ constexpr std::array<std::string_view, 21> kImportViewRequiredIds = {
     "import-archive-browse",
     "import-git-panel",
     "import-git-url-field",
-    "import-git-hint",
+    "import-git-requirement",
     "import-destination-row",
     "import-destination-field",
     "import-destination-browse",
@@ -194,7 +194,7 @@ void ApplyScrollbarLane(ScrollView& scrollView)
     UIElement* verticalBar = scrollView.GetVerticalScrollbar();
     if (!verticalBar)
         return;
-    verticalBar->Overrides()
+    verticalBar->Style()
         .Set(Style::ZIndex, kProjectPickerScrollbarZIndex)
         .Set(Style::MarginLeft, StyleLength::Px(kProjectPickerScrollbarGapPx))
         .Set(Style::MarginRight, StyleLength::Px(kProjectPickerScrollbarEdgeGapPx));
@@ -265,7 +265,7 @@ void EnableWindowDrag(UIElement& handle, UIElement& window, bool directTargetOnl
         const float left = std::clamp(state->StartLeft + dx, 0.0f, maxLeft);
         const float top = std::clamp(state->StartTop + dy, 0.0f, maxTop);
 
-        windowPtr->Overrides()
+        windowPtr->Style()
             .Set(Style::PositionLeft, StyleLength::Px(std::round(left)))
             .Set(Style::PositionTop, StyleLength::Px(std::round(top)))
             .Set(Style::MarginLeft, StyleLength::Px(0.0f))
@@ -693,7 +693,7 @@ void ProjectPickerModal::BuildTree()
     // The window's fixed size and its centering margins are one arithmetic unit
     // (margin = -size/2), so both stay here rather than splitting across the
     // stylesheet. Everything else about the window is in ProjectPicker.css.
-    windowPtr->Overrides()
+    windowPtr->Style()
         .Set(Style::MarginLeft, StyleLength::Px(-kProjectPickerLibraryWidthPx * 0.5f))
         .Set(Style::MarginTop, StyleLength::Px(-kProjectPickerModalHeightPx * 0.5f))
         .Set(Style::Width, StyleLength::Px(kProjectPickerLibraryWidthPx))
@@ -709,15 +709,15 @@ void ProjectPickerModal::BuildTree()
         kProjectPickerLibraryWidthPx - 2.0f * kProjectPickerModalHeaderHorizontalPaddingPx;
     const float headerInnerHalfPx = headerInnerWidthPx * 0.5f;
     const float sideTitleBandWidthPx = headerInnerHalfPx - kProjectPickerCubeLogoHalfPx;
-    engineRegion->Overrides().Set(Style::Width, StyleLength::Px(sideTitleBandWidthPx));
-    versionRegion->Overrides().Set(Style::Width, StyleLength::Px(sideTitleBandWidthPx));
+    engineRegion->Style().Set(Style::Width, StyleLength::Px(sideTitleBandWidthPx));
+    versionRegion->Style().Set(Style::Width, StyleLength::Px(sideTitleBandWidthPx));
 
     UI::Layout::SetBackgroundPath(*cubeIcon, "Icons/logo.svg");
 
     // The content padding is part of the window width budget above, and the
     // projects header cancels it with equal negative margins, so the pair stays
     // in C++ where that arithmetic lives.
-    content->Overrides()
+    content->Style()
         .Set(Style::PaddingTop, StyleLength::Px(0.0f))
         .Set(Style::PaddingRight, StyleLength::Px(kProjectPickerContentPaddingRightPx))
         // No bottom padding: the scroll viewport reaches the footer's rule, so a
@@ -731,7 +731,7 @@ void ProjectPickerModal::BuildTree()
     // runs edge to edge, while the row's own padding keeps the title on the
     // first card column and the search field's right edge on the last one (the
     // scrollbar lane sits inside the right padding).
-    projectHeader->Overrides()
+    projectHeader->Style()
         .Set(Style::MarginLeft, StyleLength::Px(-kProjectPickerContentPaddingLeftPx))
         .Set(Style::MarginRight, StyleLength::Px(-kProjectPickerContentPaddingRightPx))
         .Set(Style::PaddingLeft, StyleLength::Px(kProjectPickerContentPaddingLeftPx))
@@ -743,7 +743,7 @@ void ProjectPickerModal::BuildTree()
             m_SearchQuery = value;
             if (m_SearchPlaceholder)
             {
-                m_SearchPlaceholder->Overrides().Set(
+                m_SearchPlaceholder->Style().Set(
                     Style::Display, value.empty() ? DisplayMode::Flex : DisplayMode::None);
                 m_SearchPlaceholder->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
             }
@@ -775,13 +775,13 @@ void ProjectPickerModal::BuildTree()
         // the search bar's own background paint over the glyph. Kept in code:
         // the shared control owns the element, so nothing in this modal's
         // stylesheet reliably selects it.
-        clearButton->Overrides().Set(Style::ZIndex, kProjectPickerSearchClearZIndex);
+        clearButton->Style().Set(Style::ZIndex, kProjectPickerSearchClearZIndex);
         clearButton->RegisterEventHandler(kEventMouseEnter, [clearButton](UIEvent&) {
-            clearButton->Overrides().Set(Style::Opacity, 1.0f);
+            clearButton->Style().Set(Style::Opacity, 1.0f);
             clearButton->MarkDirty(UIElement::VisualDirty);
         });
         clearButton->RegisterEventHandler(kEventMouseLeave, [clearButton](UIEvent&) {
-            clearButton->Overrides().Set(Style::Opacity, 0.7f);
+            clearButton->Style().Set(Style::Opacity, 0.7f);
             clearButton->MarkDirty(UIElement::VisualDirty);
         });
     }
@@ -847,7 +847,7 @@ void ProjectPickerModal::BuildTree()
     m_TemplateProjectsView = newProjectGridContent->FindById("project-templates"_sid);
     // Grid width and gutter are derived from the card metrics, so they stay
     // beside those constants; flow and alignment are in #project-templates.
-    m_TemplateProjectsView->Overrides()
+    m_TemplateProjectsView->Style()
         .Set(Style::Gap, StyleLength::Px(kProjectPickerCardGapPx))
         .Set(Style::Width, StyleLength::Px(kProjectPickerGridWidthPx));
     m_TemplatesEmptyLabel = newProjectGridContent->FindById("project-templates-empty"_sid);
@@ -880,7 +880,7 @@ void ProjectPickerModal::BuildTree()
 
     // Card grid: shown once a catalog is available. Wraps past three entries.
     m_CommunityGrid = newProjectGridContent->FindById("project-community-grid"_sid);
-    m_CommunityGrid->Overrides()
+    m_CommunityGrid->Style()
         .Set(Style::Gap, StyleLength::Px(kProjectPickerCardGapPx))
         .Set(Style::Width, StyleLength::Px(kProjectPickerGridWidthPx));
 
@@ -898,7 +898,7 @@ void ProjectPickerModal::BuildTree()
     if (Platform::SupportsFolderPicker())
         locationBrowse->SetOnClick([this](UIEvent&) { OnNewProjectBrowseClicked(); });
     else
-        locationBrowse->Overrides().Set(Style::Display, DisplayMode::None);
+        locationBrowse->Style().Set(Style::Display, DisplayMode::None);
 
     m_ImportProjectView = importProjectView.get();
     UIElement* importHeaderPtr = importProjectView->FindById("import-header"_sid);
@@ -944,7 +944,7 @@ void ProjectPickerModal::BuildTree()
         folderDrop->SetText("This browser can't browse local folders. Use Chrome or Edge — or in "
                             "Brave, enable brave://flags/#file-system-access-api.");
         folderDrop->AddClass("disabled");
-        folderBrowseButton->Overrides().Set(Style::Display, DisplayMode::None);
+        folderBrowseButton->Style().Set(Style::Display, DisplayMode::None);
         referenceOption->RemoveClass("selected");
         referenceOption->AddClass("disabled");
     }
@@ -960,7 +960,7 @@ void ProjectPickerModal::BuildTree()
     m_ImportGitUrlField->SetOnValueChanged([this](const std::string&) { UpdateImportProjectEnabled(); });
     m_ImportGitUrlField->RegisterEventHandler(
         kEventKeyUp, [this](UIEvent&) { UpdateImportProjectEnabled(); });
-    m_ImportGitHint = dynamic_cast<Label*>(importProjectView->FindById("import-git-hint"_sid));
+    m_ImportGitRequirement = dynamic_cast<Label*>(importProjectView->FindById("import-git-requirement"_sid));
 
     // Shared destination for the archive/git flows: the project folder is
     // created inside this directory, named after the archive/repository.
@@ -991,7 +991,7 @@ void ProjectPickerModal::BuildTree()
     m_ImportProjectButton->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) { OnImportProjectClicked(); });
     // Hidden until a valid archive/URL exists; UpdateImportProjectEnabled owns
     // this state from here on.
-    m_ImportProjectButton->Overrides().Set(Style::Display, DisplayMode::None);
+    m_ImportProjectButton->Style().Set(Style::Display, DisplayMode::None);
 
     m_BottomPanel = bottomPanel;
 
@@ -1005,7 +1005,7 @@ void ProjectPickerModal::BuildTree()
         return;
     // Grid width and gutter are derived from the card metrics and feed the
     // window width budget, so they stay beside those constants.
-    recentProjectsContainer->Overrides()
+    recentProjectsContainer->Style()
         .Set(Style::Gap, StyleLength::Px(kProjectPickerCardGapPx))
         .Set(Style::Width, StyleLength::Px(kProjectPickerLibraryGridWidthPx))
         .Set(Style::MinWidth, StyleLength::Px(kProjectPickerLibraryGridWidthPx))
@@ -1019,7 +1019,7 @@ void ProjectPickerModal::BuildTree()
     if (Platform::SupportsFolderPicker())
         browseButton->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) { OnBrowseClicked(); });
     else
-        browseButton->Overrides().Set(Style::Display, DisplayMode::None);
+        browseButton->Style().Set(Style::Display, DisplayMode::None);
 
     UI::Layout::SetBackgroundPath(*projectLogo, "Icons/logo.svg");
     m_ProjectLogo = projectLogo;
@@ -1050,7 +1050,7 @@ void ProjectPickerModal::BuildTree()
 
     // Fixed size plus its centering margins (margin = -size/2) are one
     // arithmetic unit; the rest of the window is in ProjectPicker.css.
-    stackedWindowPtr->Overrides()
+    stackedWindowPtr->Style()
         .Set(Style::MarginLeft, StyleLength::Px(-kProjectPickerStackedModalWidthPx * 0.5f))
         .Set(Style::MarginTop, StyleLength::Px(-kProjectPickerStackedModalHeightPx * 0.5f))
         .Set(Style::Width, StyleLength::Px(kProjectPickerStackedModalWidthPx))
@@ -1135,7 +1135,7 @@ void ProjectPickerModal::Show()
     // .project-picker-modal will animate it to 1 on the next frame when
     // Update() sets opacity to 1. effectiveOpacity propagates through the
     // tree, so the entire modal fades as a unit.
-    Overrides()
+    Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::JustifyContent, JustifyContent::Center)
@@ -1192,7 +1192,7 @@ void ProjectPickerModal::Hide()
     // .project-picker-modal animates opacity over 0.1s and delays the
     // display:none switch by the same duration, so the element stays
     // visible during the fade-out.
-    Overrides()
+    Style()
         .Set(Style::PointerEvents, false)
         .Set(Style::Opacity, 0.0f)
         .Set(Style::Display, DisplayMode::None);
@@ -1318,13 +1318,13 @@ void ProjectPickerModal::UpdateLayoutForRecentProjects()
         // The library footer only hosts the picker-dismiss Cancel; the
         // create/import actions live in the stacked modal's own footer.
         const bool showLibraryCancel = m_ShowCancelButton;
-        m_Footer->Overrides().Set(Style::Display,
+        m_Footer->Style().Set(Style::Display,
                                   showLibraryCancel ? DisplayMode::Flex : DisplayMode::None);
         m_Footer->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
 
         if (m_CancelButton)
         {
-            m_CancelButton->Overrides().Set(
+            m_CancelButton->Style().Set(
                 Style::Display, showLibraryCancel ? DisplayMode::Block : DisplayMode::None);
             m_CancelButton->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
         }
@@ -1340,7 +1340,7 @@ void ProjectPickerModal::SetRecentProjectsVisible(bool visible, bool aggressiveH
     // parking overrides so the stylesheet's values come back.
     if (m_RecentProjectsScroll)
     {
-        StyleOverrides& scroll = m_RecentProjectsScroll->Overrides();
+        StyleDeclaration& scroll = m_RecentProjectsScroll->Style();
         if (visible)
         {
             scroll.Set(Style::Display, DisplayMode::Flex)
@@ -1371,7 +1371,7 @@ void ProjectPickerModal::SetRecentProjectsVisible(bool visible, bool aggressiveH
 
     if (m_RecentProjectsContainer)
     {
-        StyleOverrides& grid = m_RecentProjectsContainer->Overrides();
+        StyleDeclaration& grid = m_RecentProjectsContainer->Style();
         if (visible)
         {
             // The grid width is code-owned (derived from the card metrics), so
@@ -1422,36 +1422,36 @@ void ProjectPickerModal::ShowLoading()
 
     if (m_ProjectsHeader)
     {
-        m_ProjectsHeader->Overrides().Set(Style::Display, DisplayMode::None);
+        m_ProjectsHeader->Style().Set(Style::Display, DisplayMode::None);
         m_ProjectsHeader->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     // The stacked create/import modal comes down while the loading page shows;
     // HideLoading re-enters the active view, which re-raises it.
     if (m_StackedScrim)
     {
-        m_StackedScrim->Overrides().Set(Style::Display, DisplayMode::None);
+        m_StackedScrim->Style().Set(Style::Display, DisplayMode::None);
         m_StackedScrim->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 
     // Hide everything: title, browse bar (path container), bottom panel, and cancel button.
     if (m_Title)
     {
-        m_Title->Overrides().Set(Style::Display, DisplayMode::None);
+        m_Title->Style().Set(Style::Display, DisplayMode::None);
         m_Title->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     if (m_BottomPanel)
     {
-        m_BottomPanel->Overrides().Set(Style::Display, DisplayMode::None);
+        m_BottomPanel->Style().Set(Style::Display, DisplayMode::None);
         m_BottomPanel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     if (m_CancelButton)
     {
-        m_CancelButton->Overrides().Set(Style::Display, DisplayMode::None);
+        m_CancelButton->Style().Set(Style::Display, DisplayMode::None);
         m_CancelButton->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     if (m_Footer)
     {
-        m_Footer->Overrides().Set(Style::Display, DisplayMode::None);
+        m_Footer->Style().Set(Style::Display, DisplayMode::None);
         m_Footer->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 
@@ -1471,7 +1471,7 @@ void ProjectPickerModal::ShowLoading()
         if (Label* label = dynamic_cast<Label*>(m_LoadingLabel))
             label->SetText(loadingText);
 
-        m_LoadingLabel->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_LoadingLabel->Style().Set(Style::Display, DisplayMode::Flex);
         m_LoadingLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 
@@ -1498,7 +1498,7 @@ void ProjectPickerModal::HideLoading()
 
     if (m_LoadingLabel)
     {
-        m_LoadingLabel->Overrides().Set(Style::Display, DisplayMode::None);
+        m_LoadingLabel->Style().Set(Style::Display, DisplayMode::None);
         m_LoadingLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 
@@ -1528,7 +1528,7 @@ void ProjectPickerModal::Update()
     {
         // The previous frame established opacity:0. Now set opacity:1
         // so the CSS transition can interpolate the change.
-        Overrides().Set(Style::Opacity, 1.0f);
+        Style().Set(Style::Opacity, 1.0f);
         m_FadeInPending = false;
     }
 
@@ -1583,7 +1583,7 @@ void ProjectPickerModal::Update()
             if (errorLabel)
             {
                 errorLabel->SetText(acquireStatus.Error);
-                errorLabel->Overrides().Set(Style::Display, DisplayMode::Block);
+                errorLabel->Style().Set(Style::Display, DisplayMode::Block);
                 errorLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
             }
         }
@@ -1613,7 +1613,7 @@ void ProjectPickerModal::Update()
         {
             const uint32_t tint =
                 ColorHSV(m_LogoHueAnimationTime, kLogoTintSaturation, kLogoTintValue).ToARGB();
-            cubeIcon->Styles().SetBackgroundTint(tint);
+            cubeIcon->Style().Set(Style::BackgroundTint, tint);
         }
     }
     else
@@ -1674,7 +1674,7 @@ void ProjectPickerModal::BuildTemplateCards()
     m_TemplateButtons.clear();
 
     const bool hasTemplates = !m_TemplateCatalog.Entries.empty();
-    m_TemplatesEmptyLabel->Overrides().Set(Style::Display, hasTemplates ? DisplayMode::None : DisplayMode::Flex);
+    m_TemplatesEmptyLabel->Style().Set(Style::Display, hasTemplates ? DisplayMode::None : DisplayMode::Flex);
     if (!hasTemplates)
         return;
 
@@ -1755,20 +1755,20 @@ void ProjectPickerModal::UpdateCommunityStatusView()
         break;
     }
 
-    m_CommunityStatusView->Overrides().Set(Style::Display,
+    m_CommunityStatusView->Style().Set(Style::Display,
                                            showGrid ? DisplayMode::None : DisplayMode::Flex);
-    m_CommunityGrid->Overrides().Set(Style::Display,
+    m_CommunityGrid->Style().Set(Style::Display,
                                      showGrid ? DisplayMode::Flex : DisplayMode::None);
     if (m_CommunityStatusTitle)
         m_CommunityStatusTitle->SetText(title);
     if (m_CommunityStatusMessage)
         m_CommunityStatusMessage->SetText(message);
     if (m_CommunityRetryButton)
-        m_CommunityRetryButton->Overrides().Set(Style::Display,
+        m_CommunityRetryButton->Style().Set(Style::Display,
                                                 showRetry ? DisplayMode::Flex : DisplayMode::None);
     const bool showOffline = showGrid && m_Community.FromCache;
     if (m_CommunityOfflineBanner)
-        m_CommunityOfflineBanner->Overrides().Set(
+        m_CommunityOfflineBanner->Style().Set(
             Style::Display, showOffline ? DisplayMode::Flex : DisplayMode::None);
     if (m_CommunityOfflineLabel && showOffline)
         m_CommunityOfflineLabel->SetText(
@@ -1818,7 +1818,7 @@ void ProjectPickerModal::UpdateCreateProjectEnabled()
     bool enabled = !m_AcquireInFlight;
     if (m_ShowingCommunityProjects)
         enabled = enabled && m_SelectedCommunity >= 0;
-    m_CreateProjectButton->Overrides()
+    m_CreateProjectButton->Style()
         .Set(Style::PointerEvents, enabled)
         .Set(Style::Opacity, enabled ? 1.0f : 0.45f);
     m_CreateProjectButton->MarkDirty(UIElement::VisualDirty);
@@ -1834,13 +1834,13 @@ void ProjectPickerModal::UpdateNewProjectTabView()
     }
     if (m_TemplateProjectsView)
     {
-        m_TemplateProjectsView->Overrides().Set(
+        m_TemplateProjectsView->Style().Set(
             Style::Display, showCommunity ? DisplayMode::None : DisplayMode::Flex);
         m_TemplateProjectsView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     if (m_CommunityProjectsView)
     {
-        m_CommunityProjectsView->Overrides().Set(
+        m_CommunityProjectsView->Style().Set(
             Style::Display, showCommunity ? DisplayMode::Flex : DisplayMode::None);
         m_CommunityProjectsView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
@@ -1865,7 +1865,7 @@ void ProjectPickerModal::UpdateNewProjectTabView()
     if (m_NewProjectErrorLabel)
     {
         m_NewProjectErrorLabel->SetText("");
-        m_NewProjectErrorLabel->Overrides().Set(Style::Display, DisplayMode::None);
+        m_NewProjectErrorLabel->Style().Set(Style::Display, DisplayMode::None);
         m_NewProjectErrorLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
@@ -1879,7 +1879,7 @@ void ProjectPickerModal::UpdateImportProjectMode()
     auto showView = [](UIElement* view, bool visible) {
         if (!view)
             return;
-        view->Overrides().Set(Style::Display, visible ? DisplayMode::Flex : DisplayMode::None);
+        view->Style().Set(Style::Display, visible ? DisplayMode::Flex : DisplayMode::None);
         view->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     };
     showView(m_ImportFolderView, folder);
@@ -1905,21 +1905,23 @@ void ProjectPickerModal::UpdateImportProjectMode()
     // folder flow picks the project directly.
     if (m_ImportDestinationRow)
     {
-        m_ImportDestinationRow->Overrides().Set(Style::Display,
+        m_ImportDestinationRow->Style().Set(Style::Display,
                                                 folder ? DisplayMode::None : DisplayMode::Flex);
         m_ImportDestinationRow->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
-    if (m_ImportGitHint)
+    // Without Git the Import button is hidden, so this line stays visible when info cards are off.
+    if (m_ImportGitRequirement)
     {
-        m_ImportGitHint->SetText(Editor::ProjectAcquisition::IsGitAvailable()
-            ? "Public http(s) repository; cloned shallowly."
-            : "Requires Git — install it from git-scm.com.");
-        m_ImportGitHint->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
+        if (Editor::ProjectAcquisition::IsGitAvailable())
+            m_ImportGitRequirement->AddClass("hidden");
+        else
+            m_ImportGitRequirement->RemoveClass("hidden");
+        m_ImportGitRequirement->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     if (m_ImportErrorLabel)
     {
         m_ImportErrorLabel->SetText("");
-        m_ImportErrorLabel->Overrides().Set(Style::Display, DisplayMode::None);
+        m_ImportErrorLabel->Style().Set(Style::Display, DisplayMode::None);
         m_ImportErrorLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     UpdateImportProjectEnabled();
@@ -1934,18 +1936,18 @@ void ProjectPickerModal::ShowLibraryView()
     m_ShowingNewProject = false;
     m_ShowingImportProject = false;
     if (m_StackedScrim)
-        m_StackedScrim->Overrides().Set(Style::Display, DisplayMode::None);
+        m_StackedScrim->Style().Set(Style::Display, DisplayMode::None);
     if (m_ProjectsHeader)
-        m_ProjectsHeader->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_ProjectsHeader->Style().Set(Style::Display, DisplayMode::Flex);
     if (m_Title)
-        m_Title->Overrides().Set(Style::Display, DisplayMode::Block);
+        m_Title->Style().Set(Style::Display, DisplayMode::Block);
     SetRecentProjectsVisible(true, false);
     UpdateLayoutForRecentProjects();
 
     if (m_NewProjectErrorLabel)
     {
         m_NewProjectErrorLabel->SetText("");
-        m_NewProjectErrorLabel->Overrides().Set(Style::Display, DisplayMode::None);
+        m_NewProjectErrorLabel->Style().Set(Style::Display, DisplayMode::None);
         m_NewProjectErrorLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
     MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
@@ -1960,15 +1962,15 @@ void ProjectPickerModal::ShowNewProjectView()
     m_ShowingNewProject = true;
     m_ShowingImportProject = false;
     if (m_StackedScrim)
-        m_StackedScrim->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_StackedScrim->Style().Set(Style::Display, DisplayMode::Flex);
     if (m_NewProjectView)
-        m_NewProjectView->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_NewProjectView->Style().Set(Style::Display, DisplayMode::Flex);
     if (m_ImportProjectView)
-        m_ImportProjectView->Overrides().Set(Style::Display, DisplayMode::None);
+        m_ImportProjectView->Style().Set(Style::Display, DisplayMode::None);
     if (m_NewProjectActions)
-        m_NewProjectActions->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_NewProjectActions->Style().Set(Style::Display, DisplayMode::Flex);
     if (m_ImportProjectActions)
-        m_ImportProjectActions->Overrides().Set(Style::Display, DisplayMode::None);
+        m_ImportProjectActions->Style().Set(Style::Display, DisplayMode::None);
 
     if (entering)
     {
@@ -2002,15 +2004,15 @@ void ProjectPickerModal::ShowImportProjectView()
             Editor::LoadNewProjectLocation(ResolveHomePath()).generic_string());
     }
     if (m_StackedScrim)
-        m_StackedScrim->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_StackedScrim->Style().Set(Style::Display, DisplayMode::Flex);
     if (m_NewProjectView)
-        m_NewProjectView->Overrides().Set(Style::Display, DisplayMode::None);
+        m_NewProjectView->Style().Set(Style::Display, DisplayMode::None);
     if (m_ImportProjectView)
-        m_ImportProjectView->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_ImportProjectView->Style().Set(Style::Display, DisplayMode::Flex);
     if (m_NewProjectActions)
-        m_NewProjectActions->Overrides().Set(Style::Display, DisplayMode::None);
+        m_NewProjectActions->Style().Set(Style::Display, DisplayMode::None);
     if (m_ImportProjectActions)
-        m_ImportProjectActions->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_ImportProjectActions->Style().Set(Style::Display, DisplayMode::Flex);
 
     UpdateImportProjectMode();
     MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
@@ -2054,7 +2056,7 @@ void ProjectPickerModal::OnCreateProjectClicked()
         if (m_NewProjectErrorLabel)
         {
             m_NewProjectErrorLabel->SetText(message);
-            m_NewProjectErrorLabel->Overrides().Set(Style::Display, DisplayMode::Block);
+            m_NewProjectErrorLabel->Style().Set(Style::Display, DisplayMode::Block);
             m_NewProjectErrorLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
         }
     };
@@ -2185,7 +2187,7 @@ void ProjectPickerModal::UpdateImportProjectEnabled()
     // Folder selection imports immediately through Browse. Archive and Git
     // require a valid source before there is anything for Confirm to submit.
     const bool enabled = !m_AcquireInFlight && hasValidSource;
-    m_ImportProjectButton->Overrides()
+    m_ImportProjectButton->Style()
         .Set(Style::Display, enabled ? DisplayMode::Flex : DisplayMode::None);
     m_ImportProjectButton->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
 }
@@ -2196,7 +2198,7 @@ void ProjectPickerModal::OnImportProjectClicked()
         if (m_ImportErrorLabel)
         {
             m_ImportErrorLabel->SetText(message);
-            m_ImportErrorLabel->Overrides().Set(Style::Display, DisplayMode::Block);
+            m_ImportErrorLabel->Style().Set(Style::Display, DisplayMode::Block);
             m_ImportErrorLabel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
         }
     };
@@ -2409,20 +2411,20 @@ void ProjectPickerModal::SetShowButtons(bool showCancel, bool showOpen)
     m_ShowCancelButton = showCancel;
     if (m_Footer)
     {
-        m_Footer->Overrides().Set(
+        m_Footer->Style().Set(
             Style::Display, showCancel ? DisplayMode::Flex : DisplayMode::None);
         m_Footer->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 
     if (m_CancelButton)
     {
-        m_CancelButton->Overrides().Set(Style::Display, showCancel ? DisplayMode::Block : DisplayMode::None);
+        m_CancelButton->Style().Set(Style::Display, showCancel ? DisplayMode::Block : DisplayMode::None);
         m_CancelButton->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 
     if (m_ButtonContainer)
     {
-        m_ButtonContainer->Overrides().Set(Style::Display, showOpen ? DisplayMode::Flex : DisplayMode::None);
+        m_ButtonContainer->Style().Set(Style::Display, showOpen ? DisplayMode::Flex : DisplayMode::None);
         m_ButtonContainer->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
 }

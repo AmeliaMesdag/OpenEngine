@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Panels/Animation/ElementInstanceLedger.h"
 #include "Panels/Animation/TimelineTransport.h"
 
 #include "Assets/AnimationClip.h"
@@ -153,7 +154,11 @@ private:
     void BindFromAssetsDeferred();
     void LoadBindAttachLayoutAndStyle(UIManager* ui);
     void MarkBindFailed(std::string_view reason);
-    void RefreshElementPointers();
+    void SeedSessionFromSettings();
+    void BindLayoutElements();
+    void ResolveElementPointers();
+    void ConfigureElements();
+    UIElement* FindUnwired(StringId id);
     void ApplyAppearanceSettings();
     void WireMarkersElementCallbacks();
     void WireAnimationControls();
@@ -312,7 +317,13 @@ private:
     UIElement* m_PropertiesPane = nullptr;
     UIElement* m_PropertiesHeader = nullptr;
     UIElement* m_PropertiesFilterRow = nullptr;
-    TextField* m_PropertiesSearchField = nullptr;
+    // Weak: the destructor and the search callbacks outlive a reconcile that can
+    // destroy the field. Every other element pointer below is raw and re-resolved by
+    // ResolveElementPointers on each bind pass.
+    WeakRef<TextField> m_PropertiesSearchField;
+    // The search row registered with EditorSearchBars. A registry key only, never
+    // dereferenced or compared: it may name a row a reconcile has destroyed.
+    UIElement* m_RegisteredSearchRow = nullptr;
     Button* m_FilterAnimatedButton = nullptr;
     Button* m_FilterHierarchyButton = nullptr;
     Button* m_FilterChannelsOnlyButton = nullptr;
@@ -517,13 +528,18 @@ private:
 
     void SetupToolbarDragDrop();
     void WireToolbarRightClickToggles();
+    void RestoreToolbarLayoutFromPrefs();
     void RestoreToolbarGapsFromPrefs();
     void CreateToolbarGap(UIElement* container, int insertIndex);
     void RemoveToolbarGap(class Button* gap);
     std::unique_ptr<Editor::ToolbarDragDrop> m_ToolbarDragDrop;
-    bool m_ToolbarDragDropOrderLoaded = false;
-    bool m_ToolbarRightClickWired = false;
     int m_NextToolbarGapSerial = 1;
+
+    // Element instances ConfigureElements has set up and WireAnimationControls has
+    // wired. A layout reconcile keeps unchanged elements, so a later pass acts only on
+    // the instances it created.
+    Editor::ElementInstanceLedger m_ConfiguredElements;
+    Editor::ElementInstanceLedger m_WiredElements;
 
     // Live updates from AnimationWindowSettings. Declared last so it unsubscribes
     // before any member its callback touches is destroyed.

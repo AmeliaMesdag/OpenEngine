@@ -588,7 +588,7 @@ void RegisterLightInspector()
                 "Blackbody color temperature (Kelvin). Drag the gradient thumb or type a value.\n"
                 "~1900 candle, 3200 tungsten, 6500 daylight (D65), 10000+ blue sky.");
             UIElement* ctContainer = InspectorUI::AddFieldContainer(ctRow);
-            ctContainer->Overrides()
+            ctContainer->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -605,7 +605,7 @@ void RegisterLightInspector()
             auto ctField = std::make_unique<FloatField>();
             ctField->AddClass("inspector-float-field");
             ctField->SetValueWithoutNotify(light->ColorTemperature);
-            ctField->Overrides().Set(Style::Width, StyleLength::Px(kSliderValueFieldWidthPx));
+            ctField->Style().Set(Style::Width, StyleLength::Px(kSliderValueFieldWidthPx));
             FloatField* ctFieldRaw = ctField.get();
             KelvinSlider* ctSliderRaw = ctSlider.get();
 
@@ -734,7 +734,7 @@ void RegisterLightInspector()
             Label* colorLabel = InspectorUI::AddLabel(row, "Color", colorTooltip.c_str());
             if (colorLabel) colorLabel->AddClass("inspector-label-no-drag");
             UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-            fieldContainer->Overrides()
+            fieldContainer->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -750,7 +750,7 @@ void RegisterLightInspector()
             rgbLabel->AddClass("inspector-text");
             rgbLabel->SetText(InspectorUI::FormatColorRgb(light->Color[0], light->Color[1], light->Color[2]));
             if (!colorDrivenBySky)
-                rgbLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+                rgbLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
             Label* rgbLabelRaw = rgbLabel.get();
             fieldContainer->AddChild(std::move(rgbLabel));
 

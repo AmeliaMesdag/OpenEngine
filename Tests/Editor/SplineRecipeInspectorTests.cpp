@@ -32,6 +32,8 @@
 #include "UI/Controls/Button.h"
 #include "UI/Controls/Dropdown.h"
 #include "UI/Controls/FloatField.h"
+#include "UI/Controls/Foldout.h"
+#include "UI/Controls/Slider.h"
 #include "UI/Controls/InspectorNotice.h"
 #include "UI/Controls/IntField.h"
 #include "UI/Controls/Label.h"
@@ -115,6 +117,18 @@ std::string RowLabel(UIElement& row)
     std::vector<std::string> texts;
     CollectTexts(row, texts);
     return texts.empty() ? std::string() : texts.front();
+}
+
+// The title of the section that holds the last row under `root` whose label reads `label`, or empty.
+std::string SectionOfLastRow(UIElement& root, std::string_view label)
+{
+    std::vector<UIElement*> rows;
+    CollectWithClass(root, "inspector-row", rows);
+    const auto row = std::find_if(rows.rbegin(), rows.rend(), [label](UIElement* r) { return RowLabel(*r) == label; });
+    for (const UIElement* up = row == rows.rend() ? nullptr : (*row)->GetParent(); up; up = up->GetParent())
+        if (const auto* section = dynamic_cast<const Foldout*>(up))
+            return section->GetTitle();
+    return std::string();
 }
 
 void Click(Button& button)
@@ -1193,6 +1207,87 @@ TEST_F(SplineRecipeInspectorTest, ACrownExtrudeShowsItsCrownRows)
     EXPECT_FALSE(Shows(parent, "Edge Inset")) << "a Crown has no flat inset";
 }
 
+// The Verge section holds Build Verge, the two lengths as sliders and the material. With the switch off
+// the three rows read inactive, say how to turn them on and name no material; with it on, an empty
+// material reads as the road's. A filled region has no verge.
+TEST_F(SplineRecipeInspectorTest, TheVergeRowsReadInactiveUntilTheVergeIsOn)
+{
+    Build<Components::SplineExtrude>();
+    std::vector<UIElement*> rows;
+    CollectWithClass(parent, "inspector-row", rows);
+    const auto vergeSwitch = std::find_if(rows.begin(), rows.end(), [](UIElement* row) { return RowLabel(*row) == "Build Verge"; });
+    ASSERT_NE(vergeSwitch, rows.end());
+    const auto roadMaterial = std::find_if(rows.rbegin(), rows.rend(), [](UIElement* row) { return RowLabel(*row) == "Material"; });
+    ASSERT_NE(roadMaterial, rows.rend());
+    EXPECT_LT(vergeSwitch, roadMaterial.base()) << "the verge comes before the shared rows";
+    const auto materialRows = std::count_if(rows.begin(), rows.end(), [](UIElement* row) { return Shows(*row, "Material"); });
+    ASSERT_EQ(materialRows, 2) << "the road's Material and the verge's";
+    UIElement* vergeMaterial = *std::find_if(rows.begin(), rows.end(), [](UIElement* row) { return Shows(*row, "Material"); });
+    EXPECT_FALSE(Shows(*vergeMaterial, "The road's material")) << "an inactive row names no material";
+    for (UIElement* row : {FindRow(parent, "Width (m)"), FindRow(parent, "Height (m)"), vergeMaterial})
+    {
+        ASSERT_NE(row, nullptr);
+        EXPECT_FALSE(row->IsEnabled());
+        EXPECT_EQ(row->GetTooltip(), "Turn on Build Verge to build a curb along the road.");
+    }
+    EXPECT_NE(FindByClass(FindRow(parent, "Width (m)"), "slider"), nullptr);
+    EXPECT_TRUE(FindRow(parent, "Build Verge")->IsEnabled());
+
+    parent.RemoveAllChildren();
+    Components::SplineExtrude verged;
+    verged.Verge = true;
+    Build(verged);
+    EXPECT_TRUE(FindRow(parent, "Width (m)")->IsEnabled());
+    EXPECT_TRUE(FindRow(parent, "Height (m)")->IsEnabled());
+    EXPECT_TRUE(Shows(parent, "The road's material"));
+
+    parent.RemoveAllChildren();
+    Components::SplineExtrude river;
+    river.WidthMode = Components::SplineExtrudeWidthMode::FitToBanks;
+    river.Verge = true;
+    Build(river);
+    EXPECT_EQ(FindRow(parent, "Width (m)"), nullptr) << "a filled region has no verge";
+}
+
+// Every row sits under a section: the shape rows under Shape, the shared rows under the paving's
+// section names. An empty surface Material names the built-in material it draws.
+TEST_F(SplineRecipeInspectorTest, TheRoadsSharedRowsSitUnderThePavingsSectionNames)
+{
+    Build<Components::SplineExtrude>();
+    EXPECT_EQ(SectionOfLastRow(parent, "Width Mode"), "Shape");
+    EXPECT_EQ(SectionOfLastRow(parent, "Tiles Per Meter V"), "Shape");
+    EXPECT_EQ(SectionOfLastRow(parent, "Build Verge"), "Verge");
+    EXPECT_EQ(SectionOfLastRow(parent, "Material"), "Surface");
+    EXPECT_TRUE(Shows(parent, "The built-in material"));
+    EXPECT_EQ(SectionOfLastRow(parent, "Conform Mode"), "Placement");
+    EXPECT_EQ(SectionOfLastRow(parent, "Ground Authority"), "Placement");
+    EXPECT_EQ(SectionOfLastRow(parent, "Receive Shadows"), "Shadows");
+}
+
+// The verge's Width slider reaches 1 m; a typed width past it is kept, up to the field's 10 m.
+TEST_F(SplineRecipeInspectorTest, AVergeWidthTypedPastTheSliderIsKept)
+{
+    Components::SplineExtrude verged;
+    verged.Verge = true;
+    Build(verged);
+    UIElement* widthRow = FindRow(parent, "Width (m)");
+    ASSERT_NE(widthRow, nullptr);
+    std::vector<Slider*> sliders;
+    CollectOfType(*widthRow, sliders);
+    std::vector<FloatField*> fields;
+    CollectOfType(*widthRow, fields);
+    ASSERT_EQ(sliders.size(), 1u);
+    ASSERT_EQ(fields.size(), 1u);
+    EXPECT_FLOAT_EQ(sliders[0]->GetMax(), 1.0f);
+
+    fields[0]->SetValue(2.5f);
+    fields[0]->NotifyValueChanged();
+    EXPECT_FLOAT_EQ(world.GetComponent<Components::SplineExtrude>(entity)->VergeWidth, 2.5f);
+    fields[0]->SetValue(40.0f);
+    fields[0]->NotifyValueChanged();
+    EXPECT_FLOAT_EQ(world.GetComponent<Components::SplineExtrude>(entity)->VergeWidth, 10.0f);
+}
+
 // A region fill shows its reach and its floor, and a floor that is off reads as one word.
 TEST_F(SplineRecipeInspectorTest, AFitToBanksExtrudeShowsItsFloorAsNoneWhenItHasNone)
 {
@@ -1500,6 +1595,25 @@ TEST_F(SplineRecipeInspectorTest, EachOverrideIsOneRowOfTheList)
     const std::vector<Dropdown*> dropdowns = OverrideFields<Dropdown>(1);
     ASSERT_EQ(dropdowns.size(), 2u) << "the kind and the part";
     EXPECT_EQ(dropdowns[0]->GetSelectedLabel(), "Explicit Part");
+}
+
+// A fence with no overrides shows Span Overrides as one row whose value is the italic None of the
+// page's empty fields, not as a second header line.
+TEST_F(SplineRecipeInspectorTest, AFenceWithNoOverridesShowsSpanOverridesAsARowThatReadsNone)
+{
+    Components::SplineFence fence{};
+    fence.Parts[0] = {TestMesh(1), Components::SplineFencePartKind::Span};
+    BuildFenceWithUndo(fence);
+    ASSERT_TRUE(OverrideRows().empty());
+    UIElement* row = FindRow(parent, "Span Overrides");
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(RowLabel(*row), "Span Overrides");
+    std::vector<UIElement*> empties;
+    CollectWithClass(*row, "inspector-section-empty", empties);
+    ASSERT_EQ(empties.size(), 1u);
+    const auto* none = dynamic_cast<const Label*>(empties.front());
+    ASSERT_NE(none, nullptr);
+    EXPECT_EQ(none->GetText(), "None");
 }
 
 // Add Override, a point edit, Move Down and Remove each make one undo step. An override keeps

@@ -13,11 +13,14 @@ project(SplineGeometry LANGUAGES CXX)
 add_library(SplineGeometry OBJECT
     Source/AreaBoolean.cpp
     Source/AreaGround.cpp
+    Source/ArmSideLine.cpp
     Source/PavedArmPath.cpp
     Source/PavedBorder.cpp
     Source/PavedFootprint.cpp
+    Source/PavedMouth.cpp
     Source/PavedStopSolver.cpp
     Source/PavedTaggedRing.cpp
+    Source/RingWalk.cpp
     Source/SplineCorner.cpp
     Source/SplineProfile.cpp
     Source/SplineStripBuilder.cpp
@@ -58,6 +61,7 @@ if(BUILD_TESTING)
         Tests/AreaGroundTests.cpp
         Tests/PavedBorderTests.cpp
         Tests/PavedFootprintTests.cpp
+        Tests/PavedMouthTests.cpp
         Tests/SplineProfileTests.cpp
         Tests/SplineStripBuilderTests.cpp
         Tests/SplineCornerTests.cpp

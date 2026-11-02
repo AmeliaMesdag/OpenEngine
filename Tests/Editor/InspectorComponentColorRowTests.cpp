@@ -195,7 +195,7 @@ TEST(InspectorComponentColorRow, ThePickerOpensOnTheChipsEncoding)
         << "the picker does not open on the sRGB encoding of the color";
     EXPECT_FLOAT_EQ(row.Picker.OpenedIntensity, 1.0f);
     const UIElement* chip = value->GetParent()->GetChildren().front().get();
-    EXPECT_EQ(chip->Overrides().Get(Style::BackgroundColor), row.Picker.OpenedArgb)
+    EXPECT_EQ(chip->Style().Get(Style::BackgroundColor), row.Picker.OpenedArgb)
         << "the picker opens on a different color than the chip";
 }
 

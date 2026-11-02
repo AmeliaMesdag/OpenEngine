@@ -197,7 +197,7 @@ void GameUIHost::SyncFromWorld(ECS::World& world)
             if (st.SortOrder != doc.SortOrder)
             {
                 st.SortOrder = doc.SortOrder;
-                st.Root->Overrides().Set(Style::ZIndex, static_cast<int>(doc.SortOrder));
+                st.Root->Style().Set(Style::ZIndex, static_cast<int>(doc.SortOrder));
             }
 
             // Layout (.uxml): kick an async load on change, poll GetAsset, bind on the UI thread.
@@ -358,9 +358,9 @@ void GameUIHost::ApplyFullscreenOverlaySuppression()
         if (hide == st.OverlayHidden)
             continue;
         if (hide)
-            st.Root->Overrides().Set(Style::Display, DisplayMode::None);
+            st.Root->Style().Set(Style::Display, DisplayMode::None);
         else
-            st.Root->Overrides().Reset(Style::Display);
+            st.Root->Style().Reset(Style::Display);
         st.OverlayHidden = hide;
     }
 }
@@ -489,7 +489,7 @@ bool GameUIHost::OnMouseButton(int button, bool pressed, int mods)
         return false;
     // The click's mask is live platform state, and it is the only report of a
     // modifier that was already held when the window took focus.
-    m_UI->SyncModifierKeys(mods);
+    m_UI->ReconcileModifierKeys(mods);
     return DispatchMouseButton(button, pressed);
 }
 

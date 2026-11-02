@@ -346,7 +346,7 @@ void GameViewPanel::RefreshElementPointers()
     // land on whole device pixels for the `cover` fit to stay 1:1
     // (UIElement::SetSnapRectToDevicePixels).
     viewport->SetSnapRectToDevicePixels(true);
-    m_NoCameraLabel = MakeWeakRef(dynamic_cast<Label*>(viewport->FindById(HashStringId(EditorPanelIds::GameViewNoCameraLabel))));
+    m_NoCameraLabel = viewport->FindById<Label>(HashStringId(EditorPanelIds::GameViewNoCameraLabel));
     RegisterViewportPointerHandlers(*viewport);
     Editor::ViewOverlayHost::Get().PublishViewport(Editor::ViewOverlayView::Game, *viewport, {});
 }
@@ -410,7 +410,7 @@ void GameViewPanel::SetNoCameraOverlayVisible(bool visible)
 
     if (visible)
     {
-        label->Overrides()
+        label->Style()
             .Set(Style::Opacity, 1.0f)
             .Set(Style::PointerEvents, false);
         if (label->GetText().empty())
@@ -420,7 +420,7 @@ void GameViewPanel::SetNoCameraOverlayVisible(bool visible)
     }
     else
     {
-        label->Overrides()
+        label->Style()
             .Set(Style::Opacity, 0.0f)
             .Set(Style::PointerEvents, false);
     }

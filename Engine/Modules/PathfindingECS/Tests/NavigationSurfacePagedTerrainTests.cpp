@@ -13,7 +13,7 @@
 #include "ECS/World.h"
 #include "Mathematics/Vector3.h"
 #include "TerrainECS/PageLevelRule.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainService.h"
 #include "PagedTiledTerrain.h"
 #include <gtest/gtest.h>
@@ -99,7 +99,7 @@ protected:
     {
         system.Update(*world, kDeltaSeconds);
         world->ProcessCommands();
-        TE::TerrainHeightPages& pages = TE::TerrainService::Get().GetHeightPages();
+        TE::TerrainPages& pages = TE::TerrainService::Get().GetTerrainPages();
         pages.Request(request, {&camera, 1}, TE::PageLevelView{});
         pages.Update(++frame, kDeltaSeconds, false, 2);
     }
@@ -139,7 +139,7 @@ TEST_F(NavigationSurfacePagedTerrainTest, ABakeAwayFromEveryCameraWaitsOnTheFine
     world->ProcessCommands();
 
     const Mathematics::Vector3 camera{100.0f, 50.0f, 100.0f};
-    TE::TerrainHeightPages& pages = service.GetHeightPages();
+    TE::TerrainPages& pages = service.GetTerrainPages();
     pages.Request(request, {&camera, 1}, TE::PageLevelView{});
     pages.Update(++frame, kDeltaSeconds, false, 2); // the pages have their source from here on
 

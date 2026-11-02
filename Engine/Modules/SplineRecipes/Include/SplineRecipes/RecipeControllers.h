@@ -8,6 +8,7 @@
 #include <span>
 
 namespace GameEngine::ECS { class World; }
+namespace GameEngine::Components { struct SplineExtrude; }
 namespace GameEngine::Engine::Renderer { class RenderServices; }
 
 namespace GameEngine::SplineRecipes
@@ -19,7 +20,10 @@ class SplineFenceController;
 class SplineGroundAuthorityController;
 class SplinePlacementController;
 class SplineWallController;
+class SplinePavingController;
+class PavingApproachGround;
 class RecipeEditJournal;
+struct PavingStatus;
 
 // Owns every spline recipe controller: the generators (tiles, fence pieces, swept paths and
 // roads, walls) and the ground authority that keeps the terrain under a run in step with it.
@@ -51,15 +55,27 @@ public:
     // The fence's parts' mesh bounds as its last rebuild resolved them (SplineFenceController::PartBounds).
     std::span<const FenceMeshBounds> FencePartBounds(ECS::EntityHandle entity) const;
 
+    // What the paving on `entity` did at its last rebuild, or null before its first
+    // (SplinePavingController::StatusOf).
+    const PavingStatus* PavingStatusOf(ECS::EntityHandle entity) const;
+
+    // Fills the empty verge Material of the road `road` with its first paving's curb material
+    // (SplinePavingController::PrefillVergeMaterial).
+    void PrefillVergeMaterial(const ECS::World& world, ECS::EntityHandle road, Components::SplineExtrude& recipe) const;
+
 private:
     void UpdateGenerators(ECS::World& world, Engine::Renderer::RenderServices& renderServices,
                           float32 deltaSeconds);
 
     std::unique_ptr<SplinePlacementController> m_Placement;
     std::unique_ptr<SplineFenceController> m_Fence;
+    // Before the extrude: a road's strip reads the trim its paved region set in the same update.
+    std::unique_ptr<SplinePavingController> m_Paving;
     std::unique_ptr<SplineExtrudeController> m_Extrude;
     std::unique_ptr<SplineWallController> m_Wall;
     std::unique_ptr<SplineGroundAuthorityController> m_GroundAuthority;
+    // After the ground authority: an approach piece copies the effects that it provisioned.
+    std::unique_ptr<PavingApproachGround> m_ApproachGround;
     RecipeBuildStates m_BuildStates;
 };
 

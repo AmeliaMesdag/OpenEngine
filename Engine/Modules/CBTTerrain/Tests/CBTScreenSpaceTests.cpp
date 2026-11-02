@@ -1085,10 +1085,11 @@ float ExpectedPagedCorner(float u, float v, uint32_t level0Slot, float level0Fad
     return level0Fade * PagedSlotRamp(level0Slot, x0, z0) + (1.0f - level0Fade) * PagedSlotRamp(level1Slot, x1, z1);
 }
 
-// Uploads two different page tables into frame slots 0 and 1 of the instance's page-table ring,
-// runs VertexEval in each frame and expects every root corner on its own frame's table: frame 0
-// resolves level 0 settled in slot 1; frame 1 level 0 half-faded in slot 3 over level 1 in slot 2.
-void ExpectEachFrameResolvesItsOwnPageTable(IDevice& device, CBTInstance& instance, TextureHandle cacheTex)
+// Writes two page tables into slots 0 and 1 of a ring of `slotWords` words a slot and runs VertexEval in
+// each frame: frame 0 resolves level 0 settled in slot 1, frame 1 resolves level 0 half-faded in slot 3
+// over level 1 in slot 2.
+void ExpectEachFrameResolvesItsOwnPageTable(IDevice& device, CBTInstance& instance, TextureHandle cacheTex,
+                                            uint32_t slotWords)
 {
     struct FrameTable
     {
@@ -1097,10 +1098,20 @@ void ExpectEachFrameResolvesItsOwnPageTable(IDevice& device, CBTInstance& instan
         uint32_t Level1Slot;
     };
     constexpr std::array<FrameTable, 2> kTables{{{1u, 1.0f, 2u}, {3u, 0.5f, 2u}}};
+    BufferDesc desc{};
+    desc.size = static_cast<size_t>(kTables.size()) * slotWords * sizeof(uint32_t);
+    desc.usage = static_cast<uint32_t>(BufferUsage::Storage);
+    desc.memoryUsage = BufferMemoryUsage::Upload;
+    desc.debugName = "CBT.Test.PageTableRing";
+    const BufferHandle ring = device.CreateBuffer(desc);
+    ASSERT_TRUE(ring.IsValid());
     for (uint32_t frame = 0; frame < kTables.size(); ++frame)
     {
         const FrameTable& t = kTables[frame];
-        instance.UploadPageTable(frame, PackTwoLevelPageTable(t.Level0Slot, t.Level0Fade, t.Level1Slot));
+        const std::vector<uint32_t> words = PackTwoLevelPageTable(t.Level0Slot, t.Level0Fade, t.Level1Slot);
+        ASSERT_LE(words.size(), slotWords);
+        device.UpdateBuffer(ring, static_cast<size_t>(frame) * slotWords * sizeof(uint32_t),
+                            words.size() * sizeof(uint32_t), words.data());
         instance.SetPageCacheSource(frame, cacheTex);
     }
 
@@ -1115,6 +1126,7 @@ void ExpectEachFrameResolvesItsOwnPageTable(IDevice& device, CBTInstance& instan
     auto asFloat = [](uint32_t bits) { float f; std::memcpy(&f, &bits, sizeof(f)); return f; };
     for (uint32_t frame = 0; frame < kTables.size(); ++frame)
     {
+        instance.SetPageTable(ring, frame * slotWords);
         auto cl = device.CreateCommandList(IDevice::QueueType::Graphics);
         cl->Begin();
         instance.RecordUpdate(*cl, CBTInertClassify(), params, frame); // roots only
@@ -1139,17 +1151,15 @@ void ExpectEachFrameResolvesItsOwnPageTable(IDevice& device, CBTInstance& instan
             }
         }
     }
+    instance.SetPageTable({}, 0u);
+    device.DestroyBuffer(ring);
 }
 
 } // namespace
 
-// The production paged path: page tables uploaded through CBTInstance::UploadPageTable into two
-// frame slots of the ring with DIFFERENT contents, the cache bound through SetPageCacheSource, and
-// VertexEval's root corners read back, in the ring's first slots and again after the ring grew for a
-// larger terrain's table (the shader finds a frame's slot from the words per slot its frame params
-// carry).
-// Every slot holds its own ramp, so a shader reading another frame's ring slot resolves another
-// table's slots and lands on another height.
+// The production paged path, for a small ring and a large one: each frame binds its own ring slot through
+// CBTInstance::SetPageTable, and each slot holds its own ramp. A shader that reads the slot of another
+// frame lands on another height.
 TEST_F(CBTScreenSpaceTest, PagedResolveReadsThisFramesPageTableAndCache)
 {
     CBTInstance instance;
@@ -1159,9 +1169,10 @@ TEST_F(CBTScreenSpaceTest, PagedResolveReadsThisFramesPageTableAndCache)
     TextureHandle cacheTex = MakeR32Texture(*m_Device, kPagedCacheDim, kPagedCacheDim, MakePagedCache(), "CBT.Test.PagedCache");
     ASSERT_TRUE(cacheTex.IsValid());
 
-    ExpectEachFrameResolvesItsOwnPageTable(*m_Device, instance, cacheTex);
-    ASSERT_TRUE(instance.ProvisionPageTableWords(kCBTPageTableMinRingWords + 1u));
-    ExpectEachFrameResolvesItsOwnPageTable(*m_Device, instance, cacheTex);
+    constexpr uint32_t kSmallSlotWords = 4096u;
+    constexpr uint32_t kLargeSlotWords = (1u << 18) + 4096u;
+    ExpectEachFrameResolvesItsOwnPageTable(*m_Device, instance, cacheTex, kSmallSlotWords);
+    ExpectEachFrameResolvesItsOwnPageTable(*m_Device, instance, cacheTex, kLargeSlotWords);
     EXPECT_EQ(instance.ReadValidationCounter(kValidationErrorCounter), 0u);
 
     m_Device->DestroyTexture(cacheTex);

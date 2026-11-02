@@ -57,6 +57,7 @@
 #include "Inspectors/SplineFence/SplineFenceSpanPieceInspector.h"
 #include "Inspectors/Spline/SplineInspector.h"
 #include "Inspectors/Spline/SplinePlacementInspector.h"
+#include "Inspectors/SplineRecipe/Paving/SplinePavingInspector.h"
 #include "Inspectors/Texture/TextureInspector.h"
 #include "Inspectors/TransformInspector.h"
 #include "Inspectors/ValueCurveInspector.h"
@@ -99,6 +100,7 @@ void RegisterBuiltInInspectors()
     RegisterNavigationSurfaceInspector();
     RegisterSplineWallInspector();
     RegisterSplineExtrudeInspector();
+    RegisterSplinePavingInspector();
     RegisterNavigationSourceComponentTraits();
     RegisterBloomEffectInspector();
     RegisterChromaticAberrationEffectInspector();

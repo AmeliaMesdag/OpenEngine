@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -76,12 +77,59 @@ CameraData ForwardCamera(float cameraX)
         Mathematics::Matrix4x4::PerspectiveReverseZ(1.0471976f, 16.0f / 9.0f, 0.5f, 600.0f);
     const Mathematics::Matrix4x4 viewProj = projection * view;
     CameraData camera{};
-    std::memcpy(camera.view, view.Data(), sizeof(camera.view));
-    std::memcpy(camera.proj, projection.Data(), sizeof(camera.proj));
-    std::memcpy(camera.viewProj, viewProj.Data(), sizeof(camera.viewProj));
-    camera.cameraPos[0] = cameraX;
-    camera.cameraPos[1] = kCameraHeight;
+    camera.view = view;
+    camera.proj = projection;
+    camera.viewProj = viewProj;
+    camera.cameraPos.x = cameraX;
+    camera.cameraPos.y = kCameraHeight;
     return camera;
+}
+
+// A view of the default layers with a ForwardCamera at cameraX.
+ViewId AddForwardView(RenderServices& rs, const char* name, float cameraX)
+{
+    const CameraId cameraId = rs.Views().AllocateCamera(name);
+    rs.Views().SetCameraData(cameraId, ForwardCamera(cameraX));
+    const ViewId viewId = rs.Views().AllocateView(name, cameraId);
+    rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
+    ViewClearConfig clear{};
+    clear.clearColor = true;
+    clear.clearDepth = true;
+    rs.Views().SetViewTargets(viewId, 0, 0, 0, clear);
+    return viewId;
+}
+
+// One frame as the engine orders it: the extraction publishes the ocean's depth
+// claim at oceanTime, then every view in `views` declares.
+void DeclareOceanViewsAtTime(RenderServices& rs, RenderPipelineInstance& instance, IDevice* device,
+                             uint32 frameIndex, std::span<const ViewId> views, float oceanTime)
+{
+    auto& feature = rs.EnsureFeature<OceanRenderFeature>();
+    OceanParamsGPU params = feature.GetParams();
+    params.Time = oceanTime;
+    feature.SetParams(params);
+    feature.PublishDepthClaim();
+    FramePools pools(device);
+    RenderGraph::RGFrame frame(device, &pools.Persistent, &pools.Transient, &pools.Ring);
+    frame.BeginFrame(frameIndex);
+    const uint32_t colorUsage = static_cast<uint32_t>(TextureUsage::RenderTarget | TextureUsage::ShaderResource);
+    const uint32_t depthUsage = static_cast<uint32_t>(TextureUsage::DepthStencil | TextureUsage::ShaderResource);
+    std::vector<ViewTargetsRG> targets;
+    for (const ViewId view : views)
+    {
+        const std::string name = "OceanViewDepth." + std::to_string(view);
+        targets.push_back(ViewTargetsRG{
+            view,
+            frame.ImportPersistentTexture((name + ".Color").c_str(),
+                                          TargetDesc(TextureFormat::RGBA8_UNORM, colorUsage, kTargetExtent)),
+            frame.ImportPersistentTexture((name + ".Depth").c_str(),
+                                          TargetDesc(TextureFormat::D32_FLOAT, depthUsage, kTargetExtent)),
+            {}});
+    }
+    rs.BeginWorldDrawFrame();
+    rs.BuildWorldBatchKeys();
+    const std::vector<ViewDesc> declared(rs.Views().GetViews().begin(), rs.Views().GetViews().end());
+    instance.Declare(frame, targets, declared);
 }
 
 // Declares one frame of the ocean's pre-world and post-world nodes for a single
@@ -348,6 +396,65 @@ TEST(OceanWaterInViewTest, FixedOceanTimeOrNoWaterInViewClaimsNoDynamicDepth)
     device->Shutdown();
 }
 
+// The ocean changes the depth of the views that see the water, not of the others. The ocean time
+// moves the surface only through its displacement: with both FFT displacement bounds at 0 the
+// surface keeps its depth while the time runs.
+TEST(OceanWaterInViewTest, OnlyAViewThatSeesDisplacingWaterReportsADepthChange)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    {
+        RenderServices rs;
+        EXPECT_TRUE(rs.Initialize(device.get()));
+        const ViewId seeing = AddForwardView(rs, "OceanDepthSeeing", 0.0f);
+        const ViewId away = AddForwardView(rs, "OceanDepthAway", 1000.0f);
+
+        auto& feature = rs.EnsureFeature<OceanRenderFeature>();
+        EXPECT_TRUE(feature.Initialize(device.get()));
+        feature.SetHasOcean(true);
+        OceanRenderFeature::WaterBodyBox water{};
+        water.CenterZ = kWaterDistance;
+        water.HalfX = kWaterHalfExtent;
+        water.HalfZ = kWaterHalfExtent;
+        feature.SetWaterBodies({water}, true);
+        OceanParamsGPU displacing = feature.GetParams();
+        displacing.FFTCascadeCount = 1u;
+        displacing.MaxVerticalDisplacement = 1.0f;
+        displacing.MaxHorizontalDisplacement = 1.0f;
+        feature.SetParams(displacing);
+
+        RenderPipelineNodeRegistry registry;
+        EXPECT_TRUE(registry.Register(
+            "OceanRender", [] { return std::make_unique<OceanRenderNode>(); }, true));
+        RenderPipelineBlueprint blueprint;
+        blueprint.pipelineName = "OceanViewDepthTest";
+        blueprint.passes.push_back(MakeOceanPass("Ocean", R"({"id":"Ocean","type":"OceanRender"})"));
+        RenderPipelineInstance instance(rs, registry);
+        instance.SetBlueprint(blueprint);
+
+        uint32 frameIndex = 0;
+        const ViewId views[] = {seeing, away};
+        DeclareOceanViewsAtTime(rs, instance, device.get(), frameIndex++, views, 1.0f);
+        DeclareOceanViewsAtTime(rs, instance, device.get(), frameIndex++, views, 1.5f);
+        EXPECT_TRUE(rs.HasUnversionedMotion(seeing)) << "running ocean time with the water in this view";
+        EXPECT_FALSE(rs.HasUnversionedMotion(away)) << "running ocean time with the water out of this view";
+
+        OceanParamsGPU flat = feature.GetParams();
+        flat.MaxVerticalDisplacement = 0.0f;
+        flat.MaxHorizontalDisplacement = 0.0f;
+        feature.SetParams(flat);
+        DeclareOceanViewsAtTime(rs, instance, device.get(), frameIndex++, views, 2.0f);
+        DeclareOceanViewsAtTime(rs, instance, device.get(), frameIndex++, views, 2.5f);
+        DeclareOceanViewsAtTime(rs, instance, device.get(), frameIndex++, views, 3.0f);
+        EXPECT_FALSE(rs.HasUnversionedMotion(seeing)) << "zero displacement bounds: the time does not move the surface";
+
+        device->WaitForIdle();
+        rs.Shutdown();
+    }
+    device->Shutdown();
+}
+
 // Each view that sees water renders its own planar reflection: its own hidden
 // mirror view and camera, and a target sized to that view. Moving one view's
 // camera moves only that view's mirror.
@@ -417,16 +524,16 @@ TEST(OceanWaterInViewTest, EachViewThatSeesWaterHasItsOwnPlanarReflection)
         EXPECT_EQ(mirrorA->Width, kTargetExtent / 2u);
         EXPECT_EQ(mirrorB->Width, kSmallExtent / 2u);
         // Each mirror camera is its own view's camera reflected below the sea.
-        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorA).cameraPos[0], 0.0f);
-        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorB).cameraPos[0], 10.0f);
-        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorA).cameraPos[1], -kCameraHeight);
+        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorA).cameraPos.x, 0.0f);
+        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorB).cameraPos.x, 10.0f);
+        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorA).cameraPos.y, -kCameraHeight);
 
         const CameraData mirrorBBefore = MirrorCamera(rs, *mirrorB);
         rs.Views().SetCameraData(cameraA, ForwardCamera(-20.0f));
         DeclareTwoViewFrame(rs, instance, frame, frameIndex++, views);
-        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorA).cameraPos[0], -20.0f);
+        EXPECT_FLOAT_EQ(MirrorCamera(rs, *mirrorA).cameraPos.x, -20.0f);
         const CameraData mirrorBAfter = MirrorCamera(rs, *mirrorB);
-        EXPECT_EQ(std::memcmp(mirrorBBefore.viewProj, mirrorBAfter.viewProj, sizeof(mirrorBAfter.viewProj)), 0)
+        EXPECT_EQ(std::memcmp(mirrorBBefore.viewProj.Data(), mirrorBAfter.viewProj.Data(), sizeof(mirrorBAfter.viewProj)), 0)
             << "moving view A's camera changed view B's reflection camera";
         device->WaitForIdle();
         rs.Shutdown();
@@ -559,7 +666,7 @@ TEST(OceanWaterInViewTest, TheIdleSweepKeepsTheDeclaringViewsCamera)
         const OceanPlanarReflection::Mirror* mirrorB = feature.GetPlanarReflection().Find(viewB);
         ASSERT_NE(mirrorB, nullptr);
         const CameraId mirrorBCamera = mirrorB->CameraId;
-        const float mirroredY = MirrorCamera(rs, *mirrorB).cameraPos[1];
+        const float mirroredY = MirrorCamera(rs, *mirrorB).cameraPos.y;
         EXPECT_LT(mirroredY, 0.0f);
 
         // Only view B declares, a frame view A misses and then two past the timeout:
@@ -571,7 +678,7 @@ TEST(OceanWaterInViewTest, TheIdleSweepKeepsTheDeclaringViewsCamera)
         ASSERT_EQ(feature.GetPlanarReflection().Find(viewA), nullptr);
         const CameraData* mirrorBCameraData = rs.Views().FindCameraData(mirrorBCamera);
         ASSERT_NE(mirrorBCameraData, nullptr);
-        EXPECT_FLOAT_EQ(mirrorBCameraData->cameraPos[1], mirroredY)
+        EXPECT_FLOAT_EQ(mirrorBCameraData->cameraPos.y, mirroredY)
             << "view B's mirror was built from another view's camera after the sweep";
         device->WaitForIdle();
         rs.Shutdown();

@@ -4,6 +4,7 @@
 #include "SplineGeometry/PavedFootprint.h"
 #include "Types/Types.h"
 
+#include <span>
 #include <vector>
 
 namespace GameEngine::SplineGeometry
@@ -42,8 +43,13 @@ class PavedArmPath
     PavedArmSection SectionAt(float32 along) const;
 
     // The approach stop when station `lastOverlap` is the last one whose cross-section overlaps
-    // the region: the next station, advanced by the arm's width there, at most the arm's end.
+    // the region: the next station, advanced by the arm's width there, then on to the first place
+    // whose cap no near station crosses; at most the arm's end.
     float32 StopAfter(std::size_t lastOverlap) const;
+
+    // The first place at or past `along` meters from the node whose cap no near station crosses; at
+    // most the arm's end.
+    float32 StopClearOfTurns(float32 along) const;
 
     // Whether the road goes on past the stop `along` meters from the node.
     bool GoesOnPast(float32 along) const { return !m_EndsRoad || along < GetLength() - kPavedTouchMeters; }
@@ -55,11 +61,18 @@ class PavedArmPath
     float32 RoadDistance(float32 unwrapped) const;
 
   private:
+    // Whether a station within the arm's width of the cap `along` meters from the node lies on the
+    // wrong side of it: inside a sharp turn, where the road's strip and the ribbon turn back across the cap.
+    bool CapCrossesStations(float32 along) const;
+
     std::vector<PavedArmStation> m_Stations;
     std::vector<float32> m_Along;
     std::vector<PavedArmSection> m_Sections;
     float32 m_LoopMeters = 0.0f;
     bool m_EndsRoad = false;
 };
+
+// The path of each arm, two arms of one road sharing their node's cross-section (ShareNodeSection).
+std::vector<PavedArmPath> BuildPavedArmPaths(std::span<const PavedArm> arms);
 
 } // namespace GameEngine::SplineGeometry

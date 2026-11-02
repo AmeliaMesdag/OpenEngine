@@ -1,6 +1,8 @@
 #include "Prefabs/PrefabRemovedComponents.h"
 
+#include "InspectorRegistry.h"
 #include "Inspectors/ComponentIconClass.h"
+#include "Inspectors/DefaultComponentInspector.h"
 #include "UI/InspectorSection.h"
 
 #include "Scene/SceneSchemaRegistry.h"
@@ -17,7 +19,8 @@ constexpr const char* kRemovedTooltip = "The prefab has this component. This ins
 
 } // namespace
 
-PrefabRemovedComponents::PrefabRemovedComponents(const std::vector<std::string>& components)
+PrefabRemovedComponents::PrefabRemovedComponents(const std::vector<std::string>& components,
+                                                 const OverrideMenuTarget& entity, const std::function<void()>& refresh)
 {
     AddClass("prefab-removed-components");
     for (const std::string& component : components)
@@ -33,6 +36,13 @@ PrefabRemovedComponents::PrefabRemovedComponents(const std::vector<std::string>&
         section->HideOptions();
         section->SetHeaderTooltip(kRemovedTooltip);
         section->SetHeaderBadge("Removed", kRemovedTooltip, InspectorSection::BadgeKind::Override);
+        if (typeId != 0)
+        {
+            OverrideMenuTarget target = entity;
+            target.Component = typeId;
+            target.Field.clear();
+            AttachOverrideMenu(*section, target, refresh);
+        }
         AddChild(std::move(section));
     }
 }

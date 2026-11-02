@@ -116,6 +116,8 @@ class ShaderComposer
     // returns the materialDir candidate (engine-tree candidate when
     // materialDir is empty) so the caller's existence check / diagnostics name
     // a concrete path.
+    // A found file is held until NotifyShaderSourcesChanged: a file that appears
+    // or disappears is seen after the next announcement.
     static std::filesystem::path ResolveShaderReference(const std::string& relativePath,
                                                         const std::filesystem::path& materialDir,
                                                         const MaterialBuildContext& context);

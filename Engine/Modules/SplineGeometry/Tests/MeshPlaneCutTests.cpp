@@ -127,8 +127,8 @@ PieceMesh KitWall(LongFaceUnwrap unwrap, bool reversed = false)
     return mesh;
 }
 
-// The plane a mitre cuts the kit wall on: vertical, oblique to the wall.
-CutPlane KitWallMitre()
+// The plane a miter cuts the kit wall on: vertical, oblique to the wall.
+CutPlane KitWallMiter()
 {
     const V3 normal = V3(-1.0f, 0.0f, -0.4f).Normalize();
     return {normal, V3::Dot(normal, V3(0.5f, 1.0f, 0.25f))};
@@ -458,7 +458,7 @@ TEST(MeshPlaneCut, ACapIsUnwrappedInItsPlaneAtThePiecesTexelDensity)
 }
 
 // A kit wall whose top, bottom and ends are palette-mapped and whose two long
-// faces carry the unwrap, cut across its length as a mitre cuts it: most cut
+// faces carry the unwrap, cut across its length as a miter cuts it: most cut
 // edges lie on palette faces and change no UV (eight of twelve here, as on the
 // castle kit's wall), and the cap still reads at the
 // long faces' density, continuing their texture, rather than collapsing onto
@@ -518,7 +518,7 @@ TEST(MeshPlaneCut, ACapMeetsItsAnchorFaceInPhase)
 {
     for (const LongFaceUnwrap unwrap : {LongFaceUnwrap::VFallsWithHeight, LongFaceUnwrap::UVertical})
     {
-        const CutPlane plane = KitWallMitre();
+        const CutPlane plane = KitWallMiter();
         const MeshCutResult cut = CutMeshByPlane(KitWall(unwrap), plane);
         ASSERT_EQ(cut.CappedLoops, 1u);
         const std::vector<const SplineVertex*> cap = CapVertices(cut.Mesh, plane.Normal);
@@ -556,7 +556,7 @@ TEST(MeshPlaneCut, ACapMeetsItsAnchorFaceInPhase)
 // cap, vertex for vertex.
 TEST(MeshPlaneCut, TheCapsAnchorDoesNotDependOnTriangleOrder)
 {
-    const CutPlane plane = KitWallMitre();
+    const CutPlane plane = KitWallMiter();
     const MeshCutResult forward = CutMeshByPlane(KitWall(LongFaceUnwrap::VFallsWithHeight), plane);
     const MeshCutResult backward =
         CutMeshByPlane(KitWall(LongFaceUnwrap::VFallsWithHeight, true), plane);

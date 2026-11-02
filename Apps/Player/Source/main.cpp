@@ -9,6 +9,7 @@
 #include "Core/StandardPaths.h"
 #include "Engine/Build/GameConfig.h"
 #include "Engine/Build/PackagedGameLayout.h"
+#include "Logger/FileSink.h"
 #include "Logger/Logger.h"
 #include "Platform/DiscreteGpuPreference.h"
 #include "Platform/Thread.h"
@@ -331,6 +332,10 @@ static int PlayerMainImpl(int argc, char** argv)
 #ifdef SIGSEGV
     std::signal(SIGSEGV, SignalHandler);
 #endif
+#ifdef SIGTRAP
+    // A failed libc++ check in DebugFast traps (SIGTRAP on arm64).
+    std::signal(SIGTRAP, SignalHandler);
+#endif
 
     // Initialize logger. The Player is a WIN32-subsystem app in every config, so
     // a console sink alone writes nowhere a player (or a shipped game's crash
@@ -341,6 +346,12 @@ static int PlayerMainImpl(int argc, char** argv)
     {
         Logger::Log::Config logCfg;
         logCfg.GlobalMinLevel = Logger::LogLevel::Info;
+#if LOGGER_ENABLE_FILE_LOGGING
+        // Read before Initialize: until then the global level is Off and does not
+        // clamp the file level. GE_LOG_FILE_LEVEL=debug lowers the global level, so
+        // the debug lines (the GE_FRAME_TRACE frame times) can reach the file.
+        logCfg.GlobalMinLevel = std::min(logCfg.GlobalMinLevel, Logger::ResolveFileLogLevel().level);
+#endif
         Logger::Log::Initialize(logCfg);
     }
 #if LOGGER_ENABLE_FILE_LOGGING

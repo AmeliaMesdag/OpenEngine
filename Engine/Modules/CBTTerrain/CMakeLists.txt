@@ -285,6 +285,7 @@ if(BUILD_TESTING)
             Tests/CBTLookBackPriorityTests.cpp
             Tests/CBTPlanarDemandGateTests.cpp
             Tests/CBTBringUpDrainTests.cpp
+            Tests/CBTRestartRefineTests.cpp
             Tests/CBTPoolHealthTests.cpp
             Tests/CBTPlanarScaleAuditTests.cpp
             Tests/CBTNearFieldMergeTests.cpp

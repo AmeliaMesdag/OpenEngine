@@ -3,6 +3,7 @@
 #include "ECS/Component/ComponentFieldRegistry.h"
 #include "Editor/Entities/EditorECSHelpers.h"
 #include "InspectorRegistry.h"  // InspectorContext, used by GetAdditionalEntities below
+#include "Inspectors/DefaultComponentInspector.h"
 #include "Inspectors/InspectorDragHelpers.h"
 #include "Mathematics/Interpolation.h"
 #include "UndoRedo/UndoRedoService.h"
@@ -15,6 +16,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -804,6 +806,56 @@ inline Slider* AddComponentFloatSliderRow(UIElement* parent, const std::string& 
         w, e, n, undo, name, std::forward<ApplyFn>(apply), additionalEntities);
     return AddFloatSliderRow(parent, label, initial, minValue, maxValue,
         std::move(handlers.first), std::move(handlers.second), tooltip).Slider;
+}
+
+/// Marks `row` when a single selection's reflected field `fieldName` of `typeId` differs from the
+/// entity's source. A multi-selection marks nothing.
+inline void MarkReflectedFieldOverride(const InspectorContext& context, ECS::ComponentTypeId typeId, UIElement* row,
+                                       std::string_view fieldName)
+{
+    if (!GetAdditionalEntities(context).empty())
+        return;
+    const ComponentOverrides overrides =
+        InspectorRegistry::Get().QueryComponentOverrides(*context.World, context.Entity, typeId);
+    InspectorUI::SetRowOverridden(row, overrides.IsFieldOverridden(fieldName));
+}
+
+/// A slider row with a number box for the reflected length `fieldName` of TComponent. The slider spans the
+/// field's range up to `sliderMaxMeters`; a typed value takes the whole range. A drag is one undo step over
+/// the selection. Returns the row, or null when the field has no range.
+template <typename TComponent>
+UIElement* AddReflectedLengthSliderRow(const InspectorContext& context, std::string_view fieldName,
+                                       float TComponent::*member, const TComponent& shown,
+                                       const std::string& undoPrefix,
+                                       float sliderMaxMeters = std::numeric_limits<float>::infinity())
+{
+    if (!context.Parent || !context.World)
+        return nullptr;
+    const ECS::ComponentTypeId typeId = ECS::GetComponentTypeId<TComponent>();
+    const ECS::FieldInfo* field = ECS::ComponentFieldRegistry::FindField(typeId, fieldName);
+    if (!field || !field->HasRange)
+        return nullptr;
+    const std::string label = FieldDisplayName(*field);
+    auto handlers = MakeComponentInteractiveHandlers<TComponent, float>(
+        context.World, context.Entity, context.ChangeNotifications, context.Undo, undoPrefix + label,
+        [member](TComponent& component, float meters) { component.*member = meters; },
+        GetAdditionalEntities(context));
+    std::function<void(float)> commit = handlers.second;
+    const SliderWithFloatValueRow slider = AddFloatSliderRow(
+        context.Parent, label, shown.*member, field->MinValue, std::min(field->MaxValue, sliderMaxMeters),
+        std::move(handlers.first), std::move(handlers.second), ReflectedTooltip(typeId, fieldName));
+    slider.ValueField->SetOnValueChanged(
+        [track = slider.Slider, box = slider.ValueField, min = field->MinValue, max = field->MaxValue,
+         commit](const float& typed)
+        {
+            const float meters = std::clamp(typed, min, max);
+            track->SetValueWithoutNotify(meters);
+            box->SetValueWithoutNotify(meters);
+            commit(meters);
+        });
+    UIElement* row = InspectorUI::RowOfControl(slider.Slider);
+    MarkReflectedFieldOverride(context, typeId, row, fieldName);
+    return row;
 }
 
 /// Int row: preview + commit for an ECS component field.

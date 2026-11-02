@@ -2185,7 +2185,7 @@ TEST_F(ExtractionFastPathTest, MovingParticlesReportUnversionedMotionForTheViews
     ASSERT_TRUE(h.Initialize(m_Device.get(), true));
     // A second view of the same world whose clip volume is 100 units to the side.
     CameraData away = MakeIdentityCamera();
-    away.viewProj[12] = 100.0f;
+    away.viewProj[3][0] = 100.0f;
     const CameraId awayCamera = h.rs.Views().AllocateCamera("AwayCamera");
     h.rs.Views().SetCameraData(awayCamera, away);
     const ViewId awayView = h.rs.Views().AllocateView("AwayView", awayCamera);

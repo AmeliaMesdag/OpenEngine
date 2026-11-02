@@ -1,11 +1,11 @@
-// GitHub #793 — a bare `Overrides().Set(...)` marks the element it was called
+// GitHub #793 — a bare `Style().Set(...)` marks the element it was called
 // on, and nothing else. For a property whose effect stops at that element's own
 // paint box that is exactly right. For one whose effect reaches DESCENDANTS it
 // is not, and the descendants keep rendering the pre-change value.
 //
 // THE CHAIN, and where it breaks:
 //
-//   StyleOverrides::SetImpl raises VisualDirty for a paint-impact property
+//   StyleDeclaration::SetImpl raises VisualDirty for a paint-impact property
 //     -> UIElement::MarkDirty(VisualDirty)
 //     -> UIManager::NotifyDirty_UpdateRegenFlag: VisualDirty is not in
 //        kLayoutAffecting, so no full regen is requested
@@ -166,7 +166,7 @@ TEST(StyleOverrideSubtreePropagation, ControlAnExplicitStyleMarkReachesTheChild)
     ASSERT_NEAR(fx.ChildOpacityOr(-1.0f), 1.0f, 0.001f)
         << "child must emit, and start at an opacity other than the one under test";
 
-    fx.Parent->Overrides().Set(Style::Opacity, kFadedOpacity);
+    fx.Parent->Style().Set(Style::Opacity, kFadedOpacity);
     fx.Parent->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     fx.Pump();
 
@@ -184,7 +184,7 @@ TEST(StyleOverrideSubtreePropagation, OpacitySetThroughOverridesAloneReachesTheC
 
     ASSERT_NEAR(fx.ChildOpacityOr(-1.0f), 1.0f, 0.001f);
 
-    fx.Parent->Overrides().Set(Style::Opacity, kFadedOpacity);
+    fx.Parent->Style().Set(Style::Opacity, kFadedOpacity);
     fx.Pump();
 
     // Instrument: separate "the override never reached the cascade" from "the
@@ -208,7 +208,7 @@ TEST(StyleOverrideSubtreePropagation, TheStaleChildDoesNotHealOnLaterFrames)
 
     ASSERT_NEAR(fx.ChildOpacityOr(-1.0f), 1.0f, 0.001f);
 
-    fx.Parent->Overrides().Set(Style::Opacity, kFadedOpacity);
+    fx.Parent->Style().Set(Style::Opacity, kFadedOpacity);
     for (int i = 0; i < 4; ++i)
         fx.Pump();
 
@@ -230,7 +230,7 @@ TEST(StyleOverrideSubtreePropagation, VisibilitySetThroughOverridesAloneReachesT
 
     ASSERT_NE(fx.ChildPrim(), nullptr) << "the child must paint before hiding can be observed";
 
-    fx.Parent->Overrides().Set(Style::Visibility, false);
+    fx.Parent->Style().Set(Style::Visibility, false);
     fx.Pump();
 
     ASSERT_FALSE(fx.Parent->GetResolvedStyle().Visual.Visible)
@@ -255,7 +255,7 @@ TEST(StyleOverrideSubtreePropagation, OverflowSetThroughOverridesAloneClipsTheCh
         << "instrument: an overflow:visible parent must leave the child unclipped, or this "
            "test cannot tell a clip from the initial state";
 
-    fx.Parent->Overrides().Set(Style::OverflowProp, Overflow::Hidden);
+    fx.Parent->Style().Set(Style::OverflowProp, Overflow::Hidden);
     fx.Pump();
 
     ASSERT_EQ(fx.Parent->GetResolvedStyle().Layout.Overflow, Overflow::Hidden)

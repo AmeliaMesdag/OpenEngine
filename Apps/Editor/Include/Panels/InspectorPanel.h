@@ -27,6 +27,7 @@ namespace GameEngine {
 
 struct EditorContext;
 class INativeContextMenu;
+class ContextMenuBuilder;
 namespace Platform { class Window; }
 
 class Asset;
@@ -291,6 +292,10 @@ private:
     bool HasTextEditFocus() const;
     // Sets the override marks of the entity header, the component headers and the field rows again.
     void RefreshOverrideMarks();
+    // Adds to a component header's menu the override entries for `typeId` and keeps them for the command.
+    void AddOverrideMenuEntries(ContextMenuBuilder& builder, ECS::ComponentTypeId typeId);
+    // Runs the kept override entry of `commandId` and shows the entity again; false for another command.
+    bool RunOverrideMenuCommand(uint32_t commandId);
     // Re-present the shown asset now that its reload has landed: the inspector's own
     // in-place update where it registered one, the full rebuild otherwise. A rebuild
     // is the blunt answer — it drops keyboard focus, closes an open popup and resets
@@ -574,6 +579,8 @@ private:
     std::unordered_map<ECS::ComponentTypeId, std::vector<SavedComponentSettings>> m_SavedComponentSettingsByType;
     // Maps dynamic context menu command offsets to saved setting slot indices.
     std::vector<size_t> m_ContextSavedSettingsMenuIndices;
+    // The override entries of the open component header menu, by command offset.
+    std::vector<OverrideMenuEntry> m_ContextOverrideMenuEntries;
     bool m_ComponentSettingsLoaded = false;
     std::filesystem::path m_ComponentSettingsWorkspaceRoot;
 

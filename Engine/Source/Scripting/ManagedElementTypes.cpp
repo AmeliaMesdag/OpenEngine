@@ -79,6 +79,11 @@ void ManagedElementProxy::OnAuthoredAttributesApplied(
         ApplyAttributeToInstance(kv.first, kv.second);
 }
 
+bool ManagedElementProxy::BindsAuthoredAttribute(std::string_view /*nameLower*/) const
+{
+    return true;
+}
+
 void ManagedElementProxy::ApplyAttributeToInstance(const std::string& name,
                                                    const std::string& value) const
 {

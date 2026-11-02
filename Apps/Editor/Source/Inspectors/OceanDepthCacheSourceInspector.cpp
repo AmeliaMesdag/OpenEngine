@@ -84,10 +84,12 @@ void AddBakeAction(const InspectorContext& ctx)
         return;
 
     InspectorUI::AddTextBlock(ctx.Parent, "Bake", "inspector-section-subheader");
+    InspectorUI::AddInfoCard(ctx.Parent, "Uses the Bake Origin, Bake Size, Bake Sea Level, Bake Width, Bake Height, "
+                                         "and Source Layers values above.");
 
     auto row = std::make_unique<UIElement>();
     row->AddClass("inspector-asset-actions");
-    row->Overrides()
+    row->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::Gap, StyleLength::Px(6.0f))
@@ -110,9 +112,9 @@ void AddBakeAction(const InspectorContext& ctx)
     Button* dirtyButtonPtr = dirtyButton.get();
     rowPtr->AddChild(std::move(dirtyButton));
 
+    // The result of the last bake or dirty mark; empty until one runs.
     auto status = std::make_unique<Label>();
     status->AddClass("inspector-text");
-    status->SetText("Uses the bake bounds, sea level, resolution, and render layer mask above.");
     Label* statusLabel = status.get();
     rowPtr->AddChild(std::move(status));
 

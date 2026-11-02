@@ -49,18 +49,18 @@ void ApplyHierarchyLightIconTint(ECS::World& world, ECS::EntityHandle entity, UI
 {
     if (!ColoredIconsOn(icon))
     {
-        icon.Overrides().Reset(Style::BackgroundTint);
-        icon.Overrides().Reset(Style::BackgroundImageSaturation);
+        icon.Style().Reset(Style::BackgroundTint);
+        icon.Style().Reset(Style::BackgroundImageSaturation);
         icon.MarkDirty(UIElement::VisualDirty);
         return;
     }
 
-    icon.Overrides().Set(Style::BackgroundImageSaturation, 1.0f);
+    icon.Style().Set(Style::BackgroundImageSaturation, 1.0f);
     const auto* light = world.GetComponent<Components::Light>(entity);
     if (!light)
     {
         // The stylesheet tints every other glyph: neutral, or the color its row class sets.
-        icon.Overrides().Reset(Style::BackgroundTint);
+        icon.Style().Reset(Style::BackgroundTint);
         icon.MarkDirty(UIElement::VisualDirty);
         return;
     }
@@ -68,7 +68,7 @@ void ApplyHierarchyLightIconTint(ECS::World& world, ECS::EntityHandle entity, UI
     const uint32_t r = UnitToByte(light->Color[0] * kColoredIconBrightness);
     const uint32_t g = UnitToByte(light->Color[1] * kColoredIconBrightness);
     const uint32_t b = UnitToByte(light->Color[2] * kColoredIconBrightness);
-    icon.Overrides().Set(Style::BackgroundTint, (0xFFu << 24) | (r << 16) | (g << 8) | b);
+    icon.Style().Set(Style::BackgroundTint, (0xFFu << 24) | (r << 16) | (g << 8) | b);
     icon.MarkDirty(UIElement::VisualDirty);
 }
 

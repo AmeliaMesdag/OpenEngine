@@ -55,6 +55,7 @@ layout(set = 0, binding = 5) uniform sampler2D uAvgRadiance;
 layout(set = 0, binding = 8) uniform sampler2D uReprojectedMoments;
 
 #include "ScreenSpaceReflections/sssr_common.glsl"
+#include "ScreenSpaceReflections/sssr_history_policy.glsl"
 #define GE_SSSR_ARGS_BINDING 6
 #define GE_SSSR_ARGS_READONLY
 #include "ScreenSpaceReflections/sssr_dispatch.glsl"
@@ -305,9 +306,9 @@ void main()
                            kDriveMax);
 
     // Temporal: variance of the accumulated luminance, reprojected into this
-    // frame. Zero on a converged static pose by construction.
+    // frame. Zero on a converged still pose, within the moments' storage precision.
     vec2 moments = texelFetch(uReprojectedMoments, pixel, 0).rg;
-    float temporalVariance = max(moments.g - moments.r * moments.r, 0.0);
+    float temporalVariance = GE_SssrTemporalVariance(moments);
     float temporalCoV =
         min(sqrt(temporalVariance) / max(moments.r, kDriveEpsilon), kDriveMax);
 

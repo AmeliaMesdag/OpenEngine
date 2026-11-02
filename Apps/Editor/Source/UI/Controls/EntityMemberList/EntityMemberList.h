@@ -11,9 +11,10 @@
 namespace GameEngine::EditorUI
 {
 
-/// The members of one owner, then the candidates it offers. A row has a member checkbox, a glyph, a
-/// title, a note and a mode. The caller owns the data and the undo steps: each gesture calls one handler,
-/// and the caller builds the list again. Layouts: EntityMemberList.uxml, EntityMemberRow.uxml.
+/// The entities one owner lists, in the caller's order. A row has a glyph and a title in the
+/// inspector's label column, and a toggle, a note and a mode in its value column. The caller owns the
+/// data and the undo steps: each gesture calls one handler, and the caller builds the list again.
+/// Layouts: EntityMemberList.uxml, EntityMemberRow.uxml.
 class EntityMemberList final : public UIElement
 {
   public:
@@ -27,12 +28,14 @@ class EntityMemberList final : public UIElement
         bool Warning = false;
     };
 
-    /// One entity of the list. `GlyphClasses` draw the glyph (no glyph when empty). `CurrentMode` is a
-    /// member's mode; a candidate ignores it. A row that is not `Live` is a deleted member: it shows
-    /// `Words::DeletedTitle`, says that undo restores it, and cannot be selected.
+    /// One entity of the list. `On` is the toggle (the entity is in the owner's result); only a `Member`'s
+    /// mode is filled and can switch; `Modes` empty shows no mode. A row that is not `Live` is a deleted
+    /// member: it shows `Words::DeletedTitle`, says that undo restores it, and cannot be selected.
     struct Row
     {
         ECS::EntityHandle Entity{};
+        bool On = false;
+        bool Member = false;
         std::string Title;
         std::vector<std::string> GlyphClasses;
         std::string GlyphTooltip;
@@ -42,7 +45,9 @@ class EntityMemberList final : public UIElement
         bool Live = true;
     };
 
-    /// The owner's words. `MemberTooltip` and `CandidateTooltip` are the checkbox tooltips.
+    /// The owner's words. `MemberTooltip` and `CandidateTooltip` are the toggle tooltips of a member and
+    /// of any other row. An empty `Heading` shows no heading and no plate: the list is the whole of a
+    /// section that names it.
     struct Words
     {
         std::string Heading;
@@ -53,23 +58,22 @@ class EntityMemberList final : public UIElement
         std::string CandidateTooltip;
     };
 
-    /// The rows in their order: the members first, then the candidates. A non-empty `AddRefusal`
-    /// turns off every candidate's checkbox and is its tooltip (the owner holds no more members).
-    /// While not `Editable`, no checkbox and no mode can change.
+    /// The rows in their order. A non-empty `AddRefusal` turns off the toggle of every row that is not a
+    /// member and is its tooltip (the owner holds no more members). While not `Editable`, no toggle and
+    /// no mode can change.
     struct Content
     {
         Words Text;
-        std::vector<Row> Members;
-        std::vector<Row> Candidates;
+        std::vector<Row> Rows;
         std::string AddRefusal;
         bool Editable = true;
     };
 
-    /// Called with the row's entity. `Select` is called on a click on a live row's title.
+    /// Called with the row's entity. `SetOn` gets the toggle's new value. `Select` is called on a click on
+    /// a live row's title.
     struct Handlers
     {
-        std::function<void(ECS::EntityHandle)> Add;
-        std::function<void(ECS::EntityHandle)> Remove;
+        std::function<void(ECS::EntityHandle, bool)> SetOn;
         std::function<void(ECS::EntityHandle, uint8)> SetMode;
         std::function<void(ECS::EntityHandle)> Select;
     };

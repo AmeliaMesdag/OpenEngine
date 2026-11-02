@@ -220,7 +220,7 @@ Label* AddCaption(UIElement* parent, const char* text, float fontSize)
     auto label = std::make_unique<Label>();
     Label* raw = label.get();
     raw->SetText(text);
-    raw->Overrides().Set(Style::FontSize, StyleLength::Px(fontSize));
+    raw->Style().Set(Style::FontSize, StyleLength::Px(fontSize));
     parent->AddChild(std::move(label));
     return raw;
 }
@@ -256,7 +256,7 @@ public:
             return;
 
         m_YHidden = shouldHide;
-        m_YContainer->Overrides().Set(
+        m_YContainer->Style().Set(
             Style::Display, shouldHide ? DisplayMode::None : DisplayMode::Flex);
         m_YContainer->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
@@ -271,7 +271,7 @@ ChannelControl AddChannelField(UIElement* row, const char* letter, float initial
 {
     auto col = std::make_unique<UIElement>();
     UIElement* colRaw = col.get();
-    col->Overrides()
+    col->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Center)
@@ -289,7 +289,7 @@ ChannelControl AddChannelField(UIElement* row, const char* letter, float initial
     raw->SetValueWithoutNotify(initial);
     if (tooltip && tooltip[0] != '\0')
         raw->SetTooltip(tooltip);
-    raw->Overrides().Set(Style::Width, StyleLength::Percent(100.0f));
+    raw->Style().Set(Style::Width, StyleLength::Percent(100.0f));
     col->AddChild(std::move(field));
 
     row->AddChild(std::move(col));
@@ -361,7 +361,7 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
     // --- Column (equal-width flex item in the wrapping band row) -----------------
     auto card = std::make_unique<UIElement>();
     card->AddClass("color-grade-band");
-    card->Overrides()
+    card->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Stretch)
@@ -373,7 +373,7 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
     UIElement* cardRaw = card.get();
 
     Label* titleLabel = AddCaption(cardRaw, title, kTitleFontSizePx);
-    titleLabel->Overrides().Set(Style::AlignSelf, AlignItems::Center);
+    titleLabel->Style().Set(Style::AlignSelf, AlignItems::Center);
 
     // Wheel on top, centered. Grading style: center-neutral disc with a hue ring
     // at the rim, so the puck's distance reads as the strength of the hue push
@@ -381,7 +381,7 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
     // insets paint and hit-testing to min(w,h), so the puck tracks correctly.
     auto wheel = std::make_unique<ColorWheelElement>();
     wheel->SetGradingStyle(true);
-    wheel->Overrides()
+    wheel->Style()
         .Set(Style::Width, StyleLength::Px(kWheelSizePx))
         .Set(Style::Height, StyleLength::Px(kWheelSizePx))
         .Set(Style::FlexShrink, 0.0f)
@@ -403,13 +403,13 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
     std::function<void(float)> lightCommit = std::move(lightHandlers.second);
 
     auto valueRow = std::make_unique<UIElement>();
-    valueRow->Overrides()
+    valueRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Stretch)
         .Set(Style::Gap, StyleLength::Px(2.0f));
     Label* lightnessCaption = AddCaption(valueRow.get(), "Lightness", kCaptionFontSizePx);
-    lightnessCaption->Overrides().Set(Style::AlignSelf, AlignItems::Center);
+    lightnessCaption->Style().Set(Style::AlignSelf, AlignItems::Center);
     lightnessCaption->SetTooltip("Master lightness for this tonal band; double-click to reset.");
 
     auto slider = std::make_unique<Slider>();
@@ -421,7 +421,7 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
     sliderRaw->SetCentered(true);
     sliderRaw->SetShowValueBubble(true);
     sliderRaw->SetValueWithoutNotify(lightness);
-    sliderRaw->Overrides()
+    sliderRaw->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(kValueSliderMinWidthPx));
     sliderRaw->SetTooltip("Master lightness for this tonal band (0 = neutral).");
@@ -445,7 +445,7 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
     constexpr const char* kRgbTooltip = "Additive log-channel offset (-1 to 1; neutral 0).";
     auto rgbRow = std::make_unique<ResponsiveYrgbRow>(parent);
     ResponsiveYrgbRow* rgbRowRaw = rgbRow.get();
-    rgbRow->Overrides()
+    rgbRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(kFieldGapPx));
@@ -463,20 +463,20 @@ void BuildColorGradeBand(UIElement* parent, const char* title,
 
     // Hex tint field.
     auto hexRow = std::make_unique<UIElement>();
-    hexRow->Overrides()
+    hexRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(kFieldGapPx));
     Label* hexCaption = AddCaption(hexRow.get(), "Hex", kCaptionFontSizePx);
-    hexCaption->Overrides().Set(Style::Width, StyleLength::Px(kCaptionColWidthPx)).Set(Style::FlexShrink, 0.0f);
+    hexCaption->Style().Set(Style::Width, StyleLength::Px(kCaptionColWidthPx)).Set(Style::FlexShrink, 0.0f);
 
     auto hexField = std::make_unique<TextField>();
     TextField* hexRaw = hexField.get();
     hexRaw->AddClass("inspector-text-field");
     hexRaw->SetValueWithoutNotify(TintToHex(OffsetToTint(initialOffset)));
     hexRaw->SetTooltip("Tint color as #RRGGBB.");
-    hexRaw->Overrides().Set(Style::FlexGrow, 1.0f);
+    hexRaw->Style().Set(Style::FlexGrow, 1.0f);
     sync->Hex = hexRaw;
     hexRow->AddChild(std::move(hexField));
     cardRaw->AddChild(std::move(hexRow));
@@ -651,7 +651,7 @@ void RegisterColorGradeEffectInspector()
         // flex-wrap lets the row drop columns to fewer per line (3 -> 2 -> 1) when
         // the inspector is too narrow, rather than clipping horizontally.
         auto bandRow = std::make_unique<UIElement>();
-        bandRow->Overrides()
+        bandRow->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::FlexWrap, true)
@@ -702,7 +702,7 @@ void RegisterColorGradeEffectInspector()
             "Hue rotation in degrees, applied after the corrector (0 = no change).");
 
         Label* wbTitle = AddCaption(ctx.Parent, "White Balance", kTitleFontSizePx);
-        wbTitle->Overrides().Set(Style::MarginTop, StyleLength::Px(kBandGapPx));
+        wbTitle->Style().Set(Style::MarginTop, StyleLength::Px(kBandGapPx));
         addCenteredSlider("Temperature", effect->Temperature, 100.0f, "Change White Balance Temperature",
             [](G& u, float v) { u.Temperature = std::clamp(v, -100.0f, 100.0f); },
             "Warms (+) or cools (-) the image toward the compensated white point.");
@@ -715,7 +715,7 @@ void RegisterColorGradeEffectInspector()
         // the edited limit against its band sibling, so the shader never sees a
         // reversed pair from the UI.
         Label* rangesTitle = AddCaption(ctx.Parent, "Band Ranges", kTitleFontSizePx);
-        rangesTitle->Overrides().Set(Style::MarginTop, StyleLength::Px(kBandGapPx));
+        rangesTitle->Style().Set(Style::MarginTop, StyleLength::Px(kBandGapPx));
         auto addBandLimitSlider = [&](const char* label, float initial, const char* editName,
                                       auto apply, const char* tooltip)
         {

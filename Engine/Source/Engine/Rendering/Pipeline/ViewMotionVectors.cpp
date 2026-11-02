@@ -59,6 +59,30 @@ bool ViewMotionVectors::DrawsMover(const Rendering::GPUInstance& instance, uint3
     return viewWorldKey == 0u || ((instance.flags >> 16u) & 0xFFFFu) == viewWorldKey;
 }
 
+bool ViewMotionVectors::ViewHasMovers(const RenderServices& rs, Rendering::ViewId viewId,
+                                      uint64_t worldId)
+{
+    if (rs.HasUnversionedMotion(viewId))
+        return true;
+    const auto movers = rs.GetFrameMovers();
+    if (movers.empty())
+        return false;
+    const auto* scene = rs.GetGPUScene();
+    if (scene == nullptr)
+        return true;
+    const uint32_t viewWorldKey = worldId != 0u ? Rendering::PackWorldKey16(worldId) : 0u;
+    const auto* view = rs.Views().FindViewDesc(viewId);
+    const bool dropEditorHidden = view != nullptr && view->DropsEditorHidden();
+    const auto& instances = scene->GetInstances();
+    for (const auto& mover : movers)
+    {
+        if (mover.InstanceIndex < instances.size() &&
+            DrawsMover(instances[mover.InstanceIndex], viewWorldKey, dropEditorHidden))
+            return true;
+    }
+    return false;
+}
+
 ViewMotionVectors::MoverMotionPath ViewMotionVectors::ClassifyMoverMotionPath(
     VertexAttributeFlags vertexFlags, bool paletteActive, bool hasSkinStreams,
     bool skinnedShaderAvailable)
@@ -258,9 +282,9 @@ RenderGraph::RGTexture ViewMotionVectors::Declare(ViewDeclare& d)
         return {};
     *camAlloc.Ptr =
         d.Services.Views().ResolveJitteredCameraData(d.View.id, frameIndex, w, h);
-    std::memcpy(mvParamsAlloc.Ptr->CurrViewProj, current.Camera.viewProj, sizeof(float) * 16);
+    std::memcpy(mvParamsAlloc.Ptr->CurrViewProj, current.Camera.viewProj.Data(), sizeof(float) * 16);
     std::memcpy(mvParamsAlloc.Ptr->PrevViewProj,
-                previous->Camera.viewProj,
+                previous->Camera.viewProj.Data(),
                 sizeof(float) * 16);
 
     const auto sceneRG = scene != nullptr ? scene->ImportFrameResources(d.Frame)

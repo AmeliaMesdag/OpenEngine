@@ -61,7 +61,7 @@ void CaptureRootForCurrentPress(UIElement& element, UIEvent& event)
 
 void BindSearchResultIcon(UIElement& iconElement, const SearchIcon& icon, float size)
 {
-    iconElement.Overrides()
+    iconElement.Style()
         .Set(Style::Width, StyleLength::Px(size))
         .Set(Style::Height, StyleLength::Px(size))
         .Set(Style::MinWidth, StyleLength::Px(size))
@@ -78,9 +78,9 @@ void BindSearchResultIcon(UIElement& iconElement, const SearchIcon& icon, float 
         iconElement.RemoveClass(cls);
 
     iconElement.RemoveClass("search-result-swatch");
-    iconElement.Overrides().Reset(Style::BackgroundColor);
-    iconElement.Overrides().Reset(Style::MarginLeft);
-    iconElement.Overrides().Reset(Style::MarginRight);
+    iconElement.Style().Reset(Style::BackgroundColor);
+    iconElement.Style().Reset(Style::MarginLeft);
+    iconElement.Style().Reset(Style::MarginRight);
     if (icon.HasSwatch())
     {
         UI::Layout::DisableBackgroundOverride(iconElement);
@@ -89,7 +89,7 @@ void BindSearchResultIcon(UIElement& iconElement, const SearchIcon& icon, float 
         // with rows that carry an icon.
         const float swatch = size * 0.5f;
         iconElement.AddClass("search-result-swatch");
-        iconElement.Overrides()
+        iconElement.Style()
             .Set(Style::BackgroundColor, icon.SwatchArgb)
             .Set(Style::Width, StyleLength::Px(swatch))
             .Set(Style::Height, StyleLength::Px(swatch))
@@ -494,7 +494,7 @@ void SearchDialog::ApplyClampedPanelPosition()
         float left = m_AnchorX;
         if (m_HorizontalAnchor == SearchDialogHorizontalAnchor::TrailingRight)
             left = m_AnchorX - m_PanelWidth;
-        m_Panel->Overrides()
+        m_Panel->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionLeft, StyleLength::Px(left))
             .Set(Style::PositionTop, StyleLength::Px(m_AnchorY))
@@ -550,7 +550,7 @@ void SearchDialog::ApplyClampedPanelPosition()
     if (y < kViewportMargin)
         y = kViewportMargin;
 
-    m_Panel->Overrides()
+    m_Panel->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(x))
         .Set(Style::PositionTop, StyleLength::Px(y))

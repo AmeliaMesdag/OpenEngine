@@ -1,6 +1,6 @@
 #include "DebugServer/Terrain/TerrainStatsReport.h"
 
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@ using GameEngine::Editor::DescribePlanetPageTable;
 // The reply names, per face, the entries of each level and the level each pinned page's center resolves to.
 TEST(TerrainPlanetPageTableReport, ReportsEachFacesEntriesPerLevelAndThePinnedPagesResolvedLevels)
 {
-    GameEngine::TerrainECS::HeightPageStreamCounts stream;
+    GameEngine::TerrainECS::PageStreamCounts stream;
     stream.Planet = true;
     stream.Published = true;
     stream.PinnedLevel = 3;

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace GameEngine::UI::Interaction
 {
@@ -142,12 +143,12 @@ void DragDropOverlay::EnsureGhost(UIElement* root)
     }
     if (m_Ghost)
     {
-        m_Ghost->Overrides()
+        m_Ghost->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::ZIndex, 9400);
         if (!m_LastGhostVisible)
-            m_Ghost->Overrides().Set(Style::Display, DisplayMode::None);
+            m_Ghost->Style().Set(Style::Display, DisplayMode::None);
     }
 }
 
@@ -192,12 +193,12 @@ void DragDropOverlay::EnsureTooltip(UIElement* root)
     }
     if (m_Tooltip)
     {
-        m_Tooltip->Overrides()
+        m_Tooltip->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::ZIndex, 9500);
         if (!m_LastTooltipVisible)
-            m_Tooltip->Overrides().Set(Style::Display, DisplayMode::None);
+            m_Tooltip->Style().Set(Style::Display, DisplayMode::None);
     }
 }
 
@@ -248,39 +249,39 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
                         m_GhostIcon->AddClass("dnd-ghost-icon-thumbnail");
                         if (m_Ghost)
                             m_Ghost->AddClass("dnd-ghost-has-thumbnail");
-                        constexpr const char* kEnginePrefix = "engine:";
-                        constexpr const char* kFilePrefix = "file:";
-                        constexpr const char* kEditorPrefix = "editor:";
-                        if (p.GhostThumbnailEngineName.size() > 7 &&
-                            p.GhostThumbnailEngineName.compare(0, 7, kEnginePrefix) == 0)
+                        constexpr std::string_view kEnginePrefix = "engine:";
+                        constexpr std::string_view kFilePrefix = "file:";
+                        constexpr std::string_view kEditorPrefix = "editor:";
+                        const std::string& thumbnail = p.GhostThumbnailEngineName;
+                        if (thumbnail.size() > kEnginePrefix.size() && thumbnail.starts_with(kEnginePrefix))
                         {
-                            m_GhostIcon->Styles()
-                                .SetBackgroundResourceName(p.GhostThumbnailEngineName.substr(7))
-                                .SetBackgroundSizeContain();
+                            m_GhostIcon->Style()
+                                .Set(Style::BackgroundImage,
+                                     BackgroundImageSource::Resource(thumbnail.substr(kEnginePrefix.size())))
+                                .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain});
                         }
-                        else if (p.GhostThumbnailEngineName.size() > 5 &&
-                                 p.GhostThumbnailEngineName.compare(0, 5, kFilePrefix) == 0)
+                        else if (thumbnail.size() > kFilePrefix.size() && thumbnail.starts_with(kFilePrefix))
                         {
-                            UI::Layout::SetBackgroundPath(*m_GhostIcon, p.GhostThumbnailEngineName.substr(5));
+                            UI::Layout::SetBackgroundPath(*m_GhostIcon, thumbnail.substr(kFilePrefix.size()));
                         }
-                        else if (p.GhostThumbnailEngineName.size() > 7 &&
-                                 p.GhostThumbnailEngineName.compare(0, 7, kEditorPrefix) == 0)
+                        else if (thumbnail.size() > kEditorPrefix.size() && thumbnail.starts_with(kEditorPrefix))
                         {
+                            // SetBackgroundPath with the editor mount's alias, which it does not take.
                             BackgroundImageSource source{};
                             source.Kind = BackgroundImageSource::SourceKind::Path;
-                            source.Value = p.GhostThumbnailEngineName.substr(7);
+                            source.Value = thumbnail.substr(kEditorPrefix.size());
                             source.SourceAlias = "editor";
-                            m_GhostIcon->Overrides()
+                            m_GhostIcon->Style()
                                 .Set(Style::BackgroundImage, source)
                                 .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
                                 .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain})
-                                .Set(Style::BackgroundPosition, BackgroundPositionValue{50.0f, true, 50.0f, true})
+                                .Set(Style::BackgroundPosition, BackgroundPositionValue::Percent(50.0f, 50.0f))
                                 .Reset(Style::BackgroundTint);
                             m_GhostIcon->MarkDirty(UIElement::VisualDirty);
                         }
                         else
                         {
-                            std::string path = p.GhostThumbnailEngineName;
+                            std::string path = thumbnail;
                             for (char& c : path)
                                 if (c == '\\')
                                     c = '/';
@@ -290,11 +291,11 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
                                 path.insert(n, "\\");
                                 n += 2;
                             }
-                            m_GhostIcon->Styles()
-                                .SetBackgroundResourceName(path)
-                                .SetBackgroundSizeContain()
-                                .SetBackgroundPositionPercent(0.5f, 0.5f)
-                                .SetBackgroundRepeat(BackgroundRepeat::NoRepeat);
+                            m_GhostIcon->Style()
+                                .Set(Style::BackgroundImage, BackgroundImageSource::Resource(std::move(path)))
+                                .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain})
+                                .Set(Style::BackgroundPosition, BackgroundPositionValue::Percent(0.5f, 0.5f))
+                                .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat);
                         }
                     }
                     else
@@ -302,7 +303,7 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
                         m_GhostIcon->RemoveClass("dnd-ghost-icon-thumbnail");
                         if (m_Ghost)
                             m_Ghost->RemoveClass("dnd-ghost-has-thumbnail");
-                        m_GhostIcon->Styles().ResetBackgroundImage().ResetBackgroundSize();
+                        m_GhostIcon->Style().Reset(Style::BackgroundImage).Reset(Style::BackgroundSize);
                     }
                 }
             }
@@ -329,7 +330,7 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
                 const int yi = (int)std::lround(ClampToViewport(y, 1.0f, viewportH));
                 if (!m_LastGhostVisible || xi != m_LastGhostX || yi != m_LastGhostY)
                 {
-                    m_Ghost->Overrides()
+                    m_Ghost->Style()
                         .Set(Style::Display, DisplayMode::Flex)
                         .Set(Style::PositionLeft, StyleLength::Px((float)xi))
                         .Set(Style::PositionTop, StyleLength::Px((float)yi));
@@ -343,7 +344,7 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
         {
             if (m_LastGhostVisible)
             {
-                m_Ghost->Overrides().Set(Style::Display, DisplayMode::None);
+                m_Ghost->Style().Set(Style::Display, DisplayMode::None);
                 m_LastGhostVisible = false;
             }
         }
@@ -374,7 +375,7 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
                 const int yi = (int)std::lround(ClampToViewport(y, 1.0f, viewportH));
                 if (!m_LastTooltipVisible || xi != m_LastTooltipX || yi != m_LastTooltipY)
                 {
-                    m_Tooltip->Overrides()
+                    m_Tooltip->Style()
                         .Set(Style::Display, DisplayMode::Block)
                         .Set(Style::PositionLeft, StyleLength::Px((float)xi))
                         .Set(Style::PositionTop, StyleLength::Px((float)yi));
@@ -388,7 +389,7 @@ void DragDropOverlay::Update(UIElement* root, const DragDropManager& dnd, float 
         {
             if (m_LastTooltipVisible)
             {
-                m_Tooltip->Overrides().Set(Style::Display, DisplayMode::None);
+                m_Tooltip->Style().Set(Style::Display, DisplayMode::None);
                 m_LastTooltipVisible = false;
             }
         }
@@ -400,11 +401,11 @@ void DragDropOverlay::Hide()
     ResetIfDetached();
     if (m_Ghost)
     {
-        m_Ghost->Overrides().Set(Style::Display, DisplayMode::None);
+        m_Ghost->Style().Set(Style::Display, DisplayMode::None);
     }
     if (m_Tooltip)
     {
-        m_Tooltip->Overrides().Set(Style::Display, DisplayMode::None);
+        m_Tooltip->Style().Set(Style::Display, DisplayMode::None);
     }
     m_LastGhostVisible = false;
     m_LastTooltipVisible = false;

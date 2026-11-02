@@ -110,8 +110,8 @@ struct GrassBladeInstance
     uint RandAndCoverage; // grass_clump.glsl owns the layout (per-blade random, field coverage)
     uint BladeShape; // grass_clump.glsl owns the bit layout (tilt, twist, tuft fan)
     uint TerrainIndex;
-    // Terrain surface normal baked by the placement compute for atlas terrains (world nx/nz; ny
-    // reconstructed). 0 for non-atlas terrains, which re-sample the normal below (path unchanged).
+    // Terrain surface normal (world nx/nz; ny reconstructed) baked by the placement compute for a blade
+    // on surface pages (Flags kGrassFlagGroundFromPages). 0 otherwise: the stage re-samples it below.
     float NormalX;
     float NormalZ;
     uint Flags; // LOD index + clump colour code; grass_clump.glsl owns the bit layout
@@ -119,10 +119,6 @@ struct GrassBladeInstance
     // full profile (grass_root_ground_color.glsl); grass_clump.glsl owns the packing. 0 on compat.
     uint RootColor;
 };
-
-// TerrainGPUParams::Flags bit1 (mirror Terrain::kTerrainFlagAtlasBacked): height/normal come from
-// the atlas, not a unified bindless heightmap/normalmap (both bindless indices are 0 on this path).
-const uint kTerrainFlagAtlasBacked = 2u;
 
 layout(std430, set = 2, binding = 3) readonly buffer TerrainGrassInstances
 {
@@ -523,15 +519,14 @@ void ModifyVertex(inout VertexOutput v, InstanceData inst)
         (worldX - tp.WorldOriginX) / max(tp.WorldSizeX, 0.0001),
         (worldZ - tp.WorldOriginZ) / max(tp.WorldSizeZ, 0.0001)
     ), vec2(0.0), vec2(1.0));
-    // Atlas terrains have no unified heightmap/normalmap (both bindless indices are 0): the
-    // placement compute already snapped RootY through the atlas and baked the surface normal into
-    // the instance, so use those directly. Non-atlas terrains re-sample exactly as before.
-    bool atlasBacked = (tp.Flags & kTerrainFlagAtlasBacked) != 0u;
+    // A blade on surface pages carries its ground: the placement compute read the root height and
+    // the normal from the pages the terrain draws. Other blades re-sample the unified maps.
+    bool groundFromPages = (blade.Flags & kGrassFlagGroundFromPages) != 0u;
     float rootY = blade.RootY;
-    if (tp.HeightmapBindless != 0u)
+    if (!groundFromPages && tp.HeightmapBindless != 0u)
         rootY = tp.WorldOriginY + sampleHeight01(tp, terrainUV) * tp.HeightScale;
     vec3 terrainNormal;
-    if (atlasBacked)
+    if (groundFromPages)
     {
         float ny = sqrt(max(1.0 - blade.NormalX * blade.NormalX - blade.NormalZ * blade.NormalZ, 0.0));
         terrainNormal = normalize(vec3(blade.NormalX, ny, blade.NormalZ));

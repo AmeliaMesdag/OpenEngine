@@ -105,7 +105,7 @@ void AddTagModal::PlaceWindow(float x, float y)
     if (!m_Window)
         return;
     // Flex centering from backdrop handles the 50% base; margins apply the offset.
-    m_Window->Overrides()
+    m_Window->Style()
         .Set(Style::MarginLeft, StyleLength::Px(m_WindowOffsetX))
         .Set(Style::MarginTop, StyleLength::Px(m_WindowOffsetY));
 }
@@ -171,7 +171,7 @@ void AddTagModal::BuildTagList()
         if (!tag.Color.empty())
         {
             circle->AddClass(kTagColoredCircleClass);
-            circle->Overrides().Set(Style::BackgroundColor, UIRegistration::Parser<uint32_t>::Parse(tag.Color));
+            circle->Style().Set(Style::BackgroundColor, UIRegistration::Parser<uint32_t>::Parse(tag.Color));
         }
         label->SetText(tag.Name);
 

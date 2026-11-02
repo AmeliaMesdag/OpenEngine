@@ -42,7 +42,7 @@ struct OceanGPUQueryParamsGPU
     float32 _Pad1 = 0.0f;
 
     OceanCascadeLayoutGPU CombinedCascade;
-    float32 Points[kMaxOceanGPUQueryPointsPerDispatch][4] = {};
+    Mathematics::Vector4 Points[kMaxOceanGPUQueryPointsPerDispatch];
 };
 static_assert(sizeof(OceanGPUQueryParamsGPU) ==
                   48 + sizeof(OceanCascadeLayoutGPU) +
@@ -106,9 +106,9 @@ private:
     };
     struct ResultGPU
     {
-        float32 Position[4] = {};
-        float32 Normal[4] = {};
-        float32 Displacement[4] = {};
+        Mathematics::Vector4 Position;
+        Mathematics::Vector4 Normal;
+        Mathematics::Vector4 Displacement;
     };
 
     ::GameEngine::Rendering::IDevice* m_Device = nullptr;

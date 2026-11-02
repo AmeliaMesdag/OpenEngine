@@ -24,7 +24,14 @@ class PavedStopSolver
     // to overlap, so the passes end within the stations' count.
     void Solve();
 
+    // Ends `arm` at its mouth's throat, `throat` meters from the node: in place of the stop's advance
+    // when `bothSides` are round, else past the stop. Never short of the arm's last overlapping station,
+    // and past a turn there as StopAfter is.
+    void EndAtMouth(uint32 arm, float32 throat, bool bothSides);
+
     const PavedArmPath& GetPath(uint32 arm) const { return m_Paths[arm]; }
+    std::span<const PavedArmPath> GetPaths() const { return m_Paths; }
+    std::span<const PavedTaggedRing> GetOutlines() const { return m_Outlines; }
     float32 GetStop(uint32 arm) const { return m_Stops[arm]; }
     const PavedTaggedRing& GetRibbon(uint32 arm) const { return m_Ribbons[arm]; }
     const PavedTaggedRing& GetOutline(uint32 outline) const { return m_Outlines[outline]; }

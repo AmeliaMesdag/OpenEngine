@@ -1,7 +1,7 @@
 # Job system tests.
 #
-# JobSystemTests is the PURE module suite (links JobSystem + Logger only —
-# never Engine, no scripting, no shim) and builds on every platform. The
+# JobSystemTests is the PURE module suite (links JobSystem, Logger and Memory
+# only — never Engine, no scripting, no shim) and builds on every platform. The
 # scripting/hot-reload suites below the platform gate rely on the legacy
 # GameEngine.NativeShim and a Windows-only layout for managed test projects;
 # Linux/macOS scripting smoke coverage is provided by EngineCoreClrSmokeTests
@@ -29,7 +29,9 @@ set(JOB_SYSTEM_TEST_SOURCES
     JobCounterTests.cpp
     JobPriorityTests.cpp
     JobSystemStatisticsTests.cpp
+    LatencyBudgetTests.cpp
     QueueFairnessTests.cpp
+    FrameJoinedCarrierTests.cpp
     ParallelForTests.cpp
     TaskSlabPoolTests.cpp
     TaskQueueAllocationTests.cpp
@@ -58,11 +60,12 @@ endif()
 # The alloc tripwires count through the allocation counter's hook, which every
 # test executable carries (cmake/AllocationHook.cmake); the module under test is
 # the exe-local copy, so the counted code is this executable's in every
-# configuration. Logger is listed directly because OBJECT-library objects
-# propagate only one level (same pattern as Tests/ECS).
+# configuration. Logger and Memory are listed directly because OBJECT-library
+# objects propagate only one level (same pattern as Tests/ECS).
 target_link_libraries(JobSystemTests
     JobSystem
     Logger
+    Memory
     GTest::GTest
 )
 

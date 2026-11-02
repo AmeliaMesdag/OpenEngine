@@ -17,9 +17,7 @@
 #include "Logger/Backtrace.h"
 #include "Logger/Logger.h"
 
-#include "UI/Controls/DockspaceElement.h"
 #include "UI/Controls/IVirtualizedControl.h"
-#include "UI/Controls/WeightedPane.h"
 #include "UI/UIElement.h"
 #include "../UIAttributeAccess.h"
 

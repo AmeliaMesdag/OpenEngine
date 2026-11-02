@@ -4,6 +4,7 @@
 #include "AssetCore/Asset.h"
 #include "AssetCore/NineSlice.h"
 
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -11,6 +12,9 @@
 #include <vector>
 
 namespace GameEngine {
+
+class AssetRegistry;
+struct AssetDecodeInputs;
 
 /**
  * @brief Texture format types
@@ -177,6 +181,18 @@ public:
     static void SetGpuTranscodeTarget(TextureGpuTranscodeTarget target);
     static TextureGpuTranscodeTarget GetGpuTranscodeTarget();
 
+    /** The cooked artifacts a load of `sourceBytes` adopts, in order, with their normal-variance companions, and
+     * the cook plan that names them, which its decode takes as it is (TryLoadViaCook); empty without the import cook.
+     * The AssetIOService reads them next to the source, so the decode adopts an artifact without reading the disk. */
+    static AssetDecodeInputs ResolveCookDecodeInputs(const AssetRegistry& registry, const GUID& guid,
+                                                     const String& extensionLower,
+                                                     const Vector<uint8>& sourceBytes);
+
+    /** The normal-variance companion beside the packaged `payload` when the texture's settings call for one
+     * (LoadPackagedTexture), so the AssetIOService reads it with the payload; empty otherwise. */
+    static AssetDecodeInputs ResolvePackagedDecodeInputs(const AssetRegistry& registry, const GUID& guid,
+                                                         const std::filesystem::path& payload);
+
     /**
      * @brief Load texture from file
      */
@@ -270,6 +286,12 @@ public:
      */
     bool IsSwizzleBaked() const { return m_SwizzleBaked; }
 
+    /**
+     * @brief The BC4 normal-variance companion the cook wrote beside this normal map
+     * (HasNormalVarianceCompanion), or null. Its level j holds sigma of mip j + 1 in R.
+     */
+    const TextureAsset* GetNormalVarianceCompanion() const { return m_NormalVarianceCompanion.get(); }
+
     /// The SVG text an asset loaded from, with its intrinsic size in CSS px
     /// (its width/height or viewBox). Immutable once built; a reload swaps the
     /// asset's pointer to a new one. Rasterize it at any size with
@@ -357,6 +379,22 @@ private:
      */
     bool LoadWithKTXFromData(const Vector<uint8>& data);
 
+    /// Read (ReadAssetDecodeInputFile) and load a cooked normal-variance companion; null when it
+    /// is absent or not BC4.
+    std::unique_ptr<TextureAsset> LoadVarianceCompanion(const std::filesystem::path& file) const;
+
+    /// Load the companion an export wrote beside a packaged normal map's payload. False (and
+    /// an error) when the texture's settings call for one and it is missing or corrupt.
+    bool LoadPackagedVarianceCompanion(const AssetRegistry& registry, const std::filesystem::path& payload);
+
+    /**
+     * @brief Adopts the cooked container at `artifact` (TryLoadViaCook's hit path), together with
+     * `varianceCompanion` when that path is not empty. A missing or empty file is a miss; a corrupt
+     * one is logged and dropped, so the caller recooks.
+     */
+    bool AdoptCookArtifact(const std::filesystem::path& artifact, const std::filesystem::path& varianceCompanion,
+                           bool swizzleBaked);
+
     /**
      * @brief Shared tail of both KTX loaders: transcode (per the process-wide
      * GPU target), adopt the container's full mip chain and DFD color space.
@@ -387,6 +425,7 @@ private:
 	    bool m_SwizzleBaked = false;
 	    uint32 m_MipmapLevels;
 	    std::vector<TextureMipDesc> m_MipChain;
+	    std::unique_ptr<TextureAsset> m_NormalVarianceCompanion;
 	    TextureFilter m_MinFilter;
 	    TextureFilter m_MagFilter;
 	    TextureWrap m_WrapS;

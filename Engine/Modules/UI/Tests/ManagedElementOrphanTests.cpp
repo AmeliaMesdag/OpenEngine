@@ -14,11 +14,14 @@
 // which is what lets them run in UITests rather than needing a live CoreCLR.
 
 #include "../Source/UIAttributeAccess.h"
+#include "Logger/CallbackSink.h"
+#include "Logger/Logger.h"
 #include "Scripting/ManagedElementTypes.h"
 #include "UI/Registration/ElementRegistration.h"
 #include "UI/UIElement.h"
 #include "Types/StringId.h"
 #include <gtest/gtest.h>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -196,7 +199,7 @@ TEST_F(ManagedElementOrphanTest, ReRegisteringTheTypeReAttachesToTheSameElement)
     // attributes at all — which is not a state any document can produce, and re-materialization
     // replays the element's attributes.
     UIAttributeAccess::SetAuthoredAttribute(*proxy, "percent", "40", /*markDirty=*/false);
-    Factories().ApplyAttributes(*proxy, {{"percent", "40"}}, std::string{});
+    Factories().ApplyAttributes(*proxy, {{"percent", "40"}}, std::string{}, {}, 0);
 
     const uint64_t instanceId = proxy->GetInstanceId();
     const uint64_t childId = proxy->GetChildren()[0]->GetInstanceId();
@@ -233,6 +236,33 @@ TEST_F(ManagedElementOrphanTest, ReRegisteringTheTypeReAttachesToTheSameElement)
     EXPECT_EQ(StubRuntime::s_Applied[0].first, "percent");
     EXPECT_EQ(StubRuntime::s_Applied[0].second, "40");
 
+    m_Elements.push_back(std::move(el));
+}
+
+// Only the managed type knows which authored names it uses, so the load reports none of them.
+TEST_F(ManagedElementOrphanTest, AuthoredNamesOnAManagedElementAreNotReportedUnknown)
+{
+    ASSERT_NE(Register("HealthBar", kOwner), StringId(0));
+    std::unique_ptr<UIElement> el = Factories().Create("healthbar");
+    ASSERT_NE(el, nullptr);
+
+    Logger::Log::Initialize({});
+    auto sink = std::make_unique<Logger::CallbackSink>();
+    auto* sinkPointer = sink.get();
+    auto reports = std::make_shared<std::atomic<int>>(0);
+    const std::uint64_t callbackId = sinkPointer->RegisterCallback(
+        [reports](const Logger::LogMessage& message)
+        {
+            if (message.Message.find("ManagedProbe.uxml") != std::string::npos)
+                reports->fetch_add(1);
+        });
+    Logger::Log::AddSink(std::move(sink));
+    UIAttributeAccess::SetAuthoredAttribute(*el, "percent", "40", /*markDirty=*/false);
+    Factories().ApplyAttributes(*el, {{"percent", "40"}}, std::string{}, "ManagedProbe.uxml", 3);
+    Logger::Log::Flush();
+    sinkPointer->UnregisterCallback(callbackId);
+
+    EXPECT_EQ(reports->load(), 0);
     m_Elements.push_back(std::move(el));
 }
 

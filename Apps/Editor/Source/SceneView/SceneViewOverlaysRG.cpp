@@ -491,7 +491,7 @@ void SceneViewController::DeclareOverlaysRG(RenderGraph::RGFrame& frame, RenderG
                                     markupCollected ? markupCollected->CollectedBodies() : 0);
     // The mark-up gizmo builds a region's display only while it is in this view.
     Mathematics::Vector4 markupFrustum[6];
-    ExtractFrustumPlanes(Mathematics::Matrix4x4::FromColumnMajor(cam.viewProj), markupFrustum);
+    ExtractFrustumPlanes(cam.viewProj, markupFrustum);
     m_MarkupGizmo.SetViewFrustum(markupFrustum);
 
     const auto& svSettings = Editor::SceneViewSettings::Get();
@@ -534,8 +534,7 @@ void SceneViewController::DeclareOverlaysRG(RenderGraph::RGFrame& frame, RenderG
                     hasActiveCamera = true;
                 }
             }
-            m_CameraFrameGizmo.SetCamera(hasActiveCamera, activeCamera.params,
-                                         activeCamera.worldTransform.Data());
+            m_CameraFrameGizmo.SetCamera(hasActiveCamera, activeCamera.params, activeCamera.worldTransform);
             collector.AddGizmo(&m_CameraFrameGizmo);
         }
         collector.AddGizmo(&m_SplineSceneGizmo);
@@ -611,15 +610,15 @@ void SceneViewController::DeclareOverlaysRG(RenderGraph::RGFrame& frame, RenderG
                 draw.isTransparent = (draw.color.a < 0.999f);
                 if (draw.isTransparent)
                 {
-                    const float* viewM = cam.view;
+                    const Mathematics::Matrix4x4& view = cam.view;
                     double accumZ = 0.0;
                     for (uint32_t v = 0; v < vc; ++v)
                     {
                         const float x = group.vertices[static_cast<size_t>(v) * 3u + 0u];
                         const float y = group.vertices[static_cast<size_t>(v) * 3u + 1u];
                         const float z = group.vertices[static_cast<size_t>(v) * 3u + 2u];
-                        accumZ += static_cast<double>(viewM[2] * x + viewM[6] * y +
-                                                      viewM[10] * z + viewM[14]);
+                        accumZ += static_cast<double>(view[0][2] * x + view[1][2] * y +
+                                                      view[2][2] * z + view[3][2]);
                     }
                     draw.depthKey = static_cast<float>(accumZ / static_cast<double>(vc));
                 }
@@ -976,8 +975,7 @@ void SceneViewController::DeclareSelectionOutlineRG(RenderGraph::RGFrame& frame,
     MeshGPURegistry& meshReg = rs->GetMeshGPURegistry();
     auto& skeletonStore = Engine::Renderer::SkeletonStore::Instance();
 
-    glm::mat4 viewProj;
-    std::memcpy(&viewProj[0][0], m_FrameCameraData.viewProj, sizeof(float) * 16);
+    const glm::mat4 viewProj = m_FrameCameraData.viewProj.GetGLM();
 
     // Resolve every selection/hover draw NOW — the exec lambda replays the
     // snapshot with zero ECS/registry access.
@@ -1139,7 +1137,7 @@ void SceneViewController::DeclareSelectionOutlineRG(RenderGraph::RGFrame& frame,
     };
     auto foldU64 = [&](uint64_t v) { foldBytes(&v, sizeof(v)); };
     foldU64((static_cast<uint64_t>(w) << 32) | h);
-    foldBytes(m_FrameCameraData.viewProj, sizeof(float) * 16);
+    foldBytes(m_FrameCameraData.viewProj.Data(), sizeof(float) * 16);
     for (const ECS::EntityHandle e : contributors)
     {
         foldU64(static_cast<uint64_t>(ECS::EntityHandleHash{}(e)));

@@ -595,3 +595,33 @@ TEST(NavigationWorldTests, AWorldsScratchReleaseLeavesOtherSolvesRunning)
     solver.join();
     EXPECT_EQ(matched.load(), 2 * kSolves);
 }
+
+// A goal walled off from the start fails without a search. AStarSolver::Solve sizes its scratch
+// before it expands the first cell, so a world whose solvers hold no scratch after the solve
+// expanded nothing; a solve that does search then holds the scratch for the grid.
+TEST(NavigationWorldTests, AGoalInAnotherRegionFailsWithoutASearch)
+{
+    constexpr uint32 kSize = 64;
+    NavigationWorld world;
+    const NavMapHandle handle = world.AddGridMap(SquareGrid(kSize));
+    GridMap& grid = *world.GetGridMap(handle);
+    // One open cell at (40, 40), walled by the eight cells around it.
+    for (uint32 z = 39; z <= 41; ++z)
+        for (uint32 x = 39; x <= 41; ++x)
+            grid.SetCellBlocked(x, z, x != 40 || z != 40);
+
+    std::vector<GridPathSolve> solves(1);
+    solves[0].Map = handle;
+    solves[0].Request.StartX = 0.5f;
+    solves[0].Request.StartZ = 0.5f;
+    solves[0].Request.EndX = 40.5f;
+    solves[0].Request.EndZ = 40.5f;
+    world.SolveGridPaths(nullptr, solves);
+    EXPECT_EQ(solves[0].Status, PathStatus::Failed);
+    EXPECT_EQ(world.GetSolverScratchStatistics().HeldBytes, 0u) << "the solve to the walled cell searched";
+
+    PathHandle path;
+    ASSERT_EQ(world.FindPath(handle, CornerToCorner(kSize), path), PathStatus::Complete);
+    world.GetPathBuffer().FreePath(path);
+    EXPECT_EQ(world.GetSolverScratchStatistics().HeldBytes, kSolverBytesPerCell * kSize * kSize);
+}

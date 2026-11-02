@@ -38,8 +38,6 @@ constexpr float kEdgePadding = 8.0f;
 constexpr float kAnchorGap = 10.0f;
 constexpr float kArrowWidth = 20.0f;
 constexpr float kArrowHeight = 10.0f;
-// The arrow's base overlaps the panel edge so the two read as one shape.
-constexpr float kArrowPanelOverlap = 1.0f;
 // Keep the arrow clear of the panel's rounded corners.
 constexpr float kArrowCornerMargin = 10.0f;
 // Above panel content; matches the other editor overlay popups (ColorPickerPopup).
@@ -61,7 +59,7 @@ class TickLabelStrip : public UIElement
         auto label = std::make_unique<Label>();
         label->SetText(text);
         label->AddClass("popover-tick-label");
-        label->Overrides()
+        label->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false);
         m_Ticks.push_back({label.get(), value});
@@ -219,7 +217,7 @@ SceneCameraSettingsPopup::SceneCameraSettingsPopup()
     // them, and staying zero-area is what keeps a press in the viewport
     // *outside* the popup — the dismissal gate tests tree ancestry, so a
     // full-size box here would swallow every press as "inside".
-    Overrides()
+    Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f)).Set(Style::PositionTop, StyleLength::Px(0.0f))
         .Set(Style::Width, StyleLength::Px(0.0f)).Set(Style::Height, StyleLength::Px(0.0f))
@@ -234,7 +232,7 @@ SceneCameraSettingsPopup::SceneCameraSettingsPopup()
     auto panel = std::make_unique<UIElement>();
     panel->SetId("scene-camera-settings-panel");
     panel->AddClass("popover-panel");
-    panel->Overrides()
+    panel->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::Width, StyleLength::Px(kPanelWidth))
         .Set(Style::Height, StyleLength::Px(kPanelHeight))
@@ -376,16 +374,14 @@ SceneCameraSettingsPopup::SceneCameraSettingsPopup()
     if (m_CompensationRow.slider)
         m_CompensationRow.slider->SetCentered(true);
     AddTickStrip(*panel, "SceneCameraExposureComp", m_CompensationRow.slider,
-                 {{-4.0f, "-4"}, {-2.0f, "-2"}, {0.0f, "0"}, {2.0f, "+2"}, {4.0f, "+4"}});
+                 {{-8.0f, "-8"}, {-4.0f, "-4"}, {0.0f, "0"}, {4.0f, "+4"}, {8.0f, "+8"}});
 
-    // Anchor arrow pointing up at the toolbar button; a child of the panel (not
-    // a sibling) so a press on it counts as inside the popup — the dismissal
-    // gate tests tree ancestry, and the arrow is drawn outside the panel box.
-    // Added last so it draws over the panel's top border for a joined look.
+    // The arrow points up at the toolbar button. It is the panel's last child: a press on it is
+    // inside the popup (dismissal tests tree ancestry), and it draws over the panel's top border.
     auto arrow = std::make_unique<PopoverArrow>();
-    arrow->Overrides()
+    arrow->Style()
         .Set(Style::Position, PositionType::Absolute)
-        .Set(Style::PositionTop, StyleLength::Px(-kArrowHeight + kArrowPanelOverlap))
+        .Set(Style::PositionTop, StyleLength::Px(-kArrowHeight))
         .Set(Style::Width, StyleLength::Px(kArrowWidth))
         .Set(Style::Height, StyleLength::Px(kArrowHeight));
     m_Arrow = arrow.get();
@@ -494,7 +490,7 @@ SceneCameraSettingsPopup::DropdownRow SceneCameraSettingsPopup::AddDropdownRow(
     auto dropdown = std::make_unique<Dropdown>();
     dropdown->SetId(idPrefix);
     // Fill the value column so every option fits on one line in the list.
-    dropdown->Overrides().Set(Style::FlexGrow, 1.0f);
+    dropdown->Style().Set(Style::FlexGrow, 1.0f);
     std::vector<Dropdown::Option> options;
     for (size_t i = 0; i < labels.size(); ++i)
         options.push_back({std::to_string(i), labels[i]});
@@ -632,7 +628,7 @@ void SceneCameraSettingsPopup::UpdateExposureRowVisibility()
     auto setVisible = [](UIElement* el, bool visible)
     {
         if (el)
-            el->Overrides().Set(Style::Display,
+            el->Style().Set(Style::Display,
                                 visible ? DisplayMode::Flex : DisplayMode::None);
     };
     setVisible(m_ExposureMeterRow.row, autoOn);
@@ -678,7 +674,7 @@ void SceneCameraSettingsPopup::ShowAt(float anchorCenterX, float anchorBottomY,
     m_HasPlacement = false;
     UpdatePlacement(anchorCenterX, anchorBottomY, parentWidth, parentHeight);
 
-    Overrides()
+    Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::PointerEvents, true);
 }
@@ -726,11 +722,11 @@ void SceneCameraSettingsPopup::UpdatePlacement(float anchorCenterX, float anchor
                                     posX + kArrowCornerMargin,
                                     posX + kPanelWidth - kArrowWidth - kArrowCornerMargin) - posX;
 
-    m_Panel->Overrides()
+    m_Panel->Style()
         .Set(Style::PositionLeft, StyleLength::Px(posX))
         .Set(Style::PositionTop, StyleLength::Px(posY));
     if (m_Arrow)
-        m_Arrow->Overrides().Set(Style::PositionLeft, StyleLength::Px(arrowX));
+        m_Arrow->Style().Set(Style::PositionLeft, StyleLength::Px(arrowX));
 
     // Overlay descendants need an explicit invalidation while their dock
     // ancestor is being interactively resized.
@@ -741,7 +737,7 @@ void SceneCameraSettingsPopup::Hide()
 {
     m_Visible = false;
     m_HasPlacement = false;
-    Overrides()
+    Style()
         .Set(Style::Display, DisplayMode::None)
         .Set(Style::PointerEvents, false);
 }

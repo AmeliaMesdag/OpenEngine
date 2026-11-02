@@ -4,15 +4,20 @@
 // provider's mesh and a renderer with no CPU mesh are never ground. The world here has no editor
 // running: the fixture is the engine and one model.
 
+#include "Components/Hierarchy.h"
 #include "Components/RuntimeOnlyEntity.h"
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Spline/SplineExtrude.h"
+#include "Components/Spline/SplineNetworkMember.h"
+#include "Components/Spline/SplinePaving.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Picking/EditorPickProviders.h"
 #include "SplineRecipes/RecipeBuildStates.h"
+#include "SplineRecipes/RecipeControllers.h"
 #include "SplineRecipes/SplineExtrudeController.h"
 #include "SplineRecipes/SplineSurfaceConform.h"
 #include "SharedHeadlessDevice.h"
+#include "SplineECS/SplineNetwork.h"
 #include "SplineECS/SplineService.h"
 
 #include "PendingBvhGrid.h"
@@ -103,6 +108,49 @@ class SplineConformHoldTests : public PendingBvhGridTest
         return entity;
     }
 
+    // A linear network member of `kind` through `points` at y = 0, closed when `closed`.
+    GameEngine::ECS::EntityHandle CreateMember(std::initializer_list<Vector3> points, bool closed,
+                                               Components::SplineNetworkMemberKind kind)
+    {
+        auto& splines = GameEngine::SplineECS::SplineService::Get();
+        const auto handle = splines.CreateSpline(GameEngine::Spline::SplineType::Linear, closed);
+        auto* data = splines.GetSplineData(handle);
+        for (const Vector3& point : points)
+            data->AddPoint(point, 1.0f);
+        splines.RebuildCache(handle);
+        const GameEngine::ECS::EntityHandle entity = m_World.CreateEntity();
+        Components::SplineComponent spline{};
+        spline.SplineDataIndex = handle.Index();
+        spline.SplineDataGeneration = handle.Generation();
+        m_World.AddComponentImmediate(entity, spline);
+        m_World.AddComponentImmediate(entity, Components::WorldTransform{});
+        m_World.AddComponentImmediate(entity, Components::SplineNetworkMember{kind});
+        return entity;
+    }
+
+    // The sum of the bound centers of the chunks under `parent`: it moves when they rebuild.
+    Vector3 ChunkCentersUnder(GameEngine::ECS::EntityHandle parent)
+    {
+        Vector3 sum(0.0f, 0.0f, 0.0f);
+        m_World.Query<GameEngine::ECS::Read<Components::LocalBounds>, GameEngine::ECS::Read<Components::Parent>>().Each(
+            [&](GameEngine::ECS::EntityHandle, const Components::LocalBounds& bounds, const Components::Parent& link)
+            {
+                if (link.Entity == parent)
+                    sum = sum + bounds.Box.center;
+            });
+        return sum;
+    }
+
+    // One frame of the network and the recipe controllers.
+    void UpdateRecipes(GameEngine::SplineRecipes::RecipeControllers& controllers,
+                       GameEngine::Engine::Renderer::RenderServices& renderServices)
+    {
+        constexpr float kFrameSeconds = 0.3f;
+        GameEngine::SplineECS::SplineNetwork::Get().Update(m_World);
+        controllers.Update(m_World, &renderServices, nullptr, kFrameSeconds);
+        m_World.ProcessCommands();
+    }
+
     bool m_OwnsSplines = false;
 
     size_t CountGeneratedChunks()
@@ -178,15 +226,79 @@ TEST_F(SplineConformHoldTests, AnExtrudeHeldByAPendingBvhBuildsOnTheUpdateAfterI
     CreateExtrudeAcrossTheGrid();
     GameEngine::SplineRecipes::SplineExtrudeController controller;
     GameEngine::SplineRecipes::RecipeBuildStates states;
+    const GameEngine::SplineRecipes::PavingRoadTrims trims;
 
-    controller.Update(m_World, renderServices, 0.0f, states);
+    controller.Update(m_World, renderServices, 0.0f, states, trims, {});
     m_World.ProcessCommands();
     EXPECT_EQ(CountGeneratedChunks(), 0u) << "the held rebuild built pieces over the pending mesh";
 
     ASSERT_NE(MeshBvhCache::Instance().GetOrBuild(m_Guid, 0, Grid()), nullptr);
-    controller.Update(m_World, renderServices, 0.0f, states);
+    controller.Update(m_World, renderServices, 0.0f, states, trims, {});
     m_World.ProcessCommands();
     EXPECT_GT(CountGeneratedChunks(), 0u) << "the held recipe never built once the BVH was published";
 
     controller.Shutdown(m_World, &renderServices);
+}
+
+// A road edited while the paved region it enters waits for a pending BVH keeps its strip until the
+// region builds: a strip cut at the old arc lengths never shows against the old paving.
+TEST_F(SplineConformHoldTests, ARoadEditedWhileItsPavedRegionIsHeldKeepsItsStripUntilTheRegionBuilds)
+{
+    GameEngine::Rendering::IDevice* device = SharedHeadlessDevice();
+    if (!device)
+        GTEST_SKIP() << "no Vulkan device available";
+    GameEngine::Engine::Renderer::RenderServices renderServices;
+    ASSERT_TRUE(renderServices.Initialize(device));
+    const bool ownsNetwork = !GameEngine::SplineECS::SplineNetwork::IsInitialized();
+    if (ownsNetwork)
+        GameEngine::SplineECS::SplineNetwork::Initialize();
+    GameEngine::SplineRecipes::RecipeControllers controllers;
+
+    // The square paves over the terrain-only ground (none here) first: the grid's BVH stays unasked.
+    const GameEngine::ECS::EntityHandle square =
+        CreateMember({Vector3(-5.0f, 0.0f, -5.0f), Vector3(5.0f, 0.0f, -5.0f), Vector3(5.0f, 0.0f, 5.0f),
+                      Vector3(-5.0f, 0.0f, 5.0f)},
+                     true, Components::SplineNetworkMemberKind::Area);
+    m_World.AddComponentImmediate(square, Components::SplinePaving{});
+    const GameEngine::ECS::EntityHandle road = CreateMember({Vector3(-9.0f, 0.0f, 0.0f), Vector3(9.0f, 0.0f, 0.0f)},
+                                                            false, Components::SplineNetworkMemberKind::Road);
+    Components::SplineExtrude strip{};
+    strip.ConformMode = Components::SplinePlacementConform::None;
+    m_World.AddComponentImmediate(road, strip);
+    for (int i = 0; i < 8; ++i)
+        UpdateRecipes(controllers, renderServices);
+    ASSERT_EQ(controllers.BuildStates().StateOf(m_World, square).State, GameEngine::SplineRecipes::BuildState::Built);
+
+    // One edit to each: the square now reads the scene (the grid, its BVH pending), the road starts 3 m
+    // further out, so every arc length on it moves.
+    m_World.GetComponentForWrite<Components::SplinePaving>(square)->ConformTarget =
+        Components::SplineConformTarget::Scene;
+    const auto* roadSpline = m_World.GetComponent<Components::SplineComponent>(road);
+    auto& splines = GameEngine::SplineECS::SplineService::Get();
+    const GameEngine::SplineECS::SplineHandle handle(roadSpline->SplineDataIndex, roadSpline->SplineDataGeneration);
+    splines.GetSplineData(handle)->SetPointPosition(0, Vector3(-12.0f, 0.0f, 0.0f));
+    splines.RebuildCache(handle);
+
+    bool roadHeld = false;
+    bool lidMoved = false;
+    for (int i = 0; i < 8 && !lidMoved; ++i)
+    {
+        const Vector3 lidBefore = ChunkCentersUnder(square);
+        const Vector3 roadBefore = ChunkCentersUnder(road);
+        UpdateRecipes(controllers, renderServices);
+        lidMoved = (ChunkCentersUnder(square) - lidBefore).LengthSquared() > 0.0f;
+        if (!lidMoved)
+            EXPECT_EQ((ChunkCentersUnder(road) - roadBefore).LengthSquared(), 0.0f)
+                << "the strip rebuilt on the old trims on update " << i;
+        roadHeld |= controllers.BuildStates().ReasonOf(m_World, road) ==
+                    GameEngine::SplineRecipes::kHeldForPickingDataReason;
+        if (i == 2)
+            ASSERT_NE(MeshBvhCache::Instance().GetOrBuild(m_Guid, 0, Grid()), nullptr);
+    }
+    EXPECT_TRUE(roadHeld) << "the region never held, so the test saw no pending BVH";
+    EXPECT_TRUE(lidMoved) << "the region never built once the BVH was published";
+
+    controllers.ReleaseSceneScoped(m_World, &renderServices);
+    if (ownsNetwork)
+        GameEngine::SplineECS::SplineNetwork::Shutdown();
 }

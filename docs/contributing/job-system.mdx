@@ -211,9 +211,11 @@ template <typename Body>
 bool ParallelFor(WorkStealingThreadPool* pool, size_t count, Body&& body,
                  const ParallelForOptions& options = {});
 
-// Chunks: body(chunkBegin, chunkEnd) over [0, count), at most min(workers + 1, ceil(count / minBatchSize), 64) equal chunks.
+// Chunks: body(chunkBegin, chunkEnd) over [0, count), at most min(workers + 1, ceil(count / minBatchSize), 64) equal
+// chunks, each one unit of the form above: the same options, a void or bool body (false stops the run), the same result.
 template <typename Body> requires std::invocable<Body&, size_t, size_t>
-void ParallelFor(WorkStealingThreadPool* pool, size_t count, Body&& body, size_t minBatchSize);
+bool ParallelFor(WorkStealingThreadPool* pool, size_t count, Body&& body, size_t minBatchSize,
+                 const ParallelForOptions& options = {});
 
 template <typename Iter, typename Compare, ...>
 void ParallelSort(WorkStealingThreadPool* pool, Iter begin, Iter end,
@@ -233,7 +235,18 @@ JobSystem::ParallelFor(&pool, particles.size(),
         for (size_t i = begin; i < end; ++i)
             Integrate(particles[i], dt);
     },
-    /*minBatchSize=*/1024);   // at or below this, the whole range runs on the caller
+    /*minBatchSize=*/1024);   // at or below this, the whole range is one chunk on the caller
+
+// Chunks a cancel flag ends: a chunk that starts once the flag is set returns false, which stops the run on every thread.
+const bool baked = JobSystem::ParallelFor(&pool, cells.size(),
+    [&](size_t begin, size_t end)
+    {
+        if (m_CancelRequested.load(std::memory_order_relaxed))
+            return false;
+        BakeCells(begin, end);
+        return true;
+    },
+    /*minBatchSize=*/256);
 
 // A cancellable run on half the pool.
 const std::function<bool()> cancelled = [&] { return m_CancelRequested.load(); };
@@ -251,9 +264,9 @@ A pool worker, the main thread, a channel job (§12), or a thread of your own ma
 
 :::
 
-- **Units or chunks:** the unit form runs `body(unit)` once per unit, each claimed with one atomic operation, so give it units worth that (a tile, a band, a chunk you planned yourself). The chunked overload splits [0, count) into min(workers + 1, ceil(count / minBatchSize), 64) equal chunks (a range at or under `minBatchSize` runs on the caller) and runs `body(chunkBegin, chunkEnd)` per chunk, for per-element work and for bodies that set up per-chunk state. `ParallelSort` sorts one chunk per worker in parallel and merges on the caller.
-- **Result:** the unit form returns `false` when a body returned `false` or `Stop` returned true, even when no unit was left to skip (a failed last unit fails the run); `true` otherwise, and always for a `void` body without a `Stop`. It is not "every unit ran".
-- **Stopping:** a body that returns `false` or throws, `Stop` returning true or throwing, or an admission hook throwing stops the run: no further unit starts on any thread; units in flight finish. `Stop` is read by the caller only, so a body that must stop helpers mid-unit returns `false` itself.
+- **Units or chunks:** the unit form runs `body(unit)` once per unit, each claimed with one atomic operation, so give it units worth that (a tile, a band, a chunk you planned yourself). The chunked overload splits [0, count) into min(workers + 1, ceil(count / minBatchSize), 64) equal chunks (a range at or under `minBatchSize` is one chunk on the caller) and runs `body(chunkBegin, chunkEnd)` per chunk, for per-element work and for bodies that set up per-chunk state. Each chunk is one unit of the unit form, so the options, the result, stopping and exceptions below hold per chunk, on the caller-only path too; `Helpers` caps the helpers, not the chunk count. `ParallelSort` sorts one chunk per worker in parallel and merges on the caller.
+- **Result:** both forms return `false` when a body (a unit's or a chunk's) returned `false` or `Stop` returned true, even when no unit was left to skip (a failed last unit fails the run); `true` otherwise, and always for a `void` body without a `Stop`. It is not "every unit ran".
+- **Stopping:** a body that returns `false` or throws, `Stop` returning true or throwing, or an admission hook throwing stops the run: no further unit starts on any thread; units in flight finish. `Stop` is read by the caller only, so a body that must stop helpers mid-unit returns `false` itself, and a cancel flag every thread should honor is read at the start of the body: return `false` once it is set.
 - **Exceptions:** the first exception a unit, `Stop`, or an admission hook threw, on any thread, is rethrown on the caller once the units in flight have finished. Nothing is logged and dropped.
 - **Admission:** each unit a helper runs takes `TryAcquire` first and `Release` after. A refused helper ends and leaves the units to the caller and the other helpers. An admitted helper runs one unit, then re-publishes itself at the end of its lane while units are left, so the lane's other jobs run between units. The caller's own units take no admission. `TextureCookWorkers::RunBands` uses it for the texture decode budget.
 - **Helpers waiting:** a pool keeps at most `kMaxUnstartedForkTasksPerWorker` (4) fork tasks per worker published and not yet started in each lane, across every caller: these helpers and the visits `Run` publishes. A `Run` past the budget publishes a visit only when its counter's queue has none pending, since one visit runs every job queued there. Background helpers queued behind a streaming flood never take a Normal fork's budget. A fork publishes only the helpers that fit and the caller claims the rest, so a thread forking back to back faster than the workers drain the helpers its closed runs left queued runs its units itself instead of growing the queue.
@@ -502,7 +515,7 @@ Destroying a counter off a bare `IsZero()` read; two threads both treating their
 
 ## 9. Performance reference
 
-Measured 2026-07-10 on a quiet 32-core machine (CPU not recorded), Release unless noted, so the figures are rounded. The measurement record is the job system overhaul design in the workbench (`designs/jobsystem/jobsystem-overhaul.html`). Reproduce via `Tests/Jobs` bench filters (`JobSystemBench.*`, `TopologyBench.*`).
+Measured 2026-07-10 on a quiet 32-core machine (CPU not recorded), Release unless noted, so the figures are rounded. The measurement record is the job system overhaul design in the workbench. Reproduce via `Tests/Jobs` bench filters (`JobSystemBench.*`, `TopologyBench.*`).
 
 | Operation | Measured | Notes |
 |---|---|---|

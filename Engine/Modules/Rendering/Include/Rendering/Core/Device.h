@@ -1844,6 +1844,9 @@ class IDevice
     // Device management
     virtual bool Initialize(const DeviceDesc& desc) = 0;
     virtual void Shutdown() = 0;
+    // Make the calling thread the owner of this device's frames and teardown.
+    // Call it before any other call when Initialize ran on a different thread.
+    virtual void BindOwnerThread() {}
     virtual const RenderingDeviceCapabilities& GetCapabilities() const = 0;
     virtual GraphicsAPI GetAPI() const = 0;
 

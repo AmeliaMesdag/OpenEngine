@@ -93,7 +93,7 @@ static void StyleFogSwatch(UIElement* swatch, uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kSwatchSize))
         .Set(Style::Height, StyleLength::Px(kSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kSwatchSize))
@@ -131,7 +131,7 @@ static void AddFogColorRow(
     if (colorLabel)
         colorLabel->AddClass("inspector-label-no-drag");
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -148,7 +148,7 @@ static void AddFogColorRow(
     auto rgbLabel = std::make_unique<Label>();
     rgbLabel->AddClass("inspector-text");
     rgbLabel->SetText(FormatFogRgb(effect->*member));
-    rgbLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    rgbLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
     Label* rgbLabelRaw = rgbLabel.get();
     fieldContainer->AddChild(std::move(rgbLabel));
 
@@ -602,14 +602,14 @@ void RegisterVolumetricFogEffectInspector()
 
         auto glowControls = std::make_unique<UIElement>();
         UIElement* glowControlsRaw = glowControls.get();
-        glowControlsRaw->Overrides()
+        glowControlsRaw->Style()
             .Set(Style::Display, effect->FogGlowEnabled ? DisplayMode::Flex : DisplayMode::None)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::AlignItems, AlignItems::Stretch);
 
         AddToggleRow(ctx.Parent, "Fog Glow", effect->FogGlowEnabled,
             [w, e, n, undo, glowControlsRaw](bool v) {
-                glowControlsRaw->Overrides().Set(Style::Display, v ? DisplayMode::Flex : DisplayMode::None);
+                glowControlsRaw->Style().Set(Style::Display, v ? DisplayMode::Flex : DisplayMode::None);
                 CommitComponentWithUndo<Fog>(w, e, n, undo, "Change Fog Glow",
                     [v](Fog& u) { u.FogGlowEnabled = v; });
             }, "Approximate higher-order scattering with a shared multiscale veil.");
@@ -626,7 +626,7 @@ void RegisterVolumetricFogEffectInspector()
 
         auto pyramidOnlyControls = std::make_unique<UIElement>();
         UIElement* pyramidOnlyControlsRaw = pyramidOnlyControls.get();
-        pyramidOnlyControlsRaw->Overrides()
+        pyramidOnlyControlsRaw->Style()
             .Set(Style::Display,
                  effect->FogGlowQualityLevel == Components::FogGlowQuality::Fast
                      ? DisplayMode::None
@@ -638,7 +638,7 @@ void RegisterVolumetricFogEffectInspector()
                                         effect->FogGlowQualityLevel,
                                         "Fast uses one 3x3 pass; higher modes use 4, 6, or 8 pyramid octaves.");
         qualityField->SetOnValueChanged([w, e, n, undo, pyramidOnlyControlsRaw](Components::FogGlowQuality quality) {
-            pyramidOnlyControlsRaw->Overrides().Set(
+            pyramidOnlyControlsRaw->Style().Set(
                 Style::Display,
                 quality == Components::FogGlowQuality::Fast ? DisplayMode::None : DisplayMode::Flex);
             CommitComponentWithUndo<Fog>(w, e, n, undo, "Change Fog Glow Quality",

@@ -67,7 +67,7 @@ struct FenceStation
 
 // Where one end of a span — or of a crest registered to it — is cut: on the
 // vertical plane through its station's base, perpendicular to the ground
-// bisector of the two spans that meet there (SpanMitre.h, MeasureSpanJoin).
+// bisector of the two spans that meet there (SpanMiter.h, MeasureSpanJoin).
 // Two equally thick pieces laid on the chords of a turn meet on it on both
 // faces; a thinner piece meets a thicker one with the step their thicknesses
 // make (fence design section 4c). Described in the piece's own frame, because
@@ -76,9 +76,9 @@ struct FenceStation
 struct FenceEndPlane
 {
     // False keeps the end square as modelled: no span beyond it, a post over
-    // the join, a notch under a millimetre, a turn past the mitre limit, or a
+    // the join, a notch under a millimetre, a turn past the miter limit, or a
     // span that borrowed its roll.
-    bool Mitred = false;
+    bool Mitered = false;
     // The plane's yaw away from square in the piece's frame, in radians: on
     // level ground the signed turn at the station, positive where the fence
     // turns right (SignedGroundYaw).
@@ -114,7 +114,7 @@ struct FenceSpan
     uint32 PoolSlot = 0;
     // An override made this span a gate, drawn from GatePieces. A gate is laid
     // between its two stations exactly as a wall is, reserves its span of the
-    // crest row, and is mitred where it meets a span no post covers.
+    // crest row, and is mitered where it meets a span no post covers.
     bool IsGate = false;
     // Global span ordinal. An opening — a gate with no gate piece to draw —
     // places no span but keeps its ordinal, so the ordinals after it do not
@@ -123,7 +123,7 @@ struct FenceSpan
     uint32 Run = 0;          // authored point opening the run
     uint32 OrdinalInRun = 0; // position within the run's fill sequence
     // The planes the span's two ends are cut on where it meets a neighbour no
-    // post covers. A mitred end was laid longer by its overhang, which
+    // post covers. A mitered end was laid longer by its overhang, which
     // LengthScale already counts; square ends leave the span exactly as it
     // was laid between its stations.
     FenceEndPlane Start;

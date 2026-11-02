@@ -13,11 +13,6 @@ std::filesystem::path GetEditorInstallAssetsRoot()
     return GameEngine::Editor::GetEditorGlobalPaths().installAssetsRoot;
 }
 
-std::filesystem::path GetEditorUserCacheRoot()
-{
-    return GameEngine::Editor::GetEditorGlobalPaths().userCacheRoot;
-}
-
 std::filesystem::path GetDefaultProjectRoot()
 {
     return GameEngine::Editor::GetEditorGlobalPaths().defaultProjectRoot;

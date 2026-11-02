@@ -45,7 +45,7 @@ OceanCollisionQueryHandle OceanRayTracer::Submit(const OceanRayTraceDesc& ray)
 
     Impl::PendingRay pending{};
     pending.Desc = ray;
-    for (float32& component : pending.Desc.Direction)
+    for (float32& component : pending.Desc.Direction.v)
         component /= length;
     pending.Desc.SampleCount = std::clamp(ray.SampleCount, 2u, 4096u);
     pending.Points.resize(pending.Desc.SampleCount);

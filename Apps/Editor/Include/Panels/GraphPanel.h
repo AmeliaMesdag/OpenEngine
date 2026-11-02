@@ -201,9 +201,15 @@ public:
 
 private:
     void RebuildPalette();
+    // Rebuilds the palette on the next deferred drain, at most once however often it is asked.
     void SchedulePaletteRebuild();
+    // The rebuild SchedulePaletteRebuild deferred: releases its latch, then rebuilds a visible palette.
+    void RunScheduledPaletteRebuild();
     void RebuildVariablesPanel();
+    // Rebuilds the variables panel on the next deferred drain, at most once however often it is asked.
     void ScheduleVariablesPanelRebuild();
+    // The rebuild ScheduleVariablesPanelRebuild deferred: releases its latch, then rebuilds the panel.
+    void RunScheduledVariablesPanelRebuild();
     void AddNodeFromPalette(const std::string& typeId);
     void AddNodeFromPaletteAtScreen(const std::string& typeId, float screenX, float screenY,
                                     bool centerOnPointer, bool rejectPaletteArea);
@@ -431,7 +437,7 @@ private:
     VariablesSortMode m_VariablesSortMode = VariablesSortMode::Name;
     bool m_VariablesSortAscending = true;
 
-    bool m_PaletteRebuildScheduled = false; /* At most one ScheduleNext in flight so typing doesn't hang */
+    bool m_PaletteRebuildScheduled = false; /* At most one palette rebuild waits at a time, so typing does not hang */
     bool m_VariablesRebuildScheduled = false;
     bool m_FrameNodesOnNextLayout = false; /* Frame all nodes to fit view when opening a graph */
     int m_FrameRetries = 0; /* Limit retries so stale flag doesn't fire on later interactions */

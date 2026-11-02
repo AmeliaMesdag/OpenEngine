@@ -313,6 +313,25 @@ inline float PolygonDoubledSignedArea(std::span<const Vector2> polygon)
 	return sum;
 }
 
+/// Blends two points linearly: `a + (b - a) * t`. `t` is not clamped: 0 gives `a`,
+/// 1 gives `b`, and values outside [0, 1] continue along the line through `a` and `b`.
+inline Vector3 Lerp(const Vector3& a, const Vector3& b, float t)
+{
+	return a + (b - a) * t;
+}
+
+/// Blends two points on the plane linearly: `a + (b - a) * t`, with `t` not clamped.
+inline Vector2 Lerp(const Vector2& a, const Vector2& b, float t)
+{
+	return a + (b - a) * t;
+}
+
+/// Blends two four-component vectors linearly: `a + (b - a) * t`, with `t` not clamped.
+inline Vector4 Lerp(const Vector4& a, const Vector4& b, float t)
+{
+	return a + (b - a) * t;
+}
+
 // The point of segment ab nearest to `point`; `a` when the segment has no length.
 inline Vector3 ClosestPointOnSegment(const Vector3& point, const Vector3& a, const Vector3& b)
 {

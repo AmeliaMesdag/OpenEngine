@@ -62,6 +62,8 @@ $defaultScenarios = @(
   'repro_hierarchy_multi_create.json',
   'repro_hierarchy_multi_create_cubes.json',
   'repro_inspector_scroll_after_create_cube.json',
+  'repro_toolbar_build_activation_preserves_tabs.json',
+  'repro_toolbar_mixer_activation_preserves_tabs.json',
   # Assets ListView mode: wheel scroll + horizontal scrollbar drag should pass in both modes.
   'repro_assets_listview_wheel_scroll_delay.json',
   'repro_assets_listview_horizontal_scrollbar_drag.json'

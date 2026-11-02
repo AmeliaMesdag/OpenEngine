@@ -14,7 +14,6 @@
 #include "UI/UIElement.h"
 #include "UI/UIEvents.h"
 #include "UI/UIManager.h"
-#include "Scheduler/Scheduler.h"
 
 #include "Logger/Logger.h"
 
@@ -170,7 +169,7 @@ void ShaderGraphPanel::ContributeDiagnosticsStrip(UIElement& container)
     auto diagnostics = std::make_unique<UIElement>();
     diagnostics->SetId("NodeGraphDiagnostics");
     diagnostics->AddClass("node-graph-diagnostics");
-    diagnostics->Overrides().Set(Style::Display, DisplayMode::None);
+    diagnostics->Style().Set(Style::Display, DisplayMode::None);
 
     // Plain elements, not Buttons: Button.css sizes `button, .button` at a 32px
     // min-height that a single class only ties with, and the fix for that tie
@@ -375,19 +374,17 @@ void ShaderGraphPanel::OnModelChanged()
     if (m_CompileRefreshScheduled)
         return;
     m_CompileRefreshScheduled = true;
-    Scheduler::IScheduler* sched = GetScheduler();
-    if (!sched)
-    {
-        m_CompileRefreshScheduled = false;
-        Compile();
-        return;
-    }
-    sched->ScheduleNext([this]() {
+    const bool posted = PostAction([this]() {
         m_CompileRefreshScheduled = false;
         if (NodeDragInProgress())
             return;
         Compile();
     });
+    if (posted)
+        return;
+    // Unattached (no manager to drain a post): release the latch and compile now.
+    m_CompileRefreshScheduled = false;
+    Compile();
 }
 
 void ShaderGraphPanel::Shutdown()
@@ -463,7 +460,7 @@ void ShaderGraphPanel::ClearCompileDiagnostics(std::size_t onDiskErrorCount)
         m_DiagnosticsSummaryText->SetText(hint);
         m_DiagnosticsSummaryText->SetTooltip(hint);
         m_DiagnosticsExpandable = false;
-        m_DiagnosticsStrip->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_DiagnosticsStrip->Style().Set(Style::Display, DisplayMode::Flex);
         ApplyDiagnosticsExpandedState();
     }
     if (GraphCanvas* canvas = Canvas())
@@ -480,7 +477,7 @@ void ShaderGraphPanel::RebuildDiagnosticsStrip(const MaterialGraphDiagnosticsSum
         return;
 
     m_DiagnosticsListContent->RemoveAllChildren();
-    m_DiagnosticsStrip->Overrides().Set(Style::Display,
+    m_DiagnosticsStrip->Style().Set(Style::Display,
                                         errors.empty() ? DisplayMode::None : DisplayMode::Flex);
     m_DiagnosticsSummaryText->SetText(summary.CollapsedLineText);
     /* The folded line ellipsises at the strip's width, so the tooltip is where

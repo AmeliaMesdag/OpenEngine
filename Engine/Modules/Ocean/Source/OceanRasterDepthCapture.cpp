@@ -32,7 +32,7 @@ namespace
 {
 struct alignas(16) OceanRasterDepthParamsGPU
 {
-    float NearFarDeepResolution[4]{}; // x near/top padding, y far, z deep, w resolution
+    Mathematics::Vector4 NearFarDeepResolution; // x near/top padding, y far, z deep, w resolution
 };
 static_assert(sizeof(OceanRasterDepthParamsGPU) == 16);
 
@@ -357,12 +357,12 @@ CameraData OceanRasterDepthCapture::MakeTopDownCamera(
     const Matrix4x4 viewProj = proj * view;
 
     CameraData out{};
-    std::memcpy(out.view, view.Data(), sizeof(float) * 16u);
-    std::memcpy(out.proj, proj.Data(), sizeof(float) * 16u);
-    std::memcpy(out.viewProj, viewProj.Data(), sizeof(float) * 16u);
-    out.cameraPos[0] = eye.x;
-    out.cameraPos[1] = eye.y;
-    out.cameraPos[2] = eye.z;
+    out.view = view;
+    out.proj = proj;
+    out.viewProj = viewProj;
+    out.cameraPos.x = eye.x;
+    out.cameraPos.y = eye.y;
+    out.cameraPos.z = eye.z;
     return out;
 }
 

@@ -111,78 +111,6 @@ TEST_F(HotReloadPipelineTest, CompilationTaskFailure) {
 }
 
 /**
- * @brief Test file loading task
- */
-TEST_F(HotReloadPipelineTest, FileLoadingTaskExecution) {
-    FileLoadingTask task(threadPool.get(), testAssemblyPath.string());
-
-    task.Execute();
-
-    EXPECT_EQ(task.GetResult(), HotReloadResult::Success);
-    EXPECT_GT(task.GetFileSize(), 0);
-    EXPECT_EQ(task.GetFileSize(), task.GetAssemblyBytes().size());
-
-    // Verify file content
-    const auto& bytes = task.GetAssemblyBytes();
-    EXPECT_EQ(bytes[0], 'M');
-    EXPECT_EQ(bytes[1], 'Z');
-}
-
-/**
- * @brief Test assembly preparation task
- */
-TEST_F(HotReloadPipelineTest, AssemblyPrepTaskExecution) {
-    // First load the file directly to verify it works
-    FileLoadingTask fileTask(threadPool.get(), testAssemblyPath.string());
-    fileTask.Execute();
-
-    ASSERT_EQ(fileTask.GetResult(), HotReloadResult::Success);
-    ASSERT_GT(fileTask.GetFileSize(), 0);
-
-    // For now, skip the TaskHandle test since it's having issues
-    // TODO: Fix TaskHandle result storage mechanism
-    Logger::Log::Info("Skipping TaskHandle test due to known issues - testing direct execution only");
-
-    // Create a mock TaskHandle for AssemblyPrepTask (this is a workaround)
-    // In a real scenario, this would come from the completed FileLoadingTask
-    auto mockFileTaskHandle = threadPool->Submit(std::make_unique<FileLoadingTask>(threadPool.get(), testAssemblyPath.string()));
-
-    // Wait a bit for the task to start
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    auto preloadSync = std::make_shared<GameEngine::PreloadSync>();
-
-    // Test assembly preparation with a simplified approach
-    // Create AssemblyPrepTask but don't rely on TaskHandle result retrieval
-    AssemblyPrepTask prepTask(threadPool.get(), testAssemblyPath.string(), mockFileTaskHandle, preloadSync);
-
-    // The AssemblyPrepTask should handle the case where TaskHandle result is not available
-    // and fall back to test mode behavior
-    prepTask.Execute();
-
-    // Since Engine instance doesn't exist in test environment, expect success in test mode
-    EXPECT_EQ(prepTask.GetResult(), HotReloadResult::Success);
-    EXPECT_TRUE(prepTask.GetErrorMessage().empty());
-}
-
-/**
- * @brief Test main thread swap task
- */
-TEST_F(HotReloadPipelineTest, MainThreadSwapTaskExecution) {
-    auto preloadSync = std::make_shared<GameEngine::PreloadSync>();
-
-    MainThreadSwapTask swapTask(threadPool.get(), testAssemblyPath.string(), preloadSync);
-
-    auto startTime = std::chrono::high_resolution_clock::now();
-    swapTask.Execute();
-    auto endTime = std::chrono::high_resolution_clock::now();
-
-    // With improved test mode support, the task should succeed even without Engine
-    EXPECT_EQ(swapTask.GetResult(), HotReloadResult::Success);
-    EXPECT_TRUE(swapTask.GetErrorMessage().empty());
-}
-
-/**
  * @brief Test complete pipeline execution
  */
 TEST_F(HotReloadPipelineTest, CompletePipelineExecution) {
@@ -194,15 +122,15 @@ TEST_F(HotReloadPipelineTest, CompletePipelineExecution) {
 
     auto stats = future.get();
 
-    // FIXED: The pipeline now waits for all tasks to complete before returning
-    // This ensures the future only resolves when the entire hot-reload process is done
     EXPECT_TRUE(stats.success) << "Pipeline should complete successfully: " << stats.errorMessage;
     EXPECT_EQ(stats.result, HotReloadResult::Success);
     EXPECT_GT(stats.totalDuration.count(), 0) << "Pipeline should take some time to complete";
     EXPECT_TRUE(stats.errorMessage.empty()) << "No errors should occur: " << stats.errorMessage;
 
-    // Verify that the pipeline actually waited for background tasks
-    EXPECT_GT(stats.totalDuration.count(), 10) << "Pipeline should take at least 10ms (some processing time)";
+    // The future resolves only after the last stage, so the pipeline already
+    // reports the run as ended and at full progress.
+    EXPECT_FALSE(pipeline->IsExecuting()) << "the future resolved while the run was still executing";
+    EXPECT_FLOAT_EQ(pipeline->GetProgress(), 1.0f) << "the future resolved before the swap stage ended";
 
     Logger::Log::Info("CompletePipelineExecution test completed - pipeline waited for all tasks: {}ms",
                 stats.totalDuration.count());

@@ -1,5 +1,6 @@
 #include "Pathfinding/GridMap.h"
 #include "AStarSolver.h"
+#include "GridRegions.h"
 #include "HexGridHelpers.h"
 #include "Logger/Logger.h"
 #include "Mathematics/Interpolation.h"
@@ -171,7 +172,21 @@ GridMap::ReadView GridMap::View() const
     assert(m_PathSolveWindows.load(std::memory_order_relaxed) != 0 &&
            "GridMap: a read view was taken outside a path-solve window; open one with OpenPathSolveWindow "
            "(GridMap::FindPath and NavigationWorld::SolveGridPaths do)");
-    return ReadView(*this);
+    LabelRegionsIfStale();
+    ReadView view(*this);
+    view.m_Regions = m_Regions.data();
+    return view;
+}
+
+void GridMap::LabelRegionsIfStale() const
+{
+    if (m_RegionsCurrent.load(std::memory_order_acquire))
+        return;
+    const std::lock_guard lock(m_RegionsMutex);
+    if (m_RegionsCurrent.load(std::memory_order_relaxed))
+        return;
+    GridRegions::Label(m_Settings, m_Blocked, m_Heights, m_RegionSets, m_Regions);
+    m_RegionsCurrent.store(true, std::memory_order_release);
 }
 
 // Every writer calls this before it takes the reservation lock, so in an
@@ -243,7 +258,11 @@ void GridMap::SetCellBlocked(uint32 cellX, uint32 cellZ, bool blocked)
     AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
-    m_Blocked[CellIndex(cellX, cellZ)] = blocked ? 1 : 0;
+    uint8& cell = m_Blocked[CellIndex(cellX, cellZ)];
+    const uint8 value = blocked ? 1 : 0;
+    if (cell != value)
+        m_RegionsCurrent.store(false, std::memory_order_relaxed);
+    cell = value;
     ++m_TopologyVersion;
 }
 
@@ -257,7 +276,10 @@ void GridMap::SetCellHeight(uint32 cellX, uint32 cellZ, float32 height)
     AssertNoPathSolveWindow();
     if (!IsValidCell(cellX, cellZ))
         return;
-    m_Heights[CellIndex(cellX, cellZ)] = height;
+    float32& cell = m_Heights[CellIndex(cellX, cellZ)];
+    if (cell != height)
+        m_RegionsCurrent.store(false, std::memory_order_relaxed);
+    cell = height;
     ++m_TopologyVersion;
 }
 
@@ -303,7 +325,7 @@ void GridMap::ReserveCell(uint32 cellX, uint32 cellZ, uint32 agentId, float32 ex
 
     auto& cells = m_AgentCells[agentId];
     if (std::find(cells.begin(), cells.end(), index) == cells.end())
-        cells.push_back(index);
+        cells.PushBack(index);
 }
 
 void GridMap::ClearCellReservation(uint32 cellX, uint32 cellZ)
@@ -369,8 +391,8 @@ void GridMap::ClearExpiredReservations(float32 currentTime)
             }
             cells[write++] = index;
         }
-        cells.resize(write);
-        if (cells.empty())
+        cells.Resize(write, 0u);
+        if (cells.Empty())
             it = m_AgentCells.erase(it);
         else
             ++it;

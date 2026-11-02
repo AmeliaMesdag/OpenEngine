@@ -239,6 +239,18 @@ static std::string FindFocusedPanelId(const EditorWindowContext& ctx)
     return panelId;
 }
 
+// Posted, not called: the settings read and the row rebuild must not stall the frame that shows the Build tab.
+static void PostBuildPanelVersionRefresh(EditorPanelManager& manager, EditorApplication::EditorWindowContext& ctx)
+{
+    if (!ctx.ui)
+        return;
+    if (UIElement* root = ctx.ui->GetRootElement())
+        root->PostAction([&manager]() {
+            if (auto* buildPanel = manager.FindFirstPanelOfType<BuildPanel>())
+                buildPanel->RefreshVersionsFromSettings();
+        });
+}
+
 static const char* DefaultPanelLeafAnchor(const std::string& panelId)
 {
     if (panelId == EditorPanelIds::Hierarchy ||
@@ -443,18 +455,10 @@ void EditorPanelManager::ShowOrActivateBuildPanel(EditorWindowContext* ctx)
     if (!ctx || !ctx->docking)
         return;
 
-    if (ctx->docking->ActivateTab(EditorPanelIds::Build))
+    if (ActivateOpenPanel(ctx, EditorPanelIds::Build))
     {
-        RebuildDockspace(ctx);
         RefreshPanelUI(ctx, EditorPanelIds::Build);
-        // Defer version refresh so opening the Build tab doesn't stall the editor (avoids
-        // synchronous settings I/O and RebuildRows in the same call stack).
-        if (ctx->ui)
-            if (UIElement* root = ctx->ui->GetRootElement())
-                root->PostAction([this]() {
-                    if (auto* buildPanel = FindFirstPanelOfType<BuildPanel>())
-                        buildPanel->RefreshVersionsFromSettings();
-                });
+        PostBuildPanelVersionRefresh(*this, *ctx);
         return;
     }
 
@@ -479,12 +483,7 @@ void EditorPanelManager::ShowOrActivateBuildPanel(EditorWindowContext* ctx)
             ctx->docking->ActivateTab(EditorPanelIds::Build);
             RebuildDockspace(ctx);
             RefreshPanelUI(ctx, EditorPanelIds::Build);
-            if (ctx->ui)
-                if (UIElement* rootEl = ctx->ui->GetRootElement())
-                    rootEl->PostAction([this]() {
-                        if (auto* buildPanel = FindFirstPanelOfType<BuildPanel>())
-                            buildPanel->RefreshVersionsFromSettings();
-                    });
+            PostBuildPanelVersionRefresh(*this, *ctx);
             return;
         }
         // Fallback: add to first available leaf
@@ -495,12 +494,7 @@ void EditorPanelManager::ShowOrActivateBuildPanel(EditorWindowContext* ctx)
             ctx->docking->ActivateTab(EditorPanelIds::Build);
             RebuildDockspace(ctx);
             RefreshPanelUI(ctx, EditorPanelIds::Build);
-            if (ctx->ui)
-                if (UIElement* rootEl = ctx->ui->GetRootElement())
-                    rootEl->PostAction([this]() {
-                        if (auto* buildPanel = FindFirstPanelOfType<BuildPanel>())
-                            buildPanel->RefreshVersionsFromSettings();
-                    });
+            PostBuildPanelVersionRefresh(*this, *ctx);
             return;
         }
     }
@@ -511,9 +505,8 @@ void EditorPanelManager::ShowOrActivateMixerPanel(EditorWindowContext* ctx)
     if (!ctx || !ctx->docking)
         return;
 
-    if (ctx->docking->ActivateTab(EditorPanelIds::Mixer))
+    if (ActivateOpenPanel(ctx, EditorPanelIds::Mixer))
     {
-        RebuildDockspace(ctx);
         RefreshPanelUI(ctx, EditorPanelIds::Mixer);
         return;
     }

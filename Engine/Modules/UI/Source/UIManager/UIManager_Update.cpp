@@ -75,7 +75,7 @@
 
 #include "UI/Assets/UILayoutAsset.h"
 #include "UI/Assets/UIStyleAsset.h"
-#include "UI/StyleOverrides.h"
+#include "UI/StyleDeclaration.h"
 
 #include "Core/ApplicationPaths.h"
 
@@ -143,6 +143,19 @@ class ScopedUpdateEventDispatchGuard final
     ScopedUpdateEventDispatchGuard& operator=(const ScopedUpdateEventDispatchGuard&) = delete;
 };
 
+// Passes per virtualization drain point. A pass can queue follow-up work (data and scroll changes).
+constexpr int kMaxVirtualizationDrainIterations = 4;
+
+// Resolves the control of a queued work item. A control that is gone or display:none gets no work.
+UIElement* ResolveVirtualizationTarget(void* /*userCtx*/, UIManager& ui, std::uint64_t instanceId)
+{
+    UIElement* element = ui.FindElementByInstanceId(instanceId);
+    if (!element)
+        return nullptr;
+    if (element->GetResolvedStyle().Layout.DisplayMode == DisplayMode::None)
+        return nullptr;
+    return element;
+}
 
 } // namespace
 
@@ -377,48 +390,9 @@ void UIManager::Update(float deltaTime, bool interactive)
     // after a HUD is built.
     SettleAttachTransitions();
 
-    bool dockspaceRebuiltBeforeLayout = false;
-
-    // Apply any pending dockspace rebuild before building Yoga so layout
-    // reflects changes requested by UI controls in the previous frame.
-    if (runInteractive && m_RebuildDockspace && m_PendingDockspaceRebuild)
-    {
-        GE_CPU_PROFILE_SCOPE("UIManager.Update.DockspaceRebuild");
-        auto resetPrimitiveGenFrames = [&](auto& self, UIElement* el) -> void {
-            if (!el)
-                return;
-            el->m_LastPrimitiveGenFrame = 0;
-            for (const auto& child : el->GetChildren())
-                self(self, child.get());
-            if (UIElement* target = el->GetMountTarget())
-                self(self, target);
-        };
-
-        resetPrimitiveGenFrames(resetPrimitiveGenFrames, m_PendingDockspaceRebuild);
-        // Rebuilding the dockspace destroys and recreates large portions of the UI tree.
-        // Drop retained Yoga nodes up-front so we don't hold stale UIElement* keys.
-        ResetRetainedYogaTree();
-        m_PendingDockspaceRebuild->RebuildFromModel();
-        InvalidateSheetSetSubtree(m_PendingDockspaceRebuild);
-        resetPrimitiveGenFrames(resetPrimitiveGenFrames, m_PendingDockspaceRebuild);
-        dockspaceRebuiltBeforeLayout = true;
-        m_PendingDockspaceRebuild = nullptr;
-        m_RebuildDockspace = false;
-        // Safety: input state may reference elements in the rebuilt subtree
-        m_Hovered = nullptr;
-        m_HoveredInstanceId = 0;
-        m_MouseCaptured = false;
-        m_CaptureElement = nullptr;
-        m_CaptureInstanceId = 0;
-        m_CaptureId.clear();
-    }
-
-    // Non-RAII scope for the "PreBuild" phase — the prep work between DockspaceRebuild and the
-    // first BuildYoga invocation (hover recovery, viewport/content-scale checks,
-    // stylesheet flat-table construction). Released explicitly before the first BuildYoga scope
-    // so BuildYoga becomes a sibling in the call tree, not a child. unique_ptr is used because
-    // the code in between declares many locals that are used later in the function, ruling out a
-    // plain `{}` block wrapper.
+    // Profile scope for the "PreBuild" phase, from the attach settle to the first BuildYoga.
+    // It ends before BuildYoga so the two are siblings in the call tree. It is not a `{}` block
+    // because later code uses the locals declared in this phase.
     auto preBuildScope =
         std::make_unique<::GameEngine::Profiling::ScopedCpuProfile>("UIManager.Update.PreBuild");
 
@@ -960,39 +934,6 @@ void UIManager::Update(float deltaTime, bool interactive)
         m_CachedScrollViewTreeGen = m_TreeStructureGeneration.load(std::memory_order_relaxed);
     }
 
-    // Shared helpers: keep the "flush scroll callbacks + drain virtualization" pattern consistent
-    // across phases, and avoid duplicating resolver/iteration code.
-
-    auto drainVirtualizationQueueBounded = [&](int maxIterations) -> bool
-    {
-        bool anyRan = false;
-        // Stage 7 step 7.1: virtualization resolves elements via UIManager::
-        // FindElementByInstanceId (a tree walk). The previous nodesByInstanceId
-        // map was an O(1) cache rebuilt every frame; the walk is cheap enough
-        // (few k entries max) that the per-frame map maintenance was net loss
-        // for this drain path.
-        for (int it = 0; it < maxIterations; ++it)
-        {
-            if (!m_VirtualizationCoordinator.HasPending())
-                break;
-            if (!m_VirtualizationCoordinator.DrainOnce(
-                    *this,
-                    /*userCtx=*/nullptr,
-                    +[](void* /*userCtx*/, UIManager& ui, std::uint64_t id) -> UIElement*
-                    {
-                        UIElement* el = ui.FindElementByInstanceId(id);
-                        if (!el)
-                            return nullptr;
-                        if (el->GetResolvedStyle().Layout.DisplayMode == DisplayMode::None)
-                            return nullptr;
-                        return el;
-                    }))
-                break;
-            anyRan = true;
-        }
-        return anyRan;
-    };
-
     // Option A (phase separation): flush deferred ScrollView callbacks and drain virtualization work
     // before the first Yoga solve so layout sees a stable, up-to-date tree.
     //
@@ -1004,28 +945,14 @@ void UIManager::Update(float deltaTime, bool interactive)
         GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain");
         ScopedSectionTimer _tPreSolve(profEnabled, &prof.PreSolveDrainMs);
         const uint64_t treeGenBeforePreSolve = m_TreeStructureGeneration.load(std::memory_order_relaxed);
-        bool preSolveAnyScrollCallbacksFlushed = false;
-        bool preSolveAnyVirtualizationRan = false;
-
-        constexpr int kMaxVirtualizationDrainIterationsPreSolve = 4;
-
-        // Attribute the tree-gen delta to FlushScrollCallbacks vs the virtualization drain
-        // so we can tell which one is forcing the AfterPreSolveDrain rebuild. Costs one
-        // atomic load per checkpoint — negligible.
-        {
-            GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain.FlushScrollCallbacks");
-            const auto t0 = ProfClock::now();
-            preSolveAnyScrollCallbacksFlushed = preSolveAnyScrollCallbacksFlushed || FlushScrollCallbacks(ctx);
-            preSolveFlushCallbacksMs += std::chrono::duration<double, std::milli>(ProfClock::now() - t0).count();
-        }
-        const uint64_t treeGenAfterFlush = m_TreeStructureGeneration.load(std::memory_order_relaxed);
-
-        {
-            GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain.VirtualizationDrain");
-            const auto t0 = ProfClock::now();
-            preSolveAnyVirtualizationRan = preSolveAnyVirtualizationRan || drainVirtualizationQueueBounded(kMaxVirtualizationDrainIterationsPreSolve);
-            preSolveVirtualizationMs += std::chrono::duration<double, std::milli>(ProfClock::now() - t0).count();
-        }
+        // The tree generation after the flush tells whether the flush or the drain forced the
+        // AfterPreSolveDrain rebuild.
+        const PreSolveDrainPass firstPass = RunPreSolveDrainPass(ctx);
+        preSolveFlushCallbacksMs += firstPass.FlushMs;
+        preSolveVirtualizationMs += firstPass.VirtualizationMs;
+        bool preSolveAnyScrollCallbacksFlushed = firstPass.ScrollCallbacksFlushed;
+        bool preSolveAnyVirtualizationRan = firstPass.VirtualizationRan;
+        const uint64_t treeGenAfterFlush = firstPass.TreeGenerationAfterFlush;
         const uint64_t treeGenAfterPreSolve = m_TreeStructureGeneration.load(std::memory_order_relaxed);
 
         // Walk the tree to detect any layout-affecting dirty marks set during the
@@ -1094,20 +1021,13 @@ void UIManager::Update(float deltaTime, bool interactive)
             rootNode = rootBuilt.node;
             RebuildTypedNodeLists(ctx);
 
-            // Re-run one more bounded flush/drain pass in case newly-attached scroll views
-            // or controls need to observe initial scroll/viewport state.
-            {
-                GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain.FlushScrollCallbacks");
-                const auto t0 = ProfClock::now();
-                preSolveAnyScrollCallbacksFlushed = preSolveAnyScrollCallbacksFlushed || FlushScrollCallbacks(ctx);
-                preSolveFlushCallbacksMs += std::chrono::duration<double, std::milli>(ProfClock::now() - t0).count();
-            }
-            {
-                GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain.VirtualizationDrain");
-                const auto t0 = ProfClock::now();
-                preSolveAnyVirtualizationRan = preSolveAnyVirtualizationRan || drainVirtualizationQueueBounded(kMaxVirtualizationDrainIterationsPreSolve);
-                preSolveVirtualizationMs += std::chrono::duration<double, std::milli>(ProfClock::now() - t0).count();
-            }
+            // Run one more flush and drain so newly attached scroll views and controls see their
+            // initial scroll and viewport state. It runs even when the first pass did work.
+            const PreSolveDrainPass secondPass = RunPreSolveDrainPass(ctx);
+            preSolveFlushCallbacksMs += secondPass.FlushMs;
+            preSolveVirtualizationMs += secondPass.VirtualizationMs;
+            preSolveAnyScrollCallbacksFlushed = preSolveAnyScrollCallbacksFlushed || secondPass.ScrollCallbacksFlushed;
+            preSolveAnyVirtualizationRan = preSolveAnyVirtualizationRan || secondPass.VirtualizationRan;
         }
 
         if (preSolveAnyVirtualizationRan || preSolveAnyScrollCallbacksFlushed)
@@ -1233,8 +1153,6 @@ void UIManager::Update(float deltaTime, bool interactive)
     // Focus/active pseudo-state dirty marking is handled inside DispatchEvents.
     bool& treeMutatedDuringEvents = ctx.treeMutatedDuringEvents;
     bool& treeRebuiltThisFrame = ctx.treeRebuiltThisFrame;
-    if (dockspaceRebuiltBeforeLayout)
-        treeRebuiltThisFrame = true;
 
     // If the UI tree was mutated during event dispatch, rebuild Yoga/layout
     // from the now-stable tree state so we can still produce geometry for
@@ -1412,29 +1330,6 @@ void UIManager::Update(float deltaTime, bool interactive)
         treeMutatedDuringEvents = false;
     }
 
-    // Check for control-issued dockspace rebuild requests via tree walk.
-    if (runInteractive && !m_RebuildDockspace)
-    {
-        auto findDs = [&](auto& self, UIElement* el) -> void {
-            if (!el || m_RebuildDockspace) return;
-            if (auto* ds = dynamic_cast<DockspaceElement*>(el))
-            {
-                if (ds->ConsumeRebuildRequest())
-                {
-                    m_PendingDockspaceRebuild = ds;
-                    m_RebuildDockspace = true;
-                    return;
-                }
-            }
-            for (const auto& ch : el->GetChildren())
-                self(self, ch.get());
-            if (el->Kind() == UIElementKind::Mount)
-                if (UIElement* tgt = static_cast<Mount*>(el)->GetTarget())
-                    self(self, tgt);
-        };
-        findDs(findDs, rootEl);
-    }
-
     // Scrollbar drags / scroll-wheel handlers can mutate scroll offsets during
     // event dispatch without requesting a Yoga relayout. Apply any remaining
     // scroll deltas now (and refresh overflow clip caches) so geometry built
@@ -1452,13 +1347,9 @@ void UIManager::Update(float deltaTime, bool interactive)
     // event dispatch and in the same frame as the scroll movement.
     bool anyScrollCallbacksFlushed = FlushScrollCallbacks(ctx);
 
-    // Drain virtualization work requested by scroll callbacks (or other sources) at a stable point
-    // outside event dispatch. This keeps the scheduling logic centralized and prepares us to
-    // move virtualization earlier in the frame (pre-Yoga) without changing individual controls.
-    bool anyVirtualizationRan = false;
-    // Bounded draining: a virtualization pass may enqueue follow-up work (e.g. data+scroll changes).
-    constexpr int kMaxVirtualizationDrainIterations = 4;
-    anyVirtualizationRan = drainVirtualizationQueueBounded(kMaxVirtualizationDrainIterations);
+    // Drain the work that scroll callbacks and other sources queued, at a stable point outside
+    // event dispatch.
+    DrainVirtualizationQueueBounded();
 
     // Flushing callbacks may clamp scroll offsets (via SetContentSize/SetViewportSize), which can
     // require an additional translation pass. Apply any resulting deltas and refresh clip caches.
@@ -1481,38 +1372,11 @@ void UIManager::Update(float deltaTime, bool interactive)
 
     FinalizeSolve(ctx);
 
-    // Dockspace rebuild requested during event dispatch: perform it now, before
-    // the late dirty-flag scan, so the re-solve below gives new elements valid
+    // Dockspace rebuilds requested during event dispatch run now, before the
+    // late dirty-flag scan, so the re-solve below gives new elements valid
     // layout rects in this same frame (avoiding a black-frame flash).
-    if (runInteractive && m_RebuildDockspace && m_PendingDockspaceRebuild)
-    {
-        auto invalidateRenderSlots = [&](auto& self, UIElement* el) -> void {
-            if (!el)
-                return;
-            FreeRenderSlots(el);
-            el->m_LastPrimitiveGenFrame = 0;
-            for (const auto& child : el->GetChildren())
-                self(self, child.get());
-            if (UIElement* target = el->GetMountTarget())
-                self(self, target);
-        };
-
-        invalidateRenderSlots(invalidateRenderSlots, m_PendingDockspaceRebuild);
-        ResetRetainedYogaTree();
-        m_PendingDockspaceRebuild->RebuildFromModel();
-        InvalidateSheetSetSubtree(m_PendingDockspaceRebuild);
-        invalidateRenderSlots(invalidateRenderSlots, m_PendingDockspaceRebuild);
-        RequestRelayout();
+    if (runInteractive && RebuildPendingDockspaces())
         treeRebuiltThisFrame = true;
-        m_PendingDockspaceRebuild = nullptr;
-        m_RebuildDockspace = false;
-        m_Hovered = nullptr;
-        m_HoveredInstanceId = 0;
-        m_MouseCaptured = false;
-        m_CaptureElement = nullptr;
-        m_CaptureInstanceId = 0;
-        m_CaptureId.clear();
-    }
 
     // Late tree mutations / relayout requests:
     // Virtualized controls may attach/detach pooled children or mutate text (layout) during the
@@ -1617,8 +1481,9 @@ void UIManager::Update(float deltaTime, bool interactive)
 
         // Relayout may clamp scroll offsets; flush any resulting scroll callbacks and re-apply.
         bool anyScrollCallbacksFlushed2 = FlushScrollCallbacks(ctx);
-        // Drain virtualization work enqueued during the relayout scroll flush.
-        anyVirtualizationRan = anyVirtualizationRan || drainVirtualizationQueueBounded(kMaxVirtualizationDrainIterations);
+        // Drain the work the relayout queued (OnPostLayout viewport changes, the scroll flush above).
+        // It runs even when the post-event drain did work, else those rows bind one frame late.
+        DrainVirtualizationQueueBounded();
         if (anyScrollCallbacksFlushed2)
         {
             const bool translated3 = ApplyScrollTransforms(ctx);
@@ -1863,9 +1728,11 @@ void UIManager::Update(float deltaTime, bool interactive)
             retained.PrevParentBlockFlow =
                 parentStyle && EstablishesBlockFlow(parentStyle->Layout.DisplayMode);
             retained.HasPrevInputs = true;
-            YogaAdapter::ApplyStyle(retained.Node, element->GetResolvedStyle());
+            retained.PrevViewportBasis =
+                YogaAdapter::ApplyStyle(retained.Node, element->GetResolvedStyle(), ctx.ViewportBasis())
+                    ? ctx.ViewportBasis()
+                    : Mathematics::Vector2{};
             ApplyBlockFlowShrinkDefault(retained.Node, element->GetResolvedStyle(), parentStyle);
-            ApplyWeightedPaneFlexGrowOverride(element, retained.Node);
         }
 
         {
@@ -1981,7 +1848,7 @@ bool UIManager::TryIdleFrame(unsigned dirtyNow, bool viewportOrScaleChanged, boo
     if (dirtyNow != 0u)
         return false;
     m_IdleGateDecline = IdleGateDecline::RelayoutOrRebuild;
-    if (m_RequestRelayout || m_ForceFullRebuildNextFrame || m_RebuildDockspace)
+    if (m_RequestRelayout || m_ForceFullRebuildNextFrame)
         return false;
     m_IdleGateDecline = IdleGateDecline::Virtualization;
     if (m_VirtualizationImpactFlags.load(std::memory_order_relaxed) != 0u)
@@ -2021,6 +1888,40 @@ bool UIManager::TryIdleFrame(unsigned dirtyNow, bool viewportOrScaleChanged, boo
 #endif
 }
 
+UIManager::PreSolveDrainPass UIManager::RunPreSolveDrainPass(::UpdateContext& updateContext)
+{
+    using ProfClock = std::chrono::high_resolution_clock;
+    PreSolveDrainPass pass{};
+    {
+        GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain.FlushScrollCallbacks");
+        const auto start = ProfClock::now();
+        pass.ScrollCallbacksFlushed = FlushScrollCallbacks(updateContext);
+        pass.FlushMs = std::chrono::duration<double, std::milli>(ProfClock::now() - start).count();
+    }
+    pass.TreeGenerationAfterFlush = m_TreeStructureGeneration.load(std::memory_order_relaxed);
+    {
+        GE_CPU_PROFILE_SCOPE("UIManager.Update.PreSolveDrain.VirtualizationDrain");
+        const auto start = ProfClock::now();
+        pass.VirtualizationRan = DrainVirtualizationQueueBounded();
+        pass.VirtualizationMs = std::chrono::duration<double, std::milli>(ProfClock::now() - start).count();
+    }
+    return pass;
+}
+
+bool UIManager::DrainVirtualizationQueueBounded()
+{
+    bool anyRan = false;
+    for (int iteration = 0; iteration < kMaxVirtualizationDrainIterations; ++iteration)
+    {
+        if (!m_VirtualizationCoordinator.HasPending())
+            break;
+        if (!m_VirtualizationCoordinator.DrainOnce(*this, /*userCtx=*/nullptr, &ResolveVirtualizationTarget))
+            break;
+        anyRan = true;
+    }
+    return anyRan;
+}
+
 void UIManager::UpdateTooltipAndCursor(bool interactive)
 {
     // Hover tooltip overlay
@@ -2031,12 +1932,8 @@ void UIManager::UpdateTooltipAndCursor(bool interactive)
 
         // A pinned tooltip is a message, not hover help: it shows whatever the
         // pointer does and whether or not hover tooltips are on.
-        if (m_TooltipOverlay->UpdatePinned(GetRootElement()))
-        {
-            if (m_TooltipConfigProvider)
-                m_TooltipOverlay->SetArrowColor(m_TooltipConfigProvider().ArrowColor);
-        }
-        else if (m_TooltipConfigProvider)
+        const bool pinned = m_TooltipOverlay->UpdatePinned(GetRootElement());
+        if (!pinned && m_TooltipConfigProvider)
         {
             // Pull runtime config from editor settings when available.
             // The lambda avoids a hard dependency on the editor in the UI module —
@@ -2050,12 +1947,11 @@ void UIManager::UpdateTooltipAndCursor(bool interactive)
             {
                 m_TooltipOverlay->SetHoverDelay(cfg.HoverDelaySeconds);
                 m_TooltipOverlay->SetHoverResetDelay(cfg.HoverResetDelaySeconds);
-                m_TooltipOverlay->SetArrowColor(cfg.ArrowColor);
                 if (UIElement* root = GetRootElement())
                     m_TooltipOverlay->Update(root, m_MouseDown ? nullptr : m_Hovered, m_MouseX, m_MouseY, m_Time);
             }
         }
-        else
+        else if (!pinned)
         {
             if (UIElement* root = GetRootElement())
                 m_TooltipOverlay->Update(root, m_MouseDown ? nullptr : m_Hovered, m_MouseX, m_MouseY, m_Time);
@@ -2166,4 +2062,65 @@ void UIManager::UnpinTooltip(const UIElement& source)
 {
     if (m_TooltipOverlay)
         m_TooltipOverlay->Unpin(source);
+}
+
+void UIManager::RequestDockspaceRebuild(DockspaceElement* dockspace)
+{
+    if (dockspace && std::find(m_PendingDockspaceRebuilds.begin(), m_PendingDockspaceRebuilds.end(), dockspace) ==
+                         m_PendingDockspaceRebuilds.end())
+        m_PendingDockspaceRebuilds.push_back(dockspace);
+}
+
+void UIManager::CancelDockspaceRebuild(DockspaceElement* dockspace)
+{
+    std::erase(m_PendingDockspaceRebuilds, dockspace);
+}
+
+bool UIManager::RebuildPendingDockspaces()
+{
+    // A rebuild can queue another request (for itself or a nested dockspace);
+    // bounding the pass to the requests present now defers those to next frame.
+    bool rebuiltAny = false;
+    for (size_t remaining = m_PendingDockspaceRebuilds.size(); remaining > 0 && !m_PendingDockspaceRebuilds.empty();
+         --remaining)
+    {
+        DockspaceElement* dockspace = m_PendingDockspaceRebuilds.front();
+        m_PendingDockspaceRebuilds.erase(m_PendingDockspaceRebuilds.begin());
+        if (!dockspace->ConsumeRebuildRequest())
+            continue;
+
+        GE_CPU_PROFILE_SCOPE("UIManager.Update.DockspaceRebuild");
+        InvalidateDockspaceRenderState(dockspace);
+        // Rebuilding destroys and recreates large portions of the tree; drop
+        // retained Yoga nodes first so none keeps a stale UIElement* key.
+        ResetRetainedYogaTree();
+        dockspace->RebuildFromModel();
+        InvalidateSheetSetSubtree(dockspace);
+        InvalidateDockspaceRenderState(dockspace);
+        rebuiltAny = true;
+    }
+    if (!rebuiltAny)
+        return false;
+
+    RequestRelayout();
+    // Input state may reference elements in the rebuilt subtree.
+    m_Hovered = nullptr;
+    m_HoveredInstanceId = 0;
+    m_MouseCaptured = false;
+    m_CaptureElement = nullptr;
+    m_CaptureInstanceId = 0;
+    m_CaptureId.clear();
+    return true;
+}
+
+void UIManager::InvalidateDockspaceRenderState(UIElement* el)
+{
+    if (!el)
+        return;
+    FreeRenderSlots(el);
+    el->m_LastPrimitiveGenFrame = 0;
+    for (const auto& child : el->GetChildren())
+        InvalidateDockspaceRenderState(child.get());
+    if (UIElement* target = el->GetMountTarget())
+        InvalidateDockspaceRenderState(target);
 }

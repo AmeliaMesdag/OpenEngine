@@ -88,7 +88,7 @@ ListView::ListView()
     auto headerHost = std::make_unique<UIElement>();
     m_HeaderHost = headerHost.get();
     m_HeaderHost->AddClass("list-header-host");
-    m_HeaderHost->Overrides()
+    m_HeaderHost->Style()
         .Set(Style::Display, DisplayMode::None)
         .Set(Style::FlexGrow, 0.0f)
         .Set(Style::FlexShrink, 0.0f)
@@ -111,7 +111,7 @@ ListView::ListView()
 
     auto sv = std::make_unique<ScrollView>();
     m_Scroll = sv.get();
-    m_Scroll->Overrides()
+    m_Scroll->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(0.0f))
         .Set(Style::MinHeight, StyleLength::Px(0.0f));
@@ -351,7 +351,7 @@ void ListView::SetHeader(std::unique_ptr<UIElement> header)
 
     if (!header)
     {
-        m_HeaderHost->Overrides().Set(Style::Display, DisplayMode::None);
+        m_HeaderHost->Style().Set(Style::Display, DisplayMode::None);
         UI::Layout::ClearForcedHeight(*m_HeaderHost);
         m_HeaderHeightPx = 0;
         return;
@@ -359,7 +359,7 @@ void ListView::SetHeader(std::unique_ptr<UIElement> header)
 
     m_HeaderContent = header.get();
     m_HeaderWrapper->AddChild(std::move(header));
-    m_HeaderHost->Overrides().Set(Style::Display, DisplayMode::Flex);
+    m_HeaderHost->Style().Set(Style::Display, DisplayMode::Flex);
 
     // Ensure the host has a non-zero height even though the header wrapper is absolutely positioned.
     // We'll refine this on the next OnPostLayout() once the header content has a measured height.
@@ -1826,9 +1826,9 @@ void ListView::SetContentWidth(float widthPx)
     if (m_Content)
     {
         if (m_ExplicitContentWidthPx > 0.0f)
-            m_Content->Overrides().Set(Style::MinWidth, StyleLength::Px((float)std::lround(m_ExplicitContentWidthPx)));
+            m_Content->Style().Set(Style::MinWidth, StyleLength::Px((float)std::lround(m_ExplicitContentWidthPx)));
         else
-            m_Content->Overrides().Reset(Style::MinWidth);
+            m_Content->Style().Reset(Style::MinWidth);
     }
     // Update header wrapper rect immediately so column resize takes effect this frame
     // instead of waiting for OnPostLayout (which would use the previous frame's width).

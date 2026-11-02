@@ -256,8 +256,8 @@ TEST(ShippedDropdownPictureRowTests, TheOptionColorLandsOnTheName)
     ASSERT_NE(column, nullptr);
     auto* restingName = dynamic_cast<Label*>(ChildWithClass(*column, "dropdown-item-label"));
     ASSERT_NE(restingName, nullptr);
-    EXPECT_EQ(restingName->Overrides().Get(Style::Color), 0xff00ff00u);
-    EXPECT_FALSE(rows[1]->Overrides().Get(Style::Color).has_value()) << "the color belongs on the name, not the row";
+    EXPECT_EQ(restingName->Style().Get(Style::Color), 0xff00ff00u);
+    EXPECT_FALSE(rows[1]->Style().Get(Style::Color).has_value()) << "the color belongs on the name, not the row";
 }
 
 TEST(ShippedDropdownPictureRowTests, TheHeaderPictureKeepsTheFieldHeight)

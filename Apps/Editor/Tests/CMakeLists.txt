@@ -81,6 +81,31 @@ ge_stage_runtime_dependencies(EditorScreenshotCaptureWaitTests)
 
 add_test(NAME EditorScreenshotCaptureWaitTests COMMAND EditorScreenshotCaptureWaitTests)
 
+add_executable(EditorFrameSequenceRecordingTests
+    FrameSequenceRecordingTests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/DebugServer/Capture/FrameSequence/FrameSequenceRecording.cpp
+)
+
+target_include_directories(EditorFrameSequenceRecordingTests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../Include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../Source
+)
+
+target_link_libraries(EditorFrameSequenceRecordingTests
+    PRIVATE
+        Engine
+        GTest::gtest
+        GTest::gtest_main
+)
+
+target_compile_features(EditorFrameSequenceRecordingTests PRIVATE cxx_std_20)
+
+ge_set_output_tests(EditorFrameSequenceRecordingTests)
+ge_stage_runtime_dependencies(EditorFrameSequenceRecordingTests)
+
+add_test(NAME EditorFrameSequenceRecordingTests COMMAND EditorFrameSequenceRecordingTests)
+
 add_executable(EditorThumbnailTests
     TextureThumbnailHandlerTests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/Thumbnails/TextureThumbnailHandler.cpp
@@ -176,14 +201,15 @@ ge_stage_runtime_dependencies(EditorThumbnailRoutingTests)
 
 add_test(NAME EditorThumbnailRoutingTests COMMAND EditorThumbnailRoutingTests)
 
-# Execute the production scheduling, publication, slot-release, import-release, idle and
-# folder-bake queue methods with deterministic hosts.
+# Execute the production scheduling, publication, slot-release, import-release, idle,
+# folder-bake queue and lane-drain methods with deterministic hosts.
 # This standalone target needs no full Editor or GPU to catch a whole-sweep return.
 set(THUMBNAIL_CACHE_TEST_HEADERS)
 # Each phase is extracted from the file that owns it: <phase>:<file under Source/Thumbnails/ModelThumbnail>.
 foreach(entry IN ITEMS Schedule:ModelThumbnailPngPersistence.cpp Persist:ModelThumbnailPngPersistence.cpp
                        Release:ModelThumbnailBakedImages.cpp Imports:ModelThumbnailImports.cpp
-                       Idle:ModelThumbnailHandler.cpp Bakes:ModelThumbnailBakeQueue.cpp)
+                       Idle:ModelThumbnailHandler.cpp Bakes:ModelThumbnailBakeQueue.cpp
+                       Focus:ModelThumbnailRenderLanes.cpp Drain:ModelThumbnailRenderLanes.cpp)
     string(REPLACE ":" ";" entry_parts "${entry}")
     list(GET entry_parts 0 phase)
     list(GET entry_parts 1 phase_source)
@@ -202,7 +228,7 @@ foreach(entry IN ITEMS Schedule:ModelThumbnailPngPersistence.cpp Persist:ModelTh
         VERBATIM)
     list(APPEND THUMBNAIL_CACHE_TEST_HEADERS "${header}")
 endforeach()
-add_executable(EditorThumbnailPersistenceTests ThumbnailPersistenceTests.cpp
+add_executable(EditorThumbnailPersistenceTests ThumbnailPersistenceTests.cpp ThumbnailDrainTests.cpp
     ${THUMBNAIL_CACHE_TEST_HEADERS}
     ${CMAKE_SOURCE_DIR}/Engine/Modules/AssetCore/Source/GUID.cpp)
 target_include_directories(EditorThumbnailPersistenceTests PRIVATE

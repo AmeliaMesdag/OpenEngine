@@ -2,7 +2,7 @@
 
 #include "Editor/Registries/EditorServiceRegistry.h"
 #include "Placement/FenceSpanOverrideRemap.h"
-#include "UndoRedo/Spline/SplineGroundCleanupCommand.h"
+#include "UndoRedo/Spline/SplineGroundEditCommand.h"
 #include "UndoRedo/Spline/SplinePointEdits.h"
 #include "UndoRedo/UndoRedoService.h"
 
@@ -38,15 +38,16 @@ RecipeEditorHooks::~RecipeEditorHooks()
     m_Recipes.SetEditJournal(nullptr);
 }
 
-void RecipeEditorHooks::RecordGroundCleanup(ECS::World& world,
-                                            const SplineRecipes::SplineGroundCleanup& cleanup)
+void RecipeEditorHooks::RecordGroundEdit(ECS::World& world, const SplineRecipes::SplineGroundEdit& edit)
 {
     if (!m_Undo)
-    {
-        cleanup.Apply(world);
         return;
-    }
-    m_Undo->Execute(std::make_unique<SplineGroundCleanupCommand>(&world, cleanup));
+    // The edit that caused the sweep is the newest entry: one undo reverts both. With no entry to
+    // join, a sweep that removes a piece gets an entry of its own, so an undo puts the piece back.
+    if (m_Undo->CanJoinTop())
+        m_Undo->CommitJoiningTop(std::make_unique<SplineGroundEditCommand>(&world, edit));
+    else if (edit.Removes())
+        m_Undo->CommitAlreadyApplied(std::make_unique<SplineGroundEditCommand>(&world, edit));
 }
 
 void RecipeEditorHooks::ReleaseSceneScoped(ECS::World& world)

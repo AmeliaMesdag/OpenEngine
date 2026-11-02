@@ -72,11 +72,12 @@ TEST(OptionPicturesTests, EveryDeclaredClassHasARuleAndEveryRuleIsDeclared)
 
 TEST(OptionPicturesTests, EveryRuleNamesTheExistingFileItsClassIsNamedAfter)
 {
-    // One stem per picture: `.option-picture--<stem>` means `Icons/OptionPictures/<stem>.png`.
+    // One stem per picture: `.option-picture--<stem>` means `Icons/OptionPictures/<stem>.png`, or
+    // `<stem>.svg` for a line drawing.
     const std::string sheet = ReadFile(EditorPath(kPictureStylesheet));
     ASSERT_FALSE(sheet.empty()) << kPictureStylesheet << " did not read";
     static const std::regex rule(
-        R"RX(\.option-picture--([a-z0-9-]+)\s*\{[^}]*url\("editor:(Icons/OptionPictures/([^"]+)\.png)"\))RX");
+        R"RX(\.option-picture--([a-z0-9-]+)\s*\{[^}]*url\("editor:(Icons/OptionPictures/([^"]+)\.(png|svg))"\))RX");
     size_t checked = 0;
     for (auto it = std::sregex_iterator(sheet.begin(), sheet.end(), rule); it != std::sregex_iterator(); ++it)
     {

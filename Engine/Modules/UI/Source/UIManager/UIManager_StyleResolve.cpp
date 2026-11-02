@@ -53,9 +53,9 @@ void ResolveRecursive(UIElement* el, const VisualStyle* parentVisual)
     // overrides set between the last BuildYogaRecursive and ResolveStyles
     // (e.g., during event dispatch or late callbacks that don't trigger a tree
     // rebuild). Kept until proven no longer needed by runtime observation.
-    if (el->Overrides().IsVisualDirty() || el->Overrides().IsLayoutDirty())
+    if (el->Style().IsVisualDirty() || el->Style().IsLayoutDirty())
     {
-        ApplyOverridesToResolvedStyle(rs, el->Overrides());
+        ApplyOverridesToResolvedStyle(rs, el->Style());
     }
 
     // Both the inherit case and the percentage case, against the parent's
@@ -66,7 +66,7 @@ void ResolveRecursive(UIElement* el, const VisualStyle* parentVisual)
     ResolveFontSize(rs.Visual, parentVisual ? parentVisual->FontSize : kInitialFontSizePx);
 
     rs.Visual.Opacity = rs.Visual.LocalOpacity;
-    el->Overrides().ClearDirty();
+    el->Style().ClearDirty();
 
     const VisualStyle* thisVisual = &rs.Visual;
 

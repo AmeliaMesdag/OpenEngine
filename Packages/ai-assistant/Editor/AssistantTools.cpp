@@ -68,6 +68,8 @@ constexpr AssistantTool kTools[] = {
     {"trigger_capture", "trigger_capture", Class::Gated, "Take a RenderDoc capture", {"", "", ""}},
     {"get_capture_status", "get_capture_status", Class::Read, "Read the capture status", {"", "", ""}},
     {"nsight_capture", "nsight_capture", Class::Gated, "Take an Nsight capture", {"", "", ""}},
+    {"start_frame_recording", "start_frame_recording", Class::Gated, "Record frames", {"target", "maxFrames", "format"}},
+    {"stop_frame_recording", "stop_frame_recording", Class::Gated, "Stop recording frames", {"", "", ""}},
     {"get_render_graph_overview", "get_render_graph_overview", Class::Read, "Read the render graph", {"", "", ""}},
     {"get_render_graph_passes", "get_render_graph_passes", Class::Read, "Read render-graph passes", {"", "", ""}},
     {"get_render_graph_resources", "get_render_graph_resources", Class::Read, "Read render-graph resources", {"type", "", ""}},

@@ -72,7 +72,7 @@ NineSliceField::NineSliceField()
 {
     AddClass("nine-slice-field");
     SetFocusable(false);
-    Overrides()
+    Style()
         .Set(Style::Height, StyleLength::Px(kFieldHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(kFieldHeightPx));
 }

@@ -208,7 +208,7 @@ TEST(CurveField, TheLabelStripFollowsTheResolvedFontSize)
     const auto heightAt = [&field](float fontSize) {
         field.GetMutableResolvedStyle().Visual.FontSize = fontSize;
         field.OnPostLayout();
-        return field.Overrides().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value;
+        return field.Style().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value;
     };
     const float at12 = heightAt(12.0f);
     const float at20 = heightAt(20.0f);
@@ -227,14 +227,14 @@ TEST(CurveField, AHostSetsTheLabelledPlotsHeight)
     field.SetConfig(config);
     field.GetMutableResolvedStyle().Visual.FontSize = 12.0f;
     field.OnPostLayout();
-    const float defaultHeight = field.Overrides().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value;
+    const float defaultHeight = field.Style().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value;
 
     auto scope = std::make_shared<CustomPropertyScope>();
     scope->UniqueId = 1;
     scope->Local.InsertOrAssign(HashStringId("--curve-field-plot-height"), CustomPropertyScope::Entry{false, "200px"});
     field.GetMutableResolvedStyle().CustomScope = scope;
     field.OnPostLayout();
-    EXPECT_FLOAT_EQ(field.Overrides().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value,
+    EXPECT_FLOAT_EQ(field.Style().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value,
                     defaultHeight + (200.0f - 110.0f));
 }
 
@@ -438,14 +438,14 @@ TEST(CurveField, ASecondaryTimeLabelWritesASecondLineUnderEveryLabel)
     PlaceField(field, config, {Key(-14.0f, 0.0f), Key(18.0f, 1.0f)});
     const size_t oneLine = GlyphCount(field, font.get(), textures);
     field.OnPostLayout();
-    const float oneLineHeight = field.Overrides().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value;
+    const float oneLineHeight = field.Style().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value;
 
     config.SecondaryTimeLabel = [](float) { return std::string("ab"); };
     field.SetConfig(config);
     EXPECT_EQ(GlyphCount(field, font.get(), textures), oneLine + 10) << "two letters under each of five labels";
     field.OnPostLayout();
     const float lineHeight = std::max(field.GetResolvedStyle().Visual.FontSize, 12.0f) * 1.3f;
-    EXPECT_NEAR(field.Overrides().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value - oneLineHeight,
+    EXPECT_NEAR(field.Style().Get(Style::Height).value_or(StyleLength::Px(0.0f)).Value - oneLineHeight,
                 lineHeight, 1e-3f);
 }
 

@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
 #include "Graph/GraphInspectorRows.h"
+#include "Graph/GraphTransitionStore.h"
 #include "Graph/GraphValue.h"
+#include "UI/Controls/CollapsibleInfoCard.h"
+#include "UI/Controls/InspectorNotice.h"
+#include "UI/UIElement.h"
 
 #include <string>
 #include <unordered_map>
@@ -389,4 +393,30 @@ TEST(GraphInspectorRowsTests, FindNodeTypeMetaUsesKindIdOnCollision)
     EXPECT_EQ(material->DisplayName, "Material Copy");
     EXPECT_EQ(animation->DisplayName, "Animation Copy");
     EXPECT_EQ(FindNodeTypeMeta("", "AdvInspectorKindIdLookup"), nullptr);
+}
+
+// A transition with no condition is a state of that transition (compile skips it), so the inspector
+// says so with a notice, which the "Show Info Cards" switch does not hide.
+TEST(GraphTransitionConditionsNotice, ATransitionWithNoConditionShowsAWarningNotice)
+{
+    UIElement conditions;
+    AddGraphTransitionConditionsNotice(&conditions, GraphTransitionDesc{});
+
+    ASSERT_EQ(conditions.GetChildren().size(), 1u);
+    const UIElement* child = conditions.GetChildren()[0].get();
+    EXPECT_EQ(dynamic_cast<const EditorUI::CollapsibleInfoCard*>(child), nullptr)
+        << "the state is an info card, so the switch hides it";
+    const auto* notice = dynamic_cast<const EditorUI::InspectorNotice*>(child);
+    ASSERT_NE(notice, nullptr) << "the state is not a notice";
+    EXPECT_TRUE(notice->HasClass("inspector-notice-warning"));
+}
+
+TEST(GraphTransitionConditionsNotice, ATransitionWithAConditionShowsNothing)
+{
+    UIElement conditions;
+    GraphTransitionDesc transition;
+    transition.Conditions.push_back(GraphTransitionStore::MakeDefaultCondition());
+    AddGraphTransitionConditionsNotice(&conditions, transition);
+
+    EXPECT_TRUE(conditions.GetChildren().empty());
 }

@@ -963,11 +963,6 @@ void UIManager::ResetModifierKeys()
     m_Modifiers.Reset();
 }
 
-void UIManager::SyncModifierKeys(int mods)
-{
-    m_Modifiers.ApplyEventMask(mods);
-}
-
 void UIManager::ReconcileModifierKeys(int liveMods)
 {
     m_Modifiers.ApplyLiveMask(liveMods);

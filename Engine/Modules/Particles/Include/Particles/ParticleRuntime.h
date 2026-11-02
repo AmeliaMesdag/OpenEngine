@@ -16,6 +16,11 @@
 #include <utility>
 #include <vector>
 
+namespace GameEngine::Mathematics
+{
+struct Matrix4x4;
+}
+
 namespace GameEngine::Particles
 {
 
@@ -284,6 +289,6 @@ class ParticleRuntime
 };
 
 /// View-space depth of a world position; this engine's views are left-handed, +Z forward.
-float ViewDepth(const float view[16], const Mathematics::Vector3& position);
+float ViewDepth(const Mathematics::Matrix4x4& view, const Mathematics::Vector3& position);
 
 } // namespace GameEngine::Particles

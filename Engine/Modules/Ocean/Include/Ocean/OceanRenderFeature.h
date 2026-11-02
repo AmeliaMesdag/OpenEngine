@@ -44,6 +44,11 @@
 #include <unordered_map>
 #include <vector>
 
+namespace GameEngine::Mathematics
+{
+struct Matrix4x4;
+}
+
 namespace GameEngine::Rendering
 {
 class IDevice;
@@ -594,7 +599,7 @@ public:
         float LocalWavelength = 12.0f;
         float LocalDirX = 1.0f;
         float LocalDirZ = 0.0f;
-        float LocalWaveExtra[kMaxOceanWaveMaskLocalWaves - 1u][4] = {};
+        Mathematics::Vector4 LocalWaveExtra[kMaxOceanWaveMaskLocalWaves - 1u];
         float LocalFFTBlend = 0.0f;
         uint32 LocalFFTStream = 0u;
     };
@@ -611,7 +616,7 @@ public:
         float LocalWavelength = 12.0f;
         float LocalDirX = 1.0f;
         float LocalDirZ = 0.0f;
-        float LocalWaveExtra[kMaxOceanWaveMaskLocalWaves - 1u][4] = {};
+        Mathematics::Vector4 LocalWaveExtra[kMaxOceanWaveMaskLocalWaves - 1u];
         float LocalFFTBlend = 0.0f;
         uint32 LocalFFTStream = 0u;
     };
@@ -651,7 +656,7 @@ public:
     // water-body footprint (box, stamp, polygon or surface-ribbon bounds), widened
     // by horizontalMargin metres, intersects its frustum. When the water bodies do
     // not confine the surface the ocean is unbounded, and the band spans the world.
-    bool IsWaterFootprintInView(const float* viewProj, float minY, float maxY,
+    bool IsWaterFootprintInView(const Mathematics::Matrix4x4& viewProj, float minY, float maxY,
                                 float horizontalMargin) const;
     float SampleWaterBodyWaveWeight(float x, float z) const;
     WaterBodyWaveOverrideSample SampleWaterBodyWaveOverride(float x, float z, float time) const;
@@ -685,22 +690,24 @@ public:
 
     bool HasOcean() const { return m_HasOcean.load(std::memory_order_acquire); }
     void SetHasOcean(bool value) { m_HasOcean.store(value, std::memory_order_release); }
-    // The surface writes depth (Opaque material) from its own node, and that
-    // depth changes only when the blocks it is drawn from change (the surface
-    // parameter block and the global and local FFT spectrum blocks: the ocean
-    // time, the wave, spectrum and surface settings) while some view sees the
-    // water. With those blocks unchanged (ocean time fixed or paused, no edit),
-    // or no water in view, the claim is false.
+    // The surface writes depth from its own node. The claim is true while some view sees the water and
+    // a block the surface is drawn from changes (the surface parameters, the global or local FFT
+    // spectrum; the ocean time only when the surface displaces). PublishDepthClaim sets it.
     bool WritesDynamicDepth() const override
     {
         return HasOcean() && m_SurfaceDepthChanging.load(std::memory_order_acquire);
     }
     // A view's post-world declare found water in view. Declare thread.
     void NoteWaterInView() { m_WaterInViewSincePublish.store(true, std::memory_order_release); }
-    // Decides WritesDynamicDepth for the frame about to render: true when a view
-    // saw water since the previous call and the published surface, FFT or local
-    // FFT block differs from the one at that call. The extraction system calls it once
-    // per update, after its last SetParams.
+    // True when the surface depth inputs changed at the last PublishDepthClaim, whether or not a
+    // view sees the water. A view that sees water reports its depth change from this (OceanRenderNode).
+    bool SurfaceDepthInputsChanged() const
+    {
+        return HasOcean() && m_SurfaceDepthInputsChanged.load(std::memory_order_acquire);
+    }
+    // Decides WritesDynamicDepth for the next frame: true when a view saw water since the last call and
+    // a surface, FFT or local FFT block changed. The ocean time counts only when the surface displaces.
+    // The extraction system calls it once per update, after its last SetParams.
     void PublishDepthClaim();
 
     // Authored flow / dynamic-wave toggles (from OceanSurface). Stored by the
@@ -949,6 +956,7 @@ private:
     std::atomic<bool> m_HasOcean{false};
     std::atomic<bool> m_WaterInViewSincePublish{false};
     std::atomic<bool> m_SurfaceDepthChanging{false};
+    std::atomic<bool> m_SurfaceDepthInputsChanged{false};
     // Every block the surface depth is a function of. The FFT blocks are recorded
     // as SetFFTParams / SetLocalFFTParams receive them: a spectrum-dirty flag is
     // not enough, since Chop reaches the surface without re-baking the spectrum.
@@ -963,6 +971,7 @@ private:
     SurfaceDepthInputs m_LatestDepthInputs{};
     // The inputs at the previous PublishDepthClaim.
     SurfaceDepthInputs m_ClaimedDepthInputs{};
+    static void ClearOceanTimes(SurfaceDepthInputs& inputs);
     OceanOriginShiftNotifier m_OriginShiftNotifier;
     std::atomic<float32> m_WaveOriginOffsetX{0.0f};
     std::atomic<float32> m_WaveOriginOffsetZ{0.0f};

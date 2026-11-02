@@ -102,12 +102,9 @@ struct TonemapFixture
         Rs = std::make_unique<RenderServices>();
         EXPECT_TRUE(Rs->Initialize(Device));
         CameraData camera{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            camera.view[i] = 1.0f;
-            camera.proj[i] = 1.0f;
-            camera.viewProj[i] = 1.0f;
-        }
+        camera.view = Mathematics::Matrix4x4::Identity();
+        camera.proj = Mathematics::Matrix4x4::Identity();
+        camera.viewProj = Mathematics::Matrix4x4::Identity();
         const CameraId cam = Rs->Views().AllocateCamera("TonemapViewOutputCam");
         Rs->Views().SetCameraData(cam, camera);
         View = Rs->Views().AllocateView("TonemapViewOutputView", cam);

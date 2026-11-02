@@ -8,7 +8,7 @@
 #include "ECS/ECSTemplates.h"
 #include "Mathematics/Vector3.h"
 #include "Mathematics/VectorOps.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
 #include "TerrainECS/PlanetPageRequester.h"
 #include "TerrainECS/TerrainService.h"

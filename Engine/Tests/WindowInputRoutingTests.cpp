@@ -216,6 +216,22 @@ TEST(WindowInputRoutingTests, ClickAdoptsTheModifierMaskItCarries)
     EXPECT_EQ(f.ui->GetModifierKeys(), Input::kModShift);
 }
 
+TEST(WindowInputRoutingTests, ClickReleasesAModifierWhoseKeyUpWasLost)
+{
+    RouterFixture f;
+    if (!f.Init())
+    {
+        GTEST_SKIP() << "Device init failed";
+    }
+
+    // A native menu loop took the Ctrl key-up. The click's mask says Ctrl is up,
+    // so the click is a plain click.
+    WindowInputRouter::RouteKey(f.config, Input::kKeyCode_LeftControl, Input::kKeyActionPress, Input::kModControl);
+    WindowInputRouter::RouteMouseButton(f.config, /*button=*/0, /*pressed=*/true, /*mods=*/0);
+
+    EXPECT_EQ(f.ui->GetModifierKeys(), 0);
+}
+
 TEST(WindowInputRoutingTests, WheelReconcilesModifierMaskBeforeDispatch)
 {
     RouterFixture f;

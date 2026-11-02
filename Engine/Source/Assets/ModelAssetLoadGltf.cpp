@@ -1,7 +1,7 @@
 #include "ModelAssetLoadGltf.h"
 #include "Assets/ModelAsset.h"
-#include "AssetCore/SharedFileRead.h"
 #include "Assets/AnimationClip.h"
+#include "Assets/AssetDecodeInputFiles.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AuthoredLodImport.h"
 #include "Assets/FbxLoaderOptions.h"
@@ -421,9 +421,9 @@ struct GltfBufferReadContext
     ExternalBufferSizes Sizes;
 };
 
-// Every external buffer keeps its declared byteLength. Buffers naming one file share the
-// largest declared prefix, read directly into document-owned storage through the shared-open
-// path, so a watched file remains replaceable while it is read (AssetCore/SharedFileRead.h).
+// Gives cgltf each external buffer at its declared byteLength, from the largest declared prefix of its file, the only
+// part read. Inside an asset decode the document views the reader's bytes in place: every document the decode opens
+// closes before it returns. Elsewhere the prefix is read through the shared-open path (AssetCore/SharedFileRead.h).
 cgltf_result CgltfReadFileShared(const cgltf_memory_options* /*memoryOptions*/,
                                  const cgltf_file_options* fileOptions,
                                  const char* path, cgltf_size* size, void** data)
@@ -434,35 +434,59 @@ cgltf_result CgltfReadFileShared(const cgltf_memory_options* /*memoryOptions*/,
     try {
         auto& context = *static_cast<GltfBufferReadContext*>(fileOptions->user_data);
         const auto key = ExternalBufferKey(path);
-        auto loaded = context.Backing.find(key);
-        if (loaded == context.Backing.end()) {
+        const Vector<uint8>* file = nullptr;
+        if (const auto owned = context.Backing.find(key); owned != context.Backing.end()) {
+            file = &owned->second;
+        } else {
             const auto declared = context.Sizes.find(key);
             if (declared == context.Sizes.end())
                 return cgltf_result_file_not_found;
-            SharedFileReader file{std::filesystem::path(path)};
-            if (!file.IsOpen())
+            Vector<uint8> storage;
+            file = ReadAssetDecodeInputFile({key, declared->second}, storage);
+            if (!file)
                 return cgltf_result_file_not_found;
-            const int64 fileSize = file.Size();
-            if (fileSize < 0)
-                return cgltf_result_io_error;
-            if (static_cast<uint64>(fileSize) < declared->second)
+            if (file->size() < declared->second)
                 return cgltf_result_data_too_short;
-
-            Vector<uint8> bytes(declared->second);
-            const int64 read = file.Read(bytes.data(), bytes.size());
-            if (read < 0)
-                return cgltf_result_io_error;
-            if (static_cast<uint64>(read) != bytes.size())
-                return cgltf_result_data_too_short;
-            loaded = context.Backing.emplace(key, std::move(bytes)).first;
+            if (file == &storage)
+                file = &context.Backing.emplace(key, std::move(storage)).first->second;
         }
-        if (loaded->second.size() < *size)
+        if (file->size() < *size)
             return cgltf_result_data_too_short;
-        *data = loaded->second.data();
+        // The cgltf boundary: a buffer's data is a void*, but neither cgltf nor the loader writes
+        // through it.
+        *data = const_cast<uint8*>(file->data());
         return cgltf_result_success;
     } catch (const std::bad_alloc&) {
         return cgltf_result_out_of_memory;
     }
+}
+
+// A glTF image the AssetDatabase tracks is referenced as that asset, not copied into the model: its
+// import settings (mips, compression, color space, filtering) then apply, and one GPU texture
+// serves every model that shares it. ModelAsset::LoadGLTF and ModelAsset::ResolveDecodeInputs share
+// the rule, so the decode finds every image it copies already read.
+GUID FindTrackedGltfImage(const std::filesystem::path& imagePath)
+{
+    AssetManager* assetManager = EngineCore::GetInstance().TryGetAssetManager();
+    return assetManager ? assetManager->ResolveAssetGuid(imagePath) : GUID::Null();
+}
+
+// The bytes of the external image file at `imagePath` for the next image LoadGLTF adds to
+// `images`. The first image that names a file takes its bytes (TakeAssetDecodeInputFile), so a
+// decode holds one copy of them; a later image that names the same file copies that image's.
+// `firstImageOfFile` maps each file taken, by its generic path, to the image that took it.
+bool TakeExternalGltfImage(const std::filesystem::path& imagePath, const Vector<EmbeddedImage>& images,
+                           FastHashMap<String, size_t>& firstImageOfFile, Vector<uint8>& bytes)
+{
+    String file = imagePath.generic_string();
+    if (const auto first = firstImageOfFile.find(file); first != firstImageOfFile.end()) {
+        bytes = images[first->second].Data;
+        return true;
+    }
+    if (!TakeAssetDecodeInputFile({imagePath, std::nullopt}, bytes))
+        return false;
+    firstImageOfFile.emplace(std::move(file), images.size());
+    return true;
 }
 
 void CgltfReleaseSharedFile(const cgltf_memory_options*, const cgltf_file_options*, void*)
@@ -1253,6 +1277,46 @@ std::string ChargeAnimationKeys(const cgltf_data& document, size_t animationInde
     }
     return {};
 }
+
+Vector<AssetDecodeInput> ModelAsset::ResolveDecodeInputs(const Vector<uint8>& bytes, const std::filesystem::path& path)
+{
+    const ModelFormat format = FormatFromPath(path);
+    if (format != ModelFormat::GLTF && format != ModelFormat::GLB)
+        return {};
+    // Only a document that names a URI reads a file besides its own; a .glb rarely names one.
+    const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    if (text.find("\"uri\"") == std::string_view::npos)
+        return {};
+    cgltf_options options{};
+    cgltf_data* parsed = nullptr;
+    // A document that does not parse reads nothing; OpenGltfDocument refuses it in the decode.
+    if (cgltf_parse(&options, bytes.data(), bytes.size(), &parsed) != cgltf_result_success || !parsed)
+        return {};
+    const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> document(parsed, &cgltf_free);
+
+    Vector<AssetDecodeInput> inputs;
+    FastHashSet<String> named;
+    for (const auto& [file, size] : DeclaredExternalBufferSizes(*document, path.string())) {
+        named.insert(file.generic_string());
+        inputs.push_back({file, static_cast<uint64>(size)});
+    }
+    const auto modelDir = path.parent_path();
+    for (cgltf_size index = 0; index < document->images_count; ++index) {
+        const cgltf_image& image = document->images[index];
+        if (image.buffer_view || !image.uri || image.uri[0] == '\0' || std::string_view(image.uri).starts_with("data:"))
+            continue;
+        auto imagePath = modelDir / image.uri;
+        if (FindTrackedGltfImage(imagePath).IsNull() && named.insert(imagePath.generic_string()).second)
+            inputs.push_back({std::move(imagePath), std::nullopt});
+    }
+    return inputs;
+}
+
+#else
+Vector<AssetDecodeInput> ModelAsset::ResolveDecodeInputs(const Vector<uint8>&, const std::filesystem::path&)
+{
+    return {};
+}
 #endif // GE_HAVE_CGLTF
 
 bool ModelAsset::LoadGLTF(const Vector<uint8>& data, const FbxLoaderOptions& loaderOptions) {
@@ -1889,56 +1953,49 @@ bool ModelAsset::LoadGLTF(const Vector<uint8>& data, const FbxLoaderOptions& loa
     if (gltf->images_count > 0) {
         const auto modelDir = GetPath().parent_path();
         m_EmbeddedImages.reserve(gltf->images_count);
-        for (size_t i = 0; i < gltf->images_count; ++i) {
-            const cgltf_image& img = gltf->images[i];
-            EmbeddedImage ei{};
-            ei.MimeType = img.mime_type ? img.mime_type : "";
-            if (img.buffer_view && img.buffer_view->buffer && img.buffer_view->buffer->data) {
+        FastHashMap<String, size_t> firstImageOfFile;
+        for (size_t imageIndex = 0; imageIndex < gltf->images_count; ++imageIndex) {
+            const cgltf_image& image = gltf->images[imageIndex];
+            EmbeddedImage embeddedImage{};
+            embeddedImage.MimeType = image.mime_type ? image.mime_type : "";
+            if (image.buffer_view && image.buffer_view->buffer && image.buffer_view->buffer->data) {
                 // Embedded in GLB binary buffer
-                const auto* bv = img.buffer_view;
-                if (bv->offset + bv->size <= bv->buffer->size) {
-                    const uint8_t* base = static_cast<const uint8_t*>(bv->buffer->data) + bv->offset;
-                    ei.Data.assign(base, base + bv->size);
+                const auto* bufferView = image.buffer_view;
+                if (bufferView->offset + bufferView->size <= bufferView->buffer->size) {
+                    const uint8_t* base = static_cast<const uint8_t*>(bufferView->buffer->data) + bufferView->offset;
+                    embeddedImage.Data.assign(base, base + bufferView->size);
                 }
             }
-            else if (img.uri && img.uri[0] != '\0') {
-                const std::string_view uriView(img.uri);
+            else if (image.uri && image.uri[0] != '\0') {
+                const std::string_view uriView(image.uri);
                 if (uriView.substr(0, 5) == "data:") {
-                    if (!DecodeDataUriImage(uriView, ei))
+                    if (!DecodeDataUriImage(uriView, embeddedImage))
                         Logger::Log::Warning("glTF '{}': image {} has a data URI that is not standard base64 "
                                              "(data:<type>;base64,<payload>), so it imports without its bytes; "
                                              "re-export the file with base64-embedded or external images.",
-                                             GetPath().generic_string(), i);
+                                             GetPath().generic_string(), imageIndex);
                 }
                 else {
                     // External file URI — resolve relative to the .gltf file directory
-                    auto texPath = modelDir / img.uri;
-                    std::error_code ec;
-                    // A file the AssetDatabase already tracks is referenced as
-                    // that asset, not copied into the model: its import settings
-                    // (mips, compression, colour space, filtering) then apply,
-                    // and one GPU texture serves every model that shares it.
-                    if (AssetManager* assetManager = EngineCore::GetInstance().TryGetAssetManager()) {
-                        const GUID assetGuid = assetManager->ResolveAssetGuid(texPath);
-                        if (!assetGuid.IsNull()) {
-                            ei.AssetGuid = assetGuid;
-                            m_EmbeddedImages.push_back(std::move(ei));
-                            continue;
-                        }
+                    const auto imagePath = modelDir / image.uri;
+                    const GUID assetGuid = FindTrackedGltfImage(imagePath);
+                    if (!assetGuid.IsNull()) {
+                        embeddedImage.AssetGuid = assetGuid;
+                        m_EmbeddedImages.push_back(std::move(embeddedImage));
+                        continue;
                     }
-                    if (std::filesystem::exists(texPath, ec)) {
-                        if (ReadFileBytesShared(texPath, ei.Data) && !ei.Data.empty()) {
-                            Logger::Log::Info("LoadGLTF: loaded external texture '{}' ({} bytes)", texPath.string(), ei.Data.size());
-                        }
-                        if (ei.MimeType.empty())
-                            ei.MimeType = MimeFromTextureExtension(texPath);
+                    if (TakeExternalGltfImage(imagePath, m_EmbeddedImages, firstImageOfFile, embeddedImage.Data)) {
+                        if (!embeddedImage.Data.empty())
+                            Logger::Log::Debug("LoadGLTF: loaded external texture '{}' ({} bytes)", imagePath.string(), embeddedImage.Data.size());
+                        if (embeddedImage.MimeType.empty())
+                            embeddedImage.MimeType = MimeFromTextureExtension(imagePath);
                     }
                     else {
-                        Logger::Log::Warning("LoadGLTF: external texture not found: '{}' (modelDir='{}')", texPath.string(), modelDir.string());
+                        Logger::Log::Warning("LoadGLTF: external texture not found: '{}' (modelDir='{}')", imagePath.string(), modelDir.string());
                     }
                 }
             }
-            m_EmbeddedImages.push_back(std::move(ei));
+            m_EmbeddedImages.push_back(std::move(embeddedImage));
         }
     }
 

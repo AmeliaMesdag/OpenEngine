@@ -4,7 +4,7 @@
 #include "Logger/FileSink.h"
 #include "Input/GamepadEdgeTracker.h"
 #include "Input/GamepadFrame.h"
-#include "Input/GamepadPolling.h"
+#include "Input/GamepadPoller.h"
 #include "Input/InputSystem.h"
 #include "Platform/ApplicationScriptApi.h"
 #include "Platform/Thread.h"
@@ -13,6 +13,8 @@
 #include "Core/DebugMetrics.h"
 #include "Core/NvtxRange.h"
 #include "Core/Time.h"
+#include "Memory/FrameJoinedScope.h"
+#include "Memory/FrameMemory.h"
 #include <chrono>
 #include <optional>
 #include <thread>
@@ -70,6 +72,7 @@ Application::Application(const ApplicationConfig& config)
         s_Instance = this;
 
     m_ApplicationInputChain.getInput = [this]() { return m_InputSystem.get(); };
+    m_GamepadPoller = std::make_unique<Input::GamepadPoller>();
     m_GamepadEdgeTracker = std::make_unique<Input::GamepadEdgeTracker>();
 }
 
@@ -189,6 +192,11 @@ void Application::Shutdown() {
 
     Logger::Log::Info("Shutting down application");
 
+#if GE_DEBUG_INSTRUMENTATION
+    // The frame loop stops here, so the pool's threads may exit with the memory of the last frames.
+    Memory::Detail::StopFrameLoop();
+#endif
+
     // Clear the Engine-level non-owning pointer to application-owned input.
     EngineCore::GetInstance().SetInputSystem(nullptr);
     
@@ -211,7 +219,7 @@ void Application::RouteGamepadPoll()
     // the application's own InputSystem sees only what the game left; axes and
     // connection go to every stage, consumable by none.
     Input::GamepadFrame frame;
-    Input::ReadGamepadFrame(frame);
+    m_GamepadPoller->Read(frame);
 
     // Named on the first thing there is to route rather than up front: a poll
     // with no pad in any slot, now or a frame ago, reports nothing, and naming
@@ -262,6 +270,13 @@ bool Application::Tick() {
         // Optional CPU profiler: closes the frame that just finished — that is
         // the frame its readers see — and opens the one starting here.
         GameEngine::Profiling::CpuProfiler::Get().BeginFrame();
+
+        // Frame memory from two frames ago becomes free. Until Tick returns, this thread and
+        // the Run and ParallelFor units it joins may use frame memory.
+        Memory::Detail::AdvanceFrameIndex();
+#if GE_DEBUG_INSTRUMENTATION
+        const Memory::Detail::FrameJoinedScope frameJoined(true);
+#endif
 
         // Capture coarse CPU timings for the main frame phases (stored for the next frame's UI).
         auto MsBetween = [](const auto& a, const auto& b) -> double

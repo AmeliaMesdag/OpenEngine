@@ -82,7 +82,7 @@ std::string MaterialDisplayName(const TerrainMaterialEntry& entry)
 
 void StyleCardSurface(UIElement& card)
 {
-    card.Overrides()
+    card.Style()
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::FlexBasis, StyleLength::Px(kCardWidthPx))
         .Set(Style::FlexGrow, 1.0f)
@@ -111,7 +111,7 @@ Label* AddCardName(UIElement& card, const std::string& text, const std::string& 
     raw->SetId(id);
     raw->AddClass("inspector-text");
     raw->SetText(text);
-    raw->Overrides()
+    raw->Style()
         .Set(Style::FontSize, StyleLength::Px(kCardNameFontPx))
         .Set(Style::LineHeight, kCardNameLineHeightPx)
         .Set(Style::MarginTop, StyleLength::Px(5.0f))
@@ -176,7 +176,7 @@ void AddMaterialCard(UIElement& grid, const TerrainMaterialEntry& entry,
     auto swatch = std::make_unique<UIElement>();
     UIElement* swatchRaw = swatch.get();
     swatchRaw->SetId(id + "-swatch");
-    swatchRaw->Overrides()
+    swatchRaw->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::FlexStart)
         .Set(Style::Height, StyleLength::Px(kCardSwatchHeightPx))
@@ -197,7 +197,7 @@ void AddMaterialCard(UIElement& grid, const TerrainMaterialEntry& entry,
     auto chip = std::make_unique<Label>();
     chip->SetId(id + "-tintchip");
     chip->SetText("Tint");
-    chip->Overrides()
+    chip->Style()
         .Set(Style::FontSize, StyleLength::Px(kSwatchChipFontPx))
         .Set(Style::Color, kSwatchChipTextArgb)
         .Set(Style::BackgroundColor, kSwatchChipBackgroundArgb)
@@ -228,7 +228,7 @@ void AddAddTile(UIElement& grid, const std::function<void()>& add)
     auto glyph = std::make_unique<Label>();
     glyph->SetId("terrain-material-add-glyph");
     glyph->SetText("+");
-    glyph->Overrides()
+    glyph->Style()
         .Set(Style::Height, StyleLength::Px(kCardSwatchHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(kCardSwatchHeightPx))
         .Set(Style::FontSize, StyleLength::Px(kAddTileGlyphFontPx))
@@ -439,7 +439,7 @@ UIElement* AddMaterialGrid(UIElement* parent, const TerrainMaterialLibraryAsset*
     auto grid = std::make_unique<UIElement>();
     UIElement* raw = grid.get();
     raw->SetId("terrain-material-grid");
-    raw->Overrides()
+    raw->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::FlexWrap, true)
         .Set(Style::Gap, StyleLength::Px(kGridGapPx))

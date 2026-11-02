@@ -95,7 +95,7 @@ Slider::Slider()
         UIElement* thumbPtr = thumb.get();
         thumbPtr->AddClass("slider-thumb");
         thumbPtr->AddClass(thumbClass);
-        thumbPtr->Overrides()
+        thumbPtr->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::FlexGrow, 0.0f)
             .Set(Style::FlexShrink, 0.0f)

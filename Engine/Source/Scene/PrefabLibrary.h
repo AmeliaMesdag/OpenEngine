@@ -78,6 +78,14 @@ struct PrefabTemplate
     bool RootTakesFallbackName = false;
 };
 
+// A resident prefab that a rebuild gave a new generation. Both generations stay valid until the next
+// CollectAtFrameBoundary.
+struct RebuiltPrefab
+{
+    const PrefabTemplate* Before = nullptr;
+    const PrefabTemplate* After = nullptr;
+};
+
 class PrefabLibrary
 {
   public:
@@ -114,6 +122,8 @@ class PrefabLibrary
 
     /// Rebuilds, as a new generation, every resident template built from a file `changed` names.
     void RebuildChanged(std::span<const GUID> changed);
+    /// Rebuilds, as a new generation, every resident template built from one of `files` (absolute).
+    std::vector<RebuiltPrefab> RebuildFiles(std::span<const std::filesystem::path> files);
 
     /// Logs, once per GUID, that a spawn named the prefab `source` while it is not resident, with
     /// the fix. Any thread.
@@ -138,6 +148,7 @@ class PrefabLibrary
     };
 
     void AssertWritable() const;
+    std::vector<RebuiltPrefab> RebuildKeys(std::span<const std::string> changedFiles);
     void ReleaseHolds(WorldHolds& holds);
     void DestroyTemplate(const PrefabTemplate& prefab);
 

@@ -3,6 +3,7 @@
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Spline/SplineExtrude.h"
 #include "Components/Spline/SplineFence.h"
+#include "Components/Spline/SplinePaving.h"
 #include "Components/Spline/SplinePlacement.h"
 #include "Components/Spline/SplineWall.h"
 #include "Components/Transform.h"
@@ -23,7 +24,8 @@ bool IsRecipe(const ECS::World& world, ECS::EntityHandle entity)
     return world.HasComponent<Components::SplineExtrude>(entity) ||
            world.HasComponent<Components::SplineWall>(entity) ||
            world.HasComponent<Components::SplineFence>(entity) ||
-           world.HasComponent<Components::SplinePlacement>(entity);
+           world.HasComponent<Components::SplinePlacement>(entity) ||
+           world.HasComponent<Components::SplinePaving>(entity);
 }
 
 // Calls `visit` with each recipe of kind RecipeT: the entities a recipe controller's query matches.
@@ -43,6 +45,7 @@ void ForEachRecipe(ECS::World& world, VisitT&& visit)
     ForEachRecipeOfKind<Components::SplineWall>(world, visit);
     ForEachRecipeOfKind<Components::SplineFence>(world, visit);
     ForEachRecipeOfKind<Components::SplinePlacement>(world, visit);
+    ForEachRecipeOfKind<Components::SplinePaving>(world, visit);
 }
 
 } // namespace
@@ -122,10 +125,11 @@ bool RecipeBuildStates::IsSceneSettled(ECS::World& world) const
     return settled;
 }
 
-bool RecipeBuildStates::IsSceneSettledAtLastUpdate(const ECS::World& world) const
+bool RecipeBuildStates::IsSceneSettledAtLastUpdate(ECS::World& world) const
 {
-    return m_World == &world && m_WorldResetGeneration == world.GetLifecycleResetGeneration() &&
-           m_SettledAtLastUpdate;
+    if (m_World != &world || m_WorldResetGeneration != world.GetLifecycleResetGeneration())
+        return IsSceneSettled(world);
+    return m_SettledAtLastUpdate;
 }
 
 std::span<const RecipeStatus> RecipeBuildStates::Failures(ECS::World& world) const

@@ -5,9 +5,10 @@
 #include "UI/UIElement.h"
 #include "UI/Controls/Label.h"
 #include "UI/ResolvedStyle.h"
-#include "UI/StyleOverrides.h"
+#include "UI/StyleDeclaration.h"
 #include "UI/UIStyle.h"
 #include "UI/StyleProperties.h"
+#include "Types/FormatNumber.h"
 
 #include <algorithm>
 #include <cctype>
@@ -27,10 +28,20 @@ namespace
     const uint32_t kLabelColor = 0xB3FFFFFFu; // 70% opacity white for labels
 
 
-    static std::string formatLen(const StyleLength& L) {
-        if (L.IsAuto()) return "auto";
-        if (L.IsPercent()) return std::to_string(static_cast<int>(L.Value)) + "%";
-        return std::to_string(static_cast<int>(L.Value)) + "px";
+    // The length with its CSS unit, to two decimals: 233.33vh, 0.5vmin.
+    static std::string FormatLength(const StyleLength& length) {
+        const std::string number = FormatFixed(length.Value, 2);
+        switch (length.Unit)
+        {
+            case StyleLength::UnitType::Auto:    return "auto";
+            case StyleLength::UnitType::Px:      return number + "px";
+            case StyleLength::UnitType::Percent: return number + "%";
+            case StyleLength::UnitType::Vw:      return number + "vw";
+            case StyleLength::UnitType::Vh:      return number + "vh";
+            case StyleLength::UnitType::Vmin:    return number + "vmin";
+            case StyleLength::UnitType::Vmax:    return number + "vmax";
+        }
+        return number;
     }
     static std::string formatColor(uint32_t c) { char b[10]; std::snprintf(b, sizeof(b), "#%02X%02X%02X%02X", (c>>24)&0xFF, (c>>16)&0xFF, (c>>8)&0xFF, c&0xFF); return b; }
     static std::string formatColor6(uint32_t c) { char b[8]; std::snprintf(b, sizeof(b), "%06X", c & 0xFFFFFFu); return std::string(b); }
@@ -117,33 +128,33 @@ namespace
         }
     }
 
-    static void appendStyleOverridesLinesToSegments(std::vector<Segment>& segs, const StyleOverrides& ovr)
+    static void appendStyleDeclarationLinesToSegments(std::vector<Segment>& segs, const StyleDeclaration& ovr)
     {
-        ovr.ForEachProp([&](StylePropertyId id, const StyleOverrideEntry& entry)
+        ovr.ForEachProp([&](StylePropertyId id, const StyleDeclarationEntry& entry)
         {
             const char* name = StylePropertyIdName(id);
             if (!name) return;
             std::string label = std::string("  ") + name + ": ";
             std::string value;
-            if (entry.keyword != StyleKeyword::None)
+            if (entry.Keyword != StyleKeyword::None)
             {
-                value = (entry.keyword == StyleKeyword::Inherit) ? "inherit" :
-                        (entry.keyword == StyleKeyword::Initial) ? "initial" : "unset";
+                value = (entry.Keyword == StyleKeyword::Inherit) ? "inherit" :
+                        (entry.Keyword == StyleKeyword::Initial) ? "initial" : "unset";
             }
-            else if (auto* f = std::get_if<float>(&entry.value))
+            else if (auto* f = std::get_if<float>(&entry.Value))
                 value = std::to_string(*f);
-            else if (auto* i = std::get_if<int>(&entry.value))
+            else if (auto* i = std::get_if<int>(&entry.Value))
                 value = std::to_string(*i);
-            else if (auto* u = std::get_if<uint32_t>(&entry.value))
+            else if (auto* u = std::get_if<uint32_t>(&entry.Value))
             {
                 char buf[12];
                 std::snprintf(buf, sizeof(buf), "#%08X", *u);
                 value = buf;
             }
-            else if (auto* b = std::get_if<bool>(&entry.value))
+            else if (auto* b = std::get_if<bool>(&entry.Value))
                 value = *b ? "true" : "false";
-            else if (auto* len = std::get_if<StyleLength>(&entry.value))
-                value = formatLen(*len);
+            else if (auto* len = std::get_if<StyleLength>(&entry.Value))
+                value = FormatLength(*len);
             else
                 value = "(...)";
 
@@ -162,11 +173,6 @@ namespace
             const auto& lo = rs->Layout;
             const auto& vs = rs->Visual;
             auto px = [](float v) { return std::to_string(static_cast<int>(v)); };
-            auto len = [](const StyleLength& L) {
-                if (L.IsAuto()) return std::string("auto");
-                if (L.IsPercent()) return std::to_string(static_cast<int>(L.Value)) + "%";
-                return std::to_string(static_cast<int>(L.Value)) + "px";
-            };
             auto prop = [&segs](const char* label, const std::string& value) {
                 appendSegment(segs, std::string(label), kLabelColor);
                 appendSegment(segs, value + ";\n", 0);
@@ -174,8 +180,8 @@ namespace
             appendSegment(segs, " {\n", kLabelColor);
             prop("  display: ", std::string(lo.DisplayMode == DisplayMode::Flex ? "flex" : lo.DisplayMode == DisplayMode::Block ? "block" : lo.DisplayMode == DisplayMode::Inline ? "inline" : "none"));
             prop("  position: ", std::string(lo.PositionType == PositionType::Absolute ? "absolute" : "relative"));
-            if (!lo.Width.IsAuto()) prop("  width: ", len(lo.Width));
-            if (!lo.Height.IsAuto()) prop("  height: ", len(lo.Height));
+            if (!lo.Width.IsAuto()) prop("  width: ", FormatLength(lo.Width));
+            if (!lo.Height.IsAuto()) prop("  height: ", FormatLength(lo.Height));
             if (lo.Padding.Top != 0.f || lo.Padding.Left != 0.f) prop("  padding: ", px(lo.Padding.Top) + " " + px(lo.Padding.Right) + " " + px(lo.Padding.Bottom) + " " + px(lo.Padding.Left));
             if (lo.Margin.Top != 0.f || lo.Margin.Left != 0.f) prop("  margin: ", px(lo.Margin.Top) + " " + px(lo.Margin.Right) + " " + px(lo.Margin.Bottom) + " " + px(lo.Margin.Left));
             if (vs.HasColor) { appendSegment(segs, "  color: #", kLabelColor); appendSegment(segs, formatColor6(vs.Color) + ";\n", 0); }
@@ -205,11 +211,11 @@ namespace
         else
             appendSegment(segs, " { (no resolved style) }", kLabelColor);
 
-        const auto& inlineOvr = el->InlineOverrides();
+        const auto& inlineOvr = el->InlineStyle();
         if (!inlineOvr.IsEmpty())
         {
             appendSegment(segs, "\n/* inline style */\n", kLabelColor);
-            appendStyleOverridesLinesToSegments(segs, inlineOvr);
+            appendStyleDeclarationLinesToSegments(segs, inlineOvr);
         }
     }
 
@@ -292,9 +298,9 @@ void CssInspector::SetEnabled(bool on)
         if (!root)
             continue;
         if (UIElement* overlay = root->FindById("css-inspector-overlay"_sid))
-            overlay->Overrides().Set(Style::Display, DisplayMode::None);
+            overlay->Style().Set(Style::Display, DisplayMode::None);
         if (UIElement* highlight = root->FindById("css-inspector-highlight"_sid))
-            highlight->Overrides().Set(Style::Display, DisplayMode::None);
+            highlight->Style().Set(Style::Display, DisplayMode::None);
     }
     m_ActiveManagers.clear();
 }
@@ -322,9 +328,9 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
     if (!hovered)
     {
         if (overlay)
-            overlay->Overrides().Set(Style::Display, DisplayMode::None);
+            overlay->Style().Set(Style::Display, DisplayMode::None);
         if (highlight)
-            highlight->Overrides().Set(Style::Display, DisplayMode::None);
+            highlight->Style().Set(Style::Display, DisplayMode::None);
         return;
     }
 
@@ -370,7 +376,7 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
     {
         auto hl = std::make_unique<UIElement>();
         hl->SetId("css-inspector-highlight");
-        hl->Overrides()
+        hl->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionLeft, StyleLength::Px(0.f))
             .Set(Style::PositionTop, StyleLength::Px(0.f))
@@ -390,7 +396,7 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
         highlight = hl.get();
         root->AddChild(std::move(hl));
     }
-    highlight->Overrides()
+    highlight->Style()
         .Set(Style::Display, DisplayMode::Block)
         .Set(Style::PositionLeft, StyleLength::Px(hx))
         .Set(Style::PositionTop, StyleLength::Px(hy))
@@ -415,7 +421,7 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
     {
         auto container = std::make_unique<UIElement>();
         container->SetId("css-inspector-overlay");
-        container->Overrides()
+        container->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionLeft, StyleLength::Px(0.f))
             .Set(Style::PositionTop, StyleLength::Px(0.f))
@@ -433,7 +439,7 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
         root->AddChild(std::move(container));
     }
 
-    overlay->Overrides()
+    overlay->Style()
         .Set(Style::Display, DisplayMode::Block)
         .Set(Style::PositionLeft, StyleLength::Px(tooltipX))
         .Set(Style::PositionTop, StyleLength::Px(tooltipY))
@@ -502,13 +508,13 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
         rows.push_back(std::move(currentRow));
 
     auto column = std::make_unique<UIElement>();
-    column->Overrides()
+    column->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column);
     for (const RowContent& rowContent : rows)
     {
         auto rowEl = std::make_unique<UIElement>();
-        rowEl->Overrides()
+        rowEl->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row);
         for (const auto& [text, color] : rowContent)
@@ -518,7 +524,7 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
             if (swatchColor)
             {
                 auto swatch = std::make_unique<UIElement>();
-                swatch->Overrides()
+                swatch->Style()
                     .Set(Style::Width, StyleLength::Px(14.f))
                     .Set(Style::Height, StyleLength::Px(14.f))
                     .Set(Style::MarginRight, StyleLength::Px(4.f))
@@ -535,7 +541,7 @@ void CssInspector::Update(UIManager* ui, int windowWidth, int windowHeight)
             }
             auto label = std::make_unique<Label>();
             label->SetText(text);
-            label->Overrides()
+            label->Style()
                 .Set(Style::FontSize, StyleLength::Px(14.f))
                 .Set(Style::Color, (uint32_t)(color != 0 ? color : kWhite));
             rowEl->AddChild(std::move(label));

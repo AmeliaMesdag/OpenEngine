@@ -246,7 +246,7 @@ UIElement* AddRemoveConfirmBlock(UIElement* content, const CardContext& card,
     auto confirmBlock = std::make_unique<UIElement>();
     UIElement* confirm = confirmBlock.get();
     confirm->SetId(idPrefix + "-remove-confirm");
-    confirm->Overrides()
+    confirm->Style()
         .Set(Style::Display, DisplayMode::None)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -263,7 +263,7 @@ UIElement* AddRemoveConfirmBlock(UIElement* content, const CardContext& card,
     UIElement* confirmRow = InspectorUI::AddRow(confirm);
     InspectorUI::AddLabel(confirmRow, "");
     UIElement* confirmField = InspectorUI::AddFieldContainer(confirmRow);
-    confirmField->Overrides()
+    confirmField->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(6.0f));
 
@@ -291,7 +291,7 @@ UIElement* AddRemoveConfirmBlock(UIElement* content, const CardContext& card,
     cancel->AddClass("inspector-button");
     cancel->SetText("Cancel");
     cancel->RegisterEventHandler(kEventButtonClick, [confirm](UIEvent&)
-        { confirm->Overrides().Set(Style::Display, DisplayMode::None); });
+        { confirm->Style().Set(Style::Display, DisplayMode::None); });
     confirmField->AddChild(std::move(cancel));
 
     content->AddChild(std::move(confirmBlock));
@@ -336,7 +336,7 @@ void AddCardHeaderMenu(Foldout& cardUi, const CardContext& card, UIElement* remo
                     if (command != kCmdRemove)
                         return;
                     foldout->SetExpanded(true);
-                    removeConfirm->Overrides().Set(Style::Display, DisplayMode::Flex);
+                    removeConfirm->Style().Set(Style::Display, DisplayMode::Flex);
                 });
 
             const int x = static_cast<int>(button.GetLayoutX());
@@ -552,10 +552,8 @@ void RegisterTerrainMaterialLibraryInspector()
         const std::vector<TerrainMaterialEntry>& materials = lib->GetMaterials();
         if (materials.empty() && ctx.ShowInfoCards)
         {
-            InspectorUI::AddTextBlock(ctx.Parent,
-                                      "No materials yet. Add one, then paint with it from the "
-                                      "terrain brush.",
-                                      "inspector-text");
+            InspectorUI::AddInfoCard(ctx.Parent,
+                                     "No materials yet. Add one, then paint with it from the terrain brush.");
         }
 
         for (const TerrainMaterialEntry& entry : materials)

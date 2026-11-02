@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -95,4 +96,18 @@ TEST(AreaBoolean, TouchingAreasWeldWithinTheToleranceAndNoFarther)
         const std::vector<AreaPiece> pieces = CombineTouchingAreas(unions, cuts, kTouchMeters, kSliverMeters);
         EXPECT_EQ(pieces.size(), pieceCount) << "a strip " << width << " m wide";
     }
+}
+
+// A ring that pokes 0.4 mm out of a square crosses its edge at two points 0.8 mm apart around the
+// tip: the touching boolean leaves no two points of a ring closer than the 1 mm tolerance.
+TEST(AreaBoolean, TouchingAreasLeaveNoTwoPointsWithinTheTolerance)
+{
+    constexpr float kTouchMeters = 1.0e-3f;
+    constexpr float kSliverMeters = 1.0e-2f;
+    const std::vector<AreaRing> unions{Square(0.0f, 0.0f, 10.0f), {{0.0f, 5.0f}, {10.0f, 5.0f}, {5.0f, 10.0004f}}};
+    const std::vector<AreaPiece> pieces = CombineTouchingAreas(unions, {}, kTouchMeters, kSliverMeters);
+    ASSERT_EQ(pieces.size(), 1u);
+    const AreaRing& outer = pieces[0].Outer;
+    for (std::size_t i = 0; i < outer.size(); ++i)
+        EXPECT_GE((outer[(i + 1) % outer.size()] - outer[i]).Length(), kTouchMeters) << "point " << i;
 }

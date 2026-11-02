@@ -26,6 +26,8 @@ namespace ECS {
 
 // Forward declarations
 class World;
+class ArchetypeMatchCache;      // ECS/Archetype/ArchetypeMatchCache.h
+class ArchetypeMatchList;       // ECS/Archetype/ArchetypeMatchList.h
 class UnresolvedComponentStore; // ECS/UnresolvedComponentStore.h
 class ClonePlan;                // ECS/ClonePlan.h
 class EntityRemap;              // ECS/EntityRemap.h
@@ -249,6 +251,10 @@ private:
 
     // Archetype storage (sorted-vector signatures, hash-keyed for O(1) lookup)
     std::unordered_map<ComponentSignature, std::unique_ptr<Archetype>, ComponentSignatureHash> archetypes;
+    // The archetypes each query filter matches, kept current at every insert into and erase
+    // from `archetypes` (all under worldMutex held exclusively). Read through MatchArchetypes.
+    // Created with the World and never null.
+    std::unique_ptr<ArchetypeMatchCache> m_ArchetypeMatches;
     std::unordered_map<ComponentTypeId, std::size_t> componentSizes;
 
     // Thread-local command buffers: per-thread map keyed by monotonic WorldId.
@@ -309,7 +315,8 @@ private:
     DenseSignature m_AddHookSignature;
     DenseSignature m_SetHookSignature;
 
-    // Query cache invalidation tracking
+    // Bumped by every structural change. Caches keyed on it (CachedQuery,
+    // RelationIndex, extraction and editor caches) rebuild when it moves.
     std::atomic<std::size_t> structuralChangeVersion{0};
 
     // Change-signaling write-grant counter (ECS/ChangeFilter.h) — the DOTS
@@ -878,13 +885,11 @@ public:
 	    }
 	    std::size_t GetArchetypeCount() const;
 	    std::vector<Archetype*> GetAllArchetypes() const;
-	    // Fills `out` with every archetype the filter matches: contains all of
-	    // Required and Include, shares no component with Exclude, and carries
-	    // none of DisabledExclude except the tags DisabledInclude names back in.
-	    // A null member is no filter at all. `out` is cleared and reserved once,
-	    // so a buffer reused across calls stops allocating. Queries iterate this
-	    // copy rather than the archetype map: an archetype created while a query
-	    // iterates cannot invalidate it.
+	    // Fills `out` with every archetype the filter matches (ArchetypeFilter::
+	    // Matches). `out` is cleared and reserved once, so a buffer reused across
+	    // calls stops allocating. CachedQuery iterates this copy rather than the
+	    // archetype map: an archetype created while it iterates cannot invalidate
+	    // it. Query reads the World's match cache instead (MatchArchetypes).
 	    void CollectMatchingArchetypes(const ArchetypeFilter& filter,
 	                                   std::vector<Archetype*>& out) const;
 	    void SetJobSystem(JobSystem::WorkStealingThreadPool* js) { jobSystem = js; }
@@ -963,8 +968,8 @@ public:
             // Migrate a component whose byte layout changed across a hot-reload: resize the
             // recorded size + every archetype column that holds it, re-packing each existing
             // instance (preserve same-named fields by name+type+size, default new fields).
-            // Safe to call between frames; takes worldMutex exclusively and bumps the
-            // structural-change version so query caches and baked move-plans rebuild.
+            // Safe to call between frames; takes worldMutex exclusively, drops the baked
+            // move-plans and bumps the structural-change version so CachedQuery re-resolves.
             // Returns true when this world held storage for the component and re-packed it.
             bool MigrateComponentLayout(const ComponentLayoutChange& change);
 
@@ -1318,6 +1323,25 @@ public:
     Archetype* GetOrCreateArchetype(const ComponentSignature& signature);
 
 private:
+    // A query's snapshot of the archetypes its filter matches, read under one hold of
+    // worldMutex: the World's list for the filter, the archetypes the list held, and the
+    // structural version they are current for.
+    struct MatchedArchetypes
+    {
+        const ArchetypeMatchList* List = nullptr;
+        std::span<Archetype* const> Archetypes;
+        std::size_t StructuralVersion = 0;
+    };
+
+    // The archetypes `filter` matches, from a list this World keeps current as archetypes are
+    // created and destroyed: Query's iteration modes read it. A list gains an archetype as the
+    // archetype is created, before the creating call places its first entity; the lock makes
+    // sure no archetype in the snapshot is still being built. The first call with a filter
+    // registers it (worldMutex exclusive, allocates); every later call is a lookup under
+    // worldMutex shared that allocates nothing. Every signature of `filter` has its hash
+    // computed already (ArchetypeMatchCache::Find).
+    MatchedArchetypes MatchArchetypes(const ArchetypeFilter& filter);
+
     // Shared lookup behind GetComponent (const, Stamp=false) and
     // GetComponentForWrite (Stamp=true). Stamp=true records the write grant
     // for the requested column under the same shared lock; the const path
@@ -1618,7 +1642,7 @@ Entity& Entity::SetEnabled(bool enabled) {
     static_assert(!HasAnyFlag(ComponentFlagsOf<T>(), ComponentFlags::NotToggleable),
                   "This component declares NotToggleable: it has no on/off state");
     // Idempotent: a redundant call must not bump the structural version and
-    // invalidate every query cache in the world.
+    // invalidate every cache keyed on it.
     const bool disabled = Has<ComponentDisabled<T>>();
     if (enabled && disabled)
         m_World->RemoveComponentImmediate<ComponentDisabled<T>>(m_Handle);

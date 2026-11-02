@@ -122,9 +122,12 @@ RefitExecution SceneTlas::DefaultRefitExecution()
 SceneTlas::SceneTlas() : m_Impl(std::make_unique<Internal::SceneTlasImpl>()) {}
 SceneTlas::~SceneTlas()
 {
-    // Work still in flight reads and writes this TLAS: join it first.
-    if (!m_Impl->InFlight.IsZero() && m_Impl->InFlightPool)
-        m_Impl->InFlightPool->Wait(m_Impl->InFlight);
+    // Work still in flight reads and writes this TLAS. Work no worker has
+    // started is cancelled, since it would only update a tree that is going
+    // away; work that is running is waited for.
+    JobSystem::TaskHandle& work = m_Impl->InFlight;
+    if (m_Impl->IsWorkInFlight() && !work.Cancel())
+        work.Wait();
 }
 
 uint32 SceneTlas::TraverseRay(const Mathematics::Ray3D& ray,
@@ -134,7 +137,7 @@ uint32 SceneTlas::TraverseRay(const Mathematics::Ray3D& ray,
                                                float32 tExit)> visit) const
 {
     GE_CPU_PROFILE_SCOPE("SceneTlas.TraverseRay");
-    assert(m_Impl->InFlight.IsZero() &&
+    assert(!m_Impl->IsWorkInFlight() &&
            "SceneTlas traversed while work is in flight: wait for RequestCurrent to report Ready "
            "(or call WaitCurrent) first");
     std::shared_lock lock(m_Impl->Mutex);
@@ -147,7 +150,7 @@ uint32 SceneTlas::TraverseSphere(const Mathematics::Vector3& center,
                                  FunctionRef<void(const TlasInstance&)> visit) const
 {
     GE_CPU_PROFILE_SCOPE("SceneTlas.TraverseSphere");
-    assert(m_Impl->InFlight.IsZero() &&
+    assert(!m_Impl->IsWorkInFlight() &&
            "SceneTlas traversed while work is in flight: wait for RequestCurrent to report Ready "
            "(or call WaitCurrent) first");
     std::shared_lock lock(m_Impl->Mutex);
@@ -159,7 +162,7 @@ uint32 SceneTlas::TraverseFrustum(std::span<const Mathematics::Plane> planes,
                                   FunctionRef<void(const TlasInstance&)> visit) const
 {
     GE_CPU_PROFILE_SCOPE("SceneTlas.TraverseFrustum");
-    assert(m_Impl->InFlight.IsZero() &&
+    assert(!m_Impl->IsWorkInFlight() &&
            "SceneTlas traversed while work is in flight: wait for RequestCurrent to report Ready "
            "(or call WaitCurrent) first");
     std::shared_lock lock(m_Impl->Mutex);
@@ -254,7 +257,7 @@ void RefitLeaf(Internal::SceneTlasImpl& impl,
                Internal::SectorState& sector,
                uint32 leafIndex,
                const Internal::SceneTlasImpl::RefitInput& candidate,
-               const Internal::SceneTlasImpl::ReplicaSet* replicas,
+               std::span<const Internal::SectorKey> replicas,
                float32 sectorSize,
                bool& needsReconcile)
 {
@@ -267,11 +270,11 @@ void RefitLeaf(Internal::SceneTlasImpl& impl,
     // cannot migrate replicas. If the new bounds now reach a sector
     // the entity has no replica in, flag a reconcile for next tick.
     // `replicas` is the caller-held EntityToSectors entry (S1.b — no
-    // re-find); null means the entity has no current replicas, for which
-    // the answer was always false (Sync never inserts).
-    if (!needsReconcile && replicas
+    // re-find); an entity without an entry is never refit (Sync never
+    // inserts), so the caller skips it before calling here.
+    if (!needsReconcile
         && Internal::ReplicaSetWouldChange(
-               impl, *replicas, leaf.Entity.id, leaf.WorldBounds, sectorSize))
+               impl, replicas, leaf.Entity.id, leaf.WorldBounds, sectorSize))
     {
         needsReconcile = true;
     }
@@ -427,7 +430,7 @@ SceneTlas::SyncResult SceneTlas::RefitResolvedCandidates(JobSystem::WorkStealing
             if (candidate.Version == sector->Leaves[leafIt->second].CachedXfVersion)
                 continue;
 
-            RefitLeaf(*m_Impl, *sector, leafIt->second, candidate, &replicaIt->second, sectorSize,
+            RefitLeaf(*m_Impl, *sector, leafIt->second, candidate, replicaIt->second, sectorSize,
                       reconcileFlag);
             pushDirty(sector, leafIt->second);
         }
@@ -664,7 +667,7 @@ uint64 SceneTlas::GetLeafCountForTesting() const
 
 bool SceneTlas::IsWorkInFlightForTesting() const
 {
-    return !m_Impl->InFlight.IsZero();
+    return m_Impl->IsWorkInFlight();
 }
 
 uint64 SceneTlas::GetReconcileCountForTesting() const
@@ -873,7 +876,7 @@ void CompactAndRebuildSector(SectorState& sector)
 // row-major iteration order, AND because E.5.4 hysteresis keeps the
 // previous (already row-major) replica set verbatim when held — it
 // never injects out-of-order keys.
-bool ReplicaSetsEqual(const SceneTlasImpl::ReplicaSet& a, const SceneTlasImpl::ReplicaSet& b)
+bool ReplicaSetsEqual(std::span<const SectorKey> a, std::span<const SectorKey> b)
 {
     if (a.size() != b.size()) return false;
     for (size_t i = 0; i < a.size(); ++i)
@@ -881,7 +884,7 @@ bool ReplicaSetsEqual(const SceneTlasImpl::ReplicaSet& a, const SceneTlasImpl::R
     return true;
 }
 
-bool ReplicaSetContains(const SceneTlasImpl::ReplicaSet& set, const SectorKey& key)
+bool ReplicaSetContains(std::span<const SectorKey> set, const SectorKey& key)
 {
     for (const auto& k : set) if (k == key) return true;
     return false;
@@ -912,7 +915,7 @@ bool BuildReplicaSet(const AABB& worldAabb,
                      float32 sectorSize,
                      SceneTlasImpl::ReplicaSet& out)
 {
-    out.clear();
+    out.Clear();
     const SectorRange range = SectorRangeForAabb(worldAabb, sectorSize);
     const uint32 count = range.Count();
     if (count == 0u)
@@ -925,7 +928,7 @@ bool BuildReplicaSet(const AABB& worldAabb,
             (worldAabb.min.y + worldAabb.max.y) * 0.5f,
             (worldAabb.min.z + worldAabb.max.z) * 0.5f,
         };
-        out.push_back(SectorKey{
+        out.PushBack(SectorKey{
             SectorIndexForCoord(c.x, sectorSize),
             SectorIndexForCoord(c.y, sectorSize),
             SectorIndexForCoord(c.z, sectorSize),
@@ -934,11 +937,11 @@ bool BuildReplicaSet(const AABB& worldAabb,
     }
     if (count > kMaxReplicaSectors)
         return true;
-    out.reserve(count);
+    out.Reserve(count);
     for (int32 z = range.Min.Z; z <= range.Max.Z; ++z)
     for (int32 y = range.Min.Y; y <= range.Max.Y; ++y)
     for (int32 x = range.Min.X; x <= range.Max.X; ++x)
-        out.push_back(SectorKey{x, y, z});
+        out.PushBack(SectorKey{x, y, z});
     return false;
 }
 
@@ -946,7 +949,7 @@ bool BuildReplicaSet(const AABB& worldAabb,
 
 bool ReplicaSetWouldChange(
     SceneTlasImpl& impl,
-    const SceneTlasImpl::ReplicaSet& currentReplicas,
+    std::span<const SectorKey> currentReplicas,
     GameEngine::ECS::EntityId eid,
     const AABB& newBounds,
     float32 sectorSize)
@@ -1071,7 +1074,7 @@ void ReconcileFromRecords(
 
         auto& currentReplicas = impl.EntityToSectors[eid];
 
-        if (currentReplicas.empty())
+        if (currentReplicas.Empty())
         {
             // Brand new entity: insert leaves into each replica sector.
             for (const auto& key : newReplicas)

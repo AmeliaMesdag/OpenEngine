@@ -1231,4 +1231,71 @@ TEST_F(TonemapHdrHeadroom, FilmicUnderHdrGradesMidtonesAsInSdr)
         << "a grey highlight above 1.0 keeps its tone: " << Fmt(out);
 }
 
+// --- 10. The MSAA resolve's curves follow each look on a grey ----------------
+//
+// The MSAA resolve's curves (Shaders/Includes/display_response.glsl; the values below are theirs) on a grey ramp
+// from 1e-3 to 1e3 at the SDR tier: Neutral and Filmic (from tier 0 of the ACES 2 tables) within 0.5 sRGB-encoded
+// 8-bit levels of the look, Photographic (a fit to AgX's sigmoid) within 2.8 levels.
+float EncodedLevels(float light)
+{
+    const float v = std::clamp(light, 0.0f, 1.0f);
+    return 255.0f * (v <= 0.0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f);
+}
+
+float NeutralResponse(float x)
+{
+    const float v = x < 0.08f ? 6.25f * x * x : x - 0.04f;
+    return v < 0.76f ? v : 1.0f - 0.0576f / (v - 0.52f);
+}
+
+// The ACES 2 tonescale form: f = peak (x / (x + halfPoint))^power, y = min(f^2 / (f + toe), 1).
+float TonescaleResponse(float x, float peak, float halfPoint, float power, float toe)
+{
+    const float f = peak * std::pow(x / (x + halfPoint), power);
+    return std::min(f * f / (f + toe), 1.0f);
+}
+
+// The [6][12] tier scalars end the table; slot 0 is tsFScale and slot 1 is tsSDiv.
+constexpr uint32_t kTier0ScalarsFirst = Passes::kAces2TablesFloatCount - 6u * 12u;
+
+float ResolveCurve(Mode mode, float x)
+{
+    switch (mode)
+    {
+    case Mode::Filmic:
+        return TonescaleResponse(x, Passes::kAces2Tables[kTier0ScalarsFirst],
+                                 Passes::kAces2Tables[kTier0ScalarsFirst + 1u] * std::cbrt(2.0f), 1.15f, 0.04f);
+    case Mode::Photographic:
+        return TonescaleResponse(x, 1.05358f, 0.70724f, 0.91618f, 0.04284f);
+    default:
+        return NeutralResponse(x);
+    }
+}
+
+TEST_F(TonemapHdrHeadroom, TheMsaaResolveCurvesFollowEachLookOnAGrey)
+{
+    constexpr int kSteps = 49;
+    constexpr float kExactLevels = 0.5f;
+    constexpr float kFittedLevels = 2.8f;
+    for (const Mode mode : kColourRenderingModes)
+    {
+        const float tolerance = mode == Mode::Photographic ? kFittedLevels : kExactLevels;
+        float worst = 0.0f;
+        float worstAt = 0.0f;
+        for (int step = 0; step < kSteps; ++step)
+        {
+            const float x = std::pow(10.0f, -3.0f + 6.0f * static_cast<float>(step) / (kSteps - 1));
+            const float shown = EncodedLevels(Sdr({x, x, x}, mode).G);
+            const float error = std::abs(EncodedLevels(ResolveCurve(mode, x)) - shown);
+            if (error > worst)
+            {
+                worst = error;
+                worstAt = x;
+            }
+        }
+        EXPECT_LE(worst, tolerance) << ModeName(mode) << ": the resolve curve is " << worst
+                                    << " levels from the look at scene " << worstAt;
+    }
+}
+
 } // namespace

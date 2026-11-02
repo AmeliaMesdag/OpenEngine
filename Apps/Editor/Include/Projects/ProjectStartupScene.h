@@ -8,6 +8,8 @@
 namespace GameEngine::Editor
 {
 
+class SettingsStore;
+
 // Project settings key naming the scene the editor opens with the project; the
 // value is asset-relative ("Scenes/Main.scene"), the form build.globalScenes uses.
 inline constexpr const char* kProjectStartupSceneKey = "project.startupScene";
@@ -23,6 +25,14 @@ struct ProjectStartupSceneCandidates
     // the project count as the project's last-opened scene.
     std::vector<std::filesystem::path> RecentScenes;
 };
+
+// The fix for loaded project settings that name the startup scene in a nested "project": { "startupScene" }
+// object, which the editor does not read. Empty when the settings hold no such object.
+std::string DescribeNestedProjectStartupScene(const SettingsStore& settings);
+
+// The startup scene that loaded project settings name under kProjectStartupSceneKey; empty when unset.
+// Logs DescribeNestedProjectStartupScene as a warning when it is not empty.
+std::string ReadProjectStartupScene(const SettingsStore& settings);
 
 // The absolute scene an asset-relative name refers to, when it is a scene file inside
 // `assetsRoot`. Otherwise none, and a warning names `source` (the setting that holds the name).

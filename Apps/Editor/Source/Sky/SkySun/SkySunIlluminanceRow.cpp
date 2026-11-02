@@ -96,7 +96,7 @@ std::string DimmedSunText(const SunReadout& readout)
 // Show or hide an element that only applies in some states.
 void SetShown(UIElement* element, bool shown)
 {
-    element->Overrides().Set(Style::Display, shown ? DisplayMode::Flex : DisplayMode::None);
+    element->Style().Set(Style::Display, shown ? DisplayMode::Flex : DisplayMode::None);
 }
 
 // A state line under the row: shown with `text`, hidden when there is nothing to say.

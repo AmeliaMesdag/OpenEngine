@@ -369,18 +369,25 @@ std::vector<std::string> FenceWarnings(const SplineFence& fence, const Editor::F
 }
 
 // One row per override, in slot order, then an Add Override action. Overrides are also made by
-// selecting a span in the scene view (Inspectors/SplineFence/SplineFenceSpanPieceInspector.cpp); this list is
+// selecting a span in the Scene View (Inspectors/SplineFence/SplineFenceSpanPieceInspector.cpp); this list is
 // where the author sees them all and corrects one after the spline is edited.
 void BuildOverrideRows(const InspectorContext& ctx, const SplineFence& fence, const Editor::FenceBuildState& build)
 {
-    InspectorUI::AddLine(ctx.Parent, "Span Overrides");
     SplineFence listed = fence;
     SplineRecipes::CompactSpanOverrides(listed);
     const uint32 count = SplineRecipes::CountSpanOverrides(listed);
     if (count == 0u)
     {
-        InspectorUI::AddLine(ctx.Parent, "None. Select a span in the scene view to make it a gate or to give it "
-                                         "an explicit part, or use Add Override.");
+        // An empty list is one row whose value reads None, as the empty fields of the page do.
+        UIElement* row = InspectorUI::AddRow(ctx.Parent);
+        InspectorUI::AddLabel(row, "Span Overrides");
+        InspectorUI::AddTextBlock(InspectorUI::AddFieldContainer(row), "None", "inspector-section-empty");
+        InspectorUI::AddInfoCard(ctx.Parent, "Select a span in the Scene View to make it a gate or to give it an "
+                                             "explicit part, or use Add Override.");
+    }
+    else
+    {
+        InspectorUI::AddLine(ctx.Parent, "Span Overrides");
     }
 
     for (uint32 slot = 0; slot < count; ++slot)

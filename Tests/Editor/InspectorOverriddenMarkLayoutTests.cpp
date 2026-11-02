@@ -5,12 +5,14 @@
 #include <gtest/gtest.h>
 
 #include "InspectorLayoutFixture.h"
+#include "InspectorRegistry.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Prefabs/PrefabRemovedComponents.h"
 #include "UI/InspectorSection.h"
 
 #include "UI/UIElement.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -87,11 +89,12 @@ TEST(InspectorOverriddenMarkLayout, TheEdgeKeepsTheContentInPlaceInTheFilledSect
     ExpectTheMarksKeepTheContentInPlace("inspector-filled-sections");
 }
 
-TEST(InspectorOverriddenMarkLayout, ARemovedComponentHasAFadedTitleAMutedEdgeAndNoOptions)
+TEST(InspectorOverriddenMarkLayout, ARemovedComponentHasAFadedTitleAndIconAndNoOptions)
 {
     auto root = std::make_unique<UIElement>();
     InspectorSection* live = AddSectionWithRow(*root, "Light", false);
-    auto removedHost = std::make_unique<GameEngine::Editor::PrefabRemovedComponents>(std::vector<std::string>{"MeshRenderer"});
+    auto removedHost = std::make_unique<GameEngine::Editor::PrefabRemovedComponents>(
+        std::vector<std::string>{"MeshRenderer"}, GameEngine::OverrideMenuTarget{}, std::function<void()>{});
     UIElement* removed = removedHost.get();
     root->AddChild(std::move(removedHost));
 
@@ -120,7 +123,8 @@ TEST(InspectorOverriddenMarkLayout, AnOverridePillDrawsInTheColorOfItsHeadersEdg
     auto root = std::make_unique<UIElement>();
     InspectorSection* added = AddSectionWithRow(*root, "Light", true);
     added->SetHeaderBadge("Added", "", InspectorSection::BadgeKind::Override);
-    auto removedHost = std::make_unique<GameEngine::Editor::PrefabRemovedComponents>(std::vector<std::string>{"MeshRenderer"});
+    auto removedHost = std::make_unique<GameEngine::Editor::PrefabRemovedComponents>(
+        std::vector<std::string>{"MeshRenderer"}, GameEngine::OverrideMenuTarget{}, std::function<void()>{});
     UIElement* removed = removedHost.get();
     root->AddChild(std::move(removedHost));
 
@@ -140,13 +144,13 @@ TEST(InspectorOverriddenMarkLayout, AnOverridePillDrawsInTheColorOfItsHeadersEdg
         EXPECT_NE(badge->GetResolvedStyle().Visual.BackgroundColor >> 24, 0u) << "the pill has no fill";
     }
     const uint32_t addedEdge = FindByClass(added, "inspector-section-header-row-overridden")->GetResolvedStyle().Visual.BorderColor.Left;
-    EXPECT_NE(addedEdge, FindByClass(removed, "inspector-section-header-row-overridden")->GetResolvedStyle().Visual.BorderColor.Left)
-        << "the removed header's edge is not muted";
-    // ARGB: the Added pill's fill is a tint of the edge's teal; the Removed pill's fill is not.
+    EXPECT_EQ(addedEdge, FindByClass(removed, "inspector-section-header-row-overridden")->GetResolvedStyle().Visual.BorderColor.Left)
+        << "the removed header's edge is not the prefab color";
+    // ARGB: both pills fill with a tint of the edge's teal.
     constexpr uint32_t kRgbMask = 0x00FFFFFFu;
     const uint32_t addedFill = FindByClass(added, "inspector-section-header-badge-override")->GetResolvedStyle().Visual.BackgroundColor;
     const uint32_t removedFill = FindByClass(removed, "inspector-section-header-badge-override")->GetResolvedStyle().Visual.BackgroundColor;
     EXPECT_EQ(addedFill & kRgbMask, addedEdge & kRgbMask) << "the Added pill's fill is not a tint of the teal";
     EXPECT_LT(addedFill >> 24, 0xFFu) << "the Added pill's fill is opaque";
-    EXPECT_NE(removedFill & kRgbMask, addedFill & kRgbMask) << "the Removed pill's fill is not muted";
+    EXPECT_EQ(removedFill, addedFill) << "the Removed pill's fill is not the Added pill's teal";
 }

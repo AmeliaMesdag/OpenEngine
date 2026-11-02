@@ -51,7 +51,7 @@ bool InView(const Mathematics::Vector2& pixel, const SceneTools::ScenePointerEve
 
 void SetShown(UIElement& element, bool shown)
 {
-    element.Overrides().Set(Style::Display, shown ? DisplayMode::Flex : DisplayMode::None);
+    element.Style().Set(Style::Display, shown ? DisplayMode::Flex : DisplayMode::None);
 }
 
 // What one Collect reads per mark-up.
@@ -289,7 +289,7 @@ void MarkupLabelOverlay::UpdateLayer(LabelLayer& layer, ECS::World* world, const
     {
         layer.OffsetX = offsetX;
         layer.OffsetY = offsetY;
-        container->Overrides()
+        container->Style()
             .Set(Style::PositionLeft, StyleLength::Px(offsetX))
             .Set(Style::PositionTop, StyleLength::Px(offsetY));
     }
@@ -387,7 +387,7 @@ void MarkupLabelOverlay::ShowPill(Pill& pill, const Placement& placement, const 
     if (dotChanged)
     {
         if (UIElement* dot = pill.Dot.Get())
-            dot->Overrides().Set(Style::BackgroundColor, dotArgb);
+            dot->Style().Set(Style::BackgroundColor, dotArgb);
         pill.DotArgb = dotArgb;
     }
     const bool highlightChanged = placement.Selected != pill.Selected || placement.Hovered != pill.Hovered;
@@ -397,9 +397,9 @@ void MarkupLabelOverlay::ShowPill(Pill& pill, const Placement& placement, const 
         SetClass(*body, "markup-label-hovered", placement.Hovered);
         // A hovered pill's rim is its status color; the selection's accent border wins.
         if (placement.Hovered && !placement.Selected)
-            body->Overrides().Set(Style::BorderColor, BorderColorsTRBL{dotArgb, dotArgb, dotArgb, dotArgb});
+            body->Style().Set(Style::BorderColor, BorderColorsTRBL{dotArgb, dotArgb, dotArgb, dotArgb});
         else
-            body->Overrides().Reset(Style::BorderColor);
+            body->Style().Reset(Style::BorderColor);
         pill.Selected = placement.Selected;
         pill.Hovered = placement.Hovered;
     }
@@ -413,7 +413,7 @@ void MarkupLabelOverlay::ShowPill(Pill& pill, const Placement& placement, const 
     const float y = std::round(box.Top);
     if (x != pill.X || y != pill.Y)
     {
-        anchor->Overrides()
+        anchor->Style()
             .Set(Style::PositionLeft, StyleLength::Px(x))
             .Set(Style::PositionTop, StyleLength::Px(y));
         pill.X = x;

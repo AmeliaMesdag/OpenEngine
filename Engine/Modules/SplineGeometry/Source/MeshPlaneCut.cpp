@@ -1,5 +1,6 @@
 #include "SplineGeometry/MeshPlaneCut.h"
 
+#include "Mathematics/Geometry.h"
 #include "Mathematics/Triangulation.h"
 #include "Mathematics/Vector2.h"
 #include "Types/FlatMap.h"
@@ -70,13 +71,13 @@ std::vector<CutVertex> ToCutVertices(const PieceMesh& mesh)
 CutVertex LerpVertex(const CutVertex& a, const CutVertex& b, float32 t)
 {
     CutVertex out;
-    out.Position = a.Position + (b.Position - a.Position) * t;
-    out.Normal = NormalizedOr(a.Normal + (b.Normal - a.Normal) * t, a.Normal);
-    out.UV = a.UV + (b.UV - a.UV) * t;
+    out.Position = Mathematics::Lerp(a.Position, b.Position, t);
+    out.Normal = NormalizedOr(Mathematics::Lerp(a.Normal, b.Normal, t), a.Normal);
+    out.UV = Mathematics::Lerp(a.UV, b.UV, t);
     const V3 tangentA(a.Tangent.x, a.Tangent.y, a.Tangent.z);
     const V3 tangentB(b.Tangent.x, b.Tangent.y, b.Tangent.z);
-    out.Tangent = V4(NormalizedOr(tangentA + (tangentB - tangentA) * t, tangentA), a.Tangent.w);
-    out.Color = a.Color + (b.Color - a.Color) * t;
+    out.Tangent = V4(NormalizedOr(Mathematics::Lerp(tangentA, tangentB, t), tangentA), a.Tangent.w);
+    out.Color = Mathematics::Lerp(a.Color, b.Color, t);
     return out;
 }
 

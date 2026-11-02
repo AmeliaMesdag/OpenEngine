@@ -606,14 +606,14 @@ TEST(TerrainMaterialLibraryInspector, RemoveConfirmsFirstAndStatesTheEffectOnBou
 
     UIElement* confirm = root.FindById("terrainmatlib-slot-2-remove-confirm"_sid);
     ASSERT_NE(confirm, nullptr);
-    EXPECT_EQ(confirm->Overrides().Get(Style::Display), DisplayMode::None)
+    EXPECT_EQ(confirm->Style().Get(Style::Display), DisplayMode::None)
         << "the confirmation is showing before anything was asked";
 
     ASSERT_NO_FATAL_FAILURE(AskToRemoveFromTheHeaderMenu(root, 2));
 
     // The menu item deletes nothing on its own — the whole point of the step.
     EXPECT_EQ(lib.GetMaterials().size(), 1u) << "Remove Material deleted without asking";
-    EXPECT_EQ(confirm->Overrides().Get(Style::Display), DisplayMode::Flex)
+    EXPECT_EQ(confirm->Style().Get(Style::Display), DisplayMode::Flex)
         << "the confirmation never appeared";
 
     // What it says. Asserted as the facts it must carry, not as a sentence: the material's name,
@@ -633,7 +633,7 @@ TEST(TerrainMaterialLibraryInspector, RemoveConfirmsFirstAndStatesTheEffectOnBou
     Button* cancel = FindButton(root, "terrainmatlib-slot-2-remove-cancel");
     ASSERT_NE(cancel, nullptr);
     cancel->TriggerClick();
-    EXPECT_EQ(confirm->Overrides().Get(Style::Display), DisplayMode::None);
+    EXPECT_EQ(confirm->Style().Get(Style::Display), DisplayMode::None);
     ASSERT_EQ(lib.GetMaterials().size(), 1u) << "Cancel removed the material";
 
     // Confirm removes it, and writes the file the renderer parses.

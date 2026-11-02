@@ -68,7 +68,7 @@ void AddSkyStarSeenByRow(UIElement* parent, ECS::World* world, ECS::EntityHandle
     auto field = std::make_unique<EditorUI::PictureChoiceField>(std::move(choices), SeenByIndex(skyValues->StarObserver));
     field->SetOnSelected([world, sky, notifications, undo](size_t choice)
                          { CommitSeenBy(choice, world, sky, notifications, undo); });
-    InspectorUI::AddFieldRow(parent, "Seen by", std::move(field), kSeenByTooltip);
+    InspectorUI::AddPictureChoiceRow(parent, "Seen by", std::move(field), kSeenByTooltip);
 }
 
 } // namespace GameEngine

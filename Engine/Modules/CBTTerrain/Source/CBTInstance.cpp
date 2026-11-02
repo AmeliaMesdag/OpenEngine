@@ -31,6 +31,9 @@ constexpr uint64_t kReadbackValidationOffset = kReadbackDrawBytes;
 constexpr uint64_t kReadbackValidationBytes = static_cast<uint64_t>(kValidationWords) * 4u;
 // Depth-target passes RefineUniform runs past one per level.
 constexpr uint32_t kRefineUniformExtraPasses = 2u;
+// Passes RefineToView runs past one per level: its first pass classifies on the corners that the
+// uniform seed evaluated flat.
+constexpr uint32_t kRefineToViewExtraPasses = 1u;
 
 // The level-0 samples a UV rect reaches along an axis of `samples`, one sample past each side: the
 // rect comes from a texel rect padded one texel (TerrainRenderFeature::AccumulateUnifiedHeightDirty),
@@ -297,13 +300,31 @@ void CBTInstance::RefineUniform(uint32_t depth, uint32_t frameCounter)
     // One pass splits every leaf once; the passes past depth - base absorb the conforming splits
     // a pass defers, and are no-ops once every leaf is at `depth`.
     const uint32_t passes = (depth - m_BaseDepth) + kRefineUniformExtraPasses;
+    SubmitUpdatesAndWait(classify, CBTIdentityFrameParams(), passes, frameCounter, false);
+}
+
+uint32_t CBTInstance::RefineToView(const CBTClassifyDesc& classify, const CBTFrameParams& params,
+                                   uint32_t uniformDepth, uint32_t frameCounter)
+{
+    if (!m_Ready || classify.TargetDepth <= uniformDepth)
+        return 0u;
+    const uint32_t passes = (classify.TargetDepth - uniformDepth) + kRefineToViewExtraPasses;
+    SubmitUpdatesAndWait(classify, params, passes, frameCounter, true);
+    return passes;
+}
+
+void CBTInstance::SubmitUpdatesAndWait(CBTClassifyDesc classify, const CBTFrameParams& params,
+                                       uint32_t passes, uint32_t frameCounter, bool forceFirstVertexEval)
+{
+    const uint32_t gate = classify.GateVertexEval;
     for (uint32_t pass = 0; pass < passes; ++pass)
     {
+        classify.GateVertexEval = (forceFirstVertexEval && pass == 0u) ? 0u : gate;
         auto cl = m_Device->CreateCommandList(IDevice::QueueType::Graphics);
         if (!cl)
             return;
         cl->Begin();
-        RecordUpdate(*cl, classify, CBTIdentityFrameParams(), frameCounter);
+        RecordUpdate(*cl, classify, params, frameCounter);
         cl->End();
         std::vector<CommandList*> lists{cl.get()};
         m_Device->ExecuteCommandLists(lists);
@@ -531,7 +552,6 @@ void CBTInstance::RecordUpdate(CommandList& cl, const CBTClassifyDesc& classify,
     pc.GateVertexEval = vertexEvalGateSupported ? classify.GateVertexEval : 0u;
     pc.EditRetessEnabled = classify.EditRetessEnabled;
     pc.NearFieldGate = classify.NearFieldGate;
-    pc.DeepDecode = classify.DeepDecode;
     pc.PoolPressure = classify.PoolPressure;
     pc.Settle = classify.Settle;
 
@@ -1047,6 +1067,8 @@ CBTTessellationStats CBTInstance::ReadTessellationStats()
     st.DispatchClampTotal = sig(kWQDispatchClampCounter);
     st.PressureStep = sig(kWQPressureStep);
     st.OffFrustumKeepStep = sig(kWQOffFrustumKeepStep);
+    st.OffFrustumKeepFloor = sig(kWQOffFrustumKeepFloor);
+    st.MergeCandidates = sig(kWQMergeCandidateCounter);
 
     // The sum-tree root (live bisector count) sits at the heap base, past the packed leaves.
     const uint32_t rootWord = CBTSumTreeHeapBase(m_PoolSize);

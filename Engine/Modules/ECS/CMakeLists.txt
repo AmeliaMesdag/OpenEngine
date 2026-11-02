@@ -6,6 +6,8 @@ project(ECS LANGUAGES CXX)
 # Core ECS source files
 set(ECS_SOURCES
     Source/World.cpp
+    Source/Archetype/ArchetypeMatchCache.cpp
+    Source/Archetype/ArchetypeMatchList.cpp
     Source/Entity.cpp
     Source/Component/ComponentRegistry.cpp
     Source/Component/ComponentHandler.cpp
@@ -22,7 +24,9 @@ set(ECS_SOURCES
 
 # Core ECS header files
 set(ECS_HEADERS
-    Include/ECS/ArchetypeTable.h
+    Include/ECS/Archetype/ArchetypeMatchCache.h
+    Include/ECS/Archetype/ArchetypeMatchList.h
+    Include/ECS/Archetype/ArchetypeTable.h
     Include/ECS/ECS.h
     Include/ECS/Types.h
     Include/ECS/World.h

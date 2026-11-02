@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mathematics/Vector3.h"
+#include "Types/Color.h"
 
 #include <cstdint>
 
@@ -19,6 +20,14 @@ namespace Engine::Renderer
 {
 class ImageBasedLightingFeature;
 struct FeatureCullingContext;
+
+/// The three-color ambient gradient tint (scene-linear RGB). White is the identity.
+struct EnvironmentAmbientGradientTint
+{
+    ColorLinear Sky{1.0f, 1.0f, 1.0f};
+    ColorLinear Equator{1.0f, 1.0f, 1.0f};
+    ColorLinear Ground{1.0f, 1.0f, 1.0f};
+};
 
 struct EnvironmentLocalReflectionData
 {
@@ -88,15 +97,7 @@ class IEnvironmentSource
     // (up=sky, horizon=equator, down=ground). Applied at sampling time via the EnvData UBO,
     // so it is deliberately kept OUT of InputDigest (changing it never re-bakes). White =
     // identity: the default leaves every consumer byte-identical.
-    virtual void AmbientGradientTint(float outSky[3], float outEquator[3], float outGround[3]) const
-    {
-        for (int i = 0; i < 3; ++i)
-        {
-            outSky[i] = 1.0f;
-            outEquator[i] = 1.0f;
-            outGround[i] = 1.0f;
-        }
-    }
+    virtual EnvironmentAmbientGradientTint AmbientGradientTint() const { return {}; }
 
     // Optional local-reflection projection data consumed by the IBL shader. The
     // default is a distant/global environment with no parallax correction.

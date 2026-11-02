@@ -71,6 +71,33 @@ struct CBTPageLevelSample
     float Height;
     uint Level; // LevelCount when no page down the walk is resident
 };
+// The resident pages that answer a point at a continuous level, each with its weight (a locate): at
+// most two a level walk (a fading page and the ancestor that takes the rest), and a second walk in a
+// level's blend quarter. Count 0: no page down the walk is resident.
+struct CBTPageLocation
+{
+    uint Count;
+    uint Level0;
+    uint Slot0;
+    float Weight0;
+    uint Level1;
+    uint Slot1;
+    float Weight1;
+    uint Level2;
+    uint Slot2;
+    float Weight2;
+    uint Level3;
+    uint Slot3;
+    float Weight3;
+};
+
+// A point's position past the first owned sample of its page of one level, along each axis, in that
+// level's samples. Every plane of the page reads it.
+struct CBTPageOwned
+{
+    float X;
+    float Z;
+};
 // GE_SHARED_PAGE_TYPES_END
 
 // The words of a page-table ring slot (mirror CBTLayout.h kCBTPageHeaderWords, kCBTPageMaxLevels,
@@ -102,6 +129,9 @@ const uint CBT_PAGE_OWNED = 128u;
 const uint CBT_PAGE_OWNED_SHIFT = 7u; // log2(CBT_PAGE_OWNED)
 const uint CBT_PAGE_APRON = 1u;
 const uint CBT_PAGE_STRIDE = 130u;
+// Mirror PageStrideTexels of a block format: its owned samples and one 4-texel block on each side.
+const uint CBT_PAGE_BLOCK_STRIDE = 136u;
+const uint CBT_PAGE_BLOCK_APRON = 4u;
 // Mirror kNoPageBlock, kPageTableTierWords in TerrainECS PageTable.cpp.
 const uint CBT_PAGE_NO_BLOCK = 0xFFFFFFFFu;
 const uint CBT_PAGE_TIER_WORDS = 4u;
@@ -385,6 +415,130 @@ float CBT_PageSample(float u, float v, float lambda, CBTPageField field)
     if (field.LevelCount == 0u)
         return 0.0f;
     return CBT_PageSamplePoint(CBT_PagePointAtUV(u, v, field), lambda, field);
+}
+// A locate that holds no page.
+CBTPageLocation CBT_PageLocationEmpty()
+{
+    CBTPageLocation location;
+    location.Count = 0u;
+    location.Level0 = 0u;
+    location.Slot0 = 0u;
+    location.Weight0 = 0.0f;
+    location.Level1 = 0u;
+    location.Slot1 = 0u;
+    location.Weight1 = 0.0f;
+    location.Level2 = 0u;
+    location.Slot2 = 0u;
+    location.Weight2 = 0.0f;
+    location.Level3 = 0u;
+    location.Slot3 = 0u;
+    location.Weight3 = 0.0f;
+    return location;
+}
+
+// `location` with the page in `slot` of `level` added at `weight`. A locate holds four pages at most.
+CBTPageLocation CBT_PageLocationAdd(CBTPageLocation location, uint level, uint slot, float weight)
+{
+    if (location.Count == 0u)
+    {
+        location.Level0 = level;
+        location.Slot0 = slot;
+        location.Weight0 = weight;
+    }
+    else if (location.Count == 1u)
+    {
+        location.Level1 = level;
+        location.Slot1 = slot;
+        location.Weight1 = weight;
+    }
+    else if (location.Count == 2u)
+    {
+        location.Level2 = level;
+        location.Slot2 = slot;
+        location.Weight2 = weight;
+    }
+    else
+    {
+        location.Level3 = level;
+        location.Slot3 = slot;
+        location.Weight3 = weight;
+    }
+    location.Count = min(location.Count + 1u, 4u);
+    return location;
+}
+
+// `location` with the pages that answer level `level` alone at `point`, at `scale` in total: the
+// level's page when resident, faded in from its first resident ancestor, which takes the rest (a
+// fading ancestor counts as settled); else that ancestor alone.
+CBTPageLocation CBT_PageLocateLevel(CBTPagePoint point, uint level, float scale, CBTPageLocation location,
+                                    CBTPageField field)
+{
+    float remaining = scale;
+    bool fading = false;
+    for (uint walk = level; walk < field.LevelCount; ++walk)
+    {
+        uint entry = CBT_PageEntryAt(point, walk, field);
+        if (entry == CBT_PAGE_NO_PAGE)
+            continue; // the fallback walk: the first resident ancestor answers
+        uint slot = entry & CBT_PAGE_SLOT_MASK;
+        float fade = CBT_PageSlotFade(slot);
+        if (fading || fade >= 1.0f || walk + 1u >= field.LevelCount)
+            return CBT_PageLocationAdd(location, walk, slot, remaining);
+        location = CBT_PageLocationAdd(location, walk, slot, remaining * fade);
+        remaining = remaining * (1.0f - fade);
+        fading = true;
+    }
+    if (!fading)
+        CBT_PageUnresolved();
+    return location;
+}
+
+// The pages that answer `point` at continuous level `lambda`: level L's, blended toward level L + 1's by
+// CBT_PageParentBlend, or the fallback ancestor's alone when L is not resident. One locate serves every
+// plane of the field: each plane fetches its pages at CBT_PageSlotTexelX / CBT_PageSlotTexelZ of the
+// page's CBT_PageOwnedAt.
+CBTPageLocation CBT_PageLocate(CBTPagePoint point, float lambda, CBTPageField field)
+{
+    CBTPageLocation location = CBT_PageLocationEmpty();
+    if (field.LevelCount == 0u)
+        return location;
+    uint top = field.LevelCount - 1u;
+    float clamped = clamp(lambda, 0.0f, float(top));
+    uint base = min(uint(clamped), top);
+    location = CBT_PageLocateLevel(point, base, 1.0f, location, field);
+    float w = base < top ? CBT_PageParentBlend(clamped) : 0.0f;
+    if (w <= 0.0f || location.Count == 0u || location.Level0 > base)
+        return location; // the fallback ancestor answers alone: its own parent is coarser still
+    location.Weight0 = location.Weight0 * (1.0f - w);
+    location.Weight1 = location.Weight1 * (1.0f - w);
+    return CBT_PageLocateLevel(point, base + 1u, w, location, field);
+}
+
+// The position of `point` past the first owned sample of its page of `level`: one read of the level's
+// shape serves every plane of the page.
+CBTPageOwned CBT_PageOwnedAt(CBTPagePoint point, uint level)
+{
+    CBTPageLevel shape = CBT_PageLevelShape(level);
+    uint pageX = CBT_PageIndex(point.TexelX, level, shape.PagesX);
+    uint pageZ = CBT_PageIndex(point.TexelZ, level, shape.PagesZ);
+    CBTPageOwned owned;
+    owned.X = CBT_PageStride(point.TexelX, point.FractionX, level, pageX) - float(CBT_PAGE_APRON);
+    owned.Z = CBT_PageStride(point.TexelZ, point.FractionZ, level, pageZ) - float(CBT_PAGE_APRON);
+    return owned;
+}
+
+// The absolute texel along X at `owned` in the page held in `slot`, in a plane texture whose slots are
+// `stride` texels a side with the page's first owned sample `apron` texels in: a lattice plane
+// CBT_PAGE_STRIDE and CBT_PAGE_APRON, a block plane CBT_PAGE_BLOCK_STRIDE and CBT_PAGE_BLOCK_APRON.
+float CBT_PageSlotTexelX(CBTPageOwned owned, uint slot, uint stride, uint apron, CBTPageField field)
+{
+    return float((slot % field.SlotsPerRow) * stride + apron) + owned.X;
+}
+
+// CBT_PageSlotTexelX along Z.
+float CBT_PageSlotTexelZ(CBTPageOwned owned, uint slot, uint stride, uint apron, CBTPageField field)
+{
+    return float((slot / field.SlotsPerRow) * stride + apron) + owned.Z;
 }
 // GE_SHARED_PAGE_RESOLVE_END
 

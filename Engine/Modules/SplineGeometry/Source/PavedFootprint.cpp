@@ -1,6 +1,7 @@
 #include "SplineGeometry/PavedFootprint.h"
 
 #include "PavedArmPath.h"
+#include "PavedMouth.h"
 #include "PavedStopSolver.h"
 #include "PavedTaggedRing.h"
 
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iterator>
 
 namespace GameEngine::SplineGeometry
 {
@@ -60,8 +62,8 @@ struct RegionInputs
     std::vector<Vector2> Points;
 };
 
-// The source of the input edge segment ab lies on within kPavedTouchMeters; an Open edge wins, so
-// no border crosses an approach. New when none holds it.
+// The source of the input edge segment ab lies on within kPavedTouchMeters. An Open edge wins, then a
+// FlushCut edge, so no border crosses an approach or a flush cut. New when none holds it.
 PavedEdge MatchEdge(const Vector2& a, const Vector2& b, const RegionInputs& inputs)
 {
     const Rect bounds = TouchBoundsOf(std::array<Vector2, 2>{a, b});
@@ -78,7 +80,7 @@ PavedEdge MatchEdge(const Vector2& a, const Vector2& b, const RegionInputs& inpu
                 continue;
             if (ring->Edges[i].Source == PavedEdgeSource::Open)
                 return ring->Edges[i];
-            if (match.Source == PavedEdgeSource::New)
+            if (match.Source == PavedEdgeSource::New || ring->Edges[i].Source == PavedEdgeSource::FlushCut)
                 match = ring->Edges[i];
         }
     }
@@ -134,8 +136,14 @@ struct OpenEdge
     Vector2 B;
 };
 
-// The runs of one boundary ring, cut at its Open edges (the whole ring when it has none); the Open
-// edges appended to `openEdges`.
+// Whether no border runs along `edge`.
+bool BreaksRun(const PavedEdge& edge)
+{
+    return edge.Source == PavedEdgeSource::Open || edge.Source == PavedEdgeSource::FlushCut;
+}
+
+// The runs of one boundary ring, cut at its Open and FlushCut edges (the whole ring when it has
+// none); the Open edges appended to `openEdges`.
 void AppendRuns(const AreaRing& ring, bool hole, const RegionInputs& inputs, std::vector<PavedBoundaryRun>& runs,
                 std::vector<OpenEdge>& openEdges)
 {
@@ -144,36 +152,43 @@ void AppendRuns(const AreaRing& ring, bool hole, const RegionInputs& inputs, std
     const std::size_t count = points.size();
     std::vector<PavedEdge> edges;
     edges.reserve(count);
-    std::size_t firstOpen = count;
+    std::size_t firstBreak = count;
     for (std::size_t i = 0; i < count; ++i)
     {
         edges.push_back(MatchEdge(points[i], points[(i + 1) % count], inputs));
-        if (edges[i].Source != PavedEdgeSource::Open)
+        if (!BreaksRun(edges[i]))
             continue;
-        openEdges.push_back(OpenEdge{points[i], points[(i + 1) % count]});
-        firstOpen = std::min(firstOpen, i);
+        if (edges[i].Source == PavedEdgeSource::Open)
+            openEdges.push_back(OpenEdge{points[i], points[(i + 1) % count]});
+        firstBreak = std::min(firstBreak, i);
     }
-    if (firstOpen == count)
+    if (firstBreak == count)
     {
         runs.push_back(PavedBoundaryRun{points, std::move(edges), std::move(isNew), true, hole});
         return;
     }
-    // Once round the ring from the edge after the first Open one.
+    // Once round the ring from the edge after the first one that breaks a run.
     PavedBoundaryRun run;
     run.Hole = hole;
+    run.StartBreak = edges[firstBreak];
+    run.StartBreakDirection = points[(firstBreak + 1) % count] - points[firstBreak];
     for (std::size_t step = 1; step <= count; ++step)
     {
-        const std::size_t edge = (firstOpen + step) % count;
-        if (edges[edge].Source == PavedEdgeSource::Open)
+        const std::size_t edge = (firstBreak + step) % count;
+        if (BreaksRun(edges[edge]))
         {
             if (!run.Edges.empty())
             {
                 run.Points.push_back(points[edge]);
                 run.NewPoints.push_back(isNew[edge]);
+                run.EndBreak = edges[edge];
+                run.EndBreakDirection = points[(edge + 1) % count] - points[edge];
                 runs.push_back(std::move(run));
             }
             run = PavedBoundaryRun{};
             run.Hole = hole;
+            run.StartBreak = edges[edge];
+            run.StartBreakDirection = points[(edge + 1) % count] - points[edge];
             continue;
         }
         run.Points.push_back(points[edge]);
@@ -217,17 +232,28 @@ PavedFootprint BuildPavedFootprint(const PavedFootprintInput& input)
         if (!armValid[arm])
             footprint.Issues.push_back(PavedFootprintIssue{PavedFootprintIssueKind::SliverArm, arm});
     }
-    const std::vector<PavedTaggedRing> excludes =
+    // The excludes, then the flush cuts.
+    std::vector<PavedTaggedRing> cutRings =
         TagRings(input.Excludes, PavedEdgeSource::Exclude, PavedFootprintIssueKind::SliverExclude, footprint.Issues);
+    std::vector<PavedTaggedRing> flushCuts =
+        TagRings(input.FlushCuts, PavedEdgeSource::FlushCut, PavedFootprintIssueKind::SliverFlushCut, footprint.Issues);
+    cutRings.insert(cutRings.end(), std::make_move_iterator(flushCuts.begin()), std::make_move_iterator(flushCuts.end()));
     std::vector<AreaRing> cuts;
-    for (const PavedTaggedRing& exclude : excludes)
+    for (const PavedTaggedRing& cut : cutRings)
     {
-        if (!exclude.Ring.empty())
-            cuts.push_back(exclude.Ring);
+        if (!cut.Ring.empty())
+            cuts.push_back(cut.Ring);
     }
 
     PavedStopSolver solver(input.Arms, armValid, std::move(outlines));
     solver.Solve();
+    const std::vector<PavedMouth> mouths =
+        BuildPavedMouths(solver.GetPaths(), armValid, solver.GetOutlines(), input.MouthRadii);
+    for (uint32 arm = 0; arm < armCount; ++arm)
+    {
+        if (!mouths[arm].Rings.empty())
+            solver.EndAtMouth(arm, mouths[arm].Throat, mouths[arm].BothSides);
+    }
 
     // Items: the outlines, then the arms.
     const uint32 itemCount = outlineCount + armCount;
@@ -267,14 +293,18 @@ PavedFootprint BuildPavedFootprint(const PavedFootprintInput& input)
         for (const uint32 outline : region.Outlines)
             inputs.Rings.push_back(&solver.GetOutline(outline));
         for (const uint32 arm : region.Arms)
+        {
             inputs.Rings.push_back(&solver.GetRibbon(arm));
+            for (const PavedTaggedRing& mouth : mouths[arm].Rings)
+                inputs.Rings.push_back(&mouth);
+        }
         std::vector<AreaRing> unions;
         for (const PavedTaggedRing* ring : inputs.Rings)
             unions.push_back(ring->Ring);
-        for (const PavedTaggedRing& exclude : excludes)
+        for (const PavedTaggedRing& cut : cutRings)
         {
-            if (!exclude.Ring.empty())
-                inputs.Rings.push_back(&exclude);
+            if (!cut.Ring.empty())
+                inputs.Rings.push_back(&cut);
         }
         for (const PavedTaggedRing* ring : inputs.Rings)
             inputs.Points.insert(inputs.Points.end(), ring->Ring.begin(), ring->Ring.end());
@@ -311,6 +341,18 @@ PavedFootprint BuildPavedFootprint(const PavedFootprintInput& input)
         }
     }
     return footprint;
+}
+
+std::vector<AreaRing> BuildPavedArmRibbons(std::span<const PavedArm> arms)
+{
+    const std::vector<PavedArmPath> paths = BuildPavedArmPaths(arms);
+    std::vector<AreaRing> ribbons(arms.size());
+    for (uint32 arm = 0; arm < arms.size(); ++arm)
+    {
+        if (!IsSliverArm(arms[arm]))
+            ribbons[arm] = BuildRibbon(paths[arm], paths[arm].GetLength(), arm).Ring;
+    }
+    return ribbons;
 }
 
 } // namespace GameEngine::SplineGeometry

@@ -47,7 +47,7 @@ struct HpBarSystem : GameEngine::ECS::SystemBase
         using namespace GameEngine;
         if (UIElement* fill = FindInDocument(entityId, "hp-fill"_sid))
         {
-            fill->Overrides().Set(Style::Width, StyleLength::Percent(static_cast<float>(hp)));
+            fill->Style().Set(Style::Width, StyleLength::Percent(static_cast<float>(hp)));
             // State goes on as a CSS class; the stylesheet owns what it looks like.
             if (hp <= kLowHealthPercent)
                 fill->AddClass("low-health");

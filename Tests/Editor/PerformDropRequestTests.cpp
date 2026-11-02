@@ -76,12 +76,12 @@ RecordingDropTarget* MountTarget(UIManager& ui)
 {
     ui.SetLayoutSizeOverride(400, 300);
     auto root = std::make_unique<UIElement>();
-    root->Overrides()
+    root->Style()
         .Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(400.0f))
         .Set(GameEngine::Style::Height, GameEngine::StyleLength::Px(300.0f));
     auto targetOwned = std::make_unique<RecordingDropTarget>();
     RecordingDropTarget* target = targetOwned.get();
-    target->Overrides()
+    target->Style()
         .Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(200.0f))
         .Set(GameEngine::Style::Height, GameEngine::StyleLength::Px(100.0f));
     root->AddChild(std::move(targetOwned));

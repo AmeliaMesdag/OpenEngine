@@ -42,7 +42,7 @@ struct SunStateRig
     {
         const Rendering::CameraId camera = Rig.Services.Views().AllocateCamera(name);
         Rendering::CameraData data{};
-        data.cameraPos[1] = cameraHeight;
+        data.cameraPos.y = cameraHeight;
         Rig.Services.Views().SetCameraData(camera, data);
         Rig.Services.Views().AllocateView(name, camera, purpose);
     }

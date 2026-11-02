@@ -6,6 +6,7 @@
 #include "Image/Resample.h"
 #include "Logger/Logger.h"
 #include "Mathematics/Interpolation.h"
+#include "Mathematics/Vector3.h"
 
 #include <algorithm>
 #include <array>
@@ -184,11 +185,20 @@ std::string TextureCookArtifactName(const GUID& guid, uint64 sourceHash,
     return guid.ToString() + hashes + ".ktx2";
 }
 
+std::filesystem::path TextureCookVarianceCompanionPath(const std::filesystem::path& parentArtifact)
+{
+    std::filesystem::path companion = parentArtifact;
+    companion.replace_extension(".nvar.ktx2");
+    return companion;
+}
+
 namespace
 {
     // Bump when the cook recipe changes (filtering, encoder settings, container
     // layout): every cached artifact re-keys to a clean miss.
     constexpr uint32 kTextureCookVersion = 3;
+    // Bump when the normal-variance companion recipe changes: only normal maps re-key.
+    constexpr uint32 kNormalVarianceCompanionVersion = 1;
 
     // Encoder-library versions folded into the config hash: a vcpkg bump that
     // changes artifact bytes under an unchanged recipe must re-key to a clean
@@ -795,6 +805,13 @@ uint64 ComputeTextureCookSourceHash(const uint8* bytes, size_t size)
     return FnvAppend(kFnvOffset, bytes, size);
 }
 
+bool HasNormalVarianceCompanion(const TextureCookInputs& inputs, TextureCookOutput output)
+{
+    return inputs.Settings.Usage == TextureCookUsage::Normal &&
+           inputs.Settings.Compression == TextureCookCompression::Auto &&
+           output == TextureCookOutput::BC5 && inputs.Settings.MipsEnabled && inputs.Settings.MipLimit != 1;
+}
+
 uint64 ComputeTextureCookConfigHash(const TextureCookInputs& inputs, TextureCookOutput output)
 {
     // Canonical debuggable key string. The encoder-version folds tie the key to
@@ -814,6 +831,10 @@ uint64 ComputeTextureCookConfigHash(const TextureCookInputs& inputs, TextureCook
     key += "|sw="; key += swizzle;
     key += "|out="; key += std::to_string(static_cast<uint32>(output));
     key += "|mip="; key += kStbirVersion;
+    if (HasNormalVarianceCompanion(inputs, output))
+    {
+        key += "|nvar="; key += std::to_string(kNormalVarianceCompanionVersion);
+    }
     if (inputs.Settings.PreserveAlphaCoverage)
     {
         // Preserve every legacy key when disabled. Only the opt-in recipe is
@@ -855,6 +876,19 @@ uint32 ComputeTextureCookMipCount(uint32 width, uint32 height, const TextureCook
 namespace
 {
     using AlphaHistogram = std::array<uint64, 256>;
+    using Mathematics::Vector3;
+
+    constexpr float kMinNormalLength = 1e-5f;
+
+    // An RGBA8 texel's XYZ as a unit normal; a degenerate texel decodes as +Z.
+    Vector3 DecodeUnitNormal(const uint8* px)
+    {
+        const Vector3 n(static_cast<float>(px[0]) / 255.0f * 2.0f - 1.0f,
+                        static_cast<float>(px[1]) / 255.0f * 2.0f - 1.0f,
+                        static_cast<float>(px[2]) / 255.0f * 2.0f - 1.0f);
+        const float length = n.Length();
+        return length > kMinNormalLength ? n / length : Vector3(0.0f, 0.0f, 1.0f);
+    }
 
     AlphaHistogram AlphaCounts(const TextureCookMipLevel& mip)
     {
@@ -937,28 +971,17 @@ namespace
     // filtered normals shorten, which flattens relief at distance.
     void RenormalizeNormalsRGBA8(TextureCookMipLevel& mip)
     {
+        const auto toByte = [](float v) {
+            return static_cast<uint8>(std::clamp((v * 0.5f + 0.5f) * 255.0f + 0.5f, 0.0f, 255.0f));
+        };
         const size_t count = static_cast<size_t>(mip.Width) * mip.Height;
         for (size_t i = 0; i < count; ++i)
         {
             uint8* px = mip.Bytes.data() + i * 4;
-            float x = static_cast<float>(px[0]) / 255.0f * 2.0f - 1.0f;
-            float y = static_cast<float>(px[1]) / 255.0f * 2.0f - 1.0f;
-            float z = static_cast<float>(px[2]) / 255.0f * 2.0f - 1.0f;
-            const float len = std::sqrt(x * x + y * y + z * z);
-            if (len > 1e-5f)
-            {
-                x /= len; y /= len; z /= len;
-            }
-            else
-            {
-                x = 0.0f; y = 0.0f; z = 1.0f;
-            }
-            const auto toByte = [](float v) {
-                return static_cast<uint8>(std::clamp((v * 0.5f + 0.5f) * 255.0f + 0.5f, 0.0f, 255.0f));
-            };
-            px[0] = toByte(x);
-            px[1] = toByte(y);
-            px[2] = toByte(z);
+            const Vector3 n = DecodeUnitNormal(px);
+            px[0] = toByte(n.x);
+            px[1] = toByte(n.y);
+            px[2] = toByte(n.z);
         }
     }
 }
@@ -1045,6 +1068,108 @@ namespace
         }
     }
 
+    // Output rows per variance band: a band of a 512-texel-wide level is 16k means, enough work
+    // to repay a helper's hand-off.
+    constexpr uint32 kVarianceBandRows = 32;
+
+    // sigma of a mean normal of length L, sigma^2 = (1 - L) / L (Toksvig), L clamped to [0.5, 1].
+    uint8 EncodeNormalSigmaByte(const Vector3& mean)
+    {
+        const float length = std::clamp(mean.Length(), 0.5f, 1.0f);
+        const float sigma = std::sqrt((1.0f - length) / length);
+        return static_cast<uint8>(std::clamp(sigma * 255.0f + 0.5f, 0.0f, 255.0f));
+    }
+
+    // Box-filters rows [rowBegin, rowEnd) of a level of normals halved to max(extent / 2, 1), and
+    // writes each mean and its sigma texel. An odd last row or column folds into the last texel,
+    // so every source texel counts once. The means stay unnormalized.
+    template <typename FetchNormal>
+    void HalveNormalRows(uint32 width, uint32 height, TextureCookMipLevel& sigmaLevel, uint32 rowBegin,
+                         uint32 rowEnd, const FetchNormal& fetch, std::vector<Vector3>& means)
+    {
+        const uint32 halfWidth = sigmaLevel.Width;
+        const uint32 halfHeight = sigmaLevel.Height;
+        for (uint32 y = rowBegin; y < rowEnd; ++y)
+        {
+            const uint32 y0 = std::min(y * 2u, height - 1u);
+            const uint32 y1 = y + 1u == halfHeight ? height : std::min(y * 2u + 2u, height);
+            for (uint32 x = 0; x < halfWidth; ++x)
+            {
+                const uint32 x0 = std::min(x * 2u, width - 1u);
+                const uint32 x1 = x + 1u == halfWidth ? width : std::min(x * 2u + 2u, width);
+                Vector3 sum(0.0f, 0.0f, 0.0f);
+                for (uint32 sy = y0; sy < y1; ++sy)
+                    for (uint32 sx = x0; sx < x1; ++sx)
+                        sum = sum + fetch(static_cast<size_t>(sy) * width + sx);
+                const size_t index = static_cast<size_t>(y) * halfWidth + x;
+                means[index] = sum / static_cast<float>((y1 - y0) * (x1 - x0));
+                const uint8 sigma = EncodeNormalSigmaByte(means[index]);
+                uint8* px = sigmaLevel.Bytes.data() + index * 4;
+                px[0] = sigma;
+                px[1] = sigma;
+                px[2] = sigma;
+                px[3] = 255;
+            }
+        }
+    }
+
+    // One companion level from a width x height level of normals: the sigma level and its means.
+    // The rows run as bands on the cook's workers, or on the calling thread without them; each
+    // band writes its own rows, so the bytes do not depend on the split. False on a cancel.
+    template <typename FetchNormal>
+    bool BuildVarianceLevel(uint32 width, uint32 height, const FetchNormal& fetch, TextureCookWorkers* workers,
+                            const std::function<bool()>& cancelRequested, TextureCookMipLevel& outLevel,
+                            std::vector<Vector3>& outMeans)
+    {
+        outLevel.Width = std::max(width / 2u, 1u);
+        outLevel.Height = std::max(height / 2u, 1u);
+        const size_t texels = static_cast<size_t>(outLevel.Width) * outLevel.Height;
+        outLevel.Bytes.resize(texels * 4);
+        outMeans.resize(texels);
+        const uint32 bandCount = (outLevel.Height + kVarianceBandRows - 1u) / kVarianceBandRows;
+        const auto runBand = [&](uint32 band)
+        {
+            const uint32 rowBegin = band * kVarianceBandRows;
+            const uint32 rowEnd = std::min(rowBegin + kVarianceBandRows, outLevel.Height);
+            HalveNormalRows(width, height, outLevel, rowBegin, rowEnd, fetch, outMeans);
+            return true;
+        };
+        if (workers && bandCount > 1u)
+            return workers->RunBands(bandCount, runBand, cancelRequested);
+        for (uint32 band = 0; band < bandCount; ++band)
+            runBand(band);
+        return true;
+    }
+
+    // The companion's levels: level j is sigma of normal mip j + 1, at that mip's extent. The
+    // means box-filter the base's unit normals, so each level sees its whole footprint. False on
+    // a cancel.
+    bool BuildNormalVarianceCompanionLevels(const TextureCookMipLevel& base, uint32 normalMipCount,
+                                            TextureCookWorkers* workers,
+                                            const std::function<bool()>& cancelRequested,
+                                            std::vector<TextureCookMipLevel>& outLevels)
+    {
+        const uint32 levelCount = std::max(normalMipCount, 2u) - 1u;
+        outLevels.assign(levelCount, {});
+        const uint8* baseBytes = base.Bytes.data();
+        std::vector<Vector3> means;
+        std::vector<Vector3> previousMeans;
+        if (!BuildVarianceLevel(base.Width, base.Height,
+                                [baseBytes](size_t index) { return DecodeUnitNormal(baseBytes + index * 4); },
+                                workers, cancelRequested, outLevels[0], means))
+            return false;
+        for (uint32 level = 1; level < levelCount; ++level)
+        {
+            previousMeans.swap(means);
+            const TextureCookMipLevel& previous = outLevels[level - 1];
+            if (!BuildVarianceLevel(previous.Width, previous.Height,
+                                    [&previousMeans](size_t index) { return previousMeans[index]; }, workers,
+                                    cancelRequested, outLevels[level], means))
+                return false;
+        }
+        return true;
+    }
+
     uint32 VkFormatFor(TextureCookOutput out, bool srgb, bool isFloat)
     {
         switch (out)
@@ -1060,13 +1185,101 @@ namespace
             return srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
         }
     }
+
+    // Encodes every level to `output` and serializes the chain as KTX2. This check catches a
+    // cancel between levels; CompressTextureCookLevel checks again between block-row bands
+    // within a level, which bounds the wait on a large base level. A failure writes no bytes.
+    bool EncodeTextureCookChainKtx2(std::vector<TextureCookMipLevel>& chain, bool isFloat, bool srgb,
+                                    TextureCookOutput output, std::vector<uint8>& outKtx2Bytes,
+                                    std::string& outError, const std::function<bool()>& cancelRequested,
+                                    TextureCookWorkers* workers)
+    {
+        std::vector<std::vector<uint8>> levelPayloads(chain.size());
+        for (size_t i = 0; i < chain.size(); ++i)
+        {
+            if (cancelRequested && cancelRequested())
+            {
+                outKtx2Bytes.clear();
+                outError = kTextureCookCancelledError;
+                return false;
+            }
+
+            if (output == TextureCookOutput::Uncompressed)
+            {
+                levelPayloads[i] = std::move(chain[i].Bytes);
+            }
+            else if (!CompressTextureCookLevel(chain[i], isFloat, output, /*bandBlocks=*/0,
+                                              levelPayloads[i], outError, cancelRequested, workers))
+            {
+                outKtx2Bytes.clear();
+                return false;
+            }
+        }
+
+        // Serialize KTX2. The vkFormat carries block layout + transfer function;
+        // the loader treats the container DFD as authoritative for color space.
+        ktxTextureCreateInfo createInfo{};
+        createInfo.vkFormat = VkFormatFor(output, srgb, isFloat);
+        createInfo.baseWidth = chain[0].Width;
+        createInfo.baseHeight = chain[0].Height;
+        createInfo.baseDepth = 1;
+        createInfo.numDimensions = 2;
+        createInfo.numLevels = static_cast<ktx_uint32_t>(chain.size());
+        createInfo.numLayers = 1;
+        createInfo.numFaces = 1;
+        createInfo.isArray = KTX_FALSE;
+        createInfo.generateMipmaps = KTX_FALSE;
+
+        ktxTexture2* texture = nullptr;
+        KTX_error_code err = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &texture);
+        if (err != KTX_SUCCESS)
+        {
+            outError = std::string("ktxTexture2_Create failed: ") + ktxErrorString(err);
+            return false;
+        }
+
+        for (size_t level = 0; level < levelPayloads.size(); ++level)
+        {
+            err = ktxTexture_SetImageFromMemory(ktxTexture(texture), static_cast<ktx_uint32_t>(level), 0, 0,
+                                                levelPayloads[level].data(), levelPayloads[level].size());
+            if (err != KTX_SUCCESS)
+            {
+                outError = std::string("ktx SetImageFromMemory failed: ") + ktxErrorString(err);
+                ktxTexture_Destroy(ktxTexture(texture));
+                return false;
+            }
+        }
+
+        // Pin the writer metadata so cook output stays byte-stable across libktx
+        // version bumps (the library would otherwise stamp its own version string).
+        const char* writer = "GameEngine.TextureCook v1";
+        ktxHashList_AddKVPair(&texture->kvDataHead, KTX_WRITER_KEY,
+                              static_cast<ktx_uint32_t>(std::strlen(writer) + 1), writer);
+
+        ktx_uint8_t* mem = nullptr;
+        ktx_size_t memSize = 0;
+        err = ktxTexture_WriteToMemory(ktxTexture(texture), &mem, &memSize);
+        ktxTexture_Destroy(ktxTexture(texture));
+        if (err != KTX_SUCCESS || !mem || memSize == 0)
+        {
+            outError = std::string("ktx WriteToMemory failed: ") + ktxErrorString(err);
+            if (mem)
+                free(mem);
+            return false;
+        }
+
+        outKtx2Bytes.assign(mem, mem + memSize);
+        free(mem);
+        return true;
+    }
 } // namespace
 
 bool CookTexture(const uint8* srcBytes, size_t srcSize, std::string_view sourceName, const std::string& extLower,
                  const TextureCookInputs& inputs, TextureCookOutput output,
                  std::vector<uint8>& outKtx2Bytes, std::string& outError,
                  const std::function<bool()>& cancelRequested,
-                 TextureCookWorkers* workers)
+                 TextureCookWorkers* workers,
+                 std::vector<uint8>* outVarianceCompanionKtx2)
 {
     const auto isCancelled = [&cancelRequested]
     { return cancelRequested && cancelRequested(); };
@@ -1148,86 +1361,29 @@ bool CookTexture(const uint8* srcBytes, size_t srcSize, std::string_view sourceN
         return false;
     }
 
-    // Encode levels. This check catches a cancel between levels;
-    // CompressTextureCookLevel checks again between block-row bands within a
-    // level, which is what bounds the wait on a large base level. Bailing
-    // anywhere here produces no bytes, so the caller writes no cache entry.
-    std::vector<std::vector<uint8>> levelPayloads(chain.size());
-    for (size_t i = 0; i < chain.size(); ++i)
+    if (outVarianceCompanionKtx2)
     {
-        if (isCancelled())
+        outVarianceCompanionKtx2->clear();
+        if (!isFloat && HasNormalVarianceCompanion(inputs, output))
         {
-            outKtx2Bytes.clear();
-            outError = kTextureCookCancelledError;
-            return false;
-        }
-
-        if (output == TextureCookOutput::Uncompressed)
-        {
-            levelPayloads[i] = std::move(chain[i].Bytes);
-        }
-        else if (!CompressTextureCookLevel(chain[i], isFloat, output, /*bandBlocks=*/0,
-                                          levelPayloads[i], outError, cancelRequested, workers))
-        {
-            outKtx2Bytes.clear();
-            return false;
+            std::vector<TextureCookMipLevel> companion;
+            if (!BuildNormalVarianceCompanionLevels(chain[0], mipCount, workers, cancelRequested, companion))
+            {
+                outVarianceCompanionKtx2->clear();
+                outError = kTextureCookCancelledError;
+                return false;
+            }
+            if (!EncodeTextureCookChainKtx2(companion, false, false, TextureCookOutput::BC4,
+                                            *outVarianceCompanionKtx2, outError, cancelRequested, workers))
+                return false;
         }
     }
-
-    // Serialize KTX2. The vkFormat carries block layout + transfer function;
-    // the loader treats the container DFD as authoritative for color space.
-    ktxTextureCreateInfo createInfo{};
-    createInfo.vkFormat = VkFormatFor(output, srgb, isFloat);
-    createInfo.baseWidth = chain[0].Width;
-    createInfo.baseHeight = chain[0].Height;
-    createInfo.baseDepth = 1;
-    createInfo.numDimensions = 2;
-    createInfo.numLevels = static_cast<ktx_uint32_t>(chain.size());
-    createInfo.numLayers = 1;
-    createInfo.numFaces = 1;
-    createInfo.isArray = KTX_FALSE;
-    createInfo.generateMipmaps = KTX_FALSE;
-
-    ktxTexture2* texture = nullptr;
-    KTX_error_code err = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &texture);
-    if (err != KTX_SUCCESS)
+    if (!EncodeTextureCookChainKtx2(chain, isFloat, srgb, output, outKtx2Bytes, outError, cancelRequested, workers))
     {
-        outError = std::string("ktxTexture2_Create failed: ") + ktxErrorString(err);
+        if (outVarianceCompanionKtx2)
+            outVarianceCompanionKtx2->clear();
         return false;
     }
-
-    for (size_t level = 0; level < levelPayloads.size(); ++level)
-    {
-        err = ktxTexture_SetImageFromMemory(ktxTexture(texture), static_cast<ktx_uint32_t>(level), 0, 0,
-                                            levelPayloads[level].data(), levelPayloads[level].size());
-        if (err != KTX_SUCCESS)
-        {
-            outError = std::string("ktx SetImageFromMemory failed: ") + ktxErrorString(err);
-            ktxTexture_Destroy(ktxTexture(texture));
-            return false;
-        }
-    }
-
-    // Pin the writer metadata so cook output stays byte-stable across libktx
-    // version bumps (the library would otherwise stamp its own version string).
-    const char* writer = "GameEngine.TextureCook v1";
-    ktxHashList_AddKVPair(&texture->kvDataHead, KTX_WRITER_KEY,
-                          static_cast<ktx_uint32_t>(std::strlen(writer) + 1), writer);
-
-    ktx_uint8_t* mem = nullptr;
-    ktx_size_t memSize = 0;
-    err = ktxTexture_WriteToMemory(ktxTexture(texture), &mem, &memSize);
-    ktxTexture_Destroy(ktxTexture(texture));
-    if (err != KTX_SUCCESS || !mem || memSize == 0)
-    {
-        outError = std::string("ktx WriteToMemory failed: ") + ktxErrorString(err);
-        if (mem)
-            free(mem);
-        return false;
-    }
-
-    outKtx2Bytes.assign(mem, mem + memSize);
-    free(mem);
     return true;
 }
 
@@ -1235,7 +1391,7 @@ bool CookTexture(const uint8* srcBytes, size_t srcSize, std::string_view sourceN
 
 bool CookTexture(const uint8*, size_t, std::string_view, const std::string&, const TextureCookInputs&,
                  TextureCookOutput, std::vector<uint8>&, std::string& outError,
-                 const std::function<bool()>&, TextureCookWorkers*)
+                 const std::function<bool()>&, TextureCookWorkers*, std::vector<uint8>*)
 {
     outError = "texture cook requires libktx at build time";
     return false;

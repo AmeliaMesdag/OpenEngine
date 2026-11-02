@@ -56,12 +56,13 @@ struct RowParts
 RowParts FindRowParts(UIElement& row)
 {
     RowParts parts;
-    parts.Member = dynamic_cast<Toggle*>(InspectorDrag::FindChildByClass(&row, "entity-member-toggle"));
-    parts.Glyph = InspectorDrag::FindChildByClass(&row, "entity-member-glyph");
-    UIElement* text = InspectorDrag::FindChildByClass(&row, "entity-member-text");
-    parts.Title = dynamic_cast<Label*>(InspectorDrag::FindChildByClass(text, "entity-member-title"));
-    parts.Note = dynamic_cast<Label*>(InspectorDrag::FindChildByClass(text, "entity-member-note"));
-    parts.Modes = InspectorDrag::FindChildByClass(&row, "entity-member-mode");
+    UIElement* name = InspectorDrag::FindChildByClass(&row, "entity-member-name");
+    UIElement* value = InspectorDrag::FindChildByClass(&row, "entity-member-value");
+    parts.Glyph = InspectorDrag::FindChildByClass(name, "entity-member-glyph");
+    parts.Title = dynamic_cast<Label*>(InspectorDrag::FindChildByClass(name, "entity-member-title"));
+    parts.Member = dynamic_cast<Toggle*>(InspectorDrag::FindChildByClass(value, "entity-member-toggle"));
+    parts.Note = dynamic_cast<Label*>(InspectorDrag::FindChildByClass(value, "entity-member-note"));
+    parts.Modes = InspectorDrag::FindChildByClass(value, "entity-member-mode");
     if (!parts.Modes)
         return parts;
     std::size_t segment = 0;
@@ -74,21 +75,20 @@ RowParts FindRowParts(UIElement& row)
     return parts;
 }
 
-// A segment of a member's modes, filled when it is the member's mode. A click on another segment
+// A segment of a row's modes, filled when it is a member's mode. A click on another segment
 // calls SetMode. The button attaches Button.css to itself; this sheet goes after it, so that the
 // control's single-class rules outrank the segmented look at equal specificity.
-void ShowModeSegment(Button& segment, const Row& row, const Mode& mode, bool member, bool editable,
-                     const Handlers& handlers)
+void ShowModeSegment(Button& segment, const Row& row, const Mode& mode, bool editable, const Handlers& handlers)
 {
     segment.RequestSubtreeStyleAssetPath(kStyleAssetPath, "editor");
     segment.SetText(mode.Label);
     segment.SetTooltip(mode.Tooltip);
-    const bool current = member && row.CurrentMode == mode.Value;
+    const bool current = row.Member && row.CurrentMode == mode.Value;
     if (current)
         segment.AddClass(kSelectedSegmentClass);
     if (current && mode.Warning)
         segment.AddClass("entity-member-segment-warning");
-    segment.SetEnabled(member && editable);
+    segment.SetEnabled(row.Member && editable);
     if (current)
         return;
     segment.RegisterEventHandler(kEventButtonClick,
@@ -98,11 +98,16 @@ void ShowModeSegment(Button& segment, const Row& row, const Mode& mode, bool mem
                                  });
 }
 
-// The row's modes: one mode as a label, two as segments that only a member of an editable list can
-// switch.
-void ShowModes(const RowParts& parts, const Row& row, bool member, bool editable, const Handlers& handlers)
+// The row's modes: none, one as a label, or two as segments that only a member of an editable list
+// can switch.
+void ShowModes(const RowParts& parts, const Row& row, const Content& content, const Handlers& handlers)
 {
-    if (row.Modes.empty() || row.Modes.size() > kMaxModes)
+    if (row.Modes.empty())
+    {
+        parts.Modes->AddClass(kHiddenClass);
+        return;
+    }
+    if (row.Modes.size() > kMaxModes)
     {
         Logger::Log::Error("EntityMemberList: a row offers one mode or two, and this row offers {}.", row.Modes.size());
         parts.Modes->AddClass(kHiddenClass);
@@ -120,24 +125,22 @@ void ShowModes(const RowParts& parts, const Row& row, bool member, bool editable
     }
     parts.ModeLabel->AddClass(kHiddenClass);
     for (std::size_t i = 0; i < kMaxModes; ++i)
-        ShowModeSegment(*parts.Segments[i], row, row.Modes[i], member, editable, handlers);
+        ShowModeSegment(*parts.Segments[i], row, row.Modes[i], content.Editable, handlers);
 }
 
-void ShowMemberToggle(Toggle& toggle, const Row& row, bool member, const Content& content, const Handlers& handlers)
+void ShowMemberToggle(Toggle& toggle, const Row& row, const Content& content, const Handlers& handlers)
 {
-    toggle.SetValueWithoutNotify(member);
-    toggle.SetTooltip(member ? content.Text.MemberTooltip : content.Text.CandidateTooltip);
-    const bool refused = !member && !content.AddRefusal.empty();
+    toggle.SetValueWithoutNotify(row.On);
+    toggle.SetTooltip(row.Member ? content.Text.MemberTooltip : content.Text.CandidateTooltip);
+    const bool refused = !row.Member && !content.AddRefusal.empty();
     if (refused)
         toggle.SetTooltip(content.AddRefusal);
     if (refused || !content.Editable)
         toggle.SetEnabled(false);
-    toggle.SetOnValueChanged(
-        [add = handlers.Add, remove = handlers.Remove, entity = row.Entity, member](const bool& checked) {
-            const std::function<void(ECS::EntityHandle)>& handler = checked ? add : remove;
-            if (checked != member && handler)
-                handler(entity);
-        });
+    toggle.SetOnValueChanged([setOn = handlers.SetOn, entity = row.Entity, on = row.On](const bool& checked) {
+        if (checked != on && setOn)
+            setOn(entity, checked);
+    });
 }
 
 void ShowGlyph(UIElement& glyph, const Row& row)
@@ -152,7 +155,7 @@ void ShowGlyph(UIElement& glyph, const Row& row)
     glyph.SetTooltip(row.GlyphTooltip);
 }
 
-void ShowTitle(Label& title, const Row& row, bool member, const Content& content, const Handlers& handlers)
+void ShowTitle(Label& title, const Row& row, const Content& content, const Handlers& handlers)
 {
     if (!row.Live)
     {
@@ -160,10 +163,10 @@ void ShowTitle(Label& title, const Row& row, bool member, const Content& content
         title.SetText(content.Text.DeletedTitle);
         return;
     }
-    if (!member)
+    if (!row.On)
         title.AddClass("entity-member-title-out");
     title.SetText(row.Title);
-    title.SetTooltip("Click to select it");
+    title.SetTooltip(row.Title + ". Click to select it.");
     title.RegisterEventHandler(kEventMouseUp, [select = handlers.Select, entity = row.Entity](UIEvent& event) {
         if (event.Button == 0 && select)
             select(entity);
@@ -180,7 +183,7 @@ void ShowNote(Label& note, const Row& row)
 }
 
 // The row of one entity, or null with an error when the row layout does not load or lacks a part.
-std::unique_ptr<UIElement> BuildRow(const Row& row, bool member, const Content& content, const Handlers& handlers)
+std::unique_ptr<UIElement> BuildRow(const Row& row, const Content& content, const Handlers& handlers)
 {
     std::unique_ptr<UIElement> element = Editor::ControlLayoutLoader::Load(kRowLayoutAssetPath, {});
     if (!element)
@@ -193,12 +196,14 @@ std::unique_ptr<UIElement> BuildRow(const Row& row, bool member, const Content& 
                            kRowLayoutAssetPath);
         return nullptr;
     }
-    element->AddClass(member ? "entity-member-in" : "entity-member-out");
-    ShowMemberToggle(*parts.Member, row, member, content, handlers);
+    element->AddClass(row.On ? "entity-member-in" : "entity-member-out");
+    if (content.Text.Heading.empty())
+        element->AddClass("entity-member-row-bare");
+    ShowMemberToggle(*parts.Member, row, content, handlers);
     ShowGlyph(*parts.Glyph, row);
-    ShowTitle(*parts.Title, row, member, content, handlers);
+    ShowTitle(*parts.Title, row, content, handlers);
     ShowNote(*parts.Note, row);
-    ShowModes(parts, row, member, content.Editable, handlers);
+    ShowModes(parts, row, content, handlers);
     return element;
 }
 
@@ -221,18 +226,19 @@ EntityMemberList::EntityMemberList(const Content& content, const Handlers& handl
     }
     heading->SetText(content.Text.Heading);
     heading->SetTooltip(content.Text.HeadingTooltip);
+    if (content.Text.Heading.empty())
+    {
+        heading->AddClass(kHiddenClass);
+        AddClass("entity-member-group-bare");
+        empty->AddClass("entity-member-empty-bare");
+    }
     empty->SetText(content.Text.Empty);
-    if (!content.Members.empty() || !content.Candidates.empty())
+    if (!content.Rows.empty())
         empty->AddClass(kHiddenClass);
     AddChild(std::move(header));
-    for (const Row& row : content.Members)
+    for (const Row& row : content.Rows)
     {
-        if (std::unique_ptr<UIElement> element = BuildRow(row, true, content, handlers))
-            AddChild(std::move(element));
-    }
-    for (const Row& row : content.Candidates)
-    {
-        if (std::unique_ptr<UIElement> element = BuildRow(row, false, content, handlers))
+        if (std::unique_ptr<UIElement> element = BuildRow(row, content, handlers))
             AddChild(std::move(element));
     }
 }

@@ -206,9 +206,8 @@ void ExpectBoundsInsideFrustum(const GameEngine::Mathematics::AABB& bounds,
                                float fieldOfViewDeg, float aspect, float nearClip, float farClip)
 {
     using namespace GameEngine;
-    Mathematics::Matrix4x4 view;
-    Editor::CameraRig::BuildViewMatrixLH({pose.Pos[0], pose.Pos[1], pose.Pos[2]},
-                                         pose.YawDeg, pose.PitchDeg, view.Data());
+    const Mathematics::Matrix4x4 view = Editor::CameraRig::BuildViewMatrixLH(
+        {pose.Pos[0], pose.Pos[1], pose.Pos[2]}, pose.YawDeg, pose.PitchDeg);
     const auto projection = Mathematics::MakePerspectiveLH_ZO_ReverseZ(
         fieldOfViewDeg * Mathematics::Pi / 180.0f, aspect, nearClip, farClip);
     const auto viewProjection = projection * view;

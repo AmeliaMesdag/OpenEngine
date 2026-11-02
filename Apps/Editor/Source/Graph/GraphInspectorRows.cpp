@@ -1,6 +1,8 @@
 #include "Graph/GraphInspectorRows.h"
 
+#include "Graph/GraphTransitionStore.h"
 #include "Graph/GraphTypeRegistry.h"
+#include "Inspectors/InspectorUIHelpers.h"
 #include "Types/StringUtils.h"
 #include "UI/Controls/FloatField.h"
 
@@ -265,6 +267,14 @@ std::vector<GraphInspectorRow> PlanGraphInspectorRows(
         emitScalar(key, value, FindSchemaParam(schema, key));
 
     return rows;
+}
+
+void AddGraphTransitionConditionsNotice(UIElement* conditions, const GraphTransitionDesc& transition)
+{
+    if (!transition.Conditions.empty())
+        return;
+    InspectorUI::AddNotice(conditions, "Add at least one condition. A transition with no condition is skipped when the graph compiles.",
+                           EditorUI::InspectorNotice::Kind::Warning);
 }
 
 } // namespace GameEngine

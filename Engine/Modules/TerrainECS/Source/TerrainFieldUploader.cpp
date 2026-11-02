@@ -1,8 +1,8 @@
 #include "TerrainFieldUploader.h"
 #include "Mathematics/Interpolation.h"
-#include "TerrainColorMapCompose.h"
-#include "TerrainECS/TerrainColorMap.h"
-#include "TerrainECS/TerrainGrassField.h"
+#include "TerrainColorMap/TerrainColorMapCompose.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMap.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassField.h"
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "Types/Color.h"
 #include <algorithm>

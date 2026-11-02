@@ -9,7 +9,7 @@ add_library(SplineLayout OBJECT
     Source/FenceLayout.cpp
     Source/PieceEntity.cpp
     Source/SeamShear.cpp
-    Source/SpanMitre.cpp
+    Source/SpanMiter.cpp
     Source/TileLayout.cpp
 )
 target_compile_features(SplineLayout PUBLIC cxx_std_20)
@@ -23,12 +23,12 @@ if(BUILD_TESTING)
         Tests/CenterlineSamplingTests.cpp
         Tests/FenceLayoutTests.cpp
         Tests/SeamShearTests.cpp
-        Tests/SpanMitreTests.cpp
+        Tests/SpanMiterTests.cpp
         Tests/SplineStationJitterTests.cpp
         Tests/TileLayoutTests.cpp
     )
     # OBJECT dependencies propagate headers, not object files: the recipe's
-    # asset references need AssetCore's GUID constructor, the span mitre
+    # asset references need AssetCore's GUID constructor, the span miter
     # SplineGeometry's plane cut, and the allocation hook Memory's counter (ECS
     # links Memory, so this executable's own copy compiles empty), in this standalone link.
     target_link_libraries(SplineLayoutTests PRIVATE SplineLayout SplineGeometry AssetCore Memory GTest::gtest GTest::gtest_main)

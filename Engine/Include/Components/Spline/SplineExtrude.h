@@ -87,9 +87,9 @@ enum class SplineExtrudeWidthMode : int32
 // "No floor height" for SplineExtrude::FloorHeight. See that field.
 inline constexpr float32 kNoFloorHeight = std::numeric_limits<float32>::lowest();
 
-// What an extrude does to the terrain under it. The recipe declares it, and the editor makes the
-// terrain effects that apply it: Grades is a pooled flatten effect, and Owns adds the ground claim
-// on the volume that a hand-authored route carries.
+// What an extrude or a paving does to the terrain under it. The recipe declares it, and
+// SplineGroundAuthorityController makes the terrain effects that apply it: Grades is a pooled
+// flatten effect, and Owns adds the ground claim on the volume that a hand-authored route carries.
 enum class SplineGroundAuthority : int32
 {
     // Read the choice from the cross-section, where the author already says what kind of extrude
@@ -230,11 +230,29 @@ struct SplineExtrude
     // @ge-tooltip The material of the generated surface. Empty uses the built-in material.
     MaterialRef Material;
 
+    // The verge's size and surface, used when Verge is on.
+    // @ge-label Width (m)
+    // @ge-tooltip How wide the verge is, out from each edge of the road.
+    // @ge-range 0.01 10
+    float32 VergeWidth = 0.3f;
+    // @ge-label Height (m)
+    // @ge-tooltip How high the verge stands above the road's surface.
+    // @ge-range 0.01 10
+    float32 VergeHeight = 0.12f;
+    // @ge-label Material
+    // @ge-tooltip The surface drawn on the verge; empty uses the road's Material.
+    MaterialRef VergeMaterial;
+    // Channel only: a curb along both edges of the strip's top, standing out of the road. It has the
+    // paving curb's cross-section, and a paving's curb runs on into it where the road leaves the paving.
+    // @ge-label Build Verge
+    // @ge-tooltip Builds a curb along both edges of the road. Where the road leaves a Spline Paving, the paving's curb runs on into it as one piece. Turning this on fills an empty Material with that paving's curb material.
+    bool Verge = false;
+
     // What this run does to the terrain under it. Auto — the default — reads the
     // answer off Profile and WidthMode, so dropping a road recipe on a spline
     // grades and claims the ground without anyone opening the terrain effects at
     // all. See ResolveGroundAuthority below.
-    // @ge-tooltip What the extrude does to the terrain under it. Auto reads it from the cross-section: a path grades the terrain to its heights, a road grades and owns its ground so other routes stop at its edge, and a filled water region leaves the terrain alone. Another value adds its terrain effects to this entity, and you can tune their fields. None removes only the effects that this field added, and you can undo it. While the extrude grades, it adds again a Flatten or Ground Claim of its own that you delete.
+    // @ge-tooltip What the extrude does to the terrain under it. Auto reads it from the cross-section. A path grades the terrain to its heights. A road grades and owns its ground, so other routes stop at its edge; it also clears its grass and paints the ground Dirt. A filled water region leaves the terrain alone. Owns or Grades adds its terrain effects to this entity, and you can tune their fields. None removes only the effects that this field added, and you can undo it. While the extrude grades, a Flatten or Ground Claim that you delete comes back.
     SplineGroundAuthority GroundAuthority = SplineGroundAuthority::Auto;
 
     // @ge-tooltip The generated surface casts shadows.
@@ -270,6 +288,13 @@ struct SplineExtrude
 {
     return recipe.ConformMode != SplinePlacementConform::None ||
            recipe.WidthMode == SplineExtrudeWidthMode::FitToBanks;
+}
+
+// True when the recipe builds a verge: Verge is on and it sweeps a cross-section (Channel). The
+// extrude and a paving that meets the road read this one definition, so they agree on the seam.
+[[nodiscard]] constexpr bool BuildsVerge(const SplineExtrude& recipe)
+{
+    return recipe.Verge && recipe.WidthMode == SplineExtrudeWidthMode::Channel;
 }
 
 // The authority `recipe` actually carries, with Auto resolved. Never Auto.
@@ -324,22 +349,17 @@ static_assert(std::is_trivially_copyable_v<SplineExtrude>,
 static_assert(std::is_standard_layout_v<SplineExtrude>,
               "SplineExtrude must be standard layout for ECS storage");
 
-// Which of the terrain components under a generated run the recipe's ground
-// authority created (SplineGroundAuthorityController). Cleanup on an authority
-// change removes exactly the pieces marked here and never one an author placed
-// by hand: the mark is set when the controller creates a piece, is NEVER adopted
-// onto a component that already existed, and is serialized with the scene so
-// provenance survives a reload. An entity with no recipe-created pieces carries
-// no marker at all. A pre-provenance scene has no marker either, so its effects
-// read as hand-authored and cleanup leaves them in place — the conservative
-// direction: an orphaned effect is visible and deletable, a deleted authored one
-// is gone.
-// @ge-tooltip The terrain effects of this extrude that Ground Authority added. A change of Ground Authority removes only these. Effects that you add by hand stay.
+// The terrain components of a run or a paved area that SplineGroundAuthorityController created.
+// A change of authority removes only the marked pieces. The controller marks only a piece that it
+// creates, never one that was already on the entity, and the scene saves the mark.
+// @ge-tooltip The terrain effects of this extrude or paving that Ground Authority added. A change of Ground Authority removes only these. Effects that you add by hand stay.
 struct SplineGroundProvisioned
 {
     bool Flatten = false;
     bool Claim = false;
     bool Volume = false;
+    bool Grass = false;
+    bool Paint = false;
 
     bool operator==(const SplineGroundProvisioned&) const = default;
 };

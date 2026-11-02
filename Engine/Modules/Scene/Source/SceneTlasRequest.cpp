@@ -1,9 +1,6 @@
-// SceneTlas::RequestCurrent and WaitCurrent: bringing the tree current on
-// demand. The main thread detects what changed (the ECS change filter and the
-// world's structural version) and copies it into a snapshot the TLAS owns;
-// the refit or the reconcile then runs as one job on the world's job system,
-// reading only that snapshot and the tree, so it never races the next
-// frame's systems. Nothing here runs unless a consumer asks.
+// SceneTlas::RequestCurrent and WaitCurrent. The main thread copies what changed
+// into a snapshot. One Submit task, which later requests poll, refits or
+// reconciles from that snapshot and the tree only, so it never races the ECS.
 
 #include "Scene/SceneTlas.h"
 
@@ -144,15 +141,15 @@ SceneTlas::Readiness SceneTlas::RequestCurrent(GameEngine::ECS::World& world)
 {
     GE_CPU_PROFILE_SCOPE("SceneTlas.RequestCurrent");
     Internal::SceneTlasImpl& impl = *m_Impl;
-    if (!impl.InFlight.IsZero())
+    if (impl.IsWorkInFlight())
         return Readiness::Updating;
 
     // The work that just finished may have found a sector crossing (or
     // failed): only a reconcile restores coverage, so the tree is not ready
     // until one has run.
     bool reconcile = impl.InFlightNeedsReconcile.exchange(false, std::memory_order_acq_rel) ||
-                     impl.InFlight.HasAnyFailed();
-    impl.InFlight.Reset();
+                     impl.HasInFlightFailed();
+    impl.InFlight = {};
 
     // Entry-sampled, as ECS/ChangeFilter.h requires: a write after this
     // sample is seen by the next request.
@@ -175,11 +172,9 @@ SceneTlas::Readiness SceneTlas::RequestCurrent(GameEngine::ECS::World& world)
         impl.StructuralVersion = structuralVersion;
         impl.TransformGate.LastRunVersion = entryVersion; // the records carry every transform
         impl.Reconciled = true;
-        if (pool)
-        {
-            pool->Run([this] { SyncFromRecords(m_Impl->RecordSnapshot); }, impl.InFlight);
+        impl.InFlightReconciles = true;
+        if (PublishRequestedWork(pool))
             return Readiness::Updating;
-        }
         SyncFromRecords(impl.RecordSnapshot);
         return Readiness::Ready;
     }
@@ -214,11 +209,9 @@ SceneTlas::Readiness SceneTlas::RequestCurrent(GameEngine::ECS::World& world)
         return Readiness::Ready;
     }
 
-    if (pool)
-    {
-        pool->Run([this] { RefitFromSnapshot(); }, impl.InFlight);
+    impl.InFlightReconciles = false;
+    if (PublishRequestedWork(pool))
         return Readiness::Updating;
-    }
     RefitFromSnapshot();
     return RequestCurrent(world); // a crossing found inline reconciles now
 }
@@ -226,9 +219,9 @@ SceneTlas::Readiness SceneTlas::RequestCurrent(GameEngine::ECS::World& world)
 SceneTlas::Readiness SceneTlas::CheckRequest(GameEngine::ECS::World& world)
 {
     Internal::SceneTlasImpl& impl = *m_Impl;
-    if (!impl.InFlight.IsZero())
+    if (impl.IsWorkInFlight())
         return Readiness::Updating;
-    const bool followUp = impl.InFlightNeedsReconcile.load(std::memory_order_acquire) || impl.InFlight.HasAnyFailed();
+    const bool followUp = impl.InFlightNeedsReconcile.load(std::memory_order_acquire) || impl.HasInFlightFailed();
     return followUp ? RequestCurrent(world) : Readiness::Ready;
 }
 
@@ -236,7 +229,38 @@ void SceneTlas::WaitCurrent(GameEngine::ECS::World& world)
 {
     GE_CPU_PROFILE_SCOPE("SceneTlas.WaitCurrent");
     while (RequestCurrent(world) == Readiness::Updating)
-        m_Impl->InFlightPool->Wait(m_Impl->InFlight);
+        JoinRequestedWork();
+}
+
+void SceneTlas::RunRequestedWork()
+{
+    Internal::SceneTlasImpl& impl = *m_Impl;
+    if (impl.InFlightReconciles)
+        SyncFromRecords(impl.RecordSnapshot);
+    else
+        RefitFromSnapshot();
+}
+
+bool SceneTlas::PublishRequestedWork(JobSystem::WorkStealingThreadPool* pool)
+{
+    if (!pool)
+        return false;
+    m_Impl->InFlight = pool->Submit([this] { RunRequestedWork(); });
+    return m_Impl->InFlight.IsValid();
+}
+
+void SceneTlas::JoinRequestedWork()
+{
+    JobSystem::TaskHandle& work = m_Impl->InFlight;
+    if (!work.Cancel())
+    {
+        work.Wait();
+        return;
+    }
+    // No worker had started it: it runs here. The cancelled handle reads as
+    // failed, which would make the next request reconcile, so it is dropped.
+    RunRequestedWork();
+    work = {};
 }
 
 void SceneTlas::RefitFromSnapshot()

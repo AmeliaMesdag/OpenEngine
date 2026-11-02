@@ -9,6 +9,7 @@
 #include "Components/Rendering/MeshRenderer.h"
 #include "Components/RuntimeOnlyEntity.h"
 #include "Components/Spline/SplineComponent.h"
+#include "Components/Spline/SplineNetworkMember.h"
 #include "Components/Transform.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
@@ -20,6 +21,7 @@
 #include "Mathematics/Matrix4x4.h"
 #include "SplineLayout/CenterlineSampling.h"
 #include "SplineRecipes/GeneratedSplineMesh.h"
+#include "SplineRecipes/Paving/PavingRoadTrim.h"
 #include "SplineLayout/PieceEntity.h"
 #include "SplineRecipes/SplineFillRebuild.h"
 #include "SplineRecipes/SplineChunkCommit.h"
@@ -29,6 +31,7 @@
 #include "SplineRecipes/SplineSurfaceConform.h"
 #include "SplineRecipes/SplineSweepStations.h"
 #include "SplineRecipes/RecipeBuildStates.h"
+#include "RoadVerge.h"
 #include "SplineLayout/TileLayout.h"
 #include "Rendering/Materials/MaterialDocument.h"
 #include "Spline/SplineData.h"
@@ -50,17 +53,6 @@ namespace
 
 using Mathematics::Vector3;
 namespace SG = GameEngine::SplineGeometry;
-
-// The system that composes a tiled terrain's ground for the water fill. It lives
-// on the rendering loop's schedule, which is the only place holding it; null in a
-// headless or pre-init editor, where a tiled fill then reports NoTerrain rather
-// than reading a streaming hole.
-const TerrainECS::TerrainModifierSystem* ResolveModifierSystem()
-{
-    auto* loop = EngineCore::GetInstance().GetRenderingLoop();
-    auto* systems = loop ? loop->GetSystemManager() : nullptr;
-    return systems ? systems->GetSystem<TerrainECS::TerrainModifierSystem>() : nullptr;
-}
 
 // Chunk length in world metres. Chunking is what sets culling granularity for a
 // long run, and it is what makes an incremental rebuild possible later without
@@ -84,6 +76,12 @@ GUID DefaultExtrudeMaterialGuid()
 GUID ChunkKeySpace(uint32 entityId)
 {
     return GUID::Derive(GUID::Null(), "engine/mesh/spline-extrude/" + std::to_string(entityId));
+}
+
+// The key space of a recipe's verge meshes, one key per chunk slot, as ChunkKeySpace.
+GUID VergeKeySpace(uint32 entityId)
+{
+    return GUID::Derive(GUID::Null(), "engine/mesh/spline-extrude-verge/" + std::to_string(entityId));
 }
 
 Rendering::MeshGPURegistry* MeshRegistryOf(Engine::Renderer::RenderServices* renderServices)
@@ -137,9 +135,37 @@ Components::SplineExtrude WithoutLook(Components::SplineExtrude recipe)
 {
     const Components::SplineExtrude defaults{};
     recipe.Material = defaults.Material;
+    recipe.VergeMaterial = defaults.VergeMaterial;
     recipe.CastShadows = defaults.CastShadows;
     recipe.ReceiveShadows = defaults.ReceiveShadows;
     return recipe;
+}
+
+// The recipe as its verge's chunks draw it: the verge's material, else the strip's.
+Components::SplineExtrude VergeLook(Components::SplineExtrude recipe)
+{
+    if (!recipe.VergeMaterial.IsNull())
+        recipe.Material = recipe.VergeMaterial;
+    return recipe;
+}
+
+// Whether one end of a verge stretch gets a cap: the end of a run, and not on an Open edge the
+// paving's curb reaches. On a closed road a run end on no Open edge is the loop's seam.
+bool CapsVergeEnd(bool runEnd, bool closedRoad, const TrimmedRunEdge* edge)
+{
+    if (!runEnd)
+        return false;
+    if (edge && edge->Open)
+        return !edge->Curbed;
+    return !closedRoad;
+}
+
+// A conformed road's strip sits the ground lift above the ground, level with the paving it meets.
+bool LiftsOffTheGround(const ECS::World& world, ECS::EntityHandle entity, const Components::SplineExtrude& recipe)
+{
+    const auto* member = world.GetComponent<Components::SplineNetworkMember>(entity);
+    return recipe.ConformMode != Components::SplinePlacementConform::None && member &&
+           member->Kind == Components::SplineNetworkMemberKind::Road;
 }
 
 SG::SplineProfileScale MapWidthScale(Components::SplineExtrudeWidthScale mode)
@@ -177,7 +203,9 @@ SplineExtrudeController::Candidate SplineExtrudeController::MakeCandidate(ECS::W
 void SplineExtrudeController::Update(ECS::World& world,
                                      Engine::Renderer::RenderServices& renderServices,
                                      float32 deltaSeconds,
-                                     RecipeBuildStates& states)
+                                     RecipeBuildStates& states,
+                                     const PavingRoadTrims& roadTrims,
+                                     std::span<const uint32> heldRoads)
 {
     auto* splineService = SplineECS::SplineService::TryGet();
     if (!splineService)
@@ -221,7 +249,7 @@ void SplineExtrudeController::Update(ECS::World& world,
     const bool anyReadsSurface =
         std::any_of(candidates.begin(), candidates.end(),
                     [](const Candidate& c) { return Components::ReadsSurface(c.Recipe); });
-    const uint64 surfaceRevision = anyReadsSurface ? ConformSurfaceRevision(world, ResolveModifierSystem()) : 0u;
+    const uint64 surfaceRevision = anyReadsSurface ? ConformSurfaceRevision(world, ResolveTerrainModifierSystem()) : 0u;
 
     for (const Candidate& candidate : candidates)
     {
@@ -230,7 +258,7 @@ void SplineExtrudeController::Update(ECS::World& world,
 
         if (candidate.RetiredProfile)
         {
-            worldDirty |= state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+            worldDirty |= RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
             state.Gate.MarkUnbuilt();
             const auto* entityName = world.GetComponent<Components::Name>(candidate.Entity);
             ReportRecipeValidation({RetiredWallProfileValidation()},
@@ -244,16 +272,19 @@ void SplineExtrudeController::Update(ECS::World& world,
         current.Spline = ObserveSpline(*splineService, candidate.SplineDataIndex,
                                        candidate.SplineDataGeneration, candidate.WorldMatrix);
         current.Recipe = WithoutLook(candidate.Recipe);
-        const ExtrudeLook look{candidate.Recipe.Material, candidate.Recipe.CastShadows,
+        current.LiftsOffTheGround = LiftsOffTheGround(world, candidate.Entity, candidate.Recipe);
+        const ExtrudeLook look{candidate.Recipe.Material, candidate.Recipe.VergeMaterial, candidate.Recipe.CastShadows,
                                candidate.Recipe.ReceiveShadows};
         // Fitting rings to the banks reads the ground whatever ConformMode says,
         // so this recipe's ground-reader predicate is ReadsSurface, not "conforms".
         const bool readsSurface = Components::ReadsSurface(candidate.Recipe);
         current.SurfaceRevision = ObservedSurfaceRevision(readsSurface, surfaceRevision);
+        if (const std::vector<PavingRoadTrim>* trims = roadTrims.Find(candidate.Entity.id))
+            current.Trims = *trims;
 
         if (!current.Spline.Valid)
         {
-            worldDirty |= state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+            worldDirty |= RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
             state.Gate.MarkUnbuilt();
             states.Set(candidate.Entity, BuildState::Failed, kSplineTooShortReason);
             continue;
@@ -280,14 +311,19 @@ void SplineExtrudeController::Update(ECS::World& world,
             state.Models.HeldSeconds += deltaSeconds;
             releaseWaitingChunks = ChunkModelHoldReleases(state.Models, PendingTargets(world));
         }
-        if (!releaseWaitingChunks &&
-            !state.Gate.ShouldRebuild(current, state.Chunks.ChunksAlive(world), surfaceReadiness, readsSurface,
+        // A region that rebuilt this update moved the trims: the strip follows now, not after a settle.
+        const bool trimsMoved = state.Gate.AppliedOnce() && current.Trims != state.AppliedTrims;
+        if (!releaseWaitingChunks && !trimsMoved &&
+            !state.Gate.ShouldRebuild(current, state.Chunks.ChunksAlive(world) && state.VergeChunks.ChunksAlive(world),
+                                      surfaceReadiness, readsSurface,
                                       deltaSeconds, candidate.Entity.id))
         {
             if (state.Gate.AppliedOnce() && !(look == state.AppliedLook))
             {
                 state.Chunks.Rebind(world, ChunkRenderer(renderServices, candidate.Recipe),
                                     candidate.Recipe.CastShadows);
+                state.VergeChunks.Rebind(world, ChunkRenderer(renderServices, VergeLook(candidate.Recipe)),
+                                         candidate.Recipe.CastShadows);
                 state.AppliedLook = look;
             }
             const BuildState waiting = StateWhileGateWaits(state.Gate, current);
@@ -303,14 +339,23 @@ void SplineExtrudeController::Update(ECS::World& world,
             continue;
         }
 
+        // The region this road enters waits for picking data: the strip keeps its pieces and its
+        // trims until the region builds, so both change in one update.
+        if (std::binary_search(heldRoads.begin(), heldRoads.end(), candidate.Entity.id))
+        {
+            states.Set(candidate.Entity, BuildState::Held, kHeldForPickingDataReason);
+            continue;
+        }
+
         state.Hold.Held = false;
 
-        if (Rebuild(world, renderServices, candidate, state))
+        if (Rebuild(world, renderServices, candidate, current.Trims, state))
             worldDirty = true;
 
         if (!state.Hold.Held)
         {
             state.Gate.MarkBuilt(current);
+            state.AppliedTrims = current.Trims;
             state.EmptyReason = state.Chunks.HasChunks() ? std::string_view()
                                                          : EmptyBuildReason(candidate.Recipe, state.LastFillOutcome);
         }
@@ -328,7 +373,7 @@ void SplineExtrudeController::Update(ECS::World& world,
     {
         if (state.VisitStamp == m_VisitStamp)
             return false;
-        worldDirty |= state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        worldDirty |= RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
         return true;
     });
 
@@ -350,7 +395,10 @@ void SplineExtrudeController::DropStateAfterWorldReset(
     Engine::Renderer::RenderServices* renderServices)
 {
     for (auto& [entityId, state] : m_States)
+    {
         state.Chunks.DropAfterWorldReset(MeshRegistryOf(renderServices));
+        state.VergeChunks.DropAfterWorldReset(MeshRegistryOf(renderServices));
+    }
     m_States.Clear();
 }
 
@@ -359,7 +407,7 @@ void SplineExtrudeController::Shutdown(ECS::World& world,
 {
     bool worldDirty = false;
     for (auto& [entityId, state] : m_States)
-        worldDirty |= state.Chunks.Retire(world, MeshRegistryOf(renderServices));
+        worldDirty |= RetireChunks(world, MeshRegistryOf(renderServices), state);
     m_States.Clear();
     if (worldDirty)
         world.ProcessCommands();
@@ -367,7 +415,8 @@ void SplineExtrudeController::Shutdown(ECS::World& world,
 
 bool SplineExtrudeController::Rebuild(ECS::World& world,
                                       Engine::Renderer::RenderServices& renderServices,
-                                      const Candidate& candidate, ExtrudeState& state)
+                                      const Candidate& candidate, std::span<const PavingRoadTrim> trims,
+                                      ExtrudeState& state)
 {
     auto* splineService = SplineECS::SplineService::TryGet();
     const SplineECS::SplineHandle handle(candidate.SplineDataIndex,
@@ -379,12 +428,12 @@ bool SplineExtrudeController::Rebuild(ECS::World& world,
 
     const Spline::SplineData* data = splineService->GetSplineData(handle);
     if (!data || !data->IsValid() || data->TotalArcLength <= 0.0f)
-        return state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
 
     const Components::SplineExtrude& recipe = candidate.Recipe;
     const SG::SplineProfile profile = BuildRecipeProfile(recipe);
     if (!profile.IsValid())
-        return state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
 
     const Mathematics::Matrix4x4& worldM = candidate.WorldMatrix;
     const Vector3 worldOrigin = worldM.TransformPoint(Vector3(0.0f, 0.0f, 0.0f));
@@ -417,7 +466,7 @@ bool SplineExtrudeController::Rebuild(ECS::World& world,
     const SweepSamples samples =
         SampleSweepCenterline(*data, SplineLayout::CenterlineSampleCount(worldArcLength), worldM, shape);
     if (samples.Frames.size() < 2u)
-        return state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
 
     const std::vector<ECS::EntityHandle> ignore = CollectConformRayIgnoreList(world);
     ConformMissTally conformMisses;
@@ -471,8 +520,10 @@ bool SplineExtrudeController::Rebuild(ECS::World& world,
         return false;
     ReportConformMisses(conformMisses, candidate.Entity.id, state.LoggedConformMisses);
 
+    const bool lifts = LiftsOffTheGround(world, candidate.Entity, recipe);
+    const float32 lift = recipe.VerticalOffset + (lifts ? kGroundSurfaceLiftMeters : 0.0f);
     for (SplineLayout::CenterSample& sample : center)
-        sample.Pos.y += recipe.VerticalOffset;
+        sample.Pos.y += lift;
 
     // ---- Stations: one per draped sample, walked by true 3-D length ----
     //
@@ -497,10 +548,11 @@ bool SplineExtrudeController::Rebuild(ECS::World& world,
     {
         state.Models = {};
         const WaterFillRun fill = BuildWaterFillRun(world, stream.World, recipe,
-                                                    candidate.WorldMatrix, ResolveModifierSystem());
+                                                    candidate.WorldMatrix, ResolveTerrainModifierSystem());
         ReportWaterFillDiagnostics(fill, candidate.Entity.id, state.LastFillDiagnostics,
                                    state.LastFillOutcome);
-        return CommitChunkMeshes(world, renderServices, candidate, state, fill.Chunks);
+        const bool vergeRetired = state.VergeChunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return CommitChunkMeshes(world, renderServices, candidate, state, fill.Chunks) || vergeRetired;
     }
 
     // The ends stop somewhere whatever sized the rings, so the taper runs after
@@ -541,16 +593,55 @@ bool SplineExtrudeController::Rebuild(ECS::World& world,
         }
     }
 
-    // ---- Chunking: one mesh per ~50 m of run ----
-    const std::vector<std::pair<uint32, uint32>> chunkRanges =
-        CarveChunkRanges(worldDistance, kChunkLengthMetres, kMaxChunks);
+    // ---- Paved regions: the strip runs around the arc length they take over ----
+    std::span<const SG::SplineStripStation> sweptStations = stations;
+    std::span<const SplineLayout::CenterSample> sweptCenter = center;
+    TrimmedSweepStations trimmed;
+    std::vector<SplineLayout::CenterSample> trimmedCenter;
+    const bool trimming = !trims.empty() && samples.LocalDistance.size() == stations.size();
+    if (trimming)
+    {
+        const float32 arcScale = RoadArcScale(worldM);
+        std::vector<float32> roadDistance;
+        roadDistance.reserve(samples.LocalDistance.size());
+        for (const float32 local : samples.LocalDistance)
+            roadDistance.push_back(local * arcScale);
+        const float32 loopMeters = data->IsEffectivelyClosed() ? localArcLength * arcScale : 0.0f;
+        trimmed = TrimSweepStations(stations, roadDistance, loopMeters, trims, invPlacerWorld);
+        for (const uint32 source : trimmed.Source)
+            trimmedCenter.push_back(center[source]);
+        sweptStations = trimmed.Stations;
+        sweptCenter = trimmedCenter;
+    }
+
+    // ---- Chunking: one mesh per ~50 m of run, never across a paved region ----
+    std::vector<std::pair<uint32, uint32>> chunkRanges;
+    // Per chunk, its run's index into trimmed.Runs; the whole run when not trimming.
+    std::vector<uint32> chunkRuns;
+    if (!trimming)
+    {
+        chunkRanges = CarveChunkRanges(worldDistance, kChunkLengthMetres, kMaxChunks);
+        chunkRuns.assign(chunkRanges.size(), 0u);
+    }
+    for (uint32 run = 0; run < trimmed.Runs.size(); ++run)
+    {
+        const auto [first, last] = trimmed.Runs[run];
+        std::vector<float32> runDistance;
+        for (uint32 i = first; i <= last; ++i)
+            runDistance.push_back(trimmed.Stations[i].Distance);
+        for (const auto [low, high] : CarveChunkRanges(runDistance, kChunkLengthMetres, kMaxChunks))
+        {
+            chunkRanges.emplace_back(first + low, first + high);
+            chunkRuns.push_back(run);
+        }
+    }
     if (chunkRanges.empty())
-        return state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
 
     // A chunk that waits for a model near it builds empty. Only a Scene conform reads models.
     std::vector<bool> waits(chunkRanges.size(), false);
     if (conform && recipe.ConformTarget == Components::SplineConformTarget::Scene)
-        waits = HoldChunksForPendingModels(center, chunkRanges, PendingTargets(world), candidate.Entity.id,
+        waits = HoldChunksForPendingModels(sweptCenter, chunkRanges, PendingTargets(world), candidate.Entity.id,
                                            state.Models);
     else
         state.Models = {};
@@ -563,12 +654,83 @@ bool SplineExtrudeController::Rebuild(ECS::World& world,
         if (waits[c])
             continue;
         const auto [firstStation, lastStation] = chunkRanges[c];
-        const std::span<const SG::SplineStripStation> span(stations.data() + firstStation,
-                                                           lastStation - firstStation + 1u);
+        const std::span<const SG::SplineStripStation> span = sweptStations.subspan(firstStation,
+                                                                                   lastStation - firstStation + 1u);
         strips[c] = SG::BuildSplineStrip(profile, span, stripParams);
     }
 
-    return CommitChunkMeshes(world, renderServices, candidate, state, strips);
+    if (!Components::BuildsVerge(recipe))
+    {
+        const bool vergeRetired = state.VergeChunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return CommitChunkMeshes(world, renderServices, candidate, state, strips) || vergeRetired;
+    }
+
+    // The verge follows each chunk of the strip; a chunk end inside a run is welded to the next chunk.
+    const bool closedRoad = data->IsEffectivelyClosed();
+    std::vector<SG::SplineStripMesh> verges(chunkRanges.size());
+    for (uint32 c = 0; c < chunkRanges.size(); ++c)
+    {
+        if (waits[c])
+            continue;
+        const auto [firstStation, lastStation] = chunkRanges[c];
+        const auto [runFirst, runLast] =
+            trimming ? trimmed.Runs[chunkRuns[c]] : std::pair<uint32, uint32>(0u, static_cast<uint32>(stations.size()) - 1u);
+        const TrimmedRunEdge* startEdge =
+            trimming && firstStation == runFirst ? &trimmed.RunEdges[chunkRuns[c]].first : nullptr;
+        const TrimmedRunEdge* endEdge =
+            trimming && lastStation == runLast ? &trimmed.RunEdges[chunkRuns[c]].second : nullptr;
+        const RoadVergeEnd start{CapsVergeEnd(firstStation == runFirst, closedRoad, startEdge), startEdge};
+        const RoadVergeEnd end{CapsVergeEnd(lastStation == runLast, closedRoad, endEdge), endEdge};
+        verges[c] = BuildRoadVerge(recipe, sweptStations.subspan(firstStation, lastStation - firstStation + 1u), start,
+                                   end, worldDistance.front());
+    }
+    const bool stripDirty = CommitChunkMeshes(world, renderServices, candidate, state, strips);
+    return CommitVergeMeshes(world, renderServices, candidate, state, verges) || stripDirty;
+}
+
+bool SplineExtrudeController::RetireChunks(ECS::World& world, Rendering::MeshGPURegistry* registry,
+                                           ExtrudeState& state)
+{
+    const bool strip = state.Chunks.Retire(world, registry);
+    const bool verge = state.VergeChunks.Retire(world, registry);
+    return strip || verge;
+}
+
+bool SplineExtrudeController::CommitVergeMeshes(ECS::World& world, Engine::Renderer::RenderServices& renderServices,
+                                                const Candidate& candidate, ExtrudeState& state,
+                                                const std::vector<SG::SplineStripMesh>& vergeMeshes)
+{
+    std::vector<Mesh> meshes(vergeMeshes.size());
+    for (size_t c = 0; c < vergeMeshes.size(); ++c)
+    {
+        if (vergeMeshes[c].IsValid())
+            meshes[c] = ToEngineMesh(vergeMeshes[c], "SplineExtrude_" + std::to_string(candidate.Entity.id) + "_Verge_" +
+                                                         std::to_string(c));
+    }
+    return state.VergeChunks.CommitSlots(world, renderServices.GetMeshGPURegistry(), candidate.Entity,
+                                         VergeKeySpace(candidate.Entity.id), meshes,
+                                         ChunkRenderer(renderServices, VergeLook(candidate.Recipe)),
+                                         candidate.Recipe.CastShadows);
+}
+
+float32 SplineExtrudeController::StripTopHalfWidth(const Components::SplineExtrude& authored, float32 stationHalfWidth)
+{
+    const Components::SplineExtrude recipe = SanitizeExtrudeRecipe(authored);
+    if (recipe.WidthMode == Components::SplineExtrudeWidthMode::FitToBanks)
+        return stationHalfWidth;
+    const SG::SplineProfile profile = BuildRecipeProfile(recipe);
+    // The walkable surface of every preset is at y = 0 and above; the edge drop and the shoulders are below it.
+    float32 top = 0.0f;
+    for (const SG::SplineProfilePoint& point : profile.Points)
+    {
+        if (point.Position.y >= 0.0f)
+            top = std::max(top, std::abs(point.Position.x));
+    }
+    if (!profile.IsValid() || !(top > 0.0f))
+        return stationHalfWidth;
+    const float32 placed =
+        recipe.WidthScale == Components::SplineExtrudeWidthScale::None ? profile.NominalHalfWidth : stationHalfWidth;
+    return top / profile.NominalHalfWidth * placed;
 }
 
 Components::MeshRenderer SplineExtrudeController::ChunkRenderer(Engine::Renderer::RenderServices& renderServices,
@@ -613,10 +775,10 @@ bool SplineExtrudeController::CommitChunkMeshes(ECS::World& world,
 {
     const Components::SplineExtrude& recipe = candidate.Recipe;
     if (chunkMeshes.empty())
-        return state.Chunks.Retire(world, &renderServices.GetMeshGPURegistry());
+        return RetireChunks(world, &renderServices.GetMeshGPURegistry(), state);
 
     const Components::MeshRenderer renderer = ChunkRenderer(renderServices, recipe);
-    state.AppliedLook = {recipe.Material, recipe.CastShadows, recipe.ReceiveShadows};
+    state.AppliedLook = {recipe.Material, recipe.VergeMaterial, recipe.CastShadows, recipe.ReceiveShadows};
 
     // An invalid chunk stays an empty mesh: its slot is a hole.
     std::vector<Mesh> meshes(chunkMeshes.size());

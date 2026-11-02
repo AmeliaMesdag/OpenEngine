@@ -947,9 +947,9 @@ TEST(GameUIHostTests, ReadyFullscreenSuppressesOverlayDocuments)
     ASSERT_NE(menuRoot, nullptr);
     ASSERT_TRUE(GameUIHostTestAccess::AnyReadyFullscreenSubtree(host))
         << "fixture precondition: the menu's layout must have bound";
-    EXPECT_EQ(hudRoot->Overrides().Get(Style::Display), std::optional<DisplayMode>(DisplayMode::None))
+    EXPECT_EQ(hudRoot->Style().Get(Style::Display), std::optional<DisplayMode>(DisplayMode::None))
         << "an Overlay HUD must be hidden while a ready Fullscreen menu owns the screen";
-    EXPECT_FALSE(menuRoot->Overrides().Get(Style::Display).has_value())
+    EXPECT_FALSE(menuRoot->Style().Get(Style::Display).has_value())
         << "the Fullscreen document itself must never be suppressed";
 
     // The menu goes away (disable -> its subtree is removed): the HUD comes back.
@@ -957,7 +957,7 @@ TEST(GameUIHostTests, ReadyFullscreenSuppressesOverlayDocuments)
     GameUIHostTestAccess::SyncFromWorld(host, world);
     EXPECT_EQ(host.FindDocumentRoot(menuE.GetHandle().id), nullptr)
         << "fixture precondition: the disabled menu's subtree must be gone";
-    EXPECT_FALSE(hudRoot->Overrides().Get(Style::Display).has_value())
+    EXPECT_FALSE(hudRoot->Style().Get(Style::Display).has_value())
         << "the Overlay HUD must be restored once no Fullscreen document is ready";
 }
 
@@ -1072,14 +1072,14 @@ TEST(GameUIHostTests, NotReadyFullscreenDoesNotSuppressOverlay)
     GameUIHostTestAccess::SyncFromWorld(host, world);
     UIElement* hudRoot = host.FindDocumentRoot(hudE.GetHandle().id);
     ASSERT_NE(hudRoot, nullptr);
-    EXPECT_FALSE(hudRoot->Overrides().Get(Style::Display).has_value())
+    EXPECT_FALSE(hudRoot->Style().Get(Style::Display).has_value())
         << "an Overlay HUD must stay visible while the Fullscreen menu cannot draw";
 
     // Positive control: the same menu with a layout that binds does suppress, so a
     // predicate that simply never fires cannot pass this test.
     menuE.GetForWrite<Components::UIDocument>()->Layout.Set(guidB);
     GameUIHostTestAccess::SyncFromWorld(host, world);
-    EXPECT_EQ(hudRoot->Overrides().Get(Style::Display), std::optional<DisplayMode>(DisplayMode::None))
+    EXPECT_EQ(hudRoot->Style().Get(Style::Display), std::optional<DisplayMode>(DisplayMode::None))
         << "the HUD must be suppressed once the menu's layout binds";
 }
 

@@ -20,8 +20,9 @@ namespace
 // clear_color_backdrop.frag's ClearColorBlock.
 struct ClearColorBlock
 {
-    float ClearColor[4];
+    ColorLinear ClearColor;
 };
+static_assert(sizeof(ClearColorBlock) == 16, "ClearColorBlock must match the shader's vec4");
 } // namespace
 
 bool ClearColorBackdrop::EnsurePipeline(Rendering::IDevice& device)
@@ -63,8 +64,8 @@ bool ClearColorBackdrop::Declare(ViewDeclare& d)
     const Rendering::ViewDesc* view = d.Services.Views().FindViewDesc(d.View.id);
     if (!view || !view->targets.clearColor)
         return false;
-    const float* clear = view->targets.clearColorValue;
-    if (clear[0] == 0.0f && clear[1] == 0.0f && clear[2] == 0.0f)
+    const ColorLinear& clear = view->targets.clearColorValue;
+    if (clear.r == 0.0f && clear.g == 0.0f && clear.b == 0.0f)
         return false;
     Rendering::IDevice* device = d.Services.GetDevice();
     if (!device || !EnsurePipeline(*device))
@@ -76,7 +77,7 @@ bool ClearColorBackdrop::Declare(ViewDeclare& d)
     const auto block = d.Frame.AllocUpload<ClearColorBlock>();
     if (!block.Valid())
         return false;
-    *block.Ptr = ClearColorBlock{{clear[0], clear[1], clear[2], clear[3]}};
+    *block.Ptr = ClearColorBlock{clear};
 
     std::array<Rendering::RenderGraph::RGFullscreenBufferInput, 2> buffers{};
     buffers[0].Binding = 0;

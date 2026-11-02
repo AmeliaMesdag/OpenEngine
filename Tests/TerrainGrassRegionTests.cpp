@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "Components/SceneEntityTag.h"
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Terrain/TerrainModifierEffects.h"
@@ -17,7 +18,7 @@
 #include "SplineECS/SplineService.h"
 #include "TerrainECS/Scene/TerrainSceneSchemas.h"
 #include "TerrainECS/TerrainAtlas.h"
-#include "TerrainECS/TerrainGrassField.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassField.h"
 #include "TerrainECS/TerrainModifierComponents.h"
 #include "TerrainECS/TerrainModifierSystem.h"
 #include "TerrainECS/TerrainService.h"
@@ -26,6 +27,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <filesystem>
 #include <future>
@@ -126,6 +128,15 @@ protected:
         effect.TargetHeight = height;
         World.AddComponentImmediate<Components::TerrainFlattenEffect>(entity, effect);
         World.AddComponentImmediate<Components::WorldTransform>(entity, {});
+        return entity;
+    }
+
+    ECS::EntityHandle TaggedGroundRegion(float32 height, const char* sceneId)
+    {
+        const auto entity = GroundRegion(height, 0);
+        Components::SceneEntityTag tag{};
+        std::strncpy(tag.value, sceneId, sizeof(tag.value));
+        World.AddComponentImmediate<Components::SceneEntityTag>(entity, tag);
         return entity;
     }
 
@@ -557,25 +568,38 @@ TEST_F(TerrainGrassRegions, StructuralGrassEditsPreserveExplicitGroundPriorityOr
     EXPECT_EQ(Data->Normalmap, normals);
 }
 
-TEST_F(TerrainGrassRegions, StructuralGrassPresenceRetainsExistingEqualPriorityGroundTieSemantics)
+TEST_F(TerrainGrassRegions, GrassPresenceDoesNotReorderEqualPriorityGround)
 {
-    // Moving the first of three entities also swap-removes the last one from
-    // its old archetype, making the tie-order change observable.
+    // Grass on the first of three ties moves it to another archetype and swap-removes
+    // the last one from the old archetype. The tie order is by entity, so the ground stays.
     const auto a = GroundRegion(2, 0);
     GroundRegion(4, 0);
     GroundRegion(6, 0);
     Tick();
+    const auto groundVersion = Data->HeightfieldVersion;
     const auto before = Data->Heightfield.GetRawSamples()[0];
     World.AddComponentImmediate<Components::TerrainGrassEffect>(a, {});
     Tick();
-    const auto afterAdd = Data->Heightfield.GetRawSamples()[0];
-    ASSERT_NE(before, afterAdd) << "fixture must actually change the equal-priority archetype gather order";
+    EXPECT_EQ(Data->Heightfield.GetRawSamples()[0], before);
+    EXPECT_EQ(Data->HeightfieldVersion, groundVersion);
     World.RemoveComponentImmediate<Components::TerrainGrassEffect>(a);
     Tick();
-    EXPECT_NE(Data->Heightfield.GetRawSamples()[0], afterAdd)
-        << "removal must also exercise the existing structural tie order";
-    // Presence is a structural input to existing ground tie ordering. Consumers
-    // may ignore grass scalar edits, but cannot omit this presence dependency.
+    EXPECT_EQ(Data->Heightfield.GetRawSamples()[0], before);
+    EXPECT_EQ(Data->HeightfieldVersion, groundVersion);
+}
+
+TEST_F(TerrainGrassRegions, EqualPriorityGroundTiesOrderBySceneIdentity)
+{
+    // The same scene entity created again gets a higher entity id than its tie partner.
+    // The ground stays the same.
+    const auto first = TaggedGroundRegion(2, "ground-a");
+    TaggedGroundRegion(6, "ground-b");
+    Tick();
+    const auto forward = Data->Heightfield.GetRawSamples()[0];
+    World.DestroyEntityImmediate(first);
+    TaggedGroundRegion(2, "ground-a");
+    Tick();
+    EXPECT_EQ(Data->Heightfield.GetRawSamples()[0], forward);
 }
 
 TEST_F(TerrainGrassRegions, CircleRectangleAndBothSplineShapesUseExistingFootprints)
@@ -637,17 +661,17 @@ TEST_F(TerrainGrassRegions, DisabledTerrainReentryClearsRegionRemovedWhileSuspen
     EXPECT_FALSE(Data->GrassField.IsActive());
 }
 
-TEST_F(TerrainGrassRegions, UnrelatedRemovalReconcilesEqualPriorityStorageReorder)
+TEST_F(TerrainGrassRegions, UnrelatedRemovalKeepsEqualPriorityGrassOrder)
 {
     const auto far = Region(Components::TerrainVolumeShape::Circle, .7f, .7f, 500);
     Region(Components::TerrainVolumeShape::Circle, .2f, .2f);
     Region(Components::TerrainVolumeShape::Circle, .8f, .8f);
     Tick();
     const auto original = Data->GrassField.Pixels;
-    World.DestroyEntityImmediate(far); // swap-remove can reorder the two survivors
+    World.DestroyEntityImmediate(far); // the swap-remove moves the overlapping survivors in storage
     Tick();
     const auto incremental = Data->GrassField.Pixels;
-    ASSERT_NE(original, incremental) << "fixture must actually reorder the overlapping survivors";
+    EXPECT_EQ(original, incremental);
     TerrainModifierSystem fresh;
     fresh.Update(World, 1.0f/60.0f);
     EXPECT_EQ(Data->GrassField.Pixels, incremental);

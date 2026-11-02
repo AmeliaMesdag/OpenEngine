@@ -1346,7 +1346,7 @@ void MonitorsPanel::ShowChartDragGhost(const std::string& name, float x, float y
         auto ghost = std::make_unique<Label>();
         ghost->AddClass("monitors-chart-drag-ghost");
         ghost->SetOverlayLayer(OverlayLayer::DragPreview);
-        ghost->Overrides()
+        ghost->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::ZIndex, 9400)
@@ -1369,7 +1369,7 @@ void MonitorsPanel::ShowChartDragGhost(const std::string& name, float x, float y
         return;
 
     m_ChartDragGhost->SetText(MonitorDisplayName(name));
-    m_ChartDragGhost->Overrides()
+    m_ChartDragGhost->Style()
         .Set(Style::Display, DisplayMode::Block)
         .Set(Style::PositionLeft, StyleLength::Px(std::max(0.0f, x + 18.0f)))
         .Set(Style::PositionTop, StyleLength::Px(std::max(0.0f, y - 14.0f)));
@@ -1404,7 +1404,7 @@ void MonitorsPanel::ShowChartDropIndicator(const ChartDropTarget& target)
         auto indicator = std::make_unique<UIElement>();
         indicator->AddClass("monitors-chart-drop-indicator");
         indicator->SetOverlayLayer(OverlayLayer::DragPreview);
-        indicator->Overrides()
+        indicator->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::ZIndex, 9390)
@@ -1509,7 +1509,7 @@ void MonitorsPanel::ShowChartDropIndicator(const ChartDropTarget& target)
         return;
     }
 
-    m_ChartDropIndicator->Overrides()
+    m_ChartDropIndicator->Style()
         .Set(Style::PositionLeft, StyleLength::Px(std::max(0.0f, left)))
         .Set(Style::PositionTop, StyleLength::Px(std::max(0.0f, top)))
         .Set(Style::Width, StyleLength::Px(std::max(32.0f, width)))

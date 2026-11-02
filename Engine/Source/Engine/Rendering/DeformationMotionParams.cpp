@@ -22,7 +22,7 @@ bool BuildDeformationMotionParams(const DeformationMotionEndpoint& endpoint,
     if (raster.Viewport.Width <= 0.0f || raster.Viewport.Height <= 0.0f)
         return false;
 
-    std::memcpy(out.PrevViewProj, endpoint.Previous->Camera.viewProj, sizeof(out.PrevViewProj));
+    std::memcpy(out.PrevViewProj, endpoint.Previous->Camera.viewProj.Data(), sizeof(out.PrevViewProj));
     out.PrevTimeParams[0] = endpoint.Previous->DeformationTimeSeconds;
     out.PrevTimeParams[1] = endpoint.Previous->DeformationScrollSeconds;
     out.PrevTimeParams[2] = 0.0f;

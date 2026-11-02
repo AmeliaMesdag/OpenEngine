@@ -1,8 +1,11 @@
 #include "AStarSolver.h"
+#include "HexGridHelpers.h"
 #include "Pathfinding/GridMap.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <random>
 #include <vector>
 
@@ -377,4 +380,314 @@ TEST_F(AStarSolverTest, VisitStampWrapReadsEveryCellAsUnvisited)
     ASSERT_TRUE(SolveInWindow(freshSolver, grid, start, farEnd, 0, 0.0f, 0, freshPath));
     ASSERT_TRUE(SolveInWindow(m_Solver, grid, start, farEnd, 0, 0.0f, 0, path));
     EXPECT_EQ(path, freshPath);
+}
+
+// A wall written across a grid after a solve on it (the regions were labelled) separates the two
+// sides: the next solve across fails before the search, so a fresh solver never sizes its scratch,
+// which a solve does before it expands the first cell.
+TEST_F(AStarSolverTest, AWallWrittenAfterASolveSeparatesTheRegions)
+{
+    GridMap grid(MakeAStarSettings(32, 32));
+    const uint32 west = grid.CellIndex(2, 16);
+    const uint32 east = grid.CellIndex(29, 16);
+    std::vector<uint32> path;
+    ASSERT_TRUE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellBlocked(16, z, true);
+    AStarSolver freshSolver;
+    EXPECT_FALSE(SolveInWindow(freshSolver, grid, west, east, 0, 0.0f, 0, path));
+    EXPECT_EQ(freshSolver.HeldBytes(), 0u) << "the solve across the wall searched";
+}
+
+// A ridge raised across a grid after a solve, higher than an agent steps, separates the two sides
+// as a wall does: heights are part of the regions.
+TEST_F(AStarSolverTest, ARidgeRaisedAfterASolveSeparatesTheRegions)
+{
+    GridMap grid(MakeAStarSettings(32, 32));
+    const uint32 west = grid.CellIndex(2, 16);
+    const uint32 east = grid.CellIndex(29, 16);
+    std::vector<uint32> path;
+    ASSERT_TRUE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellHeight(16, z, 2.0f);
+    AStarSolver freshSolver;
+    EXPECT_FALSE(SolveInWindow(freshSolver, grid, west, east, 0, 0.0f, 0, path));
+    EXPECT_EQ(freshSolver.HeldBytes(), 0u) << "the solve across the ridge searched";
+}
+
+// A* refuses only a step greater than MaxStepHeight, so the regions join across a ridge exactly
+// MaxStepHeight high and the solve across completes. Heights 0 and MaxStepHeight differ by exactly
+// MaxStepHeight in float32.
+TEST_F(AStarSolverTest, ARidgeOfExactlyTheStepHeightJoinsTheRegions)
+{
+    GridMap grid(MakeAStarSettings(32, 32));
+    const float32 stepHeight = grid.GetSettings().MaxStepHeight;
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellHeight(16, z, stepHeight);
+    const uint32 west = grid.CellIndex(2, 16);
+    const uint32 east = grid.CellIndex(29, 16);
+    std::vector<uint32> path;
+    EXPECT_TRUE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path)) << "the step at the limit split the regions";
+}
+
+// Opening one cell of a wall that separated two regions joins them: the solve across, which failed
+// before the opening, finds the path through the gap.
+TEST_F(AStarSolverTest, OpeningAWallJoinsTheRegions)
+{
+    GridMap grid(MakeAStarSettings(32, 32));
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellBlocked(16, z, true);
+    const uint32 west = grid.CellIndex(2, 16);
+    const uint32 east = grid.CellIndex(29, 16);
+    std::vector<uint32> path;
+    ASSERT_FALSE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+
+    const uint32 gap = grid.CellIndex(16, 30);
+    grid.SetCellBlocked(16, 30, false);
+    ASSERT_TRUE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+    EXPECT_NE(std::find(path.begin(), path.end(), gap), path.end()) << "the path crosses the wall at the gap";
+}
+
+// Lowering a ridge that separated two regions joins them: the solve across, which failed while the
+// ridge stood higher than an agent steps, finds its path once the ridge is back at the height of
+// the cells either side of it.
+TEST_F(AStarSolverTest, LoweringARidgeJoinsTheRegions)
+{
+    GridMap grid(MakeAStarSettings(32, 32));
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellHeight(16, z, 2.0f);
+    const uint32 west = grid.CellIndex(2, 16);
+    const uint32 east = grid.CellIndex(29, 16);
+    std::vector<uint32> path;
+    ASSERT_FALSE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellHeight(16, z, 0.0f);
+    EXPECT_TRUE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path)) << "the lowered ridge still split the regions";
+}
+
+// Dynamic blocking is not part of the regions: obstacles are cleared and stamped again every update,
+// so a wall of dynamic cells cleared after a solve leaves the solve across it free to find its path.
+TEST_F(AStarSolverTest, ADynamicWallClearedAfterASolveLeavesTheRegionsJoined)
+{
+    GridMap grid(MakeAStarSettings(32, 32));
+    for (uint32 z = 0; z < 32; ++z)
+        grid.SetCellDynamicBlocked(16, z, true);
+    const uint32 west = grid.CellIndex(2, 16);
+    const uint32 east = grid.CellIndex(29, 16);
+    std::vector<uint32> path;
+    ASSERT_FALSE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+
+    grid.ClearAllDynamicBlocked();
+    EXPECT_TRUE(SolveInWindow(m_Solver, grid, west, east, 0, 0.0f, 0, path));
+}
+
+// A* steps diagonally between equal heights when both cardinal cells beside the step are open,
+// whatever their height. Two low quadrants that touch only at a corner, the other two a cliff,
+// are one region in both diagonal orientations.
+TEST_F(AStarSolverTest, ADiagonalStepBetweenTwoCliffsJoinsTheRegions)
+{
+    for (const bool lowQuadrantsOnTheRisingDiagonal : {false, true})
+    {
+        GridMap grid(MakeAStarSettings(8, 8));
+        for (uint32 z = 0; z < 8; ++z)
+        {
+            for (uint32 x = 0; x < 8; ++x)
+            {
+                const bool low = ((x < 4) == (z < 4)) == lowQuadrantsOnTheRisingDiagonal;
+                grid.SetCellHeight(x, z, low ? 0.0f : 2.0f);
+            }
+        }
+        // The corner cells are (3, 4) and (4, 3), or (3, 3) and (4, 4); block the cell beyond each.
+        const uint32 first = lowQuadrantsOnTheRisingDiagonal ? grid.CellIndex(0, 0) : grid.CellIndex(0, 7);
+        const uint32 second = lowQuadrantsOnTheRisingDiagonal ? grid.CellIndex(7, 7) : grid.CellIndex(7, 0);
+        if (lowQuadrantsOnTheRisingDiagonal)
+        {
+            grid.SetCellBlocked(2, 3, true);
+            grid.SetCellBlocked(5, 4, true);
+        }
+        else
+        {
+            grid.SetCellBlocked(2, 4, true);
+            grid.SetCellBlocked(5, 3, true);
+        }
+        std::vector<uint32> path;
+        EXPECT_TRUE(SolveInWindow(m_Solver, grid, first, second, 0, 0.0f, 0, path))
+            << (lowQuadrantsOnTheRisingDiagonal ? "rising" : "falling") << " diagonal";
+    }
+}
+
+namespace
+{
+
+// The cells A* may step to from `cell`, by its rules written out again: a neighbour on the grid
+// (square: eight, a diagonal only past two open cardinal cells; hex: six, odd-r) with an open
+// footprint, within MaxStepHeight and MaxSlope. Every cost on these grids is 1.
+std::vector<uint32> StepsFrom(const GridMap& grid, uint32 cell, uint32 agentCellRadius)
+{
+    constexpr float32 kDiagonal = 1.41421356f;
+    constexpr float32 kRadiansToDegrees = 180.0f / 3.14159265358979323846f;
+    const GridSettings& settings = grid.GetSettings();
+    const int32 width = static_cast<int32>(settings.Width);
+    const int32 depth = static_cast<int32>(settings.Depth);
+    uint32 cellX = 0, cellZ = 0;
+    grid.CellFromIndex(cell, cellX, cellZ);
+    const int32 x = static_cast<int32>(cellX), z = static_cast<int32>(cellZ);
+    const auto onGrid = [width, depth](int32 nx, int32 nz) { return nx >= 0 && nz >= 0 && nx < width && nz < depth; };
+    const auto open = [&grid, &onGrid](int32 nx, int32 nz) {
+        return onGrid(nx, nz) && !grid.IsCellBlocked(static_cast<uint32>(nx), static_cast<uint32>(nz));
+    };
+
+    int32 offsetX[8], offsetZ[8];
+    uint32 offsetCount = 0;
+    if (settings.Type == GridType::Hex)
+    {
+        HexGrid::GetNeighborOffsets(cellZ, offsetX, offsetZ, offsetCount);
+    }
+    else
+    {
+        static constexpr int32 kSquareX[] = {0, 0, 1, -1, 1, -1, 1, -1};
+        static constexpr int32 kSquareZ[] = {-1, 1, 0, 0, -1, -1, 1, 1};
+        std::copy(std::begin(kSquareX), std::end(kSquareX), offsetX);
+        std::copy(std::begin(kSquareZ), std::end(kSquareZ), offsetZ);
+        offsetCount = 8;
+    }
+
+    std::vector<uint32> steps;
+    for (uint32 offset = 0; offset < offsetCount; ++offset)
+    {
+        const int32 nx = x + offsetX[offset], nz = z + offsetZ[offset];
+        const bool diagonal = settings.Type == GridType::Square && offsetX[offset] != 0 && offsetZ[offset] != 0;
+        if (!onGrid(nx, nz) || (diagonal && (!open(nx, z) || !open(x, nz))))
+            continue;
+        bool footprintOpen = true;
+        const int32 radius = static_cast<int32>(agentCellRadius);
+        for (int32 fz = nz - radius; fz <= nz + radius; ++fz)
+            for (int32 fx = nx - radius; fx <= nx + radius; ++fx)
+                footprintOpen = footprintOpen && open(fx, fz);
+        if (!footprintOpen)
+            continue;
+        const float32 rise = std::abs(grid.GetCellHeight(static_cast<uint32>(nx), static_cast<uint32>(nz)) -
+                                      grid.GetCellHeight(cellX, cellZ));
+        const float32 run = (diagonal ? kDiagonal : 1.0f) * settings.CellSize;
+        if (rise > settings.MaxStepHeight || std::atan2(rise, run) * kRadiansToDegrees > settings.MaxSlope)
+            continue;
+        steps.push_back(grid.CellIndex(static_cast<uint32>(nx), static_cast<uint32>(nz)));
+    }
+    return steps;
+}
+
+// Whether A*'s steps lead from start to end, by breadth-first search.
+bool ReachesByBreadthFirstSearch(const GridMap& grid, uint32 start, uint32 end, uint32 agentCellRadius)
+{
+    if (start == end)
+        return true;
+    uint32 x = 0, z = 0, endX = 0, endZ = 0;
+    grid.CellFromIndex(start, x, z);
+    grid.CellFromIndex(end, endX, endZ);
+    if (grid.IsCellBlocked(x, z) || grid.IsCellBlocked(endX, endZ))
+        return false;
+    std::vector<uint8> seen(grid.GetCellCount(), 0);
+    std::vector<uint32> frontier{start};
+    seen[start] = 1;
+    while (!frontier.empty())
+    {
+        const uint32 cell = frontier.back();
+        frontier.pop_back();
+        for (const uint32 next : StepsFrom(grid, cell, agentCellRadius))
+        {
+            if (next == end)
+                return true;
+            if (seen[next] == 0)
+            {
+                seen[next] = 1;
+                frontier.push_back(next);
+            }
+        }
+    }
+    return false;
+}
+
+// Two grids with the same cells: `wallsStatic` holds the walls as static blocking, which the
+// regions see, and `wallsDynamic` as dynamic blocking, which they do not. Plateau steps of 0.25,
+// 0.35 and 0.6 are a step taken, a step the 15-degree slope limit refuses, and a cliff.
+void FillTwinGrids(GridMap& wallsStatic, GridMap& wallsDynamic, std::mt19937& random, float32 wallDensity)
+{
+    static constexpr float32 kHeights[] = {0.0f, 0.25f, 0.6f};
+    constexpr uint32 kPlateau = 4;
+    std::uniform_real_distribution<float32> unit(0.0f, 1.0f);
+    const GridSettings& settings = wallsStatic.GetSettings();
+    const uint32 plateausPerRow = settings.Width / kPlateau + 1;
+    std::vector<float32> plateaus(plateausPerRow * (settings.Depth / kPlateau + 1));
+    for (float32& plateau : plateaus)
+        plateau = kHeights[random() % 3];
+    for (uint32 z = 0; z < settings.Depth; ++z)
+    {
+        for (uint32 x = 0; x < settings.Width; ++x)
+        {
+            const float32 height = plateaus[(z / kPlateau) * plateausPerRow + x / kPlateau];
+            wallsStatic.SetCellHeight(x, z, height);
+            wallsDynamic.SetCellHeight(x, z, height);
+            const float32 roll = unit(random);
+            if (roll < wallDensity)
+            {
+                wallsStatic.SetCellBlocked(x, z, true);
+                wallsDynamic.SetCellDynamicBlocked(x, z, true);
+            }
+            else if (roll < wallDensity + 0.03f)
+            {
+                wallsStatic.SetCellDynamicBlocked(x, z, true);
+                wallsDynamic.SetCellDynamicBlocked(x, z, true);
+            }
+        }
+    }
+}
+
+} // namespace
+
+// Regions never fail a solve the search completes and never change a path: on seeded random grids
+// each solve matches its twin with dynamic walls and a breadth-first oracle. Enough solves fail on
+// the regions that the comparison covers the early exit.
+TEST_F(AStarSolverTest, RegionsNeverFailASolveTheSearchCompletes)
+{
+    constexpr uint32 kWidth = 24, kDepth = 20, kPairsPerGrid = 300;
+    std::mt19937 random(11);
+    uint32 completed = 0, failedOnTheRegions = 0;
+    for (const GridType type : {GridType::Square, GridType::Hex})
+    {
+        for (const float32 maxSlope : {45.0f, 15.0f})
+        {
+            for (const float32 wallDensity : {0.1f, 0.25f, 0.4f})
+            {
+                GridSettings settings = MakeAStarSettings(kWidth, kDepth, type);
+                settings.MaxSlope = maxSlope;
+                GridMap wallsStatic(settings);
+                GridMap wallsDynamic(settings);
+                FillTwinGrids(wallsStatic, wallsDynamic, random, wallDensity);
+                for (uint32 pair = 0; pair < kPairsPerGrid; ++pair)
+                {
+                    const uint32 start = static_cast<uint32>(random() % (kWidth * kDepth));
+                    const uint32 end = static_cast<uint32>(random() % (kWidth * kDepth));
+                    const uint32 radius = pair % 2;
+                    AStarSolver freshSolver;
+                    std::vector<uint32> staticPath, dynamicPath;
+                    const bool staticFound = SolveInWindow(freshSolver, wallsStatic, start, end, 0, 0.0f, radius, staticPath);
+                    const bool dynamicFound = SolveInWindow(m_Solver, wallsDynamic, start, end, 0, 0.0f, radius, dynamicPath);
+                    ASSERT_EQ(staticFound, dynamicFound) << "pair " << pair << " slope " << maxSlope << " walls " << wallDensity;
+                    ASSERT_EQ(staticPath, dynamicPath) << "pair " << pair;
+                    ASSERT_EQ(staticFound, ReachesByBreadthFirstSearch(wallsStatic, start, end, radius)) << "pair " << pair;
+                    completed += staticFound ? 1u : 0u;
+                    uint32 startX = 0, startZ = 0, endX = 0, endZ = 0;
+                    wallsStatic.CellFromIndex(start, startX, startZ);
+                    wallsStatic.CellFromIndex(end, endX, endZ);
+                    const bool bothOpen = !wallsStatic.IsCellBlocked(startX, startZ) && !wallsStatic.IsCellBlocked(endX, endZ);
+                    failedOnTheRegions += (!staticFound && bothOpen && start != end && freshSolver.HeldBytes() == 0) ? 1u : 0u;
+                }
+            }
+        }
+    }
+    EXPECT_GT(completed, 500u) << completed << " solves completed; too few for the paths to be compared";
+    EXPECT_GT(failedOnTheRegions, 200u) << failedOnTheRegions << " solves failed on the regions; too few for the early exit to be compared";
 }

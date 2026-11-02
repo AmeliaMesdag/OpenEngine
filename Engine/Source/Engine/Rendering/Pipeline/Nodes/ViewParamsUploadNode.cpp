@@ -7,6 +7,7 @@
 #include "Core/Time.h"
 #include "Rendering/Common/Math.h"
 #include "Rendering/Core/ViewParamsLayout.h"
+#include "Rendering/Passes/TonemapPass.h"
 
 #include <algorithm>
 #include <cmath>
@@ -87,13 +88,12 @@ void ViewParamsUploadNode::DeclareForView(ViewDeclare& d)
     }
     const Rendering::CameraData* cam = &jittered;
 
-    GameEngine::Rendering::Matrix4x4 projM;
-    std::memcpy(projM.Data(), cam->proj, sizeof(cam->proj));
+    GameEngine::Rendering::Matrix4x4 projM = cam->proj;
     GameEngine::Rendering::Matrix4x4 invProjM = GameEngine::Mathematics::Inverse(projM);
 
     ViewParamsUBO ubo{};
     std::memcpy(ubo.ge_invProj, invProjM.Data(), sizeof(ubo.ge_invProj));
-    std::memcpy(ubo.ge_view, cam->view, sizeof(ubo.ge_view));
+    std::memcpy(ubo.ge_view, cam->view.Data(), sizeof(ubo.ge_view));
     float zn = 0.1f, zf = 1000.0f;
     ExtractNearFarLH_ZO(cam->proj, zn, zf);
     ubo.ge_nearFar[0] = zn;
@@ -103,8 +103,7 @@ void ViewParamsUploadNode::DeclareForView(ViewDeclare& d)
     const float shaderAnimationTime = d.Services.GetShaderAnimationTimeSeconds();
     ubo.ge_nearFar[3] = shaderAnimationTime;
 
-    GameEngine::Rendering::Matrix4x4 viewM;
-    std::memcpy(viewM.Data(), cam->view, sizeof(cam->view));
+    GameEngine::Rendering::Matrix4x4 viewM = cam->view;
     GameEngine::Rendering::Matrix4x4 invViewM = GameEngine::Mathematics::Inverse(viewM);
     const float* iv = invViewM.Data();
     ubo.ge_cameraPosWS[0] = iv[12];
@@ -123,8 +122,8 @@ void ViewParamsUploadNode::DeclareForView(ViewDeclare& d)
     ubo.ge_screenSize[1] = sh;
     ubo.ge_screenSize[2] = 1.0f / sw;
     ubo.ge_screenSize[3] = 1.0f / sh;
-    std::memcpy(ubo.ge_viewProj, cam->viewProj, sizeof(ubo.ge_viewProj));
-    std::memcpy(ubo.ge_proj, cam->proj, sizeof(ubo.ge_proj)); // ge_proj == the projection ge_invProj inverts
+    std::memcpy(ubo.ge_viewProj, cam->viewProj.Data(), sizeof(ubo.ge_viewProj));
+    std::memcpy(ubo.ge_proj, cam->proj.Data(), sizeof(ubo.ge_proj)); // ge_proj == the projection ge_invProj inverts
 
     // TAAU texture-sharpness compensation: material sampling adds this bias per
     // sample (adapter_forward's GE_MaterialTexture texture() overload) so texture
@@ -146,9 +145,9 @@ void ViewParamsUploadNode::DeclareForView(ViewDeclare& d)
     const ViewTemporalSample* previous = d.Services.TemporalHistory().Advance(
         d.View.id, d.Frame.FrameIndex(), currentSample, d.Frame.SubmittedFrameCount(),
         &previousValid);
-    const float* prevViewProj =
+    const GameEngine::Rendering::Matrix4x4& prevViewProj =
         (previousValid && previous) ? previous->Camera.viewProj : stored->viewProj;
-    std::memcpy(ubo.ge_prevViewProj, prevViewProj, sizeof(ubo.ge_prevViewProj));
+    std::memcpy(ubo.ge_prevViewProj, prevViewProj.Data(), sizeof(ubo.ge_prevViewProj));
 
     // Sub-pixel NDC jitter, current (xy) and previous (zw) frame. A consumer
     // reprojecting through the UNJITTERED ge_prevViewProj adds zw to land on the
@@ -162,12 +161,14 @@ void ViewParamsUploadNode::DeclareForView(ViewDeclare& d)
         ubo.ge_taaJitter[3] = tempAA->PrevNdcJitterY;
     }
 
-    // The exposure the tonemap applies to this view, from the same effective settings the
-    // AutoExposure and Tonemap nodes read. While auto exposure meters the view, forward shading
-    // takes the metered scale from ExposureHistory instead (GE_ViewExposureScale).
+    // The exposure and the look the tonemap applies to this view, from the effective settings the
+    // AutoExposure and Tonemap nodes read. While auto exposure meters the view, shaders read the metered
+    // scale from ExposureHistory (GE_ViewExposureScale). The view's no-look output overrides the blended look.
     const PostProcessSettings& post = d.Services.GetEffectivePostProcessSettings(d.View.id, d.View.worldId);
     ubo.ge_exposureParams[0] = post.Exposure;
     ubo.ge_exposureParams[1] = post.IsAutoExposureActive() ? 1.0f : 0.0f;
+    ubo.ge_exposureParams[2] = static_cast<float>(
+        post.ViewOutput == PostProcessViewOutput::NoLook ? Passes::kTonemapNoLookArm : post.Look);
 
     *alloc.Ptr = ubo;
     d.PublishBuffer(m_BufferRef,

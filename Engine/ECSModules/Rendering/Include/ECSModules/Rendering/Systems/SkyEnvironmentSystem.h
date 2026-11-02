@@ -3,6 +3,7 @@
 #include "AssetCore/GUID.h"
 #include "ECS/Entity.h"
 #include "ECS/Systems.h"
+#include "Types/Color.h"
 #include "Types/Types.h"
 
 #include <atomic>
@@ -79,7 +80,7 @@ private:
     // last colour and Intensity it wrote there.
     ECS::EntityHandle m_DrivenLight{};
     uint8 m_DrivenFields = 0;
-    float32 m_DrivenLightColor[3] = {0.0f, 0.0f, 0.0f};
+    ColorLinear m_DrivenLightColor{0.0f, 0.0f, 0.0f};
     float32 m_DrivenLightIntensity = 0.0f;
     // The sky's noon reference while the curve drove, in lux: the Intensity a light is handed back
     // when no authored value was recorded.

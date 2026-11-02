@@ -933,175 +933,60 @@ TEST(GrassWindClock, WindTimeComesOnlyFromTheEngineAnimationClock)
     }
 }
 
-// The ground splat must be resolved in ONE place. GrassAtlasSplatSource tests what that place
-// DECIDES; this tests that both stages actually go through it, which no behavioural test of a
-// shared function can see — a shader that quietly kept its own tap would leave those tests green
-// while the blade and its ground disagreed again.
-//
-// That is not hypothetical: it is the state this slice found the surface in. It sampled
-// tp.SplatmapBindless directly, which an atlas-backed terrain leaves at 0, so every blade on a
-// >4 km terrain took its ground colour from channel 0 whatever was painted underneath.
-TEST(GrassSplatResolveSharing, BothStagesResolveTheGroundSplatThroughTheSharedInclude)
+// The ground resolves in one place. GrassGroundSource tests what that place decides; this tests that
+// both stages include it. A shader with its own tap keeps those tests green while the blade and its
+// ground disagree.
+TEST(GrassSurfaceSharing, BothStagesResolveTheGroundThroughTheSharedInclude)
 {
     for (const char* name : {"terrain_grass_place.comp", "terrain_grass_surface.glsl"})
     {
         const std::string src = ReadShaderSource(name);
         ASSERT_GT(src.size(), 200u) << name << " read back empty, truncated, or stripped to nothing";
-
-        EXPECT_NE(src.find("TerrainGrass/grass_atlas_splat.glsl"), std::string::npos)
-            << name << " does not include the shared ground splat resolve";
-        EXPECT_NE(src.find("GrassAtlas_ResolveSplat"), std::string::npos)
-            << name << " includes the shared resolve but never calls it";
-
-        // The declarations the shared include owns must exist in exactly one file, so neither
-        // stage can drift a second copy of the bindings or the selection back into itself.
-        EXPECT_EQ(src.find("uniform GrassAtlasParamsBuffer"), std::string::npos)
-            << name << " re-declares the atlas params block the shared include owns";
-        EXPECT_EQ(src.find("buffer GrassAtlasRowsBuffer"), std::string::npos)
-            << name << " re-declares the atlas rows block the shared include owns";
+        EXPECT_NE(src.find("TerrainGrass/grass_surface_pages.glsl"), std::string::npos)
+            << name << " does not include the shared ground resolve";
+        EXPECT_EQ(src.find("uniform GrassSurfaceParamsBuffer"), std::string::npos)
+            << name << " re-declares the surface params block the shared include owns";
     }
 
-    // The surface must reach the splat ONLY through the resolve. A direct tap on
-    // tp.SplatmapBindless is the exact regression this slice removed, and it is silent: an atlas
-    // terrain carries 0 there, so the shader compiles, runs, and answers channel 0 everywhere.
-    const std::string surface = ReadShaderSource("terrain_grass_surface.glsl");
-    for (const std::string& arg : CallArguments(surface, "GE_BTEX"))
-        EXPECT_EQ(arg.find("SplatmapBindless"), std::string::npos)
-            << "terrain_grass_surface.glsl samples the splatmap directly (GE_BTEX(" << arg
-            << ")) instead of through GrassAtlas_ResolveSplat, which is blind to the atlas";
-
-    // Positive control: the scan above is only meaningful if the surface samples SOMETHING through
-    // GE_BTEX at all — a broken reader would otherwise report an empty list and pass.
-    ASSERT_FALSE(CallArguments(surface, "GE_BTEX").empty())
-        << "found no GE_BTEX call sites in the grass surface - the scan is not working";
-
-    // The argument scan is defeatable by an alias (uint sm = tp.SplatmapBindless; GE_BTEX(sm, ...)),
-    // so pin the identifier's total occurrence count in the stripped source: the struct field
-    // declaration plus the one argument handed to GrassAtlas_ResolveSplat. Any third mention is a
-    // new read of the handle, and every new read belongs inside the shared resolve.
+    // The surface reaches the splat only through the shared resolve: the struct field plus the one
+    // argument handed to GrassSurface_UnifiedSplat. A third mention is a direct or aliased tap.
+    const std::string surface = StripWhitespace(ReadShaderSource("terrain_grass_surface.glsl"));
+    EXPECT_NE(surface.find("GrassSurface_UnifiedSplat(tp.SplatmapBindless,uv)"), std::string::npos)
+        << "the grass surface no longer takes its ground weights from the shared resolve";
     size_t splatmapMentions = 0;
     for (size_t at = surface.find("SplatmapBindless"); at != std::string::npos;
          at = surface.find("SplatmapBindless", at + 1))
         ++splatmapMentions;
-    EXPECT_EQ(splatmapMentions, 2u)
-        << "terrain_grass_surface.glsl mentions SplatmapBindless " << splatmapMentions
-        << " times; only the struct field and the GrassAtlas_ResolveSplat argument are allowed - "
-           "an extra mention is a direct or aliased tap the atlas path cannot see";
+    EXPECT_EQ(splatmapMentions, 2u) << "terrain_grass_surface.glsl mentions SplatmapBindless " << splatmapMentions
+                                    << " times; only the struct field and the shared resolve's argument are allowed";
 
-    // The extraction markers are COMMENTS, so this reads the raw file: the stripped copy the scans
-    // above use would never contain them, and asserting on it would pass only by accident.
-    const std::string sharedRaw = ReadShaderSourceRaw("grass_atlas_splat.glsl");
+    // The extraction markers are comments, so this reads the raw file.
+    const std::string sharedRaw = ReadShaderSourceRaw("grass_surface_pages.glsl");
     ASSERT_GT(sharedRaw.size(), 200u) << "the shared resolve read back empty or truncated";
-    for (const char* marker : {"// GE_SHARED_GRASS_SPLAT_SOURCE_BEGIN",
-                               "// GE_SHARED_GRASS_SPLAT_SOURCE_END"})
+    for (const char* marker : {"// GE_SHARED_GRASS_GROUND_SOURCE_BEGIN", "// GE_SHARED_GRASS_GROUND_SOURCE_END"})
         EXPECT_NE(sharedRaw.find(marker), std::string::npos)
-            << "the extraction marker " << marker << " GrassAtlasSplatSourceExtracted.h is "
-               "generated from is gone; the behavioural suite would be built from nothing";
-    // The selection the extracted block must actually contain, in the code rather than in prose.
-    const std::string shared = ReadShaderSource("grass_atlas_splat.glsl");
-    EXPECT_NE(shared.find("GrassAtlas_SelectSplatSource"), std::string::npos)
-        << "the shared include no longer defines the selection the host suite executes";
-    EXPECT_NE(shared.find("GrassAtlas_SlotUpgradeWeight"), std::string::npos)
-        << "the shared include no longer defines the upgrade-crossfade rule the host suite executes";
+            << "the extraction marker " << marker << " GrassGroundSourceExtracted.h is generated from is gone";
 }
 
-// The two stages share the resolve and must DISAGREE about one thing inside it: whether a tile
-// still crossfading from the coarse field into its slot is shown crossfading. Colour shows it, so a
-// blade's ground colour arrives at full detail with the ground beside it; a placement mask does
-// not, because a refusal that slid between two sources across the window would spawn and unspawn
-// blades along the residency frontier.
-//
-// Scanned rather than measured, because GrassAtlasSlotUpgrade already executes the WEIGHT rule on
-// the host and cannot see which answer each stage asks for. Swapping these two literals compiles,
-// runs, and is invisible in every settled still — the transient is bounded by the fade window.
-TEST(GrassSplatResolveSharing, ColourShowsTheUpgradeCrossfadeAndPlacementDoesNot)
+// The blade and the ground under it read one locate: the placement hands the terrain fragment's own
+// resolve (CBT_SurfPagesAt, cbt_surface_pages.glsl) the footprint of a pixel on the ground at the root,
+// and GrassGroundFootprint executes that footprint against the fragment's derivatives.
+TEST(GrassSurfaceSharing, ThePlacementReadsTheGroundsOwnLocateAtTheGroundsLevel)
 {
-    struct Consumer
-    {
-        const char* File;
-        const char* Resolve;
-        const char* ShowsFade;
-    };
-    // The ground colour is resolved by the vertex stage's root resolve on the full profile and by
-    // the surface on the compat profile; both show the fade. The root resolves the atlas once for
-    // its three reads and hands it to GrassAtlas_ResolveSplatAt.
-    for (const Consumer consumer : {Consumer{"grass_root_ground_color.glsl", "GrassAtlas_ResolveSplatAt", "true"},
-                                    Consumer{"terrain_grass_surface.glsl", "GrassAtlas_ResolveSplat", "true"},
-                                    Consumer{"terrain_grass_place.comp", "GrassAtlas_ResolveSplat", "false"}})
-    {
-        const std::string src = ReadShaderSource(consumer.File);
-        ASSERT_GT(src.size(), 200u) << consumer.File << " read back empty or stripped to nothing";
-
-        const std::vector<std::string> calls = CallArguments(src, consumer.Resolve);
-        ASSERT_EQ(calls.size(), 1u)
-            << consumer.File << " calls " << consumer.Resolve << " " << calls.size()
-            << " times; one call site per stage is what makes its fade answer scannable here";
-
-        // The last argument, however the earlier ones are spelled. A literal is required rather
-        // than a named constant: the two sites differ on purpose, and a shared name for the
-        // difference is a place for them to quietly become the same.
-        const size_t comma = calls[0].rfind(',');
-        ASSERT_NE(comma, std::string::npos)
-            << consumer.File << " passes no crossfade argument: " << calls[0];
-        std::string last = calls[0].substr(comma + 1);
-        last.erase(0, last.find_first_not_of(" \t\r\n"));
-        if (const size_t end = last.find_last_not_of(" \t\r\n"); end != std::string::npos)
-            last.erase(end + 1);
-        EXPECT_EQ(last, consumer.ShowsFade)
-            << consumer.File << " asks for showUpgradeFade=" << last << ", expected "
-            << consumer.ShowsFade << " — colour must track the ground's crossfade and a placement "
-               "mask must not";
-    }
+    const std::string shared = StripWhitespace(ReadShaderSource("grass_surface_pages.glsl"));
+    EXPECT_NE(shared.find("returnCBT_SurfPagesAt(uv,footprint,tp.WorldSizeX,tp.WorldSizeZ,Surface.SurfacePageBase,"),
+              std::string::npos)
+        << "the grass no longer reads the surface through the terrain fragment's resolve";
+    const std::string placement = StripWhitespace(ReadShaderSource("terrain_grass_place.comp"));
+    EXPECT_NE(placement.find("#include\"cbt_surface_pages.glsl\""), std::string::npos)
+        << "the placement does not include the terrain's surface page resolve";
+    EXPECT_NE(placement.find("g.Pages=GrassSurface_Pages(row,tp,uv,grassGroundPixelFootprint(tp,uv,rootWS));"),
+              std::string::npos)
+        << "the placement reads the pages at a level other than the ground's pixel footprint";
+    EXPECT_NE(placement.find("returnGrassSurface_GroundPixelFootprintAcrossFaces("), std::string::npos)
+        << "the placement's footprint is not the shared one the host suite executes";
 }
 
-// The blade's root ground colour (grass_root_ground_color.glsl) reaches the atlas THREE times: the
-// splat weights through the shared resolve above, the terrain normal that supplies the triplanar
-// projection weights the shared albedo expression blends its taps by, and the colour map mixed over
-// the result. cbt_surface.glsl crossfades all three on upgrade, so fading only the splat would still
-// step the blend the moment a tile went resident.
-TEST(GrassSplatResolveSharing, TheRootGroundNormalTakesTheSameUpgradeWeight)
-{
-    const std::string surface = ReadShaderSource("grass_root_ground_color.glsl");
-    ASSERT_GT(surface.size(), 200u) << "the root resolve read back empty or stripped to nothing";
-
-    const std::vector<std::string> calls = CallArguments(surface, "GrassAtlas_SlotUpgradeWeight");
-    ASSERT_EQ(calls.size(), 2u)
-        << "grass_root_ground_color.glsl calls GrassAtlas_SlotUpgradeWeight " << calls.size()
-        << " times; the ground normal and the colour map are the two sites that need it directly "
-           "(the splat reaches it through GrassAtlas_ResolveSplatAt)";
-    // The weight must come from the row THIS resolve read — a second clock, or a constant, would
-    // put the blade's projection weights on a different schedule from the ground's.
-    for (const std::string& call : calls)
-        EXPECT_NE(call.find("r.Fade"), std::string::npos)
-            << "an upgrade weight at the root is not derived from the resolved row's Fade: " << call;
-}
-
-// Deriving the weight is not applying it: deleting just the mix() while keeping the weight call
-// leaves every scan above green. Pin the APPLICATION — each consumer must hand its slotWeight to
-// a mix() — so the crossfade cannot be severed from its weight without a test going red.
-TEST(GrassSplatResolveSharing, TheUpgradeWeightIsActuallyMixedNotJustDerived)
-{
-    struct MixSite
-    {
-        const char* File;
-        size_t ExpectedMixes;
-    };
-    for (const MixSite& site : {MixSite{"grass_atlas_splat.glsl", 1u},
-                                MixSite{"grass_root_ground_color.glsl", 2u}})
-    {
-        const std::string src = ReadShaderSource(site.File);
-        ASSERT_GT(src.size(), 200u) << site.File << " read back empty or stripped to nothing";
-
-        size_t mixesTakingSlotWeight = 0;
-        for (const std::string& arg : CallArguments(src, "mix"))
-            if (arg.find("slotWeight") != std::string::npos) ++mixesTakingSlotWeight;
-        EXPECT_EQ(mixesTakingSlotWeight, site.ExpectedMixes)
-            << site.File << " mixes by slotWeight " << mixesTakingSlotWeight
-            << " times, expected " << site.ExpectedMixes
-            << " - a derived-but-unapplied weight reintroduces the coarse/slot step this "
-               "crossfade exists to kill";
-    }
-}
 
 // A blade's grounded end is the terrain's own resolved colour, UNSCALED. Any factor on it is a
 // value step at the contact line, and a blade that reads darker than the ground it grows out of is
@@ -1221,9 +1106,9 @@ TEST(GrassContactIdentity, TheGroundedEndTakesTheTerrainColourAndOcclusionUnscal
     placement.erase(std::remove_if(placement.begin(), placement.end(),
                                    [](unsigned char c) { return std::isspace(c) != 0; }),
                     placement.end());
-    EXPECT_NE(placement.find("returnGrassSplatCoverage(splatWeights,"), std::string::npos)
+    EXPECT_NE(placement.find("returnGrassSplatCoverage(grassGroundWeights(tp,uv,g),"), std::string::npos)
         << "the placement no longer spawns by the coverage the ground darkens by";
-    EXPECT_NE(placement.find("floatmask=GrassFieldCoverage(grassMaskFactor(stp,uv),regional);"), std::string::npos)
+    EXPECT_NE(placement.find("floatmask=ground.Readable?GrassFieldCoverage(grassMaskFactor(stp,uv,ground),regional):0.0;"), std::string::npos)
         << "the placement no longer spawns by the shared field coverage";
     EXPECT_NE(placement.find("GrassPackRandAndCoverage(s.WidthRand,mask)"), std::string::npos)
         << "the placement no longer stores the coverage it spawned the blade by";

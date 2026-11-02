@@ -258,7 +258,7 @@ void AddPostProcessEffectButton(const InspectorContext& ctx)
     button->SetText("Add Post FX");
     button->SetTooltip("Add a post-process effect to this volume.");
     button->AddClass("inspector-add-component-button");
-    button->Overrides()
+    button->Style()
         .Set(Style::Width, StyleLength::Px(kPostProcessEffectPickerWidthPx))
         .Set(Style::AlignSelf, AlignItems::Center)
         .Set(Style::MarginTop, StyleLength::Px(6.0f))

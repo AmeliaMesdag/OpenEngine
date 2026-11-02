@@ -231,8 +231,10 @@ EditorUI::EntityMemberList::Content CollectMemberRows(const InspectorContext& ct
     const std::optional<MarkupECS::MarkupFootprint> base = MarkupECS::ReadMarkupFootprint(*ctx.World, ctx.Entity);
     for (const MarkupRegionMember& member : members)
     {
-        EditorUI::EntityMemberList::Row& row = content.Members.emplace_back(
+        EditorUI::EntityMemberList::Row& row = content.Rows.emplace_back(
             MemberRow(ctx, member.Entity, MarkupECS::ReadMarkupFootprint(*ctx.World, member.Entity), base));
+        row.On = true;
+        row.Member = true;
         row.CurrentMode = static_cast<uint8>(member.Mode);
     }
     if (!base)
@@ -243,7 +245,7 @@ EditorUI::EntityMemberList::Content CollectMemberRows(const InspectorContext& ct
                 return;
             const std::optional<MarkupECS::MarkupFootprint> footprint = MarkupECS::ReadMarkupFootprint(*ctx.World, entity);
             if (footprint && BoundsOverlap(*base, *footprint))
-                content.Candidates.push_back(MemberRow(ctx, entity, footprint, base));
+                content.Rows.push_back(MemberRow(ctx, entity, footprint, base));
         });
     return content;
 }
@@ -293,8 +295,7 @@ void SwitchMember(const InspectorContext& ctx, ECS::EntityHandle entity, uint8 m
 void AddMemberList(const InspectorContext& ctx, MarkupEditorBridge& bridge, const MarkupRegion& region)
 {
     EditorUI::EntityMemberList::Handlers handlers;
-    handlers.Add = [ctx](ECS::EntityHandle entity) { AddMember(ctx, entity); };
-    handlers.Remove = [ctx](ECS::EntityHandle entity) { RemoveMember(ctx, entity); };
+    handlers.SetOn = [ctx](ECS::EntityHandle entity, bool on) { on ? AddMember(ctx, entity) : RemoveMember(ctx, entity); };
     handlers.SetMode = [ctx](ECS::EntityHandle entity, uint8 mode) { SwitchMember(ctx, entity, mode); };
     handlers.Select = [world = ctx.World, &bridge](ECS::EntityHandle entity) { bridge.SelectMarkup(*world, entity); };
     ctx.Parent->AddChild(

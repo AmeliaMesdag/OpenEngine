@@ -160,16 +160,13 @@ TEST(OceanShadowSimTest, DeclaresEveryFrameAcrossDeviceSlotWraps)
         ASSERT_TRUE(rs.Initialize(device.get()));
         const CameraId cameraId = rs.Views().AllocateCamera("OceanShadowCamera");
         CameraData camera{};
-        camera.proj[0] = 1.0f;
-        camera.proj[5] = 1.0f;
-        camera.proj[10] = 0.001f;
-        camera.proj[11] = 1.0f;
-        camera.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            camera.view[i] = 1.0f;
-            camera.viewProj[i] = 1.0f;
-        }
+        camera.proj[0][0] = 1.0f;
+        camera.proj[1][1] = 1.0f;
+        camera.proj[2][2] = 0.001f;
+        camera.proj[2][3] = 1.0f;
+        camera.proj[3][2] = 0.1f;
+        camera.view = Mathematics::Matrix4x4::Identity();
+        camera.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(cameraId, camera);
         const ViewId viewId = rs.Views().AllocateView("OceanShadowView", cameraId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());

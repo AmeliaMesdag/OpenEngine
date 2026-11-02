@@ -775,7 +775,7 @@ TEST_F(MarkupEditorBridgeTest, AnUnknownStatusPillTakesTheThemesClass)
     const UIElement& pill = *row->GetChildren().front();
     EXPECT_TRUE(pill.HasClass("markups-status-pill-unknown"));
     EXPECT_EQ(static_cast<const Label&>(pill).GetText(), "Unknown");
-    EXPECT_FALSE(pill.Overrides().Get(Style::BackgroundColor).has_value());
+    EXPECT_FALSE(pill.Style().Get(Style::BackgroundColor).has_value());
 }
 
 // The status words read as the rest of the editor's labels, in title case, on the pills, in both
@@ -1086,7 +1086,7 @@ TEST_F(MarkupEditorBridgeTest, EveryActionCarriesItsKindsMarker)
     }
     ASSERT_NE(marker, nullptr);
     EXPECT_TRUE(marker->HasClass("markup-entry-status"));
-    EXPECT_EQ(marker->Overrides().Get(Style::BackgroundColor), Editor::MarkupTagArgb(Components::kMarkupStatusRequested));
+    EXPECT_EQ(marker->Style().Get(Style::BackgroundColor), Editor::MarkupTagArgb(Components::kMarkupStatusRequested));
 }
 
 // The comment field is a full-width text area under the Thread, so a comment keeps its line

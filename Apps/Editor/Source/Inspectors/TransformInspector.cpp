@@ -1041,7 +1041,7 @@ private:
             return;
 
         {
-            label->Overrides().Set(Style::Cursor, CursorStyle::ColResize);
+            label->Style().Set(Style::Cursor, CursorStyle::ColResize);
         }
 
         // Double-click detected on MouseDown (second press) so we don't rely on MouseUp

@@ -1,6 +1,7 @@
 #include "Scene/SceneEditorController.h"
 
 #include "EditorInputActions.h"
+#include "Editor/Registries/EditorMenuRegistry.h"
 #include "Editor/Settings/BuildSettingsStore.h"
 #include "Editor/Settings/SettingsStore.h"
 #include "Editor/Shortcuts/EditorShortcuts.h"
@@ -19,6 +20,7 @@
 #include "ECS/Entity.h"
 #include "Input/InputSystem.h"
 #include "Logger/Logger.h"
+#include "Platform/Shell.h"
 #include "TerrainECS/TerrainService.h"
 #include "Types/PathUtils.h"
 #include "Types/StringUtils.h"
@@ -251,6 +253,15 @@ void SceneEditorController::AttachToRoot(UIElement& root,
     }
 
     PollAutoSavePreferences();
+
+    auto& menus = EditorMenuRegistry::Get();
+    m_MenuItems.clear();
+    m_MenuItems.push_back(menus.RegisterMenuItem({"File/New Scene", 0, [this]() { RequestNewScene(); }}));
+    m_MenuItems.push_back(menus.RegisterMenuItem({"File/Open Scene...", 1, [this]() { RequestLoadScene(); }}));
+    m_MenuItems.push_back(menus.RegisterMenuItem(
+        {"File/Save Scene", 2, [this]() { RequestSaveScene(); }, "Global", "Save Scene"}));
+    m_MenuItems.push_back(menus.RegisterMenuItem(
+        {"File/Save Scene As...", 3, [this]() { RequestSaveSceneAs(); }, "Global", "Save Scene As"}));
 }
 
 void SceneEditorController::Update(Input::InputSystem* inputSystem)
@@ -806,7 +817,7 @@ void SceneEditorController::Execute(const PendingAction& a)
         if (m_UndoRedo && before != after)
         {
             auto cmd = std::make_unique<WorldSnapshotCommand>(
-                "Load Scene Additive",
+                "Open Scene Additive",
                 m_World,
                 m_Notifications,
                 before,
@@ -1120,7 +1131,7 @@ void SceneEditorController::OpenProjectStartupScene(const std::filesystem::path&
     SettingsStore settings = OpenProjectSettings(projectRoot);
     std::string err;
     (void)settings.Load(&err);
-    settings.TryGetString(kProjectStartupSceneKey, candidates.StartupScene);
+    candidates.StartupScene = ReadProjectStartupScene(settings);
     candidates.RecentScenes = GetRecentScenePaths();
 
     const std::optional<std::filesystem::path> scene = ResolveProjectStartupScene(projectRoot, candidates);
@@ -1161,6 +1172,14 @@ void SceneEditorController::RequestNewScene()
     PendingAction a{};
     a.kind = PendingAction::Kind::NewScene;
     m_Pending = a;
+}
+
+void SceneEditorController::RequestLoadScene()
+{
+    const auto path = Platform::SelectFile(EngineCore::GetInstance().GetResolvedAssetRoot(),
+                                         "Scene files", "*.scene");
+    if (!path.empty())
+        RequestOpenScene(path, false);
 }
 
 void SceneEditorController::RequestSaveScene()

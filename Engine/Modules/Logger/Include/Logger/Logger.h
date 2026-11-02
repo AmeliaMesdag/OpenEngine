@@ -88,6 +88,11 @@ class Log
      */
     static bool FlushForCrash(std::chrono::milliseconds timeout);
 
+    /// The deadline a death path gives FlushForCrash. It is ten times the drain's 200 ms
+    /// flush latency, so a live drain thread answers. It is short, so a stuck drain thread
+    /// cannot turn the crash into a hang.
+    static constexpr std::chrono::milliseconds kCrashFlushTimeout{2000};
+
     static size_t GetSinkCount();
 
     // Cross-module unification. Logger is a STATIC library, so a host exe and

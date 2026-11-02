@@ -30,6 +30,7 @@
 #include "SceneDrawWarm.h"
 #include "Engine/Rendering/SceneProbeRecaptureSchedule.h"
 #include "Rendering/Core/Device.h"
+#include "Rendering/Core/HotReloadIntegration.h"
 #include "Rendering/Core/Pipeline/PipelineCache.h"
 #include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Geometry/VertexAttributeFlags.h"
@@ -664,6 +665,7 @@ struct DeclaredSurfaceProject
         std::error_code ec;
         std::filesystem::remove_all(Root, ec);
     }
+    // Writes the surface and announces the edit, as the file watcher does.
     void WriteSurface(const char* declarations) const
     {
         std::ofstream out(Root / "declared.glsl", std::ios::binary | std::ios::trunc);
@@ -672,6 +674,8 @@ struct DeclaredSurfaceProject
                "    SurfaceOutput o = DefaultSurfaceOutput();\n"
                "    return o;\n"
                "}\n";
+        out.close();
+        Rendering::NotifyShaderSourcesChanged();
     }
     std::filesystem::path Root;
 };
@@ -707,8 +711,8 @@ TEST_F(MaterialPipelineCompilationTest, AsyncPublish_SuccessAppliesTheDeclaredTa
     ASSERT_NE(mat->GetDeclaredProperties()->Find("density"), nullptr);
     ASSERT_EQ(mat->GetDeclaredProperties()->Find("extra"), nullptr);
 
-    // The edit adds a lane (a longer file, so the stamp-keyed cache re-parses);
-    // the submit retired the pipeline while the worker compiles it.
+    // The edit adds a lane; the submit retired the pipeline while the worker
+    // compiles it.
     project.WriteSurface("// @property float density default=1\n"
                          "// @property float extra default=2\n");
     Material::TestFactory::SetGraphicsPipelineId(*mat, {});
@@ -799,8 +803,8 @@ TEST_F(MaterialPipelineCompilationTest, RecompileMovesVersionOnlyAndParameterEdi
 }
 
 // User keywords: an in-place .material hot-reload that flips the keyword set must
-// recompile the pipeline (route through CompileMaterialPipeline, which clears the
-// per-material variant cache), while a no-op re-register must not.
+// recompile the pipeline (route through CompileMaterialPipeline), while a no-op
+// re-register must not.
 TEST_F(MaterialPipelineCompilationTest, KeywordEditRecompilesPipeline)
 {
     const GUID guid = GUID::Generate();
@@ -998,6 +1002,21 @@ std::vector<uint8_t> BasePipelineFragment(IDevice& device, const Material& mat)
 constexpr MaterialKeyword kWorldColourPass =
     MaterialKeyword::ForwardPlus | MaterialKeyword::Shadows | MaterialKeyword::IBL | MaterialKeyword::Instanced;
 
+// A draw-time colour variant compile, keyed the way PipelineVariantCache keys one: the material's
+// variant key with the pass keywords and the mesh's vertex flags, and the material's sources.
+std::shared_ptr<SharedShaderVariant> CompileColourVariant(ShaderCompilationCache& cache, const Material& mat,
+                                                          const MaterialBuildContext& buildContext)
+{
+    ShaderCacheKey key{};
+    key.VariantKey = mat.GetVariantKey();
+    key.VariantKey.materialKeywords |= kWorldColourPass;
+    key.VariantKey.vertexFlags = VertexAttributeFlags::StandardMeshWithTangent;
+    key.Source = MakeShaderSourceKey(mat.GetCompileSpec().surfaceShaderPath, mat.GetCompileSpec().vertexModifierPath,
+                                     mat.GetMaterialAssetPath());
+    return cache.GetOrCompile(key, mat.GetCompileSpec(), buildContext, mat.GetName(), mat.GetMaterialAssetPath(),
+                              ShaderSourceKind::SpirV);
+}
+
 constexpr std::string_view kTriplanarRefusal =
     "Surfaces/triplanar_pbr does not use a Height map; bind it on a Standard PBR material";
 constexpr std::string_view kHexTilingRefusal =
@@ -1064,10 +1083,9 @@ TEST_F(MaterialPipelineCompilationTest, CacheDrivenCompilesOfAParallaxMaterialMa
     EXPECT_TRUE(FragmentMarches(compiled->fragmentBytes)) << "GetOrCompile compiled the flat program";
 
     // The shape of the draw-time colour variant.
-    const auto variant = cache.GetOrCompileVariant(*mat, kWorldColourPass, ctx, ShaderSourceKind::SpirV,
-                                                   VertexAttributeFlags::StandardMeshWithTangent);
+    const auto variant = CompileColourVariant(cache, *mat, ctx);
     ASSERT_TRUE(variant) << "compile failed";
-    EXPECT_TRUE(FragmentMarches(variant->fragmentBytes)) << "GetOrCompileVariant compiled the flat program";
+    EXPECT_TRUE(FragmentMarches(variant->fragmentBytes)) << "the colour variant compiled the flat program";
 
     // A refused material (hex tiling on) keeps the flat program on the same paths.
     MaterialDocument hex = doc;
@@ -1075,8 +1093,7 @@ TEST_F(MaterialPipelineCompilationTest, CacheDrivenCompilesOfAParallaxMaterialMa
     hex.properties["hexTiling"] = 1.0f;
     Material* refused = m_rs->Materials().RegisterMaterialFromDocument(GUID::Generate(), hex);
     ASSERT_NE(refused, nullptr);
-    const auto refusedVariant = cache.GetOrCompileVariant(*refused, kWorldColourPass, ctx, ShaderSourceKind::SpirV,
-                                                          VertexAttributeFlags::StandardMeshWithTangent);
+    const auto refusedVariant = CompileColourVariant(cache, *refused, ctx);
     ASSERT_TRUE(refusedVariant) << "compile failed";
     EXPECT_FALSE(FragmentMarches(refusedVariant->fragmentBytes));
 
@@ -1432,10 +1449,11 @@ TEST_F(MaterialPipelineCompilationTest, ReregistrationKeepsTheDeclaredTableUntil
     ASSERT_NE(table, nullptr);
     ASSERT_NE(table->Find("density"), nullptr);
 
-    // A longer file so the stamp-keyed cache would re-parse if the resolve ran.
+    // An announced edit, so the table cache would re-parse if the resolve ran.
     writeSurface("declared_a.glsl",
                  "// @property float density default=1\n"
                  "// @property float extra default=2\n");
+    Rendering::NotifyShaderSourcesChanged();
     ASSERT_EQ(m_rs->Materials().RegisterMaterialFromDocument(guid, doc), mat);
     EXPECT_EQ(mat->GetDeclaredProperties(), table)
         << "an unchanged re-registration must not re-resolve the table";
@@ -3129,7 +3147,7 @@ TEST_F(MaterialPipelineCompilationTest, PublishGate_DepthVariantCompileFailure_C
 // keyed on the freed Material* (an unreachable leak; a wrong-pipeline
 // stale-serve if the address is reused). The apply must drop any record whose
 // GUID no longer resolves in the registry, exactly like the base-pipeline
-// publish drain: look up by GUID, never trust the captured pointer.
+// publish drain: check the registry binding, never trust the captured pointer.
 TEST_F(MaterialPipelineCompilationTest, PublishGate_LatePublishForUnregisteredMaterialDropped)
 {
     MaterialDocument doc{};
@@ -3143,6 +3161,8 @@ TEST_F(MaterialPipelineCompilationTest, PublishGate_LatePublishForUnregisteredMa
     ASSERT_TRUE(mat->GetGraphicsPipelineId().IsValid());
     const auto realPid = mat->GetGraphicsPipelineId();
     const uint32_t version = mat->GetVersion();
+    const uint64_t generation = m_rs->Materials().Registry().GetRegistrationGeneration(guid);
+    ASSERT_NE(generation, 0u);
 
     auto& variants = m_rs->Materials().Variants();
     const PipelineVariantCache::InstancedVariantKey key{
@@ -3157,7 +3177,7 @@ TEST_F(MaterialPipelineCompilationTest, PublishGate_LatePublishForUnregisteredMa
     m_rs->Materials().Registry().Unregister(guid);
     ASSERT_EQ(m_rs->Materials().Registry().Find(guid), nullptr);
 
-    variants.EnqueueColorVariantPublishForTesting(key, realPid, version, guid);
+    variants.EnqueueColorVariantPublishForTesting(key, realPid, version, guid, generation);
 
     std::mutex publishedMutex;
     std::vector<GUID> published;
@@ -3182,6 +3202,46 @@ TEST_F(MaterialPipelineCompilationTest, PublishGate_LatePublishForUnregisteredMa
             << "a dropped publish must not notify listeners for a dead GUID";
     }
     publishedSub.Reset();
+}
+
+// A compile submitted for one binding of a GUID publishes after the GUID is
+// unregistered and registered again. The new Material can take the freed
+// address, so the key and the version can both match it. The apply must drop
+// the record because its registration generation is not the current one.
+TEST_F(MaterialPipelineCompilationTest, PublishGate_LatePublishForSupersededRegistrationDropped)
+{
+    MaterialDocument doc{};
+    doc.materialName = "LatePublishSuperseded";
+    doc.lightingModel = "StandardPBR";
+    doc.surfaceShader = "Surfaces/standard_pbr.glsl";
+
+    const GUID guid = GUID::Generate();
+    MaterialRegistry& registry = m_rs->Materials().Registry();
+    Material* first = m_rs->Materials().RegisterMaterialFromDocument(guid, doc);
+    ASSERT_NE(first, nullptr);
+    const auto stalePid = first->GetGraphicsPipelineId();
+    ASSERT_TRUE(stalePid.IsValid());
+    const uint64_t staleGeneration = registry.GetRegistrationGeneration(guid);
+
+    registry.Unregister(guid);
+    Material* second = m_rs->Materials().RegisterMaterialFromDocument(guid, doc);
+    ASSERT_NE(second, nullptr);
+    ASSERT_GT(registry.GetRegistrationGeneration(guid), staleGeneration);
+
+    // The key names the live Material, as it does when the address is reused.
+    auto& variants = m_rs->Materials().Variants();
+    const PipelineVariantCache::InstancedVariantKey key{
+        second, VertexAttributeFlags::StandardMesh | VertexAttributeFlags::HasColor,
+        /*SampleCount=*/1u,
+        MaterialKeyword::ForwardPlus | MaterialKeyword::Instanced | MaterialKeyword::Shadows,
+        PrimitiveTopology::TriangleList};
+    variants.EnqueueColorVariantPublishForTesting(key, stalePid, second->GetVersion(), guid, staleGeneration);
+
+    variants.DrainPendingEvictions();
+    variants.ApplyPendingVariantPublishes();
+
+    EXPECT_FALSE(variants.HasColorVariantForTesting(key))
+        << "a publish for a superseded registration must not serve the new Material";
 }
 
 // A draw the publish gate skipped draws once its variant publishes, so the
@@ -3211,14 +3271,16 @@ TEST_F(MaterialPipelineCompilationTest, PublishGate_LandedPublishMovesPipelineRe
     // recapture schedule is covered too.
     constexpr uint64_t kWorld = 1;
     const uint64_t before = SceneProbeWorldEpochs::Read(*m_rs, kWorld).Pipelines;
-    variants.EnqueueColorVariantPublishForTesting(key, mat->GetGraphicsPipelineId(), mat->GetVersion(), guid);
+    variants.EnqueueColorVariantPublishForTesting(key, mat->GetGraphicsPipelineId(), mat->GetVersion(), guid,
+                                                  m_rs->Materials().Registry().GetRegistrationGeneration(guid));
     variants.ApplyPendingVariantPublishes();
     ASSERT_TRUE(variants.HasColorVariantForTesting(key));
     const uint64_t afterLanded = SceneProbeWorldEpochs::Read(*m_rs, kWorld).Pipelines;
     EXPECT_GT(afterLanded, before) << "a landed publish makes a skipped draw drawable";
 
     const GUID goneGuid = GUID::Generate();
-    variants.EnqueueColorVariantPublishForTesting(key, mat->GetGraphicsPipelineId(), mat->GetVersion(), goneGuid);
+    variants.EnqueueColorVariantPublishForTesting(key, mat->GetGraphicsPipelineId(), mat->GetVersion(), goneGuid,
+                                                  /*registrationGeneration=*/0);
     variants.ApplyPendingVariantPublishes();
     EXPECT_EQ(SceneProbeWorldEpochs::Read(*m_rs, kWorld).Pipelines, afterLanded)
         << "a publish for a material that is not registered is dropped and lands nothing";

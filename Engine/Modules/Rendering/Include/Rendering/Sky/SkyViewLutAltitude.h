@@ -3,6 +3,9 @@
 #include <cstdint>
 
 namespace GameEngine {
+namespace Mathematics {
+struct Vector3;
+}
 namespace Rendering {
 
 /// The camera altitudes the sky-view LUT is baked at. The dome a camera sees depends on its height
@@ -18,7 +21,7 @@ namespace Rendering {
 /// The height above the planet surface, in meters, of the point at world `position`: the planet's
 /// center sits `planetRadius` below the world origin, as in the sky shaders. Negative below the
 /// surface.
-float AltitudeAbovePlanetMeters(const float position[3], float planetRadius);
+float AltitudeAbovePlanetMeters(const Mathematics::Vector3& position, float planetRadius);
 
 /// The band a camera at `altitudeMeters` above the planet surface is in.
 uint32_t SkyViewLutAltitudeBand(float altitudeMeters);

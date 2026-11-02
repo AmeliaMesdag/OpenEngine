@@ -895,7 +895,7 @@ UIManager::PointerFrameResult UIManager::TryPointerOnlyFrame(unsigned dirtyNow, 
     if ((dirtyNow & ~unsigned(UIElement::VisualDirty)) != 0u)
         return PointerFrameResult::NotApplicable;
     m_PointerGateDecline = PointerGateDecline::RelayoutOrRebuild;
-    if (m_RequestRelayout || m_ForceFullRebuildNextFrame || m_RebuildDockspace)
+    if (m_RequestRelayout || m_ForceFullRebuildNextFrame)
         return PointerFrameResult::NotApplicable;
     m_PointerGateDecline = PointerGateDecline::Virtualization;
     if (m_VirtualizationImpactFlags.load(std::memory_order_relaxed) != 0u)
@@ -1020,7 +1020,7 @@ UIManager::PointerFrameResult UIManager::TryPointerOnlyFrame(unsigned dirtyNow, 
         ((m_DirtyHintFlags.load(std::memory_order_relaxed) & ~unsigned(UIElement::VisualDirty)) != 0u) ||
         m_RequestRelayout || m_ScrollOffsetsChanged || m_ScrollWheelMoved ||
         m_KeyInputSinceLastUpdate ||
-        captureChanged || m_RebuildDockspace ||
+        captureChanged ||
         (m_VirtualizationImpactFlags.load(std::memory_order_relaxed) != 0u) ||
         m_VirtualizationCoordinator.HasPending() ||
         (m_FocusId != m_LastFocusIdNotified);

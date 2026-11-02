@@ -60,6 +60,12 @@ struct PavedFootprintInput
     std::span<const PavedArm> Arms;
     // Closed rings cut out of the paving (a planting bed).
     std::span<const AreaRing> Excludes;
+    // Closed rings cut out of the paving with no border along the cut: another road's surface fills
+    // them at the paving's height, so the paving meets it flush.
+    std::span<const AreaRing> FlushCuts;
+    // Per outline, the radius in meters of the arcs that round each arm's mouth where the arm leaves
+    // that outline; 0, or no entry, keeps the sharp corner. An arc that does not fit is made smaller.
+    std::span<const float32> MouthRadii;
 };
 
 // Where a boundary edge comes from.
@@ -74,6 +80,10 @@ enum class PavedEdgeSource : uint8
     // An arm's cap at its approach stop, where the road goes on: no border crosses it.
     Open,
     Exclude,
+    // A side of a flush cut: the paving meets another road's surface there, so no border runs along it.
+    FlushCut,
+    // The arc that rounds an arm's mouth, or the straight edge that runs from the arc to the arm's side.
+    Mouth,
     // On no input edge: one the boolean made. None is expected; a test asserts it.
     New,
 };
@@ -85,7 +95,7 @@ struct PavedEdge
     uint32 Index = 0;
 };
 
-// One maximal chain of boundary edges that are not Open, in its ring's winding: an outer ring
+// One maximal chain of boundary edges that are neither Open nor FlushCut, in its ring's winding: an outer ring
 // counter-clockwise from above, a hole clockwise, so the right of travel is out of the paving.
 struct PavedBoundaryRun
 {
@@ -97,6 +107,13 @@ struct PavedBoundaryRun
     // A whole ring with no Open edge: a rim with no approach, or a bed's edge.
     bool Closed = false;
     bool Hole = false;
+    // An open run's neighbors on its ring: the Open or FlushCut edge that ends at its first point, and
+    // the one that starts at its last point, each with its direction on the ground in the ring's
+    // winding. A closed run has none.
+    PavedEdge StartBreak{};
+    PavedEdge EndBreak{};
+    Mathematics::Vector2 StartBreakDirection{};
+    Mathematics::Vector2 EndBreakDirection{};
 };
 
 // The overlapping footprints built once: the pieces to pave and the runs to border.
@@ -134,6 +151,7 @@ enum class PavedFootprintIssueKind : uint8
     // every station.
     SliverArm,
     SliverExclude,
+    SliverFlushCut,
 };
 
 // An input left out of the paving, and why.
@@ -151,16 +169,13 @@ struct PavedFootprint
     std::vector<PavedFootprintIssue> Issues;
 };
 
-// The paving of `input`. Each arm is trimmed at its approach stop: the station after the last one
-// at which its cross-section overlaps another arm's trimmed ribbon or an outline, advanced by
-// kApproachStopAdvanceWidths of its width, found by growing every arm from its node until no stop
-// moves. The trimmed ribbons and the outlines that overlap or touch within kPavedTouchMeters form
-// regions; each region is one CombineTouchingAreas of its ribbons and outlines minus the excludes,
-// welded at kPavedTouchMeters with the 1 cm sliver bound, so what touches is one piece with no gap
-// or sliver between. Every boundary edge is then matched to the input edge it lies on within
-// kPavedTouchMeters, the Open tag winning where several match, and the boundary is cut into runs
-// at the Open edges. An outline that no arm touches is a region of its own, bordered by a closed
-// run.
+// The paving of `input`: each arm stops kApproachStopAdvanceWidths past its last overlap or a turn there, or
+// at its round mouth's throat; ribbons, mouths and outlines that touch form one region less the excludes and
+// flush cuts, its boundary split into border runs at Open and FlushCut edges. A lone outline is its own region.
 PavedFootprint BuildPavedFootprint(const PavedFootprintInput& input);
+
+// The ring of each arm's whole ribbon, from the node to its last station, built as
+// BuildPavedFootprint builds an arm's ribbon. A sliver arm's ring is empty.
+std::vector<AreaRing> BuildPavedArmRibbons(std::span<const PavedArm> arms);
 
 } // namespace GameEngine::SplineGeometry

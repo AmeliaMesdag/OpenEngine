@@ -256,8 +256,9 @@ class HeightFogSkyHorizonTest : public ::testing::Test
         pc.skyExposureNight[0] = sky.exposureEV;
         pc.skyExposureNight[1] = sky.nightSkyBlend;
         pc.skyExposureNight[2] = hdriSweep ? 1.0f : 0.0f;
-        for (int c = 0; c < 3; ++c)
-            pc.skyNightHorizonColor[c] = sky.nightSkyHorizonColor[c];
+        pc.skyNightHorizonColor[0] = sky.nightSkyHorizonColor.r;
+        pc.skyNightHorizonColor[1] = sky.nightSkyHorizonColor.g;
+        pc.skyNightHorizonColor[2] = sky.nightSkyHorizonColor.b;
 
         const size_t bytes = static_cast<size_t>(kDirections) * 8u * sizeof(float);
         BufferDesc od{};
@@ -416,9 +417,7 @@ TEST(HeightFogSkyColor, FollowsEachSkyBackdropAndFallsBackToTheFixedColorWithout
 
     Rendering::SkySettings gradient = sky;
     gradient.skyMode = static_cast<uint32_t>(Components::SkyMode::Gradient);
-    gradient.gradientSkyHorizonColor[0] = 0.4f;
-    gradient.gradientSkyHorizonColor[1] = 0.5f;
-    gradient.gradientSkyHorizonColor[2] = 0.6f;
+    gradient.gradientSkyHorizonColor = ColorLinear(0.4f, 0.5f, 0.6f);
     fog = {};
     Engine::Renderer::FillHeightFogSkyColor(SkyHorizonFog(), &gradient, fog);
     EXPECT_EQ(fog.colorSource, static_cast<int32>(HeightFogColorSource::SkyConstant));
@@ -427,8 +426,8 @@ TEST(HeightFogSkyColor, FollowsEachSkyBackdropAndFallsBackToTheFixedColorWithout
 
     Rendering::SkySettings stylized = sky;
     stylized.belowHorizonMode = static_cast<uint32_t>(Rendering::SkyBelowHorizonMode::StylizedGround);
-    stylized.groundHorizonColor[0] = 0.8f;
-    stylized.groundHorizonNightColor[0] = 0.0f;
+    stylized.groundHorizonColor.r = 0.8f;
+    stylized.groundHorizonNightColor.r = 0.0f;
     fog = {};
     Engine::Renderer::FillHeightFogSkyColor(SkyHorizonFog(), &stylized, fog);
     EXPECT_EQ(fog.colorSource, static_cast<int32>(HeightFogColorSource::SkyConstant));

@@ -25,6 +25,11 @@ With **Auto**, Color and Packed usage cook to BC7, Normal to BC5, Mask to BC4, a
 an HDR image to BC6H. A texture whose usage is unknown stays uncompressed until a
 material slot that binds it tags its usage. Auto never picks BC1.
 
+A normal map with Auto compression and mips also cooks a variance texture beside it:
+BC4 at half size, one eighth of the normal map's memory. It records how much the
+normals vary inside each mip texel. A normal map whose Compression is set by hand,
+or a `.ktx2` source, has no variance texture.
+
 ## Encoders
 
 BC7 is encoded by bc7e, an ISPC-compiled BC7 encoder, at its `slow` profile with
@@ -49,5 +54,5 @@ material says how an LDR texture is used (an HDR image ships as BC6H unless its
 Compression is None). Every desktop target (Windows, Linux, macOS,
 and Steam Deck) samples these formats, so nothing ships twice. The export reuses a cooked
 texture from the project's `.Cache/Tex` when one matches, and puts each texture it
-cooks there too, so the editor does not cook it again. A cooked texture in a game that
+cooks there too, so the editor does not cook it again. A normal map ships with its variance texture. A cooked texture in a game that
 fails to load is reported in the log with the fix, "rebuild the package": export the game again.

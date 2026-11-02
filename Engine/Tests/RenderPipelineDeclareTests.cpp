@@ -20,6 +20,7 @@
 #include "Components/Transform.h"
 #include "Components/Rendering/PostProcessVolume.h"
 #include "Components/Rendering/PostProcessEffects/ShadowSettingsEffect.h"
+#include "ForwardDrainOrder.h"
 #include "RenderServicesDetail.h"
 #include "Rendering/Core/CullingStrategy.h"
 #include "Rendering/Core/GPUCulling.h"
@@ -46,6 +47,17 @@
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "TerrainECS/TerrainAtlas.h"
 #include "TerrainECS/TerrainGpuBake.h"
+#include "TerrainECS/PageLevelRule.h"
+#include "TerrainECS/TerrainPageFeature.h"
+#include "TerrainECS/TerrainPages.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePageSource.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePages.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceStore.h"
+#include "PageStreaming/GeneratedHeightPageProvider.h"
+#include "PageStreaming/PageStore/PageStoreAccess.h"
+#include "PageStreaming/PageStore/PageStoreFormat.h"
+#include "PageStreaming/PageStore/PageStorePatcher.h"
+#include "PageStreaming/PageStore/PageStoreWriter.h"
 #include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/Core/Pipeline/PipelineTypes.h"
 #include "Rendering/Core/BarrierMapping.h"
@@ -60,8 +72,8 @@
 #include "SceneDrawWarm.h"
 #include "Components/Terrain/TerrainGrass.h"
 #include "ECS/Component/ComponentFieldRegistry.h"
-#include "TerrainECS/TerrainGrassAlpha.h"
-#include "TerrainECS/TerrainGrassAuthoredBits.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassAlpha.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassAuthoredBits.h"
 #include "Rendering/Materials/MaterialBuildContext.h"
 #include "Terrain/Heightfield.h"
 #include "TerrainECS/TerrainUploadNode.h"
@@ -74,7 +86,7 @@
 #include "TerrainECS/TerrainDefaultSurfaceRules.h"
 #include "TerrainECS/TerrainRuleNoise.h"
 #include "TerrainECS/TerrainSplatComposite.h"
-#include "TerrainECS/TerrainSurfaceRuleEval.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceRuleEval.h"
 #include "TerrainGrass/GrassClumpModel.h"
 #include "TerrainGrass/GrassMaterialKeywords.h"
 #include "TerrainGrass/TerrainGrassRenderFeature.h"
@@ -125,7 +137,6 @@
 #include "Assets/AssetManager.h"
 #include "AssetCore/AssetEvents.h"
 #include "AssetCore/GUID.h"
-#include "Engine/Rendering/ForwardDrainOrder.h"
 
 #include <algorithm>
 #include <array>
@@ -389,18 +400,15 @@ CrossfadeDepthDecl DeclareCrossfadePrepassWorld(Rendering::IDevice* device, bool
 
     const CameraId camId = rs.Views().AllocateCamera("XfCam");
     CameraData cd{};
-    for (int i = 0; i < 16; i += 5)
-    {
-        cd.view[i] = 1.0f;
-        cd.proj[i] = 1.0f;
-        cd.viewProj[i] = 1.0f;
-    }
+    cd.view = Mathematics::Matrix4x4::Identity();
+    cd.proj = Mathematics::Matrix4x4::Identity();
+    cd.viewProj = Mathematics::Matrix4x4::Identity();
     rs.Views().SetCameraData(camId, cd);
     const ViewId viewId = rs.Views().AllocateView("XfView", camId);
     rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
     Rendering::ViewClearConfig clear{};
     clear.clearColor = true;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue.a = 1.0f;
     clear.clearDepth = true;
     clear.clearDepthValue = 0.0f;
     rs.Views().SetViewTargets(viewId, 0, 0, 0, clear);
@@ -575,12 +583,11 @@ PrepassOrderDecl DeclarePrepassResolveWorld(Rendering::IDevice* device, bool wit
     const CameraId camId = rs.Views().AllocateCamera("NoCam");
     // A perspective camera: the contact shadows decline an orthographic one.
     CameraData cd{};
-    for (int i = 0; i < 16; i += 5)
-        cd.view[i] = 1.0f;
+    cd.view = Mathematics::Matrix4x4::Identity();
     const auto projection = Mathematics::MakePerspectiveLH_ZO_ReverseZ(1.0471976f, 1.0f, 0.1f, 200.0f);
-    std::memcpy(cd.proj, projection.Data(), sizeof(cd.proj));
-    std::memcpy(cd.viewProj, cd.proj, sizeof(cd.proj));
-    std::memcpy(cd.viewProjRel, cd.viewProj, sizeof(cd.viewProj));
+    cd.proj = projection;
+    cd.viewProj = cd.proj;
+    cd.viewProjRel = cd.viewProj;
     rs.Views().SetCameraData(camId, cd);
     const ViewId viewId = rs.Views().AllocateView("NoView", camId);
     rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -1667,8 +1674,8 @@ TEST(RenderPipelineDeclareTests, TaaCertificationIsRevokedForAViewWithUnversione
     // A still camera with unchanged epochs and no instance movers.
     const auto mode = [&rs](ViewId view)
     {
-        return TemporalAANode::HistoryClipMode(TemporalAANode::ViewHasMovers(rs, view, kWorld),
-                                               false, true);
+        return TemporalAANode::HistoryClipMode(
+            Pipeline::ViewMotionVectors::ViewHasMovers(rs, view, kWorld), false, true);
     };
 
     rs.BeginWorldDrawFrame();
@@ -1711,12 +1718,56 @@ TEST(RenderPipelineDeclareTests, AMovingShadowsOnlyInstanceIsNotAViewMover)
 
     rs.BeginWorldDrawFrame();
     rs.AddFrameMover(proxyIndex, MeshGPUHandle{}, 0u, RenderServices::kNoPreviousSkinPalette);
-    EXPECT_FALSE(TemporalAANode::ViewHasMovers(rs, view, kWorld)) << "the proxy has no pixels to move";
-    EXPECT_FALSE(TemporalAANode::ViewHasMovers(rs, view, 0u));
+    EXPECT_FALSE(Pipeline::ViewMotionVectors::ViewHasMovers(rs, view, kWorld))
+        << "the proxy has no pixels to move";
+    EXPECT_FALSE(Pipeline::ViewMotionVectors::ViewHasMovers(rs, view, 0u));
     EXPECT_FALSE(Pipeline::ViewMotionVectors::DrawsMover(proxy, 0u, false));
 
     rs.AddFrameMover(drawnIndex, MeshGPUHandle{}, 0u, RenderServices::kNoPreviousSkinPalette);
-    EXPECT_TRUE(TemporalAANode::ViewHasMovers(rs, view, kWorld));
+    EXPECT_TRUE(Pipeline::ViewMotionVectors::ViewHasMovers(rs, view, kWorld));
+
+    rs.Shutdown();
+}
+
+// A view is still for a known world with unchanged content on the next app frame, the same
+// unjittered view-projection and no mover in view. A camera move, a content change, an unknown
+// world, a mover or a skipped frame ends it.
+TEST(RenderPipelineDeclareTests, ViewIsStillNeedsTheSameStampCameraAndNoMover)
+{
+    using Pipeline::ViewContentStamp;
+    auto* device = SharedHeadlessDevice();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device));
+    constexpr uint64_t kWorld = 7u;
+    rs.BeginWorldDrawFrame();
+    const ViewContentStamp stamp = ViewContentStamp::Capture(rs, kWorld);
+    rs.BeginWorldDrawFrame();
+    const ViewContentStamp next = ViewContentStamp::Capture(rs, kWorld);
+    CameraData camera{};
+    camera.viewProj[0][0] = 1.0f;
+    camera.viewProj[1][1] = 1.0f;
+    camera.viewProj[3][3] = 1.0f;
+
+    EXPECT_TRUE(ViewContentStamp::ViewIsStill(stamp, next, camera, camera, false))
+        << "an unchanged world on the next frame";
+    EXPECT_TRUE(stamp.SameContent(next)) << "content equality does not compare the app frame";
+
+    CameraData moved = camera;
+    moved.viewProj[3][0] = 0.01f;
+    EXPECT_FALSE(ViewContentStamp::ViewIsStill(stamp, next, camera, moved, false)) << "a camera move";
+
+    ViewContentStamp edited = next;
+    ++edited.LightListVersion;
+    EXPECT_FALSE(ViewContentStamp::ViewIsStill(stamp, edited, camera, camera, false)) << "a light edit";
+
+    const ViewContentStamp noWorld = ViewContentStamp::Capture(rs, 0u);
+    EXPECT_FALSE(ViewContentStamp::ViewIsStill(noWorld, noWorld, camera, camera, false)) << "no known world";
+    EXPECT_FALSE(ViewContentStamp::ViewIsStill(stamp, next, camera, camera, true)) << "a mover in view";
+    rs.BeginWorldDrawFrame();
+    EXPECT_FALSE(ViewContentStamp::ViewIsStill(stamp, ViewContentStamp::Capture(rs, kWorld), camera, camera, false))
+        << "a skipped frame";
 
     rs.Shutdown();
 }
@@ -1826,8 +1877,9 @@ TEST(RenderPipelineDeclareTests, AMovingEditorHiddenInstanceIsAMoverOutsideTheSc
 
     rs.BeginWorldDrawFrame();
     rs.AddFrameMover(hiddenIndex, MeshGPUHandle{}, 0u, RenderServices::kNoPreviousSkinPalette);
-    EXPECT_FALSE(TemporalAANode::ViewHasMovers(rs, sceneView, 0u)) << "the Scene View does not draw it";
-    EXPECT_TRUE(TemporalAANode::ViewHasMovers(rs, gameView, 0u)) << "the Game View draws it";
+    EXPECT_FALSE(Pipeline::ViewMotionVectors::ViewHasMovers(rs, sceneView, 0u))
+        << "the Scene View does not draw it";
+    EXPECT_TRUE(Pipeline::ViewMotionVectors::ViewHasMovers(rs, gameView, 0u)) << "the Game View draws it";
     EXPECT_FALSE(Pipeline::ViewMotionVectors::DrawsMover(hidden, 0u, true));
     EXPECT_TRUE(Pipeline::ViewMotionVectors::DrawsMover(hidden, 0u, false));
 
@@ -1982,12 +2034,9 @@ TEST(RenderPipelineDeclareTests, TaauMipBiasUploadReadsBackExtentRatio)
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("BiasCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("BiasView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -2060,8 +2109,9 @@ TEST(RenderPipelineDeclareTests, TaauMipBiasUploadReadsBackExtentRatio)
 
 // Forward shading that is display-referred (unlit particles) divides by the exposure the tonemap
 // applies, which it reads from the view's ViewParams: the static scale the effective settings
-// resolve, and whether auto exposure meters the view instead.
-TEST(RenderPipelineDeclareTests, ViewParamsUploadCarriesTheViewsExposure)
+// resolve, and whether auto exposure meters the view instead. The MSAA color resolve also reads the
+// tonemap's look there: the blended look, or the no-look arm when the view shows no look.
+TEST(RenderPipelineDeclareTests, ViewParamsUploadCarriesTheViewsExposureAndLook)
 {
     auto* device = SharedHeadlessDevice();
     if (!device)
@@ -2071,12 +2121,9 @@ TEST(RenderPipelineDeclareTests, ViewParamsUploadCarriesTheViewsExposure)
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("ExposureCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("ExposureView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -2114,21 +2161,25 @@ TEST(RenderPipelineDeclareTests, ViewParamsUploadCarriesTheViewsExposure)
         PostProcessSettings sunlit;
         sunlit.Exposure = 0.0062f;
         sunlit.AutoExposureActive = false;
+        sunlit.Look = 2; // Photographic
         rs.Views().SetViewPostProcessOverride(viewId, sunlit);
         instance.Declare(frame, targets, views);
         ViewParamsUBO manual{};
         ASSERT_TRUE(ReadBackViewParams(instance, frame, *device, viewId, manual));
         EXPECT_EQ(manual.ge_exposureParams[0], 0.0062f) << "the static scale the tonemap applies";
         EXPECT_EQ(manual.ge_exposureParams[1], 0.0f) << "nothing meters this view";
+        EXPECT_EQ(manual.ge_exposureParams[2], 2.0f) << "the look the tonemap applies";
 
         PostProcessSettings metered = sunlit;
         metered.AutoExposureActive = true;
+        metered.ViewOutput = PostProcessViewOutput::NoLook;
         rs.Views().SetViewPostProcessOverride(viewId, metered);
         instance.Declare(frame, targets, views);
         ViewParamsUBO automatic{};
         ASSERT_TRUE(ReadBackViewParams(instance, frame, *device, viewId, automatic));
         EXPECT_EQ(automatic.ge_exposureParams[1], 1.0f)
             << "auto exposure meters the view: shaders read the metered scale from ExposureHistory";
+        EXPECT_EQ(automatic.ge_exposureParams[2], 3.0f) << "the view shows no look: the tonemap's no-look arm";
 
         device->WaitForIdle();
         rs.Shutdown();
@@ -2148,7 +2199,7 @@ TEST(RenderPipelineDeclareTests, RealNodesShareOneDepthAndSuppressTheWorldClear)
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
         Rendering::ViewClearConfig clear{};
         clear.clearColor = true;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue.a = 1.0f;
         clear.clearDepth = true;
         clear.clearDepthValue = 0.0f;
         rs.Views().SetViewTargets(viewId, 0, 0, 0, clear);
@@ -2476,12 +2527,9 @@ TEST(RenderPipelineDeclareTests, NonOccludingPrepassTakesNoEntityBatchEdges)
 
         const CameraId camId = rs.Views().AllocateCamera("NoOcclSpineCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("NoOcclSpineView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -2579,12 +2627,9 @@ TEST(RenderPipelineDeclareTests, UploadNodesDissolveIntoTheRing)
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("UploadCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("UploadView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -2728,16 +2773,13 @@ TEST(RenderPipelineDeclareTests, CsmNodeCachesFrameDataBeforeTheCascadeArms)
         CameraData cd{};
         // A plausible perspective proj (nonzero [0]/[5] passes the thumbnail
         // guard; near/far extractable).
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("CsmView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -2929,20 +2971,19 @@ class SceneFitRig
     void SetCamera(float z, bool turned)
     {
         Rendering::CameraData camera{};
-        camera.proj[0] = 1.0f;
-        camera.proj[5] = 1.0f;
-        camera.proj[10] = 0.001f;
-        camera.proj[11] = 1.0f;
-        camera.proj[14] = 0.1f;
+        camera.proj[0][0] = 1.0f;
+        camera.proj[1][1] = 1.0f;
+        camera.proj[2][2] = 0.001f;
+        camera.proj[2][3] = 1.0f;
+        camera.proj[3][2] = 0.1f;
         const float axis = turned ? -1.0f : 1.0f;
-        camera.view[0] = axis;
-        camera.view[5] = 1.0f;
-        camera.view[10] = axis;
-        camera.view[15] = 1.0f;
-        camera.view[14] = -axis * z;
-        for (int i = 0; i < 16; i += 5)
-            camera.viewProj[i] = 1.0f;
-        camera.cameraPos[2] = z;
+        camera.view[0][0] = axis;
+        camera.view[1][1] = 1.0f;
+        camera.view[2][2] = axis;
+        camera.view[3][3] = 1.0f;
+        camera.view[3][2] = -axis * z;
+        camera.viewProj = Mathematics::Matrix4x4::Identity();
+        camera.cameraPos.z = z;
         m_Services.Views().SetCameraData(m_CameraId, camera);
     }
 
@@ -3119,16 +3160,13 @@ TEST(RenderPipelineDeclareTests, GlassTintDeclaresOnlyForTransmissiveCasters)
         EXPECT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("TintCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("TintView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -3292,16 +3330,13 @@ TEST(RenderPipelineDeclareTests, SdsmReduceDeclaresOnlyWithCastersOverAnyDepthSa
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("SdsmCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("SdsmView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -3443,16 +3478,13 @@ TEST(RenderPipelineDeclareTests, SdsmDepthReduceDeclaresComputeScopedSampledRead
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("SdsmScopeCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("SdsmScopeView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -3568,16 +3600,13 @@ TEST(RenderPipelineDeclareTests, SdsmReduceReadsTheViewDepthAfterLaterNodesWrite
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("SdsmLateCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("SdsmLateView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -3723,12 +3752,12 @@ CameraData MakeLookCamera(const Mathematics::Vector3& position, const Mathematic
     const Mathematics::Matrix4x4 proj =
         Mathematics::MakePerspectiveLH_ZO_ReverseZ(0.8f, 16.0f / 9.0f, 0.5f, 1000.0f);
     const Mathematics::Matrix4x4 viewProj = proj * view;
-    std::memcpy(cam.view, view.Data(), sizeof(cam.view));
-    std::memcpy(cam.proj, proj.Data(), sizeof(cam.proj));
-    std::memcpy(cam.viewProj, viewProj.Data(), sizeof(cam.viewProj));
-    cam.cameraPos[0] = position.x;
-    cam.cameraPos[1] = position.y;
-    cam.cameraPos[2] = position.z;
+    cam.view = view;
+    cam.proj = proj;
+    cam.viewProj = viewProj;
+    cam.cameraPos.x = position.x;
+    cam.cameraPos.y = position.y;
+    cam.cameraPos.z = position.z;
     return cam;
 }
 } // namespace
@@ -3865,12 +3894,12 @@ TEST(RenderPipelineDeclareTests, ShadowVolumeFiltersRestoreBaseAndFollowViewWorl
         std::array<uint32_t, 3> viewWorlds{0u, 1u, 2u};
         const CameraId camera = rs.Views().AllocateCamera("ShadowVolumeCamera");
         CameraData cameraData{};
-        cameraData.proj[0] = cameraData.proj[5] = 1.0f;
-        cameraData.proj[10] = 0.001f;
-        cameraData.proj[11] = 1.0f;
-        cameraData.proj[14] = 0.1f;
-        for (uint32_t i = 0; i < 16; i += 5)
-            cameraData.view[i] = cameraData.viewProj[i] = 1.0f;
+        cameraData.proj[0][0] = cameraData.proj[1][1] = 1.0f;
+        cameraData.proj[2][2] = 0.001f;
+        cameraData.proj[2][3] = 1.0f;
+        cameraData.proj[3][2] = 0.1f;
+        cameraData.view = Mathematics::Matrix4x4::Identity();
+        cameraData.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camera, cameraData);
         for (uint32_t i = 0; i < viewIds.size(); ++i)
         {
@@ -4132,16 +4161,13 @@ TEST(RenderPipelineDeclareTests, MsmDeclaresPerCascadeWritesOnlyWhenMsm4Active)
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("MsmCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("MsmView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -4575,12 +4601,9 @@ TEST(RenderPipelineDeclareTests, SpineIsIdempotentPerFrameAndMarksOutput)
         GameEngine::Testing::PinWorldOnlyPipeline(rs.Spine());
         const CameraId camId = rs.Views().AllocateCamera("SpineCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("SpineView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -4653,12 +4676,9 @@ TEST(RenderPipelineDeclareTests, SpineDeclaresFourQuadViewsInOneCall)
         GameEngine::Testing::PinWorldOnlyPipeline(rs.Spine());
         const CameraId camId = rs.Views().AllocateCamera("QuadCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
 
         ASSERT_NE(rs.GetGPUScene(), nullptr);
@@ -5084,12 +5104,9 @@ TEST(RenderPipelineDeclareTests, TwoFrameStreamsOneAppFrameIsolateAndShareGlobal
         Rendering::GPUScene::SetCullingShaderLoader(&StagedCullingShaderLoader);
         const CameraId camId = rs.Views().AllocateCamera("TwoStreamCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewA = rs.Views().AllocateView("TwoStreamViewA", camId);
         const ViewId viewB = rs.Views().AllocateView("TwoStreamViewB", camId);
@@ -5221,12 +5238,9 @@ TEST(RenderPipelineDeclareTests, BuildFrameGraphNeverBumpsAppFrameEpoch)
         Rendering::GPUScene::SetCullingShaderLoader(&StagedCullingShaderLoader);
         const CameraId camId = rs.Views().AllocateCamera("EpochCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewA = rs.Views().AllocateView("EpochViewA", camId);
         const ViewId viewB = rs.Views().AllocateView("EpochViewB", camId);
@@ -5316,12 +5330,9 @@ TEST(RenderPipelineDeclareTests, ReBegunFrameInvalidatesUntilRedeclareAndReapDro
         Rendering::GPUScene::SetCullingShaderLoader(&StagedCullingShaderLoader);
         const CameraId camId = rs.Views().AllocateCamera("ReBeginCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("ReBeginView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -5443,12 +5454,9 @@ TEST(RenderPipelineDeclareTests, TwoViewsOneSpineCallBothResolveAndRepeatOmissio
         GameEngine::Testing::PinWorldOnlyPipeline(rs.Spine());
         const CameraId camId = rs.Views().AllocateCamera("EdCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewA = rs.Views().AllocateView("EdViewA", camId);
         const ViewId viewB = rs.Views().AllocateView("EdViewB", camId);
@@ -5522,12 +5530,9 @@ TEST(RenderPipelineDeclareTests, ASleepingViewDeclaresNoPipelineOutput)
         GameEngine::Testing::PinWorldOnlyPipeline(rs.Spine());
         const CameraId camId = rs.Views().AllocateCamera("MaskCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewA = rs.Views().AllocateView("MaskViewA", camId);
         const ViewId viewB = rs.Views().AllocateView("MaskViewB", camId, Rendering::ViewPurpose::Game,
@@ -5591,12 +5596,9 @@ TEST(RenderPipelineDeclareTests, TwoViewsAsymmetricMsaaOneSpineCall)
         GameEngine::Testing::PinWorldOnlyPipeline(rs.Spine());
         const CameraId camId = rs.Views().AllocateCamera("AsymCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewA = rs.Views().AllocateView("AsymViewA", camId);
         const ViewId viewB = rs.Views().AllocateView("AsymViewB", camId);
@@ -5979,6 +5981,8 @@ struct SssrGateRig
     std::unique_ptr<RenderGraph::RGFrame> Frame;
     Rendering::ViewId View = 0;
     Rendering::ViewId ViewB = 0; // second view when Init's samplesB > 0
+    CameraId Camera{};
+    Nodes::ScreenSpaceReflectionsNode* Reflections = nullptr; // the instance's node, once declared
     uint32_t Samples = 1;
     uint32_t SamplesB = 0;
     // When set, every declared frame submits one draw of this material to View
@@ -5987,6 +5991,9 @@ struct SssrGateRig
     // producer needs before it declares anything.
     const Material* Deforming = nullptr;
     MeshGPUHandle DeformingMesh{};
+    // When set, the rig keeps one RGFrame across frames, so a view's temporal history has a
+    // submitted previous frame.
+    bool KeepsFrameStream = false;
 
     bool Init(Rendering::IDevice* device, uint32_t samples, uint32_t samplesB = 0,
               bool letterboxed = false, bool temporalAA = false)
@@ -5996,13 +6003,11 @@ struct SssrGateRig
         if (!Services.Initialize(device))
             return false;
         const CameraId camId = Services.Views().AllocateCamera("SssrGateCam");
+        Camera = camId;
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         Services.Views().SetCameraData(camId, cd);
         Rendering::ViewClearConfig clear{};
         clear.clearColor = true;
@@ -6036,9 +6041,7 @@ struct SssrGateRig
         if (!Registry.Register(
                 "WorldRender", [] { return std::make_unique<Nodes::WorldRenderNode>(); }, true))
             return false;
-        if (!Registry.Register(
-                "ScreenSpaceReflections",
-                [] { return std::make_unique<Nodes::ScreenSpaceReflectionsNode>(); }, true))
+        if (!Registry.Register("ScreenSpaceReflections", [this] { return MakeReflectionsNode(); }, true))
             return false;
         if (!Registry.Register(
                 "TemporalAA", [] { return std::make_unique<Nodes::TemporalAANode>(); }, true))
@@ -6094,7 +6097,7 @@ struct SssrGateRig
         // The deforming-motion producer differences against the last submitted
         // frame, which only a frame stream that outlives one frame counts: with
         // a deformer the rig keeps one RGFrame across frames, as the spine does.
-        if (Frame == nullptr || Deforming == nullptr)
+        if (Frame == nullptr || (Deforming == nullptr && !KeepsFrameStream))
             Frame = std::make_unique<RenderGraph::RGFrame>(device, &Pools->Persistent,
                                                            &Pools->Transient, &Pools->Ring);
         Frame->BeginFrame(frameIndex);
@@ -6177,6 +6180,21 @@ struct SssrGateRig
         DeclareFrame(device, frameIndex);
     }
 
+    std::unique_ptr<IRenderPipelineNode> MakeReflectionsNode()
+    {
+        auto node = std::make_unique<Nodes::ScreenSpaceReflectionsNode>();
+        Reflections = node.get();
+        return node;
+    }
+
+    // Moves the camera along x in clip space from the next declared frame.
+    void MoveCamera(float x)
+    {
+        CameraData cd = *Services.Views().FindCameraData(Camera);
+        cd.viewProj[3][0] = x;
+        Services.Views().SetCameraData(Camera, cd);
+    }
+
     void Finish(Rendering::IDevice* device)
     {
         ExecuteFrame(device);
@@ -6244,6 +6262,155 @@ struct SssrGateRig
         return names;
     }
 };
+
+// A depth writer outside the instance path (grass) changes only the views it draws into: a still view
+// it does not draw into stays still, and the view it draws into does not.
+TEST(RenderPipelineDeclareTests, ViewIsStillReadsOnlyTheDepthTheViewDraws)
+{
+    using Pipeline::ViewContentStamp;
+    auto* device = SharedHeadlessDevice();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device));
+    constexpr uint64_t kWorld = 7u;
+    CameraData camera{};
+    camera.viewProj[0][0] = 1.0f;
+    camera.viewProj[1][1] = 1.0f;
+    camera.viewProj[3][3] = 1.0f;
+    const CameraId cameraId = rs.Views().AllocateCamera("StillDepthCam");
+    rs.Views().SetCameraData(cameraId, camera);
+    Rendering::ViewClearConfig clear{};
+    clear.clearDepth = true;
+    const Rendering::ViewId drawn = rs.Views().AllocateView("StillDepthDrawn", cameraId);
+    const Rendering::ViewId other = rs.Views().AllocateView("StillDepthOther", cameraId);
+    for (const Rendering::ViewId view : {drawn, other})
+    {
+        rs.Views().SetViewRenderLayerMask(view, GameEngine::Rendering::RenderLayerMask::Default());
+        rs.Views().SetViewTargets(view, 0, 0, 0, clear);
+        rs.Views().SetViewWorldId(view, kWorld);
+    }
+    const ScopedSubscription producer = rs.RegisterForwardEmit(
+        [drawn](ForwardEmitContext& context)
+        {
+            if (context.ViewId == drawn)
+                context.Services->EmitForwardCommand(context.ViewId, DrawCommand{}, ForwardDrawDepth::ColourPass);
+        });
+
+    FramePools pools(device);
+    RenderGraph::RGFrame frame(device, &pools.Persistent, &pools.Transient, &pools.Ring);
+    // The world's stamp on two frames: index 0 is the earlier frame.
+    ViewContentStamp stamps[2];
+    for (uint64_t frameIndex = 0; frameIndex < 2; ++frameIndex)
+    {
+        frame.BeginFrame(frameIndex + 1);
+        rs.BeginWorldDrawFrame();
+        rs.BuildWorldBatchKeys();
+        rs.ScheduleViewCullingDispatches(frame, 1.0f / 60.0f);
+        stamps[frameIndex] = ViewContentStamp::Capture(rs, kWorld);
+    }
+    EXPECT_TRUE(ViewContentStamp::ViewIsStill(stamps[0], stamps[1], camera, camera,
+                                              ViewMotionVectors::ViewHasMovers(rs, other, kWorld)))
+        << "the producer draws nothing into this view";
+    EXPECT_FALSE(ViewContentStamp::ViewIsStill(stamps[0], stamps[1], camera, camera,
+                                               ViewMotionVectors::ViewHasMovers(rs, drawn, kWorld)))
+        << "the producer's depth changes this view";
+    rs.Shutdown();
+}
+
+// A view that skips frames reads no depth report from the frames it missed: it is not still on
+// the frame it resumes, and it is still again on the frame after.
+TEST(RenderPipelineDeclareTests, ViewIsStillIsFalseWhenTheViewResumesAfterSkippedFrames)
+{
+    using Pipeline::ViewContentStamp;
+    auto* device = SharedHeadlessDevice();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device));
+    constexpr uint64_t kWorld = 7u;
+    CameraData camera{};
+    camera.viewProj[0][0] = 1.0f;
+    camera.viewProj[1][1] = 1.0f;
+    camera.viewProj[3][3] = 1.0f;
+    const CameraId cameraId = rs.Views().AllocateCamera("ResumeCam");
+    rs.Views().SetCameraData(cameraId, camera);
+    Rendering::ViewClearConfig clear{};
+    clear.clearDepth = true;
+    const Rendering::ViewId view = rs.Views().AllocateView("ResumeView", cameraId);
+    rs.Views().SetViewRenderLayerMask(view, GameEngine::Rendering::RenderLayerMask::Default());
+    rs.Views().SetViewTargets(view, 0, 0, 0, clear);
+    rs.Views().SetViewWorldId(view, kWorld);
+    constexpr uint64_t kDepthChangeFrame = 2u;
+    constexpr uint64_t kResumeFrame = 5u;
+    uint64_t currentFrame = 0u;
+    const ScopedSubscription producer = rs.RegisterForwardEmit(
+        [view, &currentFrame](ForwardEmitContext& context)
+        {
+            if (context.ViewId == view && currentFrame == kDepthChangeFrame)
+                context.Services->EmitForwardCommand(context.ViewId, DrawCommand{}, ForwardDrawDepth::ColourPass);
+        });
+
+    FramePools pools(device);
+    RenderGraph::RGFrame frame(device, &pools.Persistent, &pools.Transient, &pools.Ring);
+    // The view declares on frame 1, skips frames 2 to 4 and resumes on frame 5.
+    ViewContentStamp beforeLapse{};
+    ViewContentStamp resumed{};
+    for (currentFrame = 1u; currentFrame <= kResumeFrame + 1u; ++currentFrame)
+    {
+        frame.BeginFrame(currentFrame);
+        rs.BeginWorldDrawFrame();
+        rs.BuildWorldBatchKeys();
+        rs.ScheduleViewCullingDispatches(frame, 1.0f / 60.0f);
+        if (currentFrame == 1u)
+            beforeLapse = ViewContentStamp::Capture(rs, kWorld);
+        if (currentFrame == kResumeFrame)
+        {
+            resumed = ViewContentStamp::Capture(rs, kWorld);
+            EXPECT_FALSE(ViewContentStamp::ViewIsStill(beforeLapse, resumed, camera, camera,
+                                                       ViewMotionVectors::ViewHasMovers(rs, view, kWorld)))
+                << "the depth changed on a frame the view skipped";
+        }
+    }
+    EXPECT_TRUE(ViewContentStamp::ViewIsStill(resumed, ViewContentStamp::Capture(rs, kWorld), camera, camera,
+                                              ViewMotionVectors::ViewHasMovers(rs, view, kWorld)))
+        << "the frame after the resume";
+    rs.Shutdown();
+}
+
+// The SSSR passes push one noise frame index per view. It holds while the view is still, so a
+// still view traces the same samples every frame; a camera move or a mover in view advances it.
+TEST(RenderPipelineDeclareTests, SssrTraceFrameHoldsWhileTheViewIsStill)
+{
+    auto* device = SharedHeadlessDevice();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    SssrGateRig rig;
+    ASSERT_TRUE(rig.Init(device, 1));
+    ASSERT_NE(rig.Reflections, nullptr);
+    rig.KeepsFrameStream = true;
+    rig.Services.Views().SetViewWorldId(rig.View, 7u);
+    uint64_t frameIndex = 0;
+    for (int i = 0; i < 3; ++i)
+        rig.NextFrame(device, ++frameIndex);
+    const uint32_t held = rig.Reflections->TraceFrameIndex(rig.View);
+    rig.NextFrame(device, ++frameIndex);
+    EXPECT_EQ(rig.Reflections->TraceFrameIndex(rig.View), held) << "a still view keeps its noise frame";
+    rig.NextFrame(device, ++frameIndex);
+    EXPECT_EQ(rig.Reflections->TraceFrameIndex(rig.View), held) << "the next still frame keeps it too";
+
+    rig.MoveCamera(0.01f);
+    rig.NextFrame(device, ++frameIndex);
+    const uint32_t moved = rig.Reflections->TraceFrameIndex(rig.View);
+    EXPECT_NE(moved, held) << "a camera move advances it";
+    rig.NextFrame(device, ++frameIndex);
+    EXPECT_EQ(rig.Reflections->TraceFrameIndex(rig.View), moved) << "the camera holds again";
+
+    rig.Services.NotifyUnversionedMotion(rig.View);
+    rig.NextFrame(device, ++frameIndex);
+    EXPECT_NE(rig.Reflections->TraceFrameIndex(rig.View), moved) << "a mover in view advances it";
+    rig.Finish(device);
+}
 
 // The history the SSSR chain writes in frame 0 (its only history plane), and the history the next
 // frame that runs the chain reprojects, after a number of frames in which the view renders without it.
@@ -8682,16 +8849,13 @@ struct FogFixture
         EXPECT_TRUE(Rs->Initialize(Device));
         const CameraId cam = Rs->Views().AllocateCamera("FogCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         Rs->Views().SetCameraData(cam, cd);
         View = Rs->Views().AllocateView("FogView", cam);
         Rs->Views().SetViewRenderLayerMask(View, GameEngine::Rendering::RenderLayerMask::Default());
@@ -9234,16 +9398,13 @@ struct TerrainFixture
         TerrainECS::TerrainService::Initialize();
         Cam = Rs->Views().AllocateCamera("TerrainCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         Rs->Views().SetCameraData(Cam, cd);
         EXPECT_TRUE(Registry.Register(
             "TerrainUpload", [] { return std::make_unique<TerrainECS::TerrainUploadNode>(); },
@@ -9264,15 +9425,15 @@ struct TerrainFixture
         const Mathematics::Matrix4x4 proj =
             Mathematics::MakePerspectiveLH_ZO_ReverseZ(1.0471976f, 16.0f / 9.0f, 0.1f, 8000.0f);
         const Mathematics::Matrix4x4 viewProj = proj * view;
-        std::memcpy(cd.view, view.Data(), sizeof(float) * 16);
-        std::memcpy(cd.proj, proj.Data(), sizeof(float) * 16);
-        std::memcpy(cd.viewProj, viewProj.Data(), sizeof(float) * 16);
-        std::memcpy(cd.viewRel, view.Data(), sizeof(float) * 16);
-        std::memcpy(cd.viewProjRel, viewProj.Data(), sizeof(float) * 16);
-        cd.cameraPos[0] = eye.x;
-        cd.cameraPos[1] = eye.y;
-        cd.cameraPos[2] = eye.z;
-        cd.cameraPos[3] = 0.0f;
+        cd.view = view;
+        cd.proj = proj;
+        cd.viewProj = viewProj;
+        cd.viewRel = view;
+        cd.viewProjRel = viewProj;
+        cd.cameraPos.x = eye.x;
+        cd.cameraPos.y = eye.y;
+        cd.cameraPos.z = eye.z;
+        cd.cameraPos.w = 0.0f;
         Rs->Views().SetCameraData(Cam, cd);
     }
 
@@ -11267,6 +11428,42 @@ TEST(RenderPipelineDeclareTests, CbtTerrainFragmentReadsThePlanetPagesOnTheFullP
     f.Down();
 }
 
+// A paged planar surface shades from its plane caches: the full-profile terrain fragment reads the splat,
+// normal, grass and color caches on set 2 at bindings 34 to 37. The compat surface reads its textures only.
+TEST(RenderPipelineDeclareTests, CbtTerrainFragmentReadsTheSurfacePlanesOnTheFullProfileOnly)
+{
+    constexpr uint32 kFirstPlaneBinding = 34u;
+    constexpr std::array<const char*, 4> kPlanes = {"cbt_SurfaceSplat", "cbt_SurfaceNormal", "cbt_SurfaceGrass",
+                                                    "cbt_SurfaceColor"};
+    TerrainFixture f;
+    if (!f.Up())
+        GTEST_SKIP() << "No Vulkan device available";
+    if (!ArmGrassMaterialCompile(f))
+    {
+        f.Down();
+        GTEST_SKIP() << "staged shader sources not found";
+    }
+    PrepassHeadDeclaration compat;
+    {
+        TestSupport::ScopedCompatShaderProfile compatProfile;
+        compat = DeclarePrepassHead(f, CBTTerrainECS::BuildCBTTerrainMaterialDocument(),
+                                    CBTTerrainECS::CBTTerrainMaterialKeywords(), Rendering::VertexAttributeFlags::None);
+    }
+    const PrepassHeadDeclaration desktop =
+        DeclarePrepassHead(f, CBTTerrainECS::BuildCBTTerrainMaterialDocument(),
+                           CBTTerrainECS::CBTTerrainMaterialKeywords(), Rendering::VertexAttributeFlags::None);
+    ASSERT_TRUE(desktop.Meta && compat.Meta);
+    for (std::size_t plane = 0; plane < kPlanes.size(); ++plane)
+    {
+        const Rendering::DescriptorBindingMeta* binding = FindSetTwoBinding(*desktop.Meta, kPlanes[plane]);
+        ASSERT_NE(binding, nullptr) << "the full-profile fragment declares no " << kPlanes[plane];
+        EXPECT_EQ(binding->Binding, kFirstPlaneBinding + plane) << kPlanes[plane];
+        EXPECT_NE(binding->StagesMask & Rendering::ShaderMetaStage::kFragment, 0u) << kPlanes[plane];
+        EXPECT_EQ(FindSetTwoBinding(*compat.Meta, kPlanes[plane]), nullptr) << kPlanes[plane];
+    }
+    f.Down();
+}
+
 // The same rule for the grass's opaque-blade head, which is composed lit the same way and reads its blade
 // instances from set 2 (#3367).
 TEST(RenderPipelineDeclareTests, CompatGrassPrepassHeadDeclaresOnlyWhatItsVertexStageReads)
@@ -11386,6 +11583,9 @@ TEST(RenderPipelineDeclareTests, CbtTerrainAtRestReportsARetireBeforeItsNextDecl
             const std::vector<Rendering::ViewDesc> views(f.Rs->Views().GetViews().begin(),
                                                          f.Rs->Views().GetViews().end());
             instance.Declare(frame, targets, views);
+            if (i == 0u)
+                EXPECT_TRUE(f.Rs->HasUnversionedMotion(v))
+                    << "an update that is not at rest changes the depth of the view the terrain draws into";
             frame.MarkOutput(color);
             frame.Execute();
             cbt.OnFrameSubmittedRG(frame, frame.SubmissionToken());
@@ -13843,13 +14043,9 @@ AtlasOracleBuilt BuildAtlasOracle2x2(uint32 tileRes)
 }
 } // namespace
 
-// Hypothesis A (independent of the drain-order fix): a placed atlas blade's baked RootY must sit on the
-// resident-window atlas surface, not collapse to WorldOriginY. The compact bakes
-// rootY = WorldOriginY + sampleAtlasHeight01(uv) * HeightScale; if the atlas resolve/rows binding is
-// wrong the sample returns 0 and every blade flattens to WorldOriginY. This drives the real atlas grass
-// path on device (2x2 fully-resident atlas, TerrainUpload flush) and checks the readback roots against
-// the CPU AtlasHeightSampler mirror. WorldOriginY is nonzero so a collapse cannot pass by coincidence.
-TEST(RenderPipelineDeclareTests, GrassAtlasRootsSitOnTerrainSurface)
+// An atlas-backed terrain with no surface page (no TerrainPageFeature tables): the grass cannot read the
+// atlas, so the placement on the device, over a 2x2 fully-resident atlas, places no blade.
+TEST(RenderPipelineDeclareTests, GrassPlacesNoBladeOnAnAtlasTerrainOffItsPages)
 {
     TerrainFixture f;
     if (!f.Up())
@@ -13883,7 +14079,7 @@ TEST(RenderPipelineDeclareTests, GrassAtlasRootsSitOnTerrainSurface)
         auto publishAtlasTerrain = [&] {
             terrain.RegisterAtlasSurfaceBindless(h, *f.Rs);
             heightIdx = terrain.GetAtlasHeightBindlessIndex(h);
-            // Feed the grass feature the atlas source it reads via TryGetAtlasGrassSource.
+            // The drawn terrain: atlas-backed, with no page tables published.
             TerrainECS::TerrainInstanceInfo info{};
             info.Handle = h;
             info.AtlasBacked = true;
@@ -13937,7 +14133,8 @@ TEST(RenderPipelineDeclareTests, GrassAtlasRootsSitOnTerrainSurface)
 
         const uint32 kSampleCount = 8u;
         uint32 placed = 0;
-        std::vector<float32> roots; // flat WorldX,WorldZ,RootY per blade
+        bool countRead = false;
+        std::vector<float32> heights; // BladeHeight per read-back slot: 0 for a slot the mask refused
         // Frame 0 flushes the atlas region upload through the TerrainUpload node; the compact reads it on
         // the following frames. Read back on the last frame.
         for (uint32 frameIdx = 0; frameIdx < 3; ++frameIdx)
@@ -13974,7 +14171,10 @@ TEST(RenderPipelineDeclareTests, GrassAtlasRootsSitOnTerrainSurface)
             {
                 Rendering::BufferReadbackResult res{};
                 if (countT->TryGet(res) && res.bytes.size() >= 4)
+                {
+                    countRead = true;
                     std::memcpy(&placed, res.bytes.data(), sizeof(placed));
+                }
             }
             if (instT)
             {
@@ -13984,83 +14184,326 @@ TEST(RenderPipelineDeclareTests, GrassAtlasRootsSitOnTerrainSurface)
                     const float32* fp = reinterpret_cast<const float32*>(res.bytes.data());
                     for (uint32 i = 0; i < kSampleCount; ++i)
                     {
-                        roots.push_back(fp[i * kGrassInstanceFloats + 0]); // WorldX
-                        roots.push_back(fp[i * kGrassInstanceFloats + 1]); // WorldZ
-                        roots.push_back(fp[i * kGrassInstanceFloats + 2]); // RootY
+                        heights.push_back(fp[i * kGrassInstanceFloats + 3]); // BladeHeight
                     }
                 }
             }
         }
 
         ASSERT_NE(heightIdx, 0u) << "atlas height bindless registration failed";
-        ASSERT_GT(placed, 0u) << "atlas compact placed 0 — cannot check roots";
-        ASSERT_FALSE(roots.empty()) << "atlas instance readback failed";
-
-        const TerrainECS::AtlasHeightSampler sampler{atlas.Geo, atlas.Table.Rows.data(), atlas.Atlas.data(), nullptr};
-        const uint32 checkN = std::min<uint32>(kSampleCount, placed);
-        const float32 tol = kHeightScale * 0.06f; // ~15 m: catches a collapse-to-origin, absorbs texel/filter diffs
-        uint32 checked = 0;
-        for (uint32 i = 0; i < checkN; ++i)
-        {
-            const float32 wx = roots[i * 3 + 0];
-            const float32 wz = roots[i * 3 + 1];
-            const float32 rootY = roots[i * 3 + 2];
-            const float32 u = wx / kWorldSize;
-            const float32 vv = wz / kWorldSize;
-            EXPECT_GE(u, -0.001f); EXPECT_LE(u, 1.001f);
-            EXPECT_GE(vv, -0.001f); EXPECT_LE(vv, 1.001f);
-            const float32 h01 = sampler.SampleHeightNormalized(std::clamp(u, 0.0f, 1.0f), std::clamp(vv, 0.0f, 1.0f));
-            const float32 expectedRootY = kWorldOriginY + h01 * kHeightScale;
-            EXPECT_NEAR(rootY, expectedRootY, tol)
-                << "atlas blade " << i << " root off the surface: RootY=" << rootY
-                << " expected~" << expectedRootY << " at uv(" << u << "," << vv
-                << ") — a collapse to WorldOriginY=" << kWorldOriginY << " means the atlas resolve returned 0";
-            ++checked;
-        }
-        EXPECT_GT(checked, 0u);
+        ASSERT_TRUE(countRead) << "the placed-blade count was never read back";
+        // `placed` counts the slots the plan handed out: the placement ran over this terrain.
+        ASSERT_GT(placed, 0u) << "the plan handed out no slot: the placement never ran over the terrain";
+        ASSERT_EQ(heights.size(), kSampleCount) << "instance readback failed";
+        for (uint32 i = 0; i < kSampleCount; ++i)
+            EXPECT_EQ(heights[i], 0.0f) << "slot " << i << " stood a blade on an atlas terrain whose ground it cannot read";
     }
     f.Down();
 }
 
-// Forward-contributor drain order: the world pass drains ForwardCommands in emission order, which put
-// producer-emitted blended grass AHEAD of node-emitted opaque CBT terrain. Opaque terrain (depthWrite
-// on) then overwrote the depthWrite-off blade pixels wherever it covered them, so grass survived only
-// against the sky, most visibly at grazing angles. The drain now records every depth-writing command
-// before every blended one (stable within each group). This pins that: a revert to emission order
-// fails the index expectations, and deleting the helper breaks the world pass build.
-TEST(RenderPipelineDeclareTests, ForwardDrainDrawsDepthWritingBeforeBlended)
+namespace
+{
+constexpr uint32 kPagedGrassSamples = 257u; // one 256 m tile at 1 m a sample
+
+// A published surface store of `plane` on the paged grass lattice, every texel of every page `texel`.
+std::shared_ptr<const PageStreaming::PageStoreAccess> UniformSurfaceStore(const std::filesystem::path& file,
+                                                                          PageStreaming::PageFieldKind plane,
+                                                                          std::span<const uint8> texel)
+{
+    TerrainECS::TiledTerrainConfig config;
+    config.TilesPerAxisX = 1u;
+    config.TilesPerAxisZ = 1u;
+    config.TileConfig.HeightmapWidth = kPagedGrassSamples;
+    config.TileConfig.HeightmapHeight = kPagedGrassSamples;
+    const PageStreaming::PageStoreHeader header = TerrainECS::MakeSurfaceStoreHeader(config, plane, 1u);
+    const PageStreaming::PageStoreLayout layout = PageStreaming::MakePageStoreLayout(header);
+    const uint32 stride = PageStreaming::PageStrideTexels(header.Format);
+    if (texel.size() != PageStreaming::PageTexelBytes(header.Format))
+        return nullptr;
+    std::vector<uint8> page;
+    for (uint32 i = 0; i < stride * stride; ++i)
+        page.insert(page.end(), texel.begin(), texel.end());
+    // A Bc5 store is written with its unencoded Rg8 samples beside it.
+    const bool bc5 = header.Format == PageStreaming::PageFieldFormat::Bc5;
+    PageStreaming::PageStoreHeader samplesHeader = header;
+    samplesHeader.Format = PageStreaming::PageFieldFormat::Rg8;
+    PageStreaming::PageStoreWriter writer;
+    PageStreaming::PageStoreWriter samples;
+    if (!writer.Create(file, layout).empty())
+        return nullptr;
+    if (bc5 && !samples.Create(TerrainECS::SurfaceSamplesCachePath(file),
+                               PageStreaming::MakePageStoreLayout(samplesHeader)).empty())
+        return nullptr;
+    {
+        std::optional<PageStreaming::PageStorePatcher> patcher;
+        if (bc5)
+            patcher.emplace(writer, samples, nullptr);
+        else
+            patcher.emplace(writer, nullptr);
+        for (uint32 level = 0; level < layout.Levels.size(); ++level)
+            for (uint32 pz = 0; pz < layout.Levels[level].PagesZ; ++pz)
+                for (uint32 px = 0; px < layout.Levels[level].PagesX; ++px)
+                    if (!patcher->WritePage(PageStreaming::PageAddress{0, static_cast<uint8>(level), px, pz}, page))
+                        return nullptr;
+    }
+    if (!writer.Finish().empty() || (bc5 && !samples.Finish().empty()))
+        return nullptr;
+    auto access = std::make_shared<PageStreaming::PageStoreAccess>(plane, header);
+    return access->Publish(file).empty() ? access : nullptr;
+}
+} // namespace
+
+// The placement reads the ground of a paged atlas terrain from its pages: with a flat height page and a
+// splat page on the grass layer resident, every slot stands a blade at the page height. Once the terrain is
+// not paged, no page answers, and no blade stands on the atlas ground that the grass cannot read.
+TEST(RenderPipelineDeclareTests, GrassStandsOnResidentSurfacePagesAndNoneOnAnUnpagedAtlasTerrain)
+{
+    TerrainFixture f;
+    if (!f.Up())
+        GTEST_SKIP() << "No Vulkan device available";
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "GrassPagedPlacementTest";
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    std::filesystem::create_directories(folder);
+    {
+        auto& terrain = f.Rs->EnsureFeature<TerrainECS::TerrainRenderFeature>();
+        ASSERT_TRUE(terrain.Initialize(f.Device));
+        if (!f.Rs->Textures().IsBindlessEnabled())
+            GTEST_SKIP() << "bindless disabled on this device";
+        auto& pageFeature = f.Rs->EnsureFeature<TerrainECS::TerrainPageFeature>();
+
+        const float32 kWorldSize = static_cast<float32>(kPagedGrassSamples - 1u);
+        const float32 kHeightScale = 64.0f;
+        const float32 kWorldOriginY = 5.0f; // the flat page's height; the atlas heights lie 16 to 48 m above it
+        const Mathematics::Vector3 eye(128.0f, kWorldOriginY + 20.0f, 90.0f);
+        f.SetCameraLookingAt(eye, Mathematics::Vector3(128.0f, kWorldOriginY, 128.0f));
+        const ViewId v = f.AddView("GrassPagedView", 1u);
+        ASSERT_TRUE(f.Registry.Register(
+            "TerrainGrass", [] { return std::make_unique<TerrainGrass::TerrainGrassRenderNode>(); }, true));
+
+        const uint32 tileRes = 33u;
+        const AtlasOracleBuilt atlas = BuildAtlasOracle2x2(tileRes);
+        const TerrainECS::TerrainHandle h{7u, 1u};
+        terrain.EnsureAtlasHeightTexture(h, atlas.Geo.AtlasDim);
+        terrain.UploadAtlasHeightSlot(h, atlas.Atlas.data(), atlas.Geo.AtlasDim, 0u, 0u);
+
+        // The pages: a flat generated height, a splat store all on layer 0 (the grass layer), an up normal.
+        PageStreaming::GeneratedHeightLattice lattice;
+        lattice.Source = PageStreaming::GeneratedHeightSource::Flat;
+        lattice.TileWorldSize = kWorldSize;
+        lattice.TileSamples = kPagedGrassSamples;
+        lattice.TilesX = 1;
+        lattice.TilesZ = 1;
+        TerrainECS::PagedTerrainRequest height;
+        height.Terrain = h.Index;
+        height.TerrainGeneration = h.Generation;
+        height.SourceIdentity = 1u;
+        height.Source.Generated = std::make_shared<const PageStreaming::GeneratedHeightPageProvider>(lattice);
+        height.Shape.Level0TexelX = 1.0f;
+        height.Shape.Level0TexelZ = 1.0f;
+        height.Shape.SamplesX = kPagedGrassSamples;
+        height.Shape.SamplesZ = kPagedGrassSamples;
+        height.Shape.MaxHeight = kHeightScale;
+        height.OriginY = kWorldOriginY;
+        height.HeightScale = kHeightScale;
+        const std::array<uint8, 4> grassLayer = {255u, 0u, 0u, 0u};
+        const std::array<uint8, 2> up = {128u, 128u};
+        TerrainECS::TerrainSurfacePageSource surface;
+        surface.Planes.push_back(UniformSurfaceStore(folder / "splat.gepage", PageStreaming::PageFieldKind::Splat, grassLayer));
+        surface.Planes.push_back(UniformSurfaceStore(folder / "normal.gepage", PageStreaming::PageFieldKind::Normal, up));
+        ASSERT_NE(surface.Planes[0], nullptr) << "the splat store was not written";
+        ASSERT_NE(surface.Planes[1], nullptr) << "the normal store was not written";
+        surface.PlaneMask = 0b11u;
+        surface.PinnedLevelsBaked = true;
+        TerrainECS::SurfacePagedRequest surfaceRequest;
+        surfaceRequest.Terrain = h.Index;
+        surfaceRequest.TerrainGeneration = h.Generation;
+        surfaceRequest.Source = &surface;
+        surfaceRequest.Shape = height.Shape;
+
+        TerrainECS::TerrainPages pages(nullptr, nullptr,
+                                       TerrainECS::HeightPageProfile{64, TerrainECS::kDesktopHeightPages.DenseTableWords},
+                                       TerrainECS::kDesktopSurfacePages);
+        const TerrainECS::PageRequestCamera camera{eye, {}, 0.0f, false};
+        const TerrainECS::PageLevelView heightView =
+            TerrainECS::MakePageLevelView(TerrainECS::kPageLevelReferenceRows, 1.0f, 11.0f);
+        const TerrainECS::PageLevelView surfaceView = TerrainECS::MakePageLevelView(
+            TerrainECS::kPageLevelReferenceRows, 1.0f, TerrainECS::kSurfacePageTargetPixels);
+        uint64 pageFrame = 1;
+        pages.Update(pageFrame++, 1.0f / 60.0f, false, 2); // configures the fields
+        for (uint32 i = 0; i < 24u; ++i)
+        {
+            pages.Request(height, {&eye, 1}, heightView);
+            pages.Surface().Request(surfaceRequest, std::span(&camera, 1), surfaceView);
+            pages.Update(pageFrame++, 1.0f / 60.0f, false, 2);
+            pageFeature.Publish(pages);
+        }
+
+        RenderPipelineBlueprint bp;
+        bp.pipelineName = "GrassPagedTest";
+        {
+            RenderPipelineBlueprint::Pass p;
+            p.id = "Upload"; p.type = "TerrainUpload"; p.enabled = true; p.perView = true;
+            p.passJson = R"({"id":"Upload","type":"TerrainUpload"})";
+            bp.passes.push_back(p);
+        }
+        {
+            RenderPipelineBlueprint::Pass p;
+            p.id = "Grass"; p.type = "TerrainGrass"; p.enabled = true; p.perView = true;
+            p.passJson = R"({"id":"Grass","type":"TerrainGrass"})";
+            bp.passes.push_back(p);
+        }
+        bp.outputs.push_back({"FinalColor", "View.Resolve"});
+        RenderPipelineInstance instance(*f.Rs, f.Registry);
+        instance.SetBlueprint(bp);
+        FramePools pools(f.Device);
+
+        Terrain::TerrainGPUParams params{};
+        params.WorldSizeX = kWorldSize; params.WorldSizeZ = kWorldSize;
+        params.HeightScale = kHeightScale; params.WorldOriginY = kWorldOriginY;
+        params.Flags = Terrain::kTerrainFlagAtlasBacked;
+        params.GrassEnabled = 1u;
+        params.GrassMaskThreshold = 0.0f;
+        params.GrassDensity = 1.0f;
+
+        constexpr uint32 kReadSlots = 64u;
+        uint32 frameIdx = 0;
+        // Phase 0 reads the pages. Phase 1 runs after two page updates without a request: the terrain is
+        // forgotten, and no table answers for it.
+        for (uint32 phase = 0; phase < 2; ++phase)
+        {
+            if (phase == 1)
+            {
+                pages.Update(pageFrame++, 1.0f / 60.0f, false, 2);
+                pages.Update(pageFrame++, 1.0f / 60.0f, false, 2);
+                pageFeature.Publish(pages);
+            }
+            uint32 placed = 0;
+            std::vector<float32> roots; // RootY, BladeHeight per read-back slot
+            for (uint32 step = 0; step < 4u; ++step, ++frameIdx)
+            {
+                terrain.RegisterAtlasSurfaceBindless(h, *f.Rs);
+                TerrainECS::TerrainInstanceInfo info{};
+                info.Handle = h;
+                info.AtlasBacked = true;
+                info.AtlasDim = atlas.Geo.AtlasDim;
+                info.AtlasSlotStride = atlas.Geo.SlotStride;
+                info.AtlasSlotsPerRow = atlas.Geo.SlotsPerRow;
+                info.AtlasTileRes = tileRes;
+                info.AtlasTilesPerAxisX = 2u;
+                info.AtlasTilesPerAxisZ = 2u;
+                info.AtlasHeightBindlessIndex = terrain.GetAtlasHeightBindlessIndex(h);
+                info.AtlasTableVersion = 1u;
+                info.AtlasRowCount = static_cast<uint32>(atlas.Table.Rows.size());
+                info.AtlasRowBytes.resize(atlas.Table.Rows.size() * sizeof(TerrainECS::TileAtlasSlot));
+                std::memcpy(info.AtlasRowBytes.data(), atlas.Table.Rows.data(), info.AtlasRowBytes.size());
+                std::vector<TerrainECS::TerrainInstanceInfo> infos;
+                infos.push_back(std::move(info));
+                terrain.SetActiveTerrains(std::move(infos));
+                terrain.UploadTerrainParamsArray(&params, 1u, GameEngine::Terrain::kDefaultTerrainMaterials,
+                                                 GameEngine::Terrain::kTerrainLayerRoleCount, frameIdx);
+
+                RenderGraph::RGFrame frame(f.Device, &pools.Persistent, &pools.Transient, &pools.Ring);
+                frame.BeginFrame(frameIdx);
+                RenderGraph::RGTexture color = frame.ImportPersistentTexture("GPaged.Color", ColorTargetDesc());
+                RenderGraph::RGTexture depth = frame.ImportPersistentTexture("GPaged.Depth", DepthTargetDesc());
+                f.Rs->BeginWorldDrawFrame();
+                f.Rs->BuildWorldBatchKeys();
+                const std::vector<ViewTargetsRG> targets = {ViewTargetsRG{v, color, depth, {}}};
+                const std::vector<Rendering::ViewDesc> views(f.Rs->Views().GetViews().begin(),
+                                                             f.Rs->Views().GetViews().end());
+                instance.Declare(frame, targets, views);
+                std::shared_ptr<Rendering::RGBufferReadbackTicket> countT, instT;
+                const RenderGraph::RGBuffer argsRG = GrassWorldReadArgs(*f.Rs, frame, v);
+                const RenderGraph::RGBuffer instRG = GrassInstancesInFrame(*f.Rs, frame, v);
+                const bool lastStep = (step == 3u);
+                if (lastStep && argsRG.IsValid())
+                    countT = Rendering::RequestBufferReadbackRG(f.Device, frame, argsRG, 4u, 4u, "GPagedCount");
+                if (lastStep && instRG.IsValid())
+                    instT = Rendering::RequestBufferReadbackRG(f.Device, frame, instRG, 0u,
+                                                               kGrassInstanceBytes * kReadSlots, "GPagedInst");
+                frame.MarkOutput(color);
+                frame.Execute();
+                Rendering::OnFrameSubmittedReadbacksRG(frame, frame.SubmissionToken());
+                f.Device->WaitForIdle();
+
+                Rendering::BufferReadbackResult res{};
+                if (countT && countT->TryGet(res) && res.bytes.size() >= 4)
+                    std::memcpy(&placed, res.bytes.data(), sizeof(placed));
+                if (instT && instT->TryGet(res) && res.bytes.size() >= kGrassInstanceBytes * kReadSlots)
+                {
+                    const float32* fp = reinterpret_cast<const float32*>(res.bytes.data());
+                    for (uint32 i = 0; i < std::min(placed, kReadSlots); ++i)
+                    {
+                        roots.push_back(fp[i * kGrassInstanceFloats + 2]); // RootY
+                        roots.push_back(fp[i * kGrassInstanceFloats + 3]); // BladeHeight
+                    }
+                }
+            }
+
+            ASSERT_GT(placed, 0u) << "phase " << phase << ": the plan handed out no slot";
+            ASSERT_FALSE(roots.empty()) << "phase " << phase << ": the instance readback failed";
+            uint32 standing = 0;
+            for (std::size_t i = 0; i < roots.size(); i += 2)
+            {
+                if (roots[i + 1] <= 0.0f)
+                    continue;
+                ++standing;
+                EXPECT_NEAR(roots[i], kWorldOriginY, 0.05f)
+                    << "phase " << phase << ": blade " << i / 2 << " stands off the flat height page";
+            }
+            if (phase == 0)
+                EXPECT_EQ(standing, roots.size() / 2) << "a slot on the resident grass pages stood no blade";
+            else
+                EXPECT_EQ(standing, 0u) << "a blade stands on atlas ground that no page table describes";
+        }
+    }
+    f.Down();
+    std::filesystem::remove_all(folder, ec);
+}
+
+// The world pass records every depth-writing entity and contributor before every
+// blended one: a blended entity must wait for an opaque contributor too.
+TEST(RenderPipelineDeclareTests, WorldForwardDispatchFinishesBothOpaqueSourcesBeforeEitherBlendSource)
 {
     using namespace GameEngine::Engine::Renderer;
     using GameEngine::MaterialAlphaMode;
-
-    Material opaque = Material::TestFactory::Create(GUID::Derive(GUID{}, "drain/opaque"), "opaque", 64u);
-    Material blend = Material::TestFactory::Create(GUID::Derive(GUID{}, "drain/blend"), "blend", 64u);
+    Material opaque = Material::TestFactory::Create(GUID::Derive(GUID{}, "world-drain/opaque"), "opaque", 64u);
+    Material mask = Material::TestFactory::Create(GUID::Derive(GUID{}, "world-drain/mask"), "mask", 64u);
+    Material blend = Material::TestFactory::Create(GUID::Derive(GUID{}, "world-drain/blend"), "blend", 64u);
+    Material::TestFactory::SetAlphaMode(mask, MaterialAlphaMode::Mask);
     Material::TestFactory::SetAlphaMode(blend, MaterialAlphaMode::Blend);
-    ASSERT_EQ(opaque.GetAlphaMode(), MaterialAlphaMode::Opaque);
-    ASSERT_EQ(blend.GetAlphaMode(), MaterialAlphaMode::Blend);
-
-    // Grass (blend) is emitted by the producer sweep ahead of CBT terrain (opaque)
-    // from its node — reproduce that interleave: blend, opaque, blend, opaque.
-    DrawCommand cBlend{}; cBlend.Material = &blend;
-    DrawCommand cOpaque{}; cOpaque.Material = &opaque;
-    const std::vector<DrawCommand> stream = {cBlend, cOpaque, cBlend, cOpaque};
-
-    const std::vector<uint32_t> order = ForwardDrainOrderOpaqueFirst(stream);
-    ASSERT_EQ(order.size(), 4u);
-    // Depth-writing (opaque) indices 1,3 first, then blended indices 0,2 — relative order preserved.
-    EXPECT_EQ(order[0], 1u);
-    EXPECT_EQ(order[1], 3u);
-    EXPECT_EQ(order[2], 0u);
-    EXPECT_EQ(order[3], 2u);
-    // No blended command may precede a depth-writing one in the drained order.
-    bool sawBlended = false;
-    for (uint32_t idx : order)
+    std::vector<WorldDrawBuilder::BatchKey> entities(6);
+    const Material* materials[] = {&blend, &opaque, &mask, nullptr, &blend, &opaque};
+    for (size_t i = 0; i < entities.size(); ++i)
     {
-        const bool blended = IsBlendedContributor(stream[idx]);
-        if (blended)
-            sawBlended = true;
-        else
-            EXPECT_FALSE(sawBlended) << "opaque command drained after a blended one";
+        entities[i].material = materials[i];
+        entities[i].materialIndex = static_cast<uint32_t>(i);
+    }
+    std::vector<DrawCommand> contributors(5);
+    for (size_t i = 0; i < contributors.size(); ++i)
+        contributors[i].Material = materials[i];
+
+    // An empty span is how the world pass turns off one source.
+    for (bool entityScope : {false, true})
+    {
+        for (bool contributorScope : {false, true})
+        {
+            SCOPED_TRACE(testing::Message() << "entities=" << entityScope << " contributors=" << contributorScope);
+            std::vector<uint32_t> recorded;
+            DrainWorldForwardOpaqueFirst(
+                entityScope ? std::span<const WorldDrawBuilder::BatchKey>(entities) : std::span<const WorldDrawBuilder::BatchKey>{},
+                contributorScope ? std::span<const DrawCommand>(contributors) : std::span<const DrawCommand>{},
+                [&](const WorldDrawBuilder::BatchKey& key) { recorded.push_back(100u + key.materialIndex); },
+                [&](const DrawCommand& command) { recorded.push_back(200u + static_cast<uint32_t>(&command - contributors.data())); });
+            // Each draw records one time; each source keeps its order in each phase.
+            const std::vector<uint32_t> all{101, 102, 103, 105, 201, 202, 203, 100, 104, 200, 204};
+            std::vector<uint32_t> expected;
+            for (uint32_t id : all)
+                if ((id < 200 && entityScope) || (id >= 200 && contributorScope))
+                    expected.push_back(id);
+            EXPECT_EQ(recorded, expected);
+        }
     }
 }
 
@@ -15032,12 +15475,9 @@ TEST(RenderPipelineDeclareTests, ThumbnailShapedViewChainsWorldTonemapEncode)
         GameEngine::Testing::PinWorldOnlyPipeline(rs.Spine());
         const CameraId camId = rs.Views().AllocateCamera("MainCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId mainView = rs.Views().AllocateView("MainView", camId);
         rs.Views().SetViewRenderLayerMask(mainView, GameEngine::Rendering::RenderLayerMask::Default());
@@ -15338,12 +15778,9 @@ TEST(RenderPipelineDeclareTests, ActivePipelineHotReloadRecompilesOffPollAndRelo
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("S3Cam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("S3View", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -18012,12 +18449,9 @@ struct HzbTwoViewRig
             return false;
         const CameraId camId = Services.Views().AllocateCamera("HzbCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         Services.Views().SetCameraData(camId, cd);
         Rendering::ViewClearConfig clear{};
         clear.clearColor = true;
@@ -18310,16 +18744,13 @@ TEST(RenderPipelineDeclareTests, BothWorldArmsReadThePcssPyramidSoTheReductionOr
 
         const CameraId camId = rs.Views().AllocateCamera("PyramidEdgeCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("PyramidEdgeView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -18531,16 +18962,13 @@ TEST(RenderPipelineDeclareTests, PcssCascadeLightSizeIsTheFrameTangentOnEveryCas
     ASSERT_TRUE(rs.Initialize(device));
     const CameraId camId = rs.Views().AllocateCamera("PenumbraCam");
     CameraData cd{};
-    cd.proj[0] = 1.0f;
-    cd.proj[5] = 1.0f;
-    cd.proj[10] = 0.001f;
-    cd.proj[11] = 1.0f;
-    cd.proj[14] = 0.1f;
-    for (int i = 0; i < 16; i += 5)
-    {
-        cd.view[i] = 1.0f;
-        cd.viewProj[i] = 1.0f;
-    }
+    cd.proj[0][0] = 1.0f;
+    cd.proj[1][1] = 1.0f;
+    cd.proj[2][2] = 0.001f;
+    cd.proj[2][3] = 1.0f;
+    cd.proj[3][2] = 0.1f;
+    cd.view = Mathematics::Matrix4x4::Identity();
+    cd.viewProj = Mathematics::Matrix4x4::Identity();
     rs.Views().SetCameraData(camId, cd);
     const ViewId viewId = rs.Views().AllocateView("PenumbraView", camId);
 
@@ -18748,16 +19176,13 @@ TEST(RenderPipelineDeclareTests, ShadowMinMaxPyramidDeclaresAndPublishesOnlyForE
         ASSERT_TRUE(rs.Initialize(device));
         const CameraId camId = rs.Views().AllocateCamera("PyramidCam");
         CameraData cd{};
-        cd.proj[0] = 1.0f;
-        cd.proj[5] = 1.0f;
-        cd.proj[10] = 0.001f;
-        cd.proj[11] = 1.0f;
-        cd.proj[14] = 0.1f;
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.proj[0][0] = 1.0f;
+        cd.proj[1][1] = 1.0f;
+        cd.proj[2][2] = 0.001f;
+        cd.proj[2][3] = 1.0f;
+        cd.proj[3][2] = 0.1f;
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         rs.Views().SetCameraData(camId, cd);
         const ViewId viewId = rs.Views().AllocateView("PyramidView", camId);
         rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
@@ -20054,12 +20479,11 @@ namespace
 Rendering::CameraData RebuildTestCamera()
 {
     Rendering::CameraData camera{};
-    for (int i = 0; i < 16; i += 5)
-        camera.view[i] = 1.0f;
+    camera.view = Mathematics::Matrix4x4::Identity();
     const auto projection = Mathematics::MakePerspectiveLH_ZO_ReverseZ(1.0471976f, 1.0f, 0.1f, 200.0f);
-    std::memcpy(camera.proj, projection.Data(), sizeof(camera.proj));
-    std::memcpy(camera.viewProj, camera.proj, sizeof(camera.proj));
-    std::memcpy(camera.viewProjRel, camera.viewProj, sizeof(camera.viewProj));
+    camera.proj = projection;
+    camera.viewProj = camera.proj;
+    camera.viewProjRel = camera.viewProj;
     return camera;
 }
 

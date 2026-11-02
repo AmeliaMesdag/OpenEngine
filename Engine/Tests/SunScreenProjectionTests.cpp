@@ -28,8 +28,8 @@ TEST(SunScreenProjection, AnOrthographicViewPlacesTheSunOnTheSideItIsOn)
     const Matrix4x4 viewProj = proj * view;
 
     CameraData camera{};
-    std::memcpy(camera.viewProj, viewProj.Data(), sizeof(camera.viewProj));
-    camera.cameraPos[3] = 1.0f; // orthographic
+    camera.viewProj = viewProj;
+    camera.cameraPos.w = 1.0f; // orthographic
 
     const std::optional<Vector3> ndc = ProjectSunDirectionToNdc(camera, Vector3(0.6f, 0.0f, 0.8f));
     ASSERT_TRUE(ndc.has_value());

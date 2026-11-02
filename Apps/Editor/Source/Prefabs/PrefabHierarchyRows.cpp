@@ -15,6 +15,7 @@
 #include "ECS/World.h"
 #include "Scene/PrefabAuthoring.h"
 #include "Types/FlatMap.h"
+#include "UI/Controls/Label.h"
 #include "UI/UIElement.h"
 
 #include <filesystem>
@@ -228,6 +229,15 @@ void DecoratePrefabRow(ECS::World& world, ECS::EntityHandle entity, HierarchyRow
     }
     else if (wasMissing)
         parts.Title->SetTooltip("");
+}
+
+void SetShownText(Label& label, const std::string& text)
+{
+    label.SetText(text);
+    if (text.empty())
+        label.AddClass("hidden");
+    else
+        label.RemoveClass("hidden");
 }
 
 } // namespace GameEngine::Editor

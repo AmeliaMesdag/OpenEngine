@@ -435,11 +435,14 @@ public:
         return it != m_ViewShadowResources.end() ? &it->second : nullptr;
     }
 
+    /// The forced LOD level that returns a view to automatic LOD selection.
+    static constexpr uint32_t kAutomaticLod = 0xFFFFFFFFu;
+
     // Per-view LOD force override (setter only; ResolveViewForceLOD stays on
     // RenderServices, blending this against the global force level).
     void SetViewForcedLOD(Rendering::ViewId viewId, uint32_t level)
     {
-        if (level == 0xFFFFFFFFu)
+        if (level == kAutomaticLod)
             m_ViewForcedLOD.erase(viewId);
         else
             m_ViewForcedLOD[viewId] = level;

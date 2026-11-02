@@ -317,6 +317,17 @@ class Material
     // Used for bulk memcpy into the MaterialParams SSBO.
     const uint32_t (&GetBindlessTextureIndices() const)[kTextureSlotArraySize];
 
+    // True when `name` resolves to the normal slot (TextureSlot::kNormal) on this material.
+    bool IsNormalSlot(StringId name) const
+    {
+        return ResolveTextureSlotOrdinal(name) == static_cast<uint32_t>(TextureSlot::kNormal);
+    }
+    // The bindless index of the normal-variance companion of the normal slot's texture
+    // (TextureAsset::GetNormalVarianceCompanion). Any change of the normal slot's index
+    // resets it to the black default (sigma 0).
+    void SetNormalVarianceIndex(uint32_t descriptorIndex);
+    uint32_t GetNormalVarianceIndex() const { return m_NormalVarianceIndex; }
+
     // Per-texture UV transform. Legacy scale/offset setter stores:
     // {scaleX, 0, offsetX, 0, 0, scaleY, offsetY, 0} per slot.
     void SetTextureTransform(TextureSlot slot, float scaleX, float scaleY, float offsetX, float offsetY);
@@ -402,6 +413,8 @@ class Material
     Rendering::GraphicsPipelineId GetGraphicsPipelineId() const { return m_GraphicsPipelineId; }
     const std::shared_ptr<Rendering::ShaderMeta>& GetShaderMeta() const { return m_ShaderMeta; }
 
+    // GetGpuSceneMaterialIndex of a material that has no GPUScene material index yet.
+    static constexpr uint32_t kInvalidSSBOIndex = 0xFFFFFFFFu;
     uint32_t GetGpuSceneMaterialIndex() const { return m_GpuSceneMaterialIndex; }
 
     // Pipeline-compilation generation: moves only when a shader recompile
@@ -654,6 +667,10 @@ class Material
     // defaults can be re-applied when the @texture map arrives after registration
     // (and again after a device rebuild re-bakes fresh defaults).
     uint32_t m_DefaultWhiteIndex = 0;
+    uint32_t m_DefaultBlackIndex = 0;
+
+    // The variance companion of the normal slot's texture; black (sigma 0) when it has none.
+    uint32_t m_NormalVarianceIndex = 0;
     bool m_HasBindlessDefaults = false;
 
     // Per-texture UV affine transform rows:
@@ -694,7 +711,6 @@ class Material
                                VariantKeyHash> m_PerFlagsId;
 
     // GPUScene material index (for scene-buffer-backed materials).
-    static constexpr uint32_t kInvalidSSBOIndex = 0xFFFFFFFFu;
     uint32_t m_GpuSceneMaterialIndex = kInvalidSSBOIndex;
 };
 

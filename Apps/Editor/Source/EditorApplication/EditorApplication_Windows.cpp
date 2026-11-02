@@ -554,13 +554,7 @@ void EditorApplication::UndockToFloatingWindow(const std::string& panelId)
         {
             if (auto* ds = dynamic_cast<DockspaceElement*>(el))
             {
-                ds->SetOnPostRebuild([this]() {
-                    for (const auto& panel : m_PanelStorage)
-                    {
-                        if (auto* ip = dynamic_cast<InspectorPanel*>(panel.get()))
-                            ip->PostAction([ip]() { ip->EnsureInspectorTabLockMounted(); });
-                    }
-                });
+                ds->SetOnPostRebuild([this]() { MountInspectorTabLocks(); });
                 ds->SetOnTabContextMenu([this, rawCtx = ctx.get()](const std::string& panelId, float x, float y) {
                     ShowTabContextMenu(panelId, x, y, rawCtx->window.get());
                 });

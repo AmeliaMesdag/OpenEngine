@@ -9,6 +9,7 @@
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Logger/Logger.h"
+#include "Mathematics/Matrix4x4.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Materials/Shader/ShaderProfileDefines.h"
 
@@ -74,7 +75,8 @@ bool IsReflectedCausticsBandInView(const Engine::Renderer::RenderServices& rs,
     if (!camera)
         return true;
     const float maxHeightAboveSurface = bandHeight + 2.0f * displacement;
-    return feature.IsWaterFootprintInView(camera->viewProj, params.SeaLevel - displacement,
+    return feature.IsWaterFootprintInView(camera->viewProj,
+                                          params.SeaLevel - displacement,
                                           params.SeaLevel + displacement + bandHeight,
                                           maxHeightAboveSurface / kReflectedCausticsMinRise);
 }
@@ -91,7 +93,8 @@ bool IsWaterSurfaceInView(const Engine::Renderer::RenderServices& rs,
     if (!camera)
         return true;
     const float displacement = ReflectedCausticsSurfaceDisplacementBound(params, nullptr);
-    return feature.IsWaterFootprintInView(camera->viewProj, params.SeaLevel - displacement,
+    return feature.IsWaterFootprintInView(camera->viewProj,
+                                          params.SeaLevel - displacement,
                                           params.SeaLevel + displacement,
                                           std::max(params.MaxHorizontalDisplacement, 0.0f));
 }
@@ -330,7 +333,8 @@ void OceanRenderNode::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d)
                 // a frame that cannot see one declares no pass at all.
                 const auto* viewCamera = rs.Views().FindCameraData(d.View.cameraId);
                 if (portalData.Enabled && viewCamera &&
-                    IsUnderwaterPortalInView(portalData, viewCamera->viewProj))
+                    IsUnderwaterPortalInView(portalData,
+                                             viewCamera->viewProj))
                     feature.GetUnderwater().DeclareForView(d, uwParams, 0.0f, shape,
                                                            underwaterCaustics,
                                                            underwaterCausticsSampler, uwSettings,
@@ -359,9 +363,9 @@ void OceanRenderNode::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d)
     auto snapCameraId = ResolveOceanSnapCamera(rs, d.View);
     if (const auto* cam = rs.Views().FindCameraData(snapCameraId))
     {
-        cameraX = cam->cameraPos[0];
-        cameraY = cam->cameraPos[1];
-        cameraZ = cam->cameraPos[2];
+        cameraX = cam->cameraPos.x;
+        cameraY = cam->cameraPos.y;
+        cameraZ = cam->cameraPos.z;
         haveCamera = true;
     }
 
@@ -413,13 +417,13 @@ void OceanRenderNode::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d)
     bool isOrthographicSceneView = false;
     if (const auto* viewCam = rs.Views().FindCameraData(d.View.cameraId))
     {
-        viewCameraX = viewCam->cameraPos[0];
-        viewCameraY = viewCam->cameraPos[1];
-        viewCameraZ = viewCam->cameraPos[2];
+        viewCameraX = viewCam->cameraPos.x;
+        viewCameraY = viewCam->cameraPos.y;
+        viewCameraZ = viewCam->cameraPos.z;
         haveViewCamera = true;
         // cameraPos.w == 1 is the editor 2D-ortho marker (CameraTypes.h) — the
         // explicit signal the old name+projection sniffing approximated.
-        isOrthographicSceneView = viewCam->cameraPos[3] == 1.0f;
+        isOrthographicSceneView = viewCam->cameraPos.w == 1.0f;
     }
 
     // Underwater gate: this view's camera is submerged when it sits below the
@@ -482,6 +486,9 @@ void OceanRenderNode::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d)
         submerged || IsWaterSurfaceInView(rs, feature, d.View, feature.GetParams());
     if (!waterInView)
         feature.ForgetSimulationClaimsBefore(frameIndex);
+    // The surface changes this view's depth only while the view sees the water.
+    if (waterInView && feature.SurfaceDepthInputsChanged())
+        rs.NotifyUnversionedMotion(d.View.id);
     const bool simulateWaves =
         waterInView || feature.HasRecentSurfaceQueries() ||
         (feature.IsGPUQueryReady() && feature.GetGPUQuery().HasPending());

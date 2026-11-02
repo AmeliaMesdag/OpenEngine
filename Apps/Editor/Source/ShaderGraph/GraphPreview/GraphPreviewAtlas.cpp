@@ -362,23 +362,17 @@ Rendering::CameraData GraphPreviewAtlas::BuildCameraData() const
     const Matrix4x4 viewProjM = projM * viewM;
 
     Rendering::CameraData cam{};
-    const float* viewSrc = viewM.Data();
-    const float* projSrc = projM.Data();
-    const float* viewProjSrc = viewProjM.Data();
-    for (int i = 0; i < 16; ++i)
-    {
-        cam.view[i] = viewSrc[i];
-        cam.proj[i] = projSrc[i];
-        cam.viewProj[i] = viewProjSrc[i];
-        // Render origin is inactive here (sector 0), so the rebased matrices
-        // equal the full-world ones and the shader takes the full-world path.
-        cam.viewRel[i] = viewSrc[i];
-        cam.viewProjRel[i] = viewProjSrc[i];
-    }
-    cam.cameraPos[0] = kEyeX;
-    cam.cameraPos[1] = kEyeY;
-    cam.cameraPos[2] = kEyeZ;
-    cam.cameraPos[3] = 0.0f;
+    cam.view = viewM;
+    cam.proj = projM;
+    cam.viewProj = viewProjM;
+    // Render origin is inactive here (sector 0), so the rebased matrices
+    // equal the full-world ones and the shader takes the full-world path.
+    cam.viewRel = viewM;
+    cam.viewProjRel = viewProjM;
+    cam.cameraPos.x = kEyeX;
+    cam.cameraPos.y = kEyeY;
+    cam.cameraPos.z = kEyeZ;
+    cam.cameraPos.w = 0.0f;
     return cam;
 }
 
@@ -561,10 +555,10 @@ void GraphPreviewAtlas::TickRG(uint64_t windowId, UIManager* ui, RG::RGFrame& fr
             return;
         Rendering::ViewParamsUBO vp{};
         const Rendering::CameraData cam = BuildCameraData();
-        std::memcpy(vp.ge_view, cam.view, sizeof(vp.ge_view));
-        std::memcpy(vp.ge_viewProj, cam.viewProj, sizeof(vp.ge_viewProj));
-        std::memcpy(vp.ge_proj, cam.proj, sizeof(vp.ge_proj));
-        std::memcpy(vp.ge_prevViewProj, cam.viewProj, sizeof(vp.ge_prevViewProj));
+        std::memcpy(vp.ge_view, cam.view.Data(), sizeof(vp.ge_view));
+        std::memcpy(vp.ge_viewProj, cam.viewProj.Data(), sizeof(vp.ge_viewProj));
+        std::memcpy(vp.ge_proj, cam.proj.Data(), sizeof(vp.ge_proj));
+        std::memcpy(vp.ge_prevViewProj, cam.viewProj.Data(), sizeof(vp.ge_prevViewProj));
         vp.ge_nearFar[0] = kNearZ;
         vp.ge_nearFar[1] = kFarZ;
         vp.ge_cameraPosWS[0] = kEyeX;

@@ -60,6 +60,12 @@ class ViewMotionVectors
     static bool DrawsMover(const Rendering::GPUInstance& instance, uint32_t viewWorldKey,
                            bool dropEditorHidden);
 
+    // Whether the view draws content that moved this frame: a drawn mover of the view's world
+    // (DrawsMover), or motion without an instance or an epoch (RenderServices::HasUnversionedMotion).
+    // History validation uses this conservative superset of the motion-vector pass's movers.
+    static bool ViewHasMovers(const RenderServices& rs, Rendering::ViewId viewId,
+                              uint64_t worldId);
+
   private:
     bool EnsureLoaded(IDevice* device);
     GraphicsPipelineId GetOrCreateMVPipeline(IDevice* device, uint32_t strideBytes, bool skinned);

@@ -415,7 +415,7 @@ void WriteTexturePayloadMeta(const std::filesystem::path& assetPath, const char*
 void SetControlWritable(UIElement* control, bool writable)
 {
     if (control)
-        control->SetDisabled(!writable);
+        control->SetEnabled(writable);
 }
 
 // Every import-setting edit lands here. These rows write into a store file
@@ -654,7 +654,7 @@ void BuildNineSliceSection(UIElement* root, TextureAsset* tex, const std::filesy
     // reach them; inspector.css dims it (.nine-slice-gated:disabled).
     auto applyGate = [st]() {
         if (st->gated)
-            st->gated->SetDisabled(!st->slice.Enabled);
+            st->gated->SetEnabled(st->slice.Enabled);
     };
 
     // The enable toggle stays interactive and gates everything below it.
@@ -694,7 +694,7 @@ void BuildNineSliceSection(UIElement* root, TextureAsset* tex, const std::filesy
             if (st->field)
                 st->field->SetIndependent(on);
             if (st->innerContainer)
-                st->innerContainer->Overrides().Set(Style::Display, on ? DisplayMode::Block : DisplayMode::None);
+                st->innerContainer->Style().Set(Style::Display, on ? DisplayMode::Block : DisplayMode::None);
             if (!on)
             {
                 // Collapse gaps: snap each inner cut back onto its corner.
@@ -811,7 +811,7 @@ void BuildNineSliceSection(UIElement* root, TextureAsset* tex, const std::filesy
     for (FloatField* inset : {st->fLI, st->fRI, st->fTI, st->fBI})
         SetControlWritable(inset, settingsWritable);
 
-    st->innerContainer->Overrides().Set(Style::Display, st->independent ? DisplayMode::Block : DisplayMode::None);
+    st->innerContainer->Style().Set(Style::Display, st->independent ? DisplayMode::Block : DisplayMode::None);
 
     // Now that every inset field exists, show the unit suffix on each.
     applyUnitSuffix();
@@ -851,7 +851,7 @@ void BuildNineSliceSection(UIElement* root, TextureAsset* tex, const std::filesy
             st->field->SetIndependent(st->independent);
         }
         if (st->innerContainer)
-            st->innerContainer->Overrides().Set(Style::Display, st->independent ? DisplayMode::Block : DisplayMode::None);
+            st->innerContainer->Style().Set(Style::Display, st->independent ? DisplayMode::Block : DisplayMode::None);
         if (st->slicedToggle)      st->slicedToggle->SetValueWithoutNotify(st->slice.Enabled);
         if (st->independentToggle) st->independentToggle->SetValueWithoutNotify(st->independent);
         if (st->drawCenterToggle)  st->drawCenterToggle->SetValueWithoutNotify(st->slice.FillCenter);

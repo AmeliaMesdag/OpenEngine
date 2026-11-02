@@ -19,12 +19,13 @@ set(UI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UITargetSpace.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UITextureSpace.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ClassBackgroundImageQuery.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/StyleOverrides.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/StyleDeclaration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/StyleInterpolation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/StyleApplier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/TransitionEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UITransform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ResolvedStyle.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/BubblePaint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_StyleResolve.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_StyleAnalysis.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/UIManager/UIManager_HoverAndEvents.cpp
@@ -66,6 +67,7 @@ set(UI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Layout/DockingHitTest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Layout/DropdownPopupPlacement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Mount.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/WeightedPane.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/Button.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Registration/ElementRegistration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Controls/ControlRegistration.cpp
@@ -254,6 +256,10 @@ set_target_properties(UI PROPERTIES
     CXX_STANDARD_REQUIRED ON
     FOLDER "UI"
 )
+
+if(BUILD_BENCHMARKS)
+    add_subdirectory(Benchmarks)
+endif()
 
 if(MSVC)
     target_compile_options(UI PRIVATE /bigobj)
@@ -493,22 +499,27 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIEncodedBlendParityTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/HudFlipPreviewProbe.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/BorderBackgroundCompositeTests.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/OverflowClipPaddingBoxTests.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/OverflowClipPaddingBoxTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ViewportUnitsLayoutTests.cpp)
 
     # Styling: the CSS and XML parsers, the cascade and its caches, restyle and
     # invalidation, transitions, and every test that reads the shipped editor
     # stylesheets or layouts.
     ge_add_ui_test(UIStyleTests
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ElementBuilderStyleTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UITransitionCostTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CSSParserTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CssImportsTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CSSMathFunctionTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CSSViewportUnitTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ClassBackgroundImageQueryTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/BorderSideShorthandTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/CSSKeywordParsingTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/XMLParserTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/StyleUtilTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/StyleOverrideCustomColorTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ElementStyleTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/StyleOverrideCustomVarCascadeTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/FloatingPanelTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/MarkdownTextLayoutTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIManagerPseudoInvalidationTests.cpp
@@ -526,6 +537,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShippedMarkupTextAreaFocusTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/TextSelectionColorTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShippedMarkupUnseenDotTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShippedBadgeButtonStateTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShippedSearchPlaceholderTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShippedHeadingWeightTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ShippedDropdownPictureRowTests.cpp
@@ -611,6 +623,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/DismissablePopupTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/PopupPlacementTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/TooltipPlacementTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/PointerArrowTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIScrollVirtualizationTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/VirtualWindowCoreTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/TextFieldXmlTests.cpp
@@ -647,6 +660,7 @@ if(BUILD_TESTING)
     # AbiNativeSmokeTest links the exports but has no host, so every call there
     # stops at not-found before a type is ever examined.
     ge_add_ui_test(UITests
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ElementBuilderTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ElementIdAttachmentTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ElementIdLookupTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/ModuleOwnedHandlerRevocationTests.cpp
@@ -673,6 +687,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UITargetSpaceTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UITextureSpaceTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIBackgroundTextureMipTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIDeferredTextureSlotTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/SvgBackgroundRasterTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UISvgBackgroundVariantTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/GameUIHostTests.cpp
@@ -685,6 +700,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIHotReloadTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIStyleAssetReloadTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/OverlayLayerOrderTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/TooltipTemplateTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UITextureRegistryTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UITextureRegistryDeviceRebuildTests.cpp)
 
@@ -765,4 +781,10 @@ if(BUILD_TESTING)
     ge_set_output_tests(UISlotAllocatorBench)
     ge_stage_runtime_dependencies(UISlotAllocatorBench)
     add_test(NAME UISlotAllocatorBench COMMAND $<TARGET_FILE:UISlotAllocatorBench>)
+
+    # --- Timing baseline for the element paths a UIElement layout change can
+    #     move: restyle and relayout, subtree attach with id lookups, and deep
+    #     dispatch. Its own process so a timing never shares a heap with a suite.
+    ge_add_ui_test(UIRestyleRelayoutBench
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/UIRestyleRelayoutBench.cpp)
 endif()

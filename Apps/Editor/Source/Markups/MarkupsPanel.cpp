@@ -168,7 +168,7 @@ void MarkupsPanel::BindFrame()
         scroll->AddContent(std::move(list));
         m_Scroll = MakeWeakRef(scroll);
     }
-    m_Empty = MakeWeakRef(dynamic_cast<Label*>(FindById("MarkupsEmpty"_sid)));
+    m_Empty = FindById<Label>("MarkupsEmpty"_sid);
 }
 
 void MarkupsPanel::RefreshTimesIfShown()

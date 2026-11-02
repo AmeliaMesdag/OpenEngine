@@ -1,8 +1,12 @@
 #pragma once
 
+#include "Mathematics/Matrix4x4.h"
+#include "Mathematics/Vector4.h"
+#include "Types/Color.h"
 #include "Types/Types.h"
 #include "Rendering/RenderLayerMask.h"
 
+#include <cstddef>
 #include <memory>
 
 namespace GameEngine
@@ -19,10 +23,14 @@ using CameraId = uint32;
 // matching the existing Scene View camera uniform.
 struct CameraData
 {
-    float view[16];     // View matrix (full world space)
-    float proj[16];     // Projection matrix
-    float viewProj[16]; // View-projection matrix (full world space)
-    float cameraPos[4]; // World-space camera position (xyz), w=1 for editor 2D ortho views, 0 otherwise.
+    // The matrices are zero until a camera fills them.
+    Mathematics::Matrix4x4 view{glm::mat4(0.0f)};     // View matrix (full world space)
+    Mathematics::Matrix4x4 proj{glm::mat4(0.0f)};     // Projection matrix
+    Mathematics::Matrix4x4 viewProj{glm::mat4(0.0f)}; // View-projection matrix (full world space)
+    // World-space camera position in xyz; w is 1 for an editor 2D orthographic view, else 0.
+    // A cascade shadow view puts the light direction in xyz. A spot, point or area shadow view
+    // puts the light position in xyz and its far plane in w (negative for an area light).
+    Mathematics::Vector4 cameraPos;
     // Camera-relative rendering (Earth-scale precision). Rebased view / view-proj
     // built from the camera's sector-local position (camera minus render origin);
     // the vertex stage projects render-origin-relative positions through these so
@@ -31,12 +39,16 @@ struct CameraData
     // the shader takes the full-world path (byte-identical to the pre-feature
     // layout). Filled by RenderOrigin.h::ComputeRebasedView at the
     // ViewRegistry::ResolveCameraData chokepoint; GLSL mirror camera_ubo_fields.glsl.
-    float viewRel[16];
-    float viewProjRel[16];
+    Mathematics::Matrix4x4 viewRel{glm::mat4(0.0f)};
+    Mathematics::Matrix4x4 viewProjRel{glm::mat4(0.0f)};
     int32 renderOriginSector[4]; // xyz = render origin sector; w = sector size (meters)
 };
 static_assert(sizeof(CameraData) == 352,
               "CameraData must be 352 bytes (5 mat4 + 1 vec4 + 1 ivec4) to match camera_ubo_fields.glsl");
+static_assert(offsetof(CameraData, proj) == 64 && offsetof(CameraData, viewProj) == 128 &&
+                  offsetof(CameraData, cameraPos) == 192 && offsetof(CameraData, viewRel) == 208 &&
+                  offsetof(CameraData, viewProjRel) == 272 && offsetof(CameraData, renderOriginSector) == 336,
+              "CameraData member offsets must match camera_ubo_fields.glsl");
 
 // Optional aggregate that carries a camera identifier, its data,
 // and an optional debug label. The debugName is non-owning and
@@ -82,7 +94,7 @@ struct ViewTargets
     bool clearColor = false;
     bool clearDepth = false;
     bool clearStencil = false;
-    float clearColorValue[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    ColorLinear clearColorValue{0.0f, 0.0f, 0.0f, 0.0f};
     float clearDepthValue = 0.0f;  // reverse-Z: clear to far
     uint8 clearStencilValue = 0;
 };
@@ -172,7 +184,7 @@ struct ViewDesc
 struct ViewClearConfig
 {
     bool clearColor;
-    float clearColorValue[4];
+    ColorLinear clearColorValue;
     bool clearDepth;
     float clearDepthValue;
     bool clearStencil;
@@ -180,16 +192,13 @@ struct ViewClearConfig
 
     constexpr ViewClearConfig(
         bool clearColorIn = false,
-        float clearR = 0.0f,
-        float clearG = 0.0f,
-        float clearB = 0.0f,
-        float clearA = 1.0f,
+        ColorLinear clearColorValueIn = ColorLinear(0.0f, 0.0f, 0.0f, 1.0f),
         bool clearDepthIn = false,
         float clearDepthValueIn = 0.0f,
         bool clearStencilIn = false,
         uint8_t clearStencilValueIn = 0)
         : clearColor(clearColorIn),
-          clearColorValue{clearR, clearG, clearB, clearA},
+          clearColorValue(clearColorValueIn),
           clearDepth(clearDepthIn),
           clearDepthValue(clearDepthValueIn),
           clearStencil(clearStencilIn),

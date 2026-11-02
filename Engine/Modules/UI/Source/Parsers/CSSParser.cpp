@@ -2329,7 +2329,7 @@ void CSSParser::ComputeStyleInto(ResolvedStyle& out,
         }
     }
 
-    el.InlineOverrides().ForEachCustom([&](StringId varId, const std::string& value)
+    el.InlineStyle().ForEachCustom([&](StringId varId, const std::string& value)
     {
         ensureLocalScope();
         auto& slot = localScope->Local.GetOrInsert(varId);
@@ -2338,7 +2338,7 @@ void CSSParser::ComputeStyleInto(ResolvedStyle& out,
         customVars[varId] = value;
     });
 
-    el.Overrides().ForEachCustom([&](StringId varId, const std::string& value)
+    el.Style().ForEachCustom([&](StringId varId, const std::string& value)
     {
         ensureLocalScope();
         auto& slot = localScope->Local.GetOrInsert(varId);

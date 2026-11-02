@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mathematics/Curve.h" // Math::Curve, Math::CurveKey
+#include "Types/Color.h"
 
 #include <vector>
 
@@ -84,7 +85,7 @@ float MoonlightLux(const SkyEnvironment& sky, float moonUpDot);
 // (Rendering::SkySunState::MoonPhaseFraction; Rendering::SkyBodyGroundColors::Moon,
 // SkySystemConfig::moonColor extinguished at the moon's elevation), so the frame runs the phase law
 // and the moon's extinction once.
-float MoonlightLuxFromGround(const SkyEnvironment& sky, float moonPhaseFraction, const float moonGround[3]);
+float MoonlightLuxFromGround(const SkyEnvironment& sky, float moonPhaseFraction, const ColorLinear& moonGround);
 
 // The sky's Moonlight as a multiple of the default moonlight: exactly 1 at the default.
 float MoonlightRatio(const SkyEnvironment& sky);

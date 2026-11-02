@@ -1,13 +1,6 @@
 #include "Rendering/Passes/PixelPerfectUpscalePass.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
+#include "Mathematics/Vector2.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/NamedDescriptorWriter.h"
 #include "Rendering/Core/NamedPushConstantWriter.h"
@@ -17,6 +10,14 @@
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 #include "Logger/Logger.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 namespace GameEngine {
 namespace Rendering {
 namespace Passes {
@@ -25,14 +26,14 @@ namespace
 {
 // pixelperfect_upscale.frag's UpscalePC members, written by NAME against the
 // reflected block (never hand-mirrored — see TonemapPass for the drift-class
-// rationale). vec2 members are written as float[2].
+// rationale).
 struct UpscaleValues
 {
-    float sourceSize[2]{0.0f, 0.0f};
-    float referenceSize[2]{0.0f, 0.0f};
-    float sampleOrigin[2]{0.0f, 0.0f};
-    float outputOrigin[2]{0.0f, 0.0f};
-    float outputSize[2]{0.0f, 0.0f};
+    Mathematics::Vector2 sourceSize{0.0f, 0.0f};
+    Mathematics::Vector2 referenceSize{0.0f, 0.0f};
+    Mathematics::Vector2 sampleOrigin{0.0f, 0.0f};
+    Mathematics::Vector2 outputOrigin{0.0f, 0.0f};
+    Mathematics::Vector2 outputSize{0.0f, 0.0f};
     float zoom = 1.0f;
     int32_t outEncoding = 1;
     float paperWhiteNits = 203.0f;
@@ -305,11 +306,11 @@ RenderGraph::RGPass AddPixelPerfectUpscalePassRG(RenderGraph::RGFrame& frame,
             : NamedPushConstantWriter(shaders.meta, shaders.meta.PushConstants[0].Name);
     if (pcw.IsValid())
     {
-        pcw.AddRaw("sourceSize", pc.sourceSize, sizeof(pc.sourceSize));
-        pcw.AddRaw("referenceSize", pc.referenceSize, sizeof(pc.referenceSize));
-        pcw.AddRaw("sampleOrigin", pc.sampleOrigin, sizeof(pc.sampleOrigin));
-        pcw.AddRaw("outputOrigin", pc.outputOrigin, sizeof(pc.outputOrigin));
-        pcw.AddRaw("outputSize", pc.outputSize, sizeof(pc.outputSize));
+        pcw.Add("sourceSize", pc.sourceSize);
+        pcw.Add("referenceSize", pc.referenceSize);
+        pcw.Add("sampleOrigin", pc.sampleOrigin);
+        pcw.Add("outputOrigin", pc.outputOrigin);
+        pcw.Add("outputSize", pc.outputSize);
         pcw.Add("zoom", pc.zoom);
         pcw.Add("outEncoding", pc.outEncoding);
         pcw.Add("paperWhiteNits", pc.paperWhiteNits);

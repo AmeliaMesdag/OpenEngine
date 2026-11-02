@@ -108,9 +108,8 @@ struct GrassBladeInstance
     uint RandAndCoverage; // grass_clump.glsl owns the layout (per-blade random, field coverage)
     uint BladeShape; // grass_clump.glsl owns the bit layout (tilt, twist, tuft fan)
     uint TerrainIndex;
-    // Terrain surface normal (world nx/nz; ny reconstructed) baked here for atlas terrains, whose
-    // vertex modifier has no unified normalmap to sample. 0 for non-atlas terrains (the vertex
-    // modifier samples NormalmapBindless / the height gradient itself, unchanged).
+    // Terrain surface normal (world nx/nz; ny reconstructed), baked here for a blade on surface pages
+    // (Flags kGrassFlagGroundFromPages). 0 otherwise: the vertex modifier samples the unified maps.
     float NormalX;
     float NormalZ;
     uint Flags; // LOD index + clump colour code; grass_clump.glsl owns the bit layout
@@ -204,11 +203,8 @@ shared uint sAccepted[gl_WorkGroupSize.x];
 #include "Includes/bindless_textures.glsl"
 #endif
 
-// Resident-window atlas resolve (terrain UV -> tile -> slot UV). Pure math, no bindings —
-// the SAME byte-shared helper CBT's compute + surface run (cbt_atlas.glsl), so grass snaps
-// roots to exactly the height CBT displaces the surface to. Included here rather than by
-// grass_atlas_splat.glsl below because only this stage's compile has the CBT directory on its
-// include path (the surface reaches the same file as "CBT/cbt_atlas.glsl").
+// The terrain lattice helper (CBT_LatticeTextureUV) the unified map taps read through. Spelled
+// "cbt_atlas.glsl": this stage's compile has the CBT directory on its include path.
 #include "cbt_atlas.glsl"
 
 // Unified-map existence bits (Terrain/TerrainTypes.h mirror): on the compat profile the bindless
@@ -226,7 +222,7 @@ const uint kTerrainFlagHasSplatmap = 16u;
 #define GRASS_HAS_SPLATMAP(tp) (tp.SplatmapBindless != 0u)
 #endif
 
-// Every terrain/atlas map tap below is an explicit-LOD data lookup, so one macro carries the
+// Every terrain map tap below is an explicit-LOD data lookup, so one macro carries the
 // whole profile fork: the full profile indexes the bindless array, compat reads a named binding
 // declared just below (WebGPU exposes no binding arrays).
 //
@@ -250,38 +246,36 @@ const uint kTerrainFlagHasSplatmap = 16u;
     grassMapTap(mapIndex, mapTex, CBT_LatticeTextureUV(uv, vec2(grassMapSize(mapIndex, mapTex))))
 
 #if defined(GE_COMPAT_PROFILE)
-// WebGPU exposes no binding arrays, so the twelve maps this shader reads are named bindings in
-// grass's own set, after PlaceParams at binding 6. One sampler serves all of them: every tap
-// here is a clamped explicit-LOD data lookup (GE_TS_CLAMP on the bindless arm).
-layout(set = 0, binding = 7) uniform texture2D gGrassAtlasHeight;
-layout(set = 0, binding = 8) uniform texture2D gGrassAtlasHeightCoarse;
-layout(set = 0, binding = 9) uniform texture2D gGrassAtlasNormal;
-layout(set = 0, binding = 10) uniform texture2D gGrassAtlasNormalCoarse;
-layout(set = 0, binding = 11) uniform texture2D gGrassAtlasSplat;
-layout(set = 0, binding = 12) uniform texture2D gGrassAtlasSplatCoarse;
+// WebGPU exposes no binding arrays, so the four unified maps this shader reads are named bindings in
+// grass's own set. One sampler serves all of them: every tap here is a clamped explicit-LOD data
+// lookup (GE_TS_CLAMP on the bindless arm).
 layout(set = 0, binding = 13) uniform texture2D gGrassHeightmap;
 layout(set = 0, binding = 14) uniform texture2D gGrassNormalmap;
 layout(set = 0, binding = 15) uniform texture2D gGrassSplatmap;
-layout(set = 0, binding = 16) uniform texture2D gGrassAtlasControl;
-layout(set = 0, binding = 17) uniform texture2D gGrassAtlasControlCoarse;
 layout(set = 0, binding = 18) uniform texture2D gGrassControlmap;
 layout(set = 0, binding = 19) uniform sampler gGrassMapSampler;
+#define GRASS_SPLAT_TAP_UNIFIED(bindlessIndex, uv) grassLatticeTap(bindlessIndex, gGrassSplatmap, uv)
+#else
+// The paged terrain's page-table words (the height table, then the surface table: the CBT's binding-22
+// ring slot), its height cache and its surface plane caches, for cbt_surface_pages.glsl.
+layout(std430, set = 0, binding = 5) readonly buffer GrassPageTableBuffer
+{
+    uint Words[];
+} gPageTable;
+layout(set = 0, binding = 21) uniform sampler2D gPageCache;
+layout(set = 0, binding = 22) uniform sampler2D cbt_SurfaceSplat;
+layout(set = 0, binding = 23) uniform sampler2D cbt_SurfaceNormal;
+layout(set = 0, binding = 24) uniform sampler2D cbt_SurfaceGrass;
+layout(set = 0, binding = 25) uniform sampler2D cbt_SurfaceColor;
+#define GRASS_SURFACE_SET 0
+#define GRASS_SURFACE_PARAMS_BINDING 4
 #endif
+// The surface page resolve (its struct only on the compat profile, which has no pages).
+#include "cbt_surface_pages.glsl"
 
-// The shared splat taps, for the profile with no bindless array. Unlike the surface, the compute
-// DOES carry the atlas pair as named bindings, so all three sources resolve here.
-#if defined(GE_COMPAT_PROFILE)
-#define GRASS_SPLAT_TAP_UNIFIED(idx, uv) grassLatticeTap(idx, gGrassSplatmap, uv)
-#define GRASS_SPLAT_TAP_ATLAS_SLOT(idx, uv) grassMapTap(idx, gGrassAtlasSplat, uv)
-#define GRASS_SPLAT_TAP_ATLAS_COARSE(idx, uv) grassMapTap(idx, gGrassAtlasSplatCoarse, uv)
-#endif
-
-// The atlas bindings + the ground splat resolve, shared with terrain_grass_surface.glsl so a
-// blade's placement mask and its ground colour can never resolve the splat differently.
-#define GRASS_ATLAS_SET 0
-#define GRASS_ATLAS_PARAMS_BINDING 4
-#define GRASS_ATLAS_ROWS_BINDING 5
-#include "TerrainGrass/grass_atlas_splat.glsl"
+// The ground resolve, shared with terrain_grass_surface.glsl so a blade's placement mask and its
+// ground color read one answer.
+#include "TerrainGrass/grass_surface_pages.glsl"
 #include "Includes/terrain_grass_canopy.glsl"
 
 #if !defined(GE_COMPAT_PROFILE)
@@ -294,30 +288,10 @@ layout(set = 0, binding = 19) uniform sampler gGrassMapSampler;
 #endif
 
 // Endpoint-aligned RG8 control lattice: R is height, G is density. Missing maps
-// are exactly neutral. Resolve at the blade's own site, and do not crossfade rejection
-// probabilities during streaming.
+// are exactly neutral. Resolve at the blade's own site. Where a page answers, the caller takes the
+// page's control plane instead (GrassGround.Pages.Grass).
 vec2 grassRegionControls(TerrainParamsEntry tp, vec2 uv)
 {
-    if (GrassAtlas_IsAtlasBacked(tp.Flags, Atlas.Enabled))
-    {
-        if (Atlas.GrassEnabled == 0u) return vec2(1.0);
-        AtlasResolve r = grassAtlasResolve(uv);
-#if defined(GE_COMPAT_PROFILE)
-        // GrassEnabled is published only after BOTH named maps have authored
-        // contents. A compat device never allocates bindless indices.
-        bool haveSlot = true;
-        bool haveCoarse = true;
-#else
-        bool haveSlot = Atlas.GrassBindless != 0u;
-        bool haveCoarse = Atlas.GrassCoarseBindless != 0u;
-#endif
-        if (r.Resident && haveSlot)
-            return grassMapTap(Atlas.GrassBindless, gGrassAtlasControl, r.SlotUV).rg;
-        if (haveCoarse)
-            return grassMapTap(Atlas.GrassCoarseBindless, gGrassAtlasControlCoarse,
-                               grassCoarseUV(uv, Atlas.CoarseDim)).rg;
-        return vec2(1.0);
-    }
 #if defined(GE_COMPAT_PROFILE)
     bool haveMap = (tp.Flags & 32u) != 0u;
 #else
@@ -428,21 +402,8 @@ vec3 grassRenderOriginWorld()
 }
 #endif
 
-float sampleAtlasHeight01(vec2 uv)
-{
-    AtlasResolve r = grassAtlasResolve(uv);
-    if (r.Resident && Atlas.HeightBindless != 0u)
-        return grassMapTap(Atlas.HeightBindless, gGrassAtlasHeight, r.SlotUV).r;
-    if (Atlas.HeightCoarseBindless != 0u)
-        return grassMapTap(Atlas.HeightCoarseBindless, gGrassAtlasHeightCoarse,
-                           grassCoarseUV(uv, Atlas.CoarseDim)).r;
-    return 0.0;
-}
-
 float sampleHeight01(TerrainParamsEntry tp, vec2 uv)
 {
-    if (grassAtlasBacked(tp.Flags))
-        return sampleAtlasHeight01(uv);
     if (GRASS_MISSING_HEIGHTMAP(tp))
         return 0.0;
     return grassLatticeTap(tp.HeightmapBindless, gGrassHeightmap, uv).r;
@@ -450,18 +411,6 @@ float sampleHeight01(TerrainParamsEntry tp, vec2 uv)
 
 vec3 sampleTerrainNormalWS(TerrainParamsEntry tp, vec2 uv)
 {
-    if (grassAtlasBacked(tp.Flags))
-    {
-        AtlasResolve r = grassAtlasResolve(uv);
-        vec2 nXZ = vec2(0.0);
-        if (r.Resident && Atlas.NormalBindless != 0u)
-            nXZ = grassMapTap(Atlas.NormalBindless, gGrassAtlasNormal, r.SlotUV).rg;
-        else if (Atlas.NormalCoarseBindless != 0u)
-            nXZ = grassMapTap(Atlas.NormalCoarseBindless, gGrassAtlasNormalCoarse,
-                              grassCoarseUV(uv, Atlas.CoarseDim)).rg;
-        float ny = sqrt(max(1.0 - dot(nXZ, nXZ), 0.0));
-        return normalize(vec3(nXZ.x, ny, nXZ.y));
-    }
     if (GRASS_HAS_NORMALMAP(tp))
     {
         vec2 nXZ = grassLatticeTap(tp.NormalmapBindless, gGrassNormalmap, uv).rg;
@@ -486,21 +435,88 @@ vec3 sampleTerrainNormalWS(TerrainParamsEntry tp, vec2 uv)
     ));
 }
 
+// The ground under a candidate as the terrain draws it, resolved once for the mask, the controls, the
+// root height, the lean and the root color.
+struct GrassGround
+{
+    bool Readable;          // false: an atlas-backed terrain off its pages; no blade stands here
+    float Height01;         // the root height in [0, 1] of the terrain's height range
+    CBTSurfacePages Pages;  // the surface pages, when one answers (Pages.Resolved)
+};
+
+#if !defined(GE_COMPAT_PROFILE)
+// The footprint the terrain fragment at `posWS` takes its surface level from, never coarser. The face slopes
+// come from the paged heights one level-0 sample to each side.
+float grassGroundPixelFootprint(TerrainParamsEntry tp, vec2 uv, vec3 posWS)
+{
+    CBTPageField field = CBT_SurfPageField(0u);
+    vec2 step = vec2(1.0f / float(max(field.Level0SamplesX, 2u) - 1u),
+                     1.0f / float(max(field.Level0SamplesZ, 2u) - 1u));
+    vec2 spacing = max(vec2(tp.WorldSizeX, tp.WorldSizeZ) * step, vec2(1e-4f));
+    float h = GrassSurface_PagedHeight01(uv);
+    vec4 rise = vec4(h - GrassSurface_PagedHeight01(uv - vec2(step.x, 0.0f)),
+                     GrassSurface_PagedHeight01(uv + vec2(step.x, 0.0f)) - h,
+                     h - GrassSurface_PagedHeight01(uv - vec2(0.0f, step.y)),
+                     GrassSurface_PagedHeight01(uv + vec2(0.0f, step.y)) - h);
+    vec4 faceSlopes = rise * tp.HeightScale / vec4(spacing.x, spacing.x, spacing.y, spacing.y);
+    mat3 viewRot = mat3(Place.ViewRotCol0.xyz, Place.ViewRotCol1.xyz, Place.ViewRotCol2.xyz);
+    return GrassSurface_GroundPixelFootprintAcrossFaces(viewRot * (posWS - Place.CameraPos.xyz),
+                                                        Place.ViewRotCol0.xyz, Place.ViewRotCol1.xyz,
+                                                        Place.ViewRotCol2.xyz, faceSlopes, Place.ViewRotCol2.w,
+                                                        Place.ViewRotCol1.w);
+}
+#endif
+
+GrassGround grassGroundAt(uint row, TerrainParamsEntry tp, vec2 uv, vec2 worldXZ)
+{
+    GrassGround g;
+    g.Pages = CBT_SurfPagesNone();
+#if defined(GE_COMPAT_PROFILE)
+    g.Height01 = sampleHeight01(tp, uv);
+#else
+    bool heightPaged = GrassSurface_HeightPaged(row);
+    g.Height01 = heightPaged ? GrassSurface_PagedHeight01(uv) : sampleHeight01(tp, uv);
+    if (heightPaged)
+    {
+        vec3 rootWS = vec3(worldXZ.x, tp.WorldOriginY + g.Height01 * tp.HeightScale, worldXZ.y);
+        g.Pages = GrassSurface_Pages(row, tp, uv, grassGroundPixelFootprint(tp, uv, rootWS));
+    }
+#endif
+    g.Readable = GrassSurface_GroundReadable(tp.Flags, g.Pages.Resolved);
+    return g;
+}
+
+// The four normalized ground weights under a candidate.
+vec4 grassGroundWeights(TerrainParamsEntry tp, vec2 uv, GrassGround g)
+{
+    if (GrassSurface_SelectSource(g.Pages.Resolved, tp.SplatmapBindless) == kGrassGroundPages)
+        return grassNormalizeLayerWeights(g.Pages.Splat);
+    return GrassSurface_UnifiedSplat(tp.SplatmapBindless, uv);
+}
+
+// The terrain normal under a candidate: the page's normal plane, else the unified map or the height
+// gradient.
+vec3 grassGroundNormalWS(TerrainParamsEntry tp, vec2 uv, GrassGround g)
+{
+    if (g.Pages.Resolved)
+    {
+        vec2 nXZ = g.Pages.NormalXZ;
+        return normalize(vec3(nXZ.x, sqrt(max(1.0 - dot(nXZ, nXZ), 0.0)), nXZ.y));
+    }
+    return sampleTerrainNormalWS(tp, uv);
+}
+
 // Splat-mask acceptance in [0,1] for a candidate, or a negative value when the surface refuses
 // grass outright. Semantics preserved from the fixed-grid placement (mirrored by the
 // TerrainAtlasTests oracles): grass must both reach MaskThreshold and lead the next-strongest
-// layer by min(0.18, MaskThreshold).
-float grassMaskFactor(TerrainParamsEntry tp, vec2 uv)
+// layer by min(0.18, MaskThreshold). The weights are the ground's, fade included: the blade and the
+// ground beside it take one answer while a page arrives.
+float grassMaskFactor(TerrainParamsEntry tp, vec2 uv, GrassGround g)
 {
-    // A newly-resident tile's coarse->slot crossfade is NOT shown here: the mask below is a
-    // threshold and a refusal, and a weight sliding between two sources across the upgrade window
-    // would spawn and unspawn blades along the residency frontier. Placement has always taken the
-    // slot outright and keeps doing so; only the ground COLOUR travels with the ground's fade.
-    vec4 splatWeights = GrassAtlas_ResolveSplat(tp.Flags, tp.SplatmapBindless, uv, false);
     // The coverage the ground darkens its canopy occlusion by (cbt_surface.glsl), so the ground
     // under the field and the blades standing on it agree on where the field is.
-    return GrassSplatCoverage(splatWeights, min(tp.GrassLayerIndex, 3u), tp.GrassMaskThreshold,
-                              grassHasSplat(tp.Flags, tp.SplatmapBindless));
+    return GrassSplatCoverage(grassGroundWeights(tp, uv, g), min(tp.GrassLayerIndex, 3u), tp.GrassMaskThreshold,
+                              g.Pages.Resolved || tp.SplatmapBindless != 0u);
 }
 
 // First terrain row whose XZ footprint CONTAINS this point. Resolved per candidate, not per cell:
@@ -624,8 +640,10 @@ uint emitCellSlots()
                                     vec2(0.0), vec2(1.0));
                     // The field coverage: the probability a blade stands here, and the share of
                     // the canopy occlusion its root and the ground under it take.
-                    vec2 regional = grassRegionControls(stp, uv);
-                    float mask = GrassFieldCoverage(grassMaskFactor(stp, uv), regional);
+                    GrassGround ground = grassGroundAt(uint(siteIdx), stp, uv, vec2(worldX, worldZ));
+                    vec2 regional = ground.Pages.Resolved ? ground.Pages.Grass : grassRegionControls(stp, uv);
+                    float mask = ground.Readable ? GrassFieldCoverage(grassMaskFactor(stp, uv, ground), regional)
+                                                 : 0.0;
                     // The mask feather stays stochastic so splat boundaries keep their soft edge;
                     // the base density is now geometric, not a Bernoulli thinning of a fixed grid.
                     if (mask > 0.0 && s.MaskRand <= mask)
@@ -669,7 +687,7 @@ uint emitCellSlots()
 
                         blade.WorldX = worldX;
                         blade.WorldZ = worldZ;
-                        blade.RootY = stp.WorldOriginY + sampleHeight01(stp, uv) * stp.HeightScale;
+                        blade.RootY = stp.WorldOriginY + ground.Height01 * stp.HeightScale;
                         blade.BladeHeight = bladeHeight;
                         blade.BladeWidth = bladeWidth;
                         float yaw = s.Yaw01 * 6.28318530718;
@@ -704,18 +722,26 @@ uint emitCellSlots()
                         blade.Flags = GrassPackFlags(lod, clumpCode,
                             grassMinWidthScale(vec3(worldX, blade.RootY, worldZ),
                                                bladeHeight, bladeWidth, yaw));
-                        if (grassAtlasBacked(stp.Flags))
+                        // A blade on pages carries its ground: the vertex stage then takes this root
+                        // height and normal.
+                        if (ground.Pages.Resolved)
                         {
-                            vec3 terrainNormal = sampleTerrainNormalWS(stp, uv);
+                            vec3 terrainNormal = grassGroundNormalWS(stp, uv, ground);
                             blade.NormalX = terrainNormal.x;
                             blade.NormalZ = terrainNormal.z;
+                            blade.Flags |= kGrassFlagGroundFromPages;
                         }
 #if !defined(GE_COMPAT_PROFILE)
                         // At the blade's site on the surface. The vertex stage sinks the drawn root
                         // 1 cm along the normal, which moves a 1 m footprint's centre by under 1 cm.
                         vec3 rootWS = vec3(worldX, blade.RootY, worldZ);
+                        GrassRootGround root;
+                        root.Weights = grassGroundWeights(stp, uv, ground);
+                        root.Paged = ground.Pages.Resolved;
+                        root.PagedNormalXZ = ground.Pages.NormalXZ;
+                        root.PagedColor = ground.Pages.Color;
                         blade.RootColor = GrassPackRootColor(
-                            GrassRootGroundColor(stp, rootWS, rootWS - grassRenderOriginWorld()));
+                            GrassRootGroundColor(stp, rootWS, rootWS - grassRenderOriginWorld(), root));
 #endif
                         accepted = true;
                     }

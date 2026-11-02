@@ -300,10 +300,6 @@ class ScrollView : public UIElement
     // without knowing about ScrollView specifically.
     void OnEvent(UIEvent& e) override;
 
-    // Observe layout of the internal viewport so we can keep viewport size
-    // and scroll ranges up to date without UIManager directly poking at us.
-    void OnScrollViewportLayout(UIElement* viewport, float W, float H) override;
-
   private:
     void UpdateContentTransform() const;
     void UpdateScrollbarVisibility() const;

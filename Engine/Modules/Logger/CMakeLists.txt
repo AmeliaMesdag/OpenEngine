@@ -12,6 +12,7 @@ set(LOGGER_SOURCES
     Source/DeferredSink.cpp
     Source/RingBufferSink.cpp
     Source/Backtrace.cpp
+    Source/LibcxxVerboseAbort.cpp
 )
 
 # Core Logger header files

@@ -125,6 +125,9 @@ public:
     ManagedTypeState State() const { return m_State; }
     std::intptr_t Handle() const { return m_Handle; }
 
+    // Every name goes to the managed instance, and only the managed type knows which it uses.
+    bool BindsAuthoredAttribute(std::string_view nameLower) const override;
+
 protected:
     // The authored attributes have landed, so the instance can be configured from them. This
     // runs on every application — first parse, document rebuild, and .uxml reconcile — which

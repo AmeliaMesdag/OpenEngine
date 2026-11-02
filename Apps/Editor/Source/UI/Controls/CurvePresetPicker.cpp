@@ -142,7 +142,7 @@ void CurvePresetPicker::UpdateHeight()
 {
     const int rows = (TotalCount() + kColumns - 1) / kColumns;
     const float h = kGridPadTopPx + static_cast<float>(rows) * kCellHPx + kGridPadBottomPx + kPadBottomPx;
-    Overrides().Set(Style::Height, StyleLength::Px(h)).Set(Style::MinHeight, StyleLength::Px(h));
+    Style().Set(Style::Height, StyleLength::Px(h)).Set(Style::MinHeight, StyleLength::Px(h));
     // Mark layout + visual dirty; the manager's deferred relayout reflows the rows below us on the
     // next frame. (No parent poke / RequestRelayout needed -- the height change marking us
     // LayoutDirty is enough now that the update loop carries the frame's dirty hint into the

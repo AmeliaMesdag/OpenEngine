@@ -116,6 +116,8 @@ SplineGroundProvisioned: game data, a full mirror
 SplineNetworkMember: game data, a full mirror
 SplineNetworkOverride: element struct, mirrored inside its owner
 SplineNetworkOverrides: game data, a full mirror
+SplinePaving: game data, a full mirror
+SplinePavingMember: element struct, mirrored inside its owner
 SplinePlacement: game data, a full mirror
 SplineSpanOverride: element struct, mirrored inside its owner
 SplineWall: game data, a full mirror

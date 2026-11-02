@@ -224,7 +224,7 @@ void TodoPanel::BuildUI()
     auto scrollView = std::make_unique<ScrollView>();
     scrollView->SetId("todo-scroll");
     scrollView->AddClass("todo-list");
-    scrollView->Overrides().SetCustomNumber(StringId("--ui_scrollview_measure_horizontal"), 0.0f);
+    scrollView->Style().SetCustomNumber(HashStringId("--ui_scrollview_measure_horizontal"), 0.0f);
     m_ScrollView = scrollView.get();
     
     // Handle click on background to clear selection
@@ -321,7 +321,7 @@ void TodoPanel::BuildUI()
     // Insertion indicator for drag-and-drop
     auto indicator = std::make_unique<UIElement>();
     indicator->SetId("todo-insertion-indicator");
-    indicator->Overrides().Set(Style::Display, DisplayMode::None);
+    indicator->Style().Set(Style::Display, DisplayMode::None);
     m_InsertionIndicator = indicator.get();
     contentContainer->AddChild(std::move(indicator));
     
@@ -426,7 +426,7 @@ void TodoPanel::CreateTodoRow(const TodoItem& todo, UIElement* container, bool i
     if (m_SelectedId == todo.Id)
         row->AddClass("selected");
     
-    row->Overrides()
+    row->Style()
         .Set(Style::MinHeight, StyleLength::Px(m_RowHeight))
         .Set(Style::Height, StyleLength::Px(m_RowHeight));
     
@@ -445,7 +445,7 @@ void TodoPanel::CreateTodoRow(const TodoItem& todo, UIElement* container, bool i
     if (m_RowHeight <= 22.0f)
     {
         int checkboxSize = 18; // Smaller checkbox for compact rows
-        checkbox->Overrides()
+        checkbox->Style()
             .Set(Style::Width, StyleLength::Px((float)checkboxSize))
             .Set(Style::Height, StyleLength::Px((float)checkboxSize))
             .Set(Style::MinWidth, StyleLength::Px((float)checkboxSize))
@@ -696,7 +696,7 @@ void TodoPanel::SetupDragAndDrop(UIElement* row, UIElement* dragHandle, const st
         {
             if (m_InsertionIndicator)
             {
-                m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+                m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
             }
             m_DragTargetIndex = -1;
             e.Stop();
@@ -732,7 +732,7 @@ void TodoPanel::SetupDragAndDrop(UIElement* row, UIElement* dragHandle, const st
         // Show insertion indicator
         if (m_InsertionIndicator)
         {
-            m_InsertionIndicator->Overrides()
+            m_InsertionIndicator->Style()
                 .Set(Style::PositionTop, StyleLength::Px(indicatorY))
                 .Set(Style::Display, DisplayMode::Block);
         }
@@ -751,7 +751,7 @@ void TodoPanel::SetupDragAndDrop(UIElement* row, UIElement* dragHandle, const st
             m_DragTargetIndex = -1;
             if (m_InsertionIndicator)
             {
-                m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+                m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
             }
             return;
         }
@@ -792,7 +792,7 @@ void TodoPanel::SetupDragAndDrop(UIElement* row, UIElement* dragHandle, const st
         
         if (m_InsertionIndicator)
         {
-            m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
         }
 
         m_DraggedRow = nullptr;
@@ -814,7 +814,7 @@ void TodoPanel::CancelDrag()
     m_DragTargetIndex = -1;
     if (m_InsertionIndicator)
     {
-        m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+        m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
     }
 }
 

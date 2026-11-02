@@ -184,6 +184,22 @@ void PrefabLibrary::RebuildChanged(std::span<const GUID> changed)
         if (registry.TryGetAssetMetadata(guid, metadata))
             changedFiles.push_back(AssetPaths::NormalizeForRegistryKey(metadata.Path));
     }
+    RebuildKeys(changedFiles);
+}
+
+std::vector<RebuiltPrefab> PrefabLibrary::RebuildFiles(std::span<const std::filesystem::path> files)
+{
+    AssertWritable();
+    if (!m_AssetManager || m_Records.empty())
+        return {};
+    std::vector<std::string> changedFiles;
+    for (const std::filesystem::path& file : files)
+        changedFiles.push_back(AssetPaths::NormalizeForRegistryKey(file));
+    return RebuildKeys(changedFiles);
+}
+
+std::vector<RebuiltPrefab> PrefabLibrary::RebuildKeys(std::span<const std::string> changedFiles)
+{
     std::vector<const PrefabTemplate*> stale;
     for (const auto& [key, record] : m_Records)
     {
@@ -191,7 +207,7 @@ void PrefabLibrary::RebuildChanged(std::span<const GUID> changed)
             stale.push_back(record->Current.get());
     }
     if (stale.empty())
-        return;
+        return {};
 
     EngineCore& engine = EngineCore::GetInstance();
     AssetManagerSceneResolver resolver(*m_AssetManager, engine.GetResolvedAssetRoot(),
@@ -202,16 +218,20 @@ void PrefabLibrary::RebuildChanged(std::span<const GUID> changed)
     options.assetRootOverride = resolver.GetAssetRoot();
     options.projectRoot = engine.GetWorkspaceRoot();
     options.embedMaterializer = &materializer;
+    std::vector<RebuiltPrefab> rebuilt;
     for (const PrefabTemplate* prefab : stale)
     {
         // A rebuild retires the old generation, which stays alive until the frame boundary.
         const std::filesystem::path& path = prefab->Path;
         std::string error;
-        if (!BuildTemplateFromFile(*this, path, prefab->Source, options, error))
+        if (const PrefabTemplate* built = BuildTemplateFromFile(*this, path, prefab->Source, options, error))
+            rebuilt.push_back({prefab, built});
+        else
             Logger::Log::Error("Prefab {} changed but could not be rebuilt, so spawns and loads still use the "
                                "previous version: {}",
                                path.filename().string(), error);
     }
+    return rebuilt;
 }
 
 void PrefabLibrary::ReportNotResident(const GUID& source) const

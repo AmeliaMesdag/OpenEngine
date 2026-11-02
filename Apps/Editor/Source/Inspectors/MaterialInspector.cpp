@@ -599,7 +599,7 @@ static void AddColorSwatchRow(UIElement* parent, const std::string& labelText,
     Label* lbl = InspectorUI::AddLabel(row, labelText, tooltip);
     if (lbl) lbl->AddClass("inspector-label-no-drag");
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -615,7 +615,7 @@ static void AddColorSwatchRow(UIElement* parent, const std::string& labelText,
     auto rgbaLabel = std::make_unique<Label>();
     rgbaLabel->AddClass("inspector-text");
     rgbaLabel->SetText(FormatColorRgba(currentColor));
-    rgbaLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    rgbaLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
     Label* rgbaLabelRaw = rgbaLabel.get();
     fieldContainer->AddChild(std::move(rgbaLabel));
 
@@ -760,7 +760,7 @@ static void AddShaderGraphAliasedColorRow(UIElement* parent, const std::string& 
     if (lbl)
         lbl->AddClass("inspector-label-no-drag");
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -775,7 +775,7 @@ static void AddShaderGraphAliasedColorRow(UIElement* parent, const std::string& 
     auto rgbaLabel = std::make_unique<Label>();
     rgbaLabel->AddClass("inspector-text");
     rgbaLabel->SetText(FormatColorRgba(currentColor));
-    rgbaLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    rgbaLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
     Label* rgbaLabelRaw = rgbaLabel.get();
     fieldContainer->AddChild(std::move(rgbaLabel));
 
@@ -992,7 +992,7 @@ static void AddDeclaredVectorRow(UIElement* parent, const Rendering::ShaderPrope
     UIElement* row = InspectorUI::AddRow(parent);
     InspectorUI::AddLabel(row, p.DisplayName, p.Tooltip.empty() ? nullptr : p.Tooltip.c_str());
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(4.0f));
 
@@ -2077,7 +2077,7 @@ void BuildMaterialInspectorUI(UIElement* root, MaterialAsset* mat, OpenColorPick
             {
                 if (!label || !fA || !fB)
                     return;
-                label->Overrides().Set(Style::Cursor, CursorStyle::ColResize);
+                label->Style().Set(Style::Cursor, CursorStyle::ColResize);
 
                 auto startA = std::make_shared<float>(0.0f);
                 auto startB = std::make_shared<float>(0.0f);

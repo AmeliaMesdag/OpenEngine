@@ -5,10 +5,12 @@
 #include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
 #include "Rendering/Core/RenderGraph/RGFullscreen.h"
 #include "Rendering/Materials/Shader/ShaderLayoutShape.h"
+#include "Rendering/Passes/TonemapPass.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
 #include "Logger/Logger.h"
 #include "Types/FlatMap.h"
 
+#include <array>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -20,6 +22,10 @@ namespace
 {
 constexpr const char* kPackagePath = "Shaders/msaa_color_resolve.shaderpkg";
 constexpr const char* kBloomDeltaPackagePath = "Shaders/msaa_color_resolve_bloom_delta.shaderpkg";
+// tonemap_aces2_tables.glsl, view_params.glsl and view_exposure.glsl.
+constexpr uint32_t kAces2TablesBinding = 2;
+constexpr uint32_t kViewParamsBinding = 7;
+constexpr uint32_t kExposureHistoryBinding = 47;
 
 // One device's resolve program. The pipeline id names an interned description and survives a
 // device rebuild; the sampler is a GPU object, so the per-device cleanup drops the entry.
@@ -30,6 +36,8 @@ struct ResolveDeviceResources
     GraphicsPipelineId BloomDeltaPipeline{};
     DescriptorSetLayoutDesc Layout{};
     SamplerHandle Sampler{};
+    // TonemapPass owns it; its per-device cleanup frees it when this entry drops.
+    BufferHandle Aces2Tables{};
 };
 
 std::mutex g_ResolveMutex;
@@ -69,7 +77,10 @@ GraphicsPipelineId LoadResolvePipeline(IDevice& device, const char* packagePath,
     }
 
     layout.debugName = "MsaaColorResolve.Set0";
-    layout.bindings = {{0, DescriptorType::CombinedImageSampler, 1, kShaderStageFragment}};
+    layout.bindings = {{0, DescriptorType::CombinedImageSampler, 1, kShaderStageFragment},
+                       {kAces2TablesBinding, DescriptorType::StorageBuffer, 1, kShaderStageFragment},
+                       {kViewParamsBinding, DescriptorType::UniformBuffer, 1, kShaderStageFragment},
+                       {kExposureHistoryBinding, DescriptorType::StorageBuffer, 1, kShaderStageFragment}};
     ApplyMetaImageShapeToLayout(package.meta, layout);
     PipelineDesc pipeline = RenderGraph::MakeFullscreenPipelineDesc(debugName);
     pipeline.vertexShader = vertex->second;
@@ -80,7 +91,8 @@ GraphicsPipelineId LoadResolvePipeline(IDevice& device, const char* packagePath,
 
 bool LoadResolveResources(IDevice& device, ResolveDeviceResources& out)
 {
-    // Both packages reflect one sampler2DMS at binding 0, so one layout serves both pipelines.
+    // Both packages reflect one sampler2DMS at binding 0, the ACES 2 tables and the two view buffers, so one layout
+    // serves both.
     out.Pipeline = LoadResolvePipeline(device, kPackagePath, "MsaaColorResolve", out.Layout);
     out.BloomDeltaPipeline =
         LoadResolvePipeline(device, kBloomDeltaPackagePath, "MsaaColorResolveBloomDelta", out.Layout);
@@ -88,7 +100,11 @@ bool LoadResolveResources(IDevice& device, ResolveDeviceResources& out)
         return false;
     // texelFetch ignores the filter; the binding is a combined image sampler and needs one.
     out.Sampler = device.CreateSampler(SamplerDesc::PointClamp("MsaaColorResolve.PointClamp"));
-    return out.Sampler.IsValid();
+    out.Aces2Tables = GetAces2TablesBuffer(&device);
+    if (!out.Aces2Tables.IsValid())
+        Logger::Log::Error("MsaaColorResolvePass: the ACES 2 tables buffer could not be created; multisampled scene "
+                           "color is not resolved");
+    return out.Sampler.IsValid() && out.Aces2Tables.IsValid();
 }
 
 // Copies this device's resources into `out`, loading them on first use. A failed load is
@@ -117,11 +133,18 @@ bool EnsureResolveResources(IDevice& device, ResolveDeviceResources& out)
 
 RenderGraph::RGPass AddMsaaColorResolvePassRG(RenderGraph::RGFrame& frame, RenderGraph::RGTexture multisampled,
                                               RenderGraph::RGTexture resolved, RenderGraph::RGTexture bloomSampleDelta,
-                                              const char* passName)
+                                              const MsaaResolveViewBuffers& view, const char* passName)
 {
     IDevice* device = frame.Device();
     if (!device || !multisampled.IsValid() || !resolved.IsValid())
         return {};
+    if (!view.ViewParams.Buffer.IsValid() || !view.ExposureHistory.Buffer.IsValid())
+    {
+        Logger::Log::Error("MsaaColorResolvePass '{}': the view's ViewParams or ExposureHistory buffer is invalid; "
+                           "the pass is not declared. Pass the view's buffers or the engine's fallbacks.",
+                           passName);
+        return {};
+    }
     const RenderGraph::RGResourceDesc& source = frame.Graph().ResourceDesc(multisampled.Id);
     const RenderGraph::RGResourceDesc& target = frame.Graph().ResourceDesc(resolved.Id);
     if (source.SampleCount < 2 || target.SampleCount != 1 || target.MipLevels != 1 || target.ArrayLayers != 1 ||
@@ -144,12 +167,25 @@ RenderGraph::RGPass AddMsaaColorResolvePassRG(RenderGraph::RGFrame& frame, Rende
     input.Sampler = resources.Sampler;
     input.Required = true;
 
+    // The ACES 2 tables are static engine data, uploaded once, so the graph tracks no access to them.
+    RenderGraph::RGFullscreenBufferInput tables{};
+    tables.Binding = kAces2TablesBinding;
+    tables.Buffer = resources.Aces2Tables;
+    tables.Size = GetAces2TablesBufferBytes();
+    tables.IsStorage = true;
+    std::array<RenderGraph::RGFullscreenBufferInput, 3> buffers{tables, view.ViewParams, view.ExposureHistory};
+    buffers[1].Binding = kViewParamsBinding;
+    buffers[1].IsStorage = false;
+    buffers[2].Binding = kExposureHistoryBinding;
+    buffers[2].IsStorage = true;
+
     RenderGraph::RGFullscreenDesc desc{};
     desc.Name = passName;
     desc.Phase = PassPhase::kWorldRender;
     desc.Pipeline = bloomSampleDelta.IsValid() ? resources.BloomDeltaPipeline : resources.Pipeline;
     desc.Layout = resources.Layout;
     desc.Textures = {&input, 1};
+    desc.Buffers = buffers;
     desc.Target = resolved;
     desc.SecondTarget = bloomSampleDelta;
     desc.Ops.Load = RenderGraph::RGLoadOp::DontCare;

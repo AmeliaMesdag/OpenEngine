@@ -39,7 +39,7 @@ A corner is an authored point on a **Linear** spline, or a point on a curved spl
 
 ::::cardgrid
 
-:::card[Mitre]
+:::card[Miter]
 The two faces meet on one sharp vertical edge, and the top meets on the miter line, the way a masonry corner does. This is what a wall on a Linear spline starts with.
 :::
 
@@ -52,7 +52,7 @@ The outside of the corner sweeps an arc, and the inside meets at a point. Use it
 Adding the component picks the corner from the spline's type at that moment. Changing the spline's type afterwards leaves your choice alone. Resetting the component restores the values it had when you first selected it, not a corner picked again from the type.
 
 :::caution[Turns sharper than 120 degrees are always round]
-A mitered corner on a very sharp turn would reach out toward infinity, so a turn past 120 degrees is built round even with **Corner** set to **Mitre**. The log says so, naming the point. Its inside meets where the two inside faces cross. On a leg too short to reach that point, the inside narrows toward the corner instead.
+A mitered corner on a very sharp turn would reach out toward infinity, so a turn past 120 degrees is built round even with **Corner** set to **Miter**. The log says so, naming the point. Its inside meets where the two inside faces cross. On a leg too short to reach that point, the inside narrows toward the corner instead.
 :::
 
 ## Slopes
@@ -94,7 +94,7 @@ Each problem is logged once, naming the wall and the point, with the fix. Rebuil
 
 | Message | What to do |
 |---|---|
-| A point turns past the 120-degree mitre limit, so the corner is built round. | Widen the turn to keep a mitered corner. |
+| A point turns past the 120-degree miter limit, so the corner is built round. | Widen the turn to keep a mitered corner. |
 | A point is too close to the end of the wall for its corner. | Lengthen the end leg or thin the wall. |
 | Two points turn the same way too close together. | Lengthen the leg between them or thin the wall. |
 | The curve between two points bends tighter than half the wall's thickness, so the inside face folds there. | Widen the curve or thin the wall. |

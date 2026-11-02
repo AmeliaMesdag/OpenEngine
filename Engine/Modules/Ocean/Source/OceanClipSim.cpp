@@ -26,7 +26,7 @@ namespace
 {
 
 // Grow `bounds` (min X, min Z, max X, max Z) to hold `box` in the same order.
-void ExpandBounds(float bounds[4], bool& hasBounds, const float box[4])
+void ExpandBounds(Mathematics::Vector4& bounds, bool& hasBounds, const Mathematics::Vector4& box)
 {
     bounds[0] = hasBounds ? std::min(bounds[0], box[0]) : box[0];
     bounds[1] = hasBounds ? std::min(bounds[1], box[1]) : box[1];
@@ -128,12 +128,12 @@ bool OceanClipSim::BeginFrame(float cameraX, float cameraZ)
 {
     // The union of every source's XZ bounds: outside it the bake writes the
     // default state, so a coarsest layer over it holds all authored water.
-    float bounds[4] = {};
+    Mathematics::Vector4 bounds;
     bool hasBounds = false;
     for (uint32 i = 0; i < m_Params.SourceCount; ++i)
     {
-        const float* rect = m_Params.Sources[i].OriginExtent;
-        const float box[4] = {rect[0] - rect[2], rect[1] - rect[3], rect[0] + rect[2], rect[1] + rect[3]};
+        const Mathematics::Vector4& rect = m_Params.Sources[i].OriginExtent;
+        const Mathematics::Vector4 box(rect[0] - rect[2], rect[1] - rect[3], rect[0] + rect[2], rect[1] + rect[3]);
         ExpandBounds(bounds, hasBounds, box);
     }
     for (uint32 i = 0; i < m_Params.PolygonCount; ++i)

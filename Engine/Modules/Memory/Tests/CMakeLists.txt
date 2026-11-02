@@ -3,8 +3,8 @@
 
 find_package(GTest REQUIRED)
 
-# The counter and its windows, the stats registry, the arena, the object pool, the range allocator
-# and scratch scopes,
+# The counter and its windows, the stats registry, the arena, the object pool, the range allocator,
+# scratch scopes, the frame-joined bit and frame memory,
 # over the Memory module's own copy of each. JobSystem gives the Process window a real worker to
 # fork onto, and scratch scopes the pool's ways of nesting bodies on one thread.
 add_executable(MemoryTests
@@ -13,6 +13,8 @@ add_executable(MemoryTests
     ArenaImagePinTests.cpp
     ArenaTests.cpp
     ArenaUseTests.cpp
+    FrameJoinedScopeTests.cpp
+    FrameMemoryTests.cpp
     ObjectPoolTests.cpp
     ObjectPoolUseTests.cpp
     RangeAllocatorTests.cpp

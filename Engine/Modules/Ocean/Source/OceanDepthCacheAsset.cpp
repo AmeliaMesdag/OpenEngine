@@ -130,7 +130,7 @@ Mathematics::Vector3 ReadMeshPosition(const OceanDepthCacheMeshSource& source, u
     if (!source.UseLocalToWorld)
         return p;
 
-    const float32* m = source.LocalToWorld;
+    const float32* m = source.LocalToWorld.Data();
     return Mathematics::Vector3{
         m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12],
         m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13],

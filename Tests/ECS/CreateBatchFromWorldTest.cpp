@@ -112,7 +112,9 @@ void ExpectCopyOf(const World& source, std::span<const EntityHandle> sources, co
         EXPECT_EQ(targetPosition->z, sourcePosition->z);
         EXPECT_EQ(target.HasComponent<Velocity>(targets[i]), source.HasComponent<Velocity>(sources[i]));
         if (const Velocity* velocity = source.GetComponent<Velocity>(sources[i]))
+        {
             EXPECT_EQ(target.GetComponent<Velocity>(targets[i])->x, velocity->x);
+        }
 
         if (const CloneParentLink* link = source.GetComponent<CloneParentLink>(sources[i]))
         {
@@ -141,7 +143,9 @@ void ExpectSameBytes(const World& expectedWorld, EntityHandle expected, const Wo
     const T* got = actualWorld.GetComponent<T>(actual);
     ASSERT_EQ(got != nullptr, want != nullptr) << "entry " << entry;
     if (want)
+    {
         EXPECT_EQ(std::memcmp(got, want, sizeof(T)), 0) << "entry " << entry;
+    }
 }
 } // namespace
 

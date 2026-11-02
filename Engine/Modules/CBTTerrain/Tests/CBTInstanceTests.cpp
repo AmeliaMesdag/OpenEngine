@@ -666,8 +666,8 @@ TEST_F(CBTInstanceTest, OverflowTelemetrySaturatesUnderConcurrentRollbacks)
     }
 }
 
-// A restart refines the fresh roots to one uniform depth before the first draw: every leaf at that
-// depth, the tree conforming, the sum tree counting exactly those leaves.
+// A restart refines the fresh roots to one uniform depth, the seed RefineToView then starts from: every
+// leaf at that depth, the tree conforming, the sum tree counting exactly those leaves.
 TEST_F(CBTInstanceTest, RefineUniformReachesOneDepthEverywhere)
 {
     CBTInstance instance;
@@ -738,16 +738,15 @@ TEST_F(CBTInstanceTest, ReseedIgnoresPoisonedDeadPayloadAcrossDomains)
         {
             for (uint32_t corner = 0; corner < 3u; ++corner)
             {
-                float xyz[3];
-                std::memcpy(xyz, vertices.data() + slot * kVertexWordsPerSlot + corner * 4u,
-                            sizeof(xyz));
-                for (float coordinate : xyz)
+                double xyz[3];
+                ReadCornerWorld(vertices, slot, corner, xyz);
+                for (double coordinate : xyz)
                     EXPECT_TRUE(std::isfinite(coordinate));
                 if (domain == kDomainSpherical)
                     EXPECT_NEAR(std::sqrt(xyz[0]*xyz[0] + xyz[1]*xyz[1] + xyz[2]*xyz[2]),
-                                50.0f, 0.01f);
+                                50.0, 0.01);
                 else
-                    EXPECT_EQ(xyz[1], 0.0f);
+                    EXPECT_EQ(xyz[1], 0.0);
             }
         }
         classify.TargetDepth = base;

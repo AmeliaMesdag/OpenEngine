@@ -96,7 +96,7 @@ Rendering::RenderGraph::RGTexture ScreenSpaceShadowPasses::DeclareMaskPass(
     if (!depth.IsValid() || !towardLight || !std::isfinite(thickness) ||
         // The radial projection assumes perspective depth. Orthographic views
         // retain their existing directional shadow source.
-        std::abs(camera.proj[15]) > kPerspectiveEpsilon || camera.proj[0] == 0 || camera.proj[5] == 0)
+        std::abs(camera.proj[3][3]) > kPerspectiveEpsilon || camera.proj[0][0] == 0 || camera.proj[1][1] == 0)
         return {};
     const auto source = frame.Graph().ResourceDesc(depth.Id);
     if (source.SampleCount > 1 || !m_Device)
@@ -108,7 +108,7 @@ Rendering::RenderGraph::RGTexture ScreenSpaceShadowPasses::DeclareMaskPass(
     float clip[4]{};
     for (int row = 0; row < 4; ++row)
         for (int col = 0; col < 3; ++col)
-            clip[row] += camera.viewProj[col * 4 + row] * towardLight[col];
+            clip[row] += camera.viewProj[col][row] * towardLight[col];
     const auto plan = BuildScreenSpaceShadowDispatches(clip, source.Width, source.Height);
     if (!plan.Count ||
         !m_Device->IsTextureFormatSupported(Rendering::TextureFormat::R32_UINT,
@@ -275,12 +275,11 @@ Rendering::RenderGraph::RGTexture ScreenSpaceShadowPasses::DeclareMaskPass(
         auto upload = frame.AllocUpload<MatchParams>();
         if (matched.IsValid() && frame.PhysicalTexture(matched).IsValid() && upload.Valid())
         {
-            Mathematics::Matrix4x4 vp;
-            std::memcpy(vp.Data(), camera.viewProjRel, sizeof(float) * 16);
+            Mathematics::Matrix4x4 vp = camera.viewProjRel;
             const auto inverse = Mathematics::Inverse(vp);
             std::memcpy(upload.Ptr->Inverse, inverse.Data(), sizeof(float) * 16);
-            upload.Ptr->Projection[0] = camera.proj[10];
-            upload.Ptr->Projection[1] = camera.proj[14];
+            upload.Ptr->Projection[0] = camera.proj[2][2];
+            upload.Ptr->Projection[1] = camera.proj[3][2];
             upload.Ptr->Projection[2] = static_cast<float>(filter->Resolution);
             upload.Ptr->Projection[3] = 0;
             frame.AddComputePass(matchedName.c_str(), Rendering::PassPhase::kDefault,

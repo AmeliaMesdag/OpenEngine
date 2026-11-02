@@ -19,7 +19,7 @@
 #include "JobSystem/WorkStealingThreadPool.h"
 #include "Mathematics/HalfFloat.h"
 #include "PageStreaming/GeneratedHeightPageProvider.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageResidency.h"
 #include "PageStreaming/PageStore/PageStoreAccess.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
@@ -29,20 +29,23 @@
 #include "Terrain/Heightfield.h"
 #include "TerrainECS/TerrainModifierComponents.h"
 #include "TerrainECS/TerrainModifierSystem.h"
-#include "TerrainECS/TerrainSurfaceBakeInputs.h"
-#include "TerrainECS/TerrainSurfacePageBaker.h"
-#include "TerrainECS/TerrainSurfacePageDriver.h"
-#include "TerrainECS/TerrainSurfaceStore.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceBakeInputs.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePageBaker.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePageDriver.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceStore.h"
 #include "TerrainECS/HeightPageStoreLoader.h"
-#include "TerrainECS/TerrainColorMapBaker.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMapBaker.h"
 #include "Types/Fnv1a.h"
 #include "SplineECS/SplineService.h"
 #include "TerrainECS/TerrainAtlas.h" // BuildCoarseHeightField (the atlas coarse field)
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePages.h"
+#include "TerrainECS/TerrainHeightSource.h"
 #include "TerrainECS/TerrainReprovisionDebounce.h"
 #include "TerrainECS/TerrainService.h"
 #include "TerrainECS/TerrainSplatComposite.h" // CompositeSplatTexel (zero-base rationale)
 #include "TerrainECS/TileStreamingManager.h"
+#include "PageResidency/UploadedPages.h"
 #include "TerrainRowBands.h" // TerrainECS/Source: RunRowBands, kBakeBandRows
 
 #include <algorithm>
@@ -1264,6 +1267,36 @@ TEST(TerrainRegionBake, AFullWeightRowReachesItsChannelCompletelyFromTheUnbakedB
     EXPECT_NEAR(static_cast<int>(pixel[kLayer]), 127, 1);
     EXPECT_NEAR(static_cast<int>(pixel[1]), 127, 1);
     EXPECT_EQ(pixel[0], 0);
+}
+
+// The surface reads an unwritten texel as the first material. A Replace paint on it must
+// blend with that material at the paint's weight, as it does on a texel that holds it.
+TEST(TerrainRegionBake, ReplaceOnAnUnwrittenTexelBlendsWithTheFirstMaterial)
+{
+    uint8 pixel[4] = {0, 0, 0, 0};
+    CompositeSplatTexel(pixel, 2u, 0.5f, /*replace*/ true);
+    EXPECT_EQ(pixel[0], 127) << "half-weight Dirt did not keep half of the first material";
+    EXPECT_EQ(pixel[1], 0);
+    EXPECT_EQ(pixel[2], 127);
+    EXPECT_EQ(pixel[3], 0);
+
+    uint8 fourthMaterial[4] = {0, 0, 0, 255};
+    CompositeSplatTexel(fourthMaterial, 2u, 0.5f, /*replace*/ true);
+    EXPECT_EQ(fourthMaterial[0], 0) << "a texel that holds the fourth material read as unwritten";
+    EXPECT_EQ(fourthMaterial[3], 127);
+
+    for (uint32 layer = 0; layer < 4; ++layer)
+    {
+        for (float32 weight : {0.01f, 0.25f, 0.75f, 1.0f})
+        {
+            uint8 unwritten[4] = {0, 0, 0, 0};
+            uint8 written[4] = {255, 0, 0, 0};
+            CompositeSplatTexel(unwritten, layer, weight, /*replace*/ true);
+            CompositeSplatTexel(written, layer, weight, /*replace*/ true);
+            EXPECT_EQ(0, std::memcmp(unwritten, written, 4))
+                << "layer " << layer << " weight " << weight;
+        }
+    }
 }
 
 TEST(TerrainRegionBake, SplatmapRegionResetClearsExactlyItsRect)
@@ -4342,17 +4375,6 @@ TEST(TerrainRegionBake, TheFrameThreadNeverWaitsForASurfaceJob)
 namespace
 {
 
-// The pages of `wanted` of `level` that stream `stream` of `residency` holds.
-std::size_t LoadedPages(const PageStreaming::PageResidencyManager& residency, uint32 stream,
-                        std::span<const PageStreaming::PageWant> wanted, uint32 level)
-{
-    std::size_t loaded = 0;
-    for (const PageStreaming::PageWant& want : wanted)
-        if (want.Address.Level == level && residency.Bytes(stream, want.Address) != nullptr)
-            ++loaded;
-    return loaded;
-}
-
 // Every page of `levels`, nearest first by page column and row.
 std::vector<PageStreaming::PageWant> EverySurfacePage(std::span<const PageStreaming::PageStoreLevel> levels)
 {
@@ -4365,14 +4387,17 @@ std::vector<PageStreaming::PageWant> EverySurfacePage(std::span<const PageStream
     return wanted;
 }
 
-// Updates `residency` until stream `stream` holds `count` pages of `level` of `wanted`, at most 30 s.
-void UpdateUntilLoaded(PageStreaming::PageResidencyManager& residency, uint64& frame, uint32 stream,
-                       std::span<const PageStreaming::PageWant> wanted, uint32 level, std::size_t count)
+// Updates `residency` until stream `stream` has uploaded `count` pages of `level` of `wanted`, taking
+// each frame's uploads into `uploaded`, at most 30 s.
+void UpdateUntilUploaded(PageStreaming::PageResidencyManager& residency, uint64& frame,
+                         PageStreaming::Test::UploadedPages& uploaded, uint32 stream,
+                         std::span<const PageStreaming::PageWant> wanted, uint32 level, std::size_t count)
 {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (LoadedPages(residency, stream, wanted, level) < count && std::chrono::steady_clock::now() < deadline)
+    while (uploaded.Count(stream, wanted, level) < count && std::chrono::steady_clock::now() < deadline)
     {
         residency.Update(++frame, 1.0f / 60.0f, false);
+        uploaded.Take(residency);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
@@ -4431,17 +4456,18 @@ TEST(TerrainRegionBake, ASurfacePageBakedMidRunIsReadByItsStreamBeforeTheRunEnds
     budget.CpuBytes = 1ull << 30;
     PageStreaming::PageResidencyManager residency(&readers, nullptr, budget);
     residency.ConfigureField(0, 2u * static_cast<uint32>(wanted.size()), 2, 0.0f);
-    residency.Configure(0, 0, PageStreaming::PageSource{nullptr, nullptr, access});
-    residency.Configure(1, 0, PageStreaming::PageSource{nullptr, nullptr, access});
+    residency.Configure(0, 0, PageStreaming::PageSource{nullptr, nullptr, {access}});
+    residency.Configure(1, 0, PageStreaming::PageSource{nullptr, nullptr, {access}});
     residency.Request(0, wanted);
     residency.Request(1, {});
     uint64 frame = 0;
+    PageStreaming::Test::UploadedPages uploaded(0);
     const uint32 top = static_cast<uint32>(levels.size()) - 1u;
     const std::size_t topPages = static_cast<std::size_t>(levels[top].PagesX) * levels[top].PagesZ;
-    UpdateUntilLoaded(residency, frame, 0, wanted, top, topPages);
-    ASSERT_EQ(LoadedPages(residency, 0, wanted, top), topPages)
+    UpdateUntilUploaded(residency, frame, uploaded, 0, wanted, top, topPages);
+    ASSERT_EQ(uploaded.Count(0, wanted, top), topPages)
         << "the published pinned levels did not load";
-    ASSERT_EQ(LoadedPages(residency, 0, wanted, 0u), 0u) << "a level-0 page loaded before the run";
+    ASSERT_EQ(uploaded.Count(0, wanted, 0u), 0u) << "a level-0 page loaded before the run";
 
     terrain.World.SetJobSystem(&pool);
     terrain.System.Update(terrain.World, 1.0f / 60.0f);
@@ -4449,8 +4475,8 @@ TEST(TerrainRegionBake, ASurfacePageBakedMidRunIsReadByItsStreamBeforeTheRunEnds
         // The run's first job is queued before the holds, so it has ended when the constructor
         // returns; the holds keep the run from going on.
         BusyPool busy(pool, kWorkers);
-        UpdateUntilLoaded(residency, frame, 0, wanted, 0u, TerrainSurfacePageDriver::kLevel0PagesAJob);
-        EXPECT_EQ(LoadedPages(residency, 0, wanted, 0u), TerrainSurfacePageDriver::kLevel0PagesAJob)
+        UpdateUntilUploaded(residency, frame, uploaded, 0, wanted, 0u, TerrainSurfacePageDriver::kLevel0PagesAJob);
+        EXPECT_EQ(uploaded.Count(0, wanted, 0u), TerrainSurfacePageDriver::kLevel0PagesAJob)
             << "the first job's pages did not load while the run was open";
         EXPECT_GT(terrain.System.SurfacePages().PendingPages(handle), 0u) << "the run ended";
         EXPECT_FALSE(std::filesystem::exists(splat)) << "the run published the store";
@@ -4459,18 +4485,18 @@ TEST(TerrainRegionBake, ASurfacePageBakedMidRunIsReadByItsStreamBeforeTheRunEnds
     ASSERT_TRUE(std::filesystem::exists(splat));
     EXPECT_EQ(terrain.System.SurfacePages().SurfaceStore(handle, PageStreaming::PageFieldKind::Splat), access)
         << "the run gave the plane another store access";
-    UpdateUntilLoaded(residency, frame, 0, wanted, 0u, level0);
-    ASSERT_EQ(LoadedPages(residency, 0, wanted, 0u), level0) << "a page baked in the run did not load";
+    UpdateUntilUploaded(residency, frame, uploaded, 0, wanted, 0u, level0);
+    ASSERT_EQ(uploaded.Count(0, wanted, 0u), level0) << "a page baked in the run did not load";
     for (const PageStreaming::PageWant& want : wanted)
         if (want.Address.Level == 0u)
-            EXPECT_EQ(*residency.Bytes(0, want.Address), PublishedPayload(splat, want.Address))
+            EXPECT_EQ(*uploaded.Find(0, want.Address), PublishedPayload(splat, want.Address))
                 << "level-0 page " << want.Address.X << "," << want.Address.Z;
 
     residency.Request(1, wanted);
-    UpdateUntilLoaded(residency, frame, 1, wanted, 0u, level0);
+    UpdateUntilUploaded(residency, frame, uploaded, 1, wanted, 0u, level0);
     for (const PageStreaming::PageWant& want : wanted)
     {
-        const std::vector<uint8>* bytes = residency.Bytes(1, want.Address);
+        const std::vector<uint8>* bytes = uploaded.Find(1, want.Address);
         ASSERT_NE(bytes, nullptr);
         EXPECT_EQ(*bytes, PublishedPayload(splat, want.Address))
             << "level " << int(want.Address.Level) << " page " << want.Address.X << "," << want.Address.Z;
@@ -4505,9 +4531,10 @@ TEST(TerrainRegionBake, ASurfaceStoreAccessOutlivesItsDriverAndReadsTheRunItsLas
     budget.CpuBytes = 1ull << 30;
     PageStreaming::PageResidencyManager residency(&readers, nullptr, budget);
     residency.ConfigureField(0, static_cast<uint32>(wanted.size()), 2, 0.0f);
-    residency.Configure(0, 0, PageStreaming::PageSource{nullptr, nullptr, access});
+    residency.Configure(0, 0, PageStreaming::PageSource{nullptr, nullptr, {access}});
     residency.Request(0, wanted);
     uint64 frame = 0;
+    PageStreaming::Test::UploadedPages uploaded(0);
 
     terrain->World.SetJobSystem(&pool);
     terrain->System.Update(terrain->World, 1.0f / 60.0f);
@@ -4519,8 +4546,10 @@ TEST(TerrainRegionBake, ASurfaceStoreAccessOutlivesItsDriverAndReadsTheRunItsLas
         terrain->System.Update(terrain->World, 1.0f / 60.0f); // takes the first job, queues the second
         ASSERT_GT(terrain->System.SurfacePages().PendingPages(handle), 0u);
         residency.Update(++frame, 1.0f / 60.0f, false); // reads start
+        uploaded.Take(residency);
         terrain.reset();
         residency.Update(++frame, 1.0f / 60.0f, false);
+        uploaded.Take(residency);
     }
     {
         BusyPool flush(pool, kWorkers); // the second job has run and let its stores go
@@ -4530,11 +4559,11 @@ TEST(TerrainRegionBake, ASurfaceStoreAccessOutlivesItsDriverAndReadsTheRunItsLas
     while (!std::filesystem::exists(splat) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     ASSERT_TRUE(std::filesystem::exists(splat)) << "the job of the driver that went away did not publish the store";
-    UpdateUntilLoaded(residency, frame, 0, wanted, 0u, 2u * TerrainSurfacePageDriver::kLevel0PagesAJob);
-    EXPECT_EQ(LoadedPages(residency, 0, wanted, 0u), 2u * TerrainSurfacePageDriver::kLevel0PagesAJob)
+    UpdateUntilUploaded(residency, frame, uploaded, 0, wanted, 0u, 2u * TerrainSurfacePageDriver::kLevel0PagesAJob);
+    EXPECT_EQ(uploaded.Count(0, wanted, 0u), 2u * TerrainSurfacePageDriver::kLevel0PagesAJob)
         << "the stream did not read the pages of the run's two jobs";
     for (const PageStreaming::PageWant& want : wanted)
-        if (const std::vector<uint8>* bytes = want.Address.Level == 0u ? residency.Bytes(0, want.Address) : nullptr)
+        if (const std::vector<uint8>* bytes = want.Address.Level == 0u ? uploaded.Find(0, want.Address) : nullptr)
             EXPECT_EQ(*bytes, PublishedPayload(splat, want.Address))
                 << "level-0 page " << want.Address.X << "," << want.Address.Z;
     std::size_t temporaries = 0;
@@ -4584,6 +4613,96 @@ TEST(TerrainRegionBake, ASurfacePlaneThatLosesItsStoreClosesItsAccessBeforeTheFi
     EXPECT_TRUE(outcome.Absent) << "the access of the deleted Color store read a page";
     EXPECT_EQ(outcome.Bytes, nullptr);
     EXPECT_TRUE(outcome.Error.empty()) << outcome.Error;
+    readers.Shutdown();
+}
+
+// The driver publishes a terrain's plane store accesses, baked once it took the job that opens them;
+// without stores or before that bake the terrain is not surface-paged. Its surface stream uploads one
+// page of every plane into one slot, each plane's bytes in PageFieldKind order.
+TEST(TerrainRegionBake, ASurfaceStreamUploadsEveryPlaneOfAPageIntoOneSlotOnceItsPinnedLevelsAreBaked)
+{
+    JobSystem::WorkStealingThreadPool readers(1);
+    SplatStoreTerrain terrain(3u, 3u);
+    ASSERT_NE(terrain.Tiled, nullptr);
+    TiledTerrainData& tiled = *terrain.Tiled;
+    TerrainHeightSourceInputs height;
+    height.ModifiersPending = false;
+    height.GeneratedBase = true;
+    height.PagesOnLattice = true;
+    height.GpuReadsPages = true;
+    ASSERT_TRUE(TerrainHeightIsPaged(height));
+    EXPECT_FALSE(TerrainSurfaceIsPaged(height, tiled.SurfacePages)) << "a terrain without stores is surface-paged";
+
+    ScopedStoreFolder folder("surface-stream");
+    GiveSurfaceStores(terrain, folder.Path, GUID::Generate());
+    const TerrainSurfacePageSource& source = tiled.SurfacePages;
+    terrain.System.Update(terrain.World, 1.0f / 60.0f);
+    ASSERT_EQ(source.Planes.size(), 2u);
+    ASSERT_TRUE(source.PinnedLevelsBaked) << "the open job was taken, its pinned levels are not published";
+    ASSERT_TRUE(TerrainSurfaceIsPaged(height, source));
+    TerrainSurfacePageSource opening = source;
+    opening.PinnedLevelsBaked = false;
+    EXPECT_FALSE(TerrainSurfaceIsPaged(height, opening)) << "surface-paged before its pinned levels are baked";
+    EXPECT_EQ(source.PlaneMask, 0b11u) << "the splat and normal planes";
+
+    TerrainPages pages(&readers, nullptr, kDesktopHeightPages, kDesktopSurfacePages);
+    uint64 frame = 0;
+    pages.Update(frame++, 1.0f / 60.0f, false, 2u); // configures the fields
+    const std::span<const PageStreaming::PageStoreLevel> levels = source.Planes.front()->Levels();
+    SurfacePagedRequest request;
+    request.Terrain = 1u;
+    request.Source = &source;
+    request.Shape.Level0TexelX = 1.0f;
+    request.Shape.Level0TexelZ = 1.0f;
+    request.Shape.SamplesX = levels.front().SamplesX;
+    request.Shape.SamplesZ = levels.front().SamplesZ;
+    request.Shape.MaxHeight = 1.0f;
+    // Far from the terrain: only the pinned levels are wanted.
+    const PageRequestCamera camera{Mathematics::Vector3{0.0f, 1.0e6f, 0.0f}, {}, 0.0f, false};
+    const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, kSurfacePageTargetPixels);
+    const uint32 top = static_cast<uint32>(levels.size()) - 1u;
+    const std::size_t topPages = static_cast<std::size_t>(levels[top].PagesX) * levels[top].PagesZ;
+    std::size_t topUploads = 0;
+    std::size_t uploads = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    // A child page's load can land in a later drain than the top page's, so run until both uploaded.
+    while ((topUploads < topPages || uploads == topUploads) && std::chrono::steady_clock::now() < deadline)
+    {
+        pages.Surface().Request(request, std::span(&camera, 1), view);
+        pages.Update(frame++, 1.0f / 60.0f, false, 2u);
+        const PageStreaming::PageCache& cache = pages.Residency().FieldCache(kSurfacePageField);
+        for (const SurfacePageUpload& upload : pages.Surface().Uploads())
+        {
+            const auto slot = std::ranges::find(cache.Uploads(), upload.Slot, &PageStreaming::PageUploadRequest::Slot);
+            ASSERT_NE(slot, cache.Uploads().end()) << "an upload names no slot the cache assigned";
+            const PageStreaming::PageAddress address = slot->Page.Address;
+            std::vector<uint8> expected;
+            for (const std::shared_ptr<const PageStreaming::PageStoreAccess>& plane : source.Planes)
+            {
+                const PageStreaming::PageFetchOutcome outcome = plane->Fetch(address);
+                ASSERT_NE(outcome.Bytes, nullptr) << "level " << int(address.Level) << " is not in a plane";
+                expected.insert(expected.end(), outcome.Bytes->begin(), outcome.Bytes->end());
+            }
+            EXPECT_EQ(upload.PlaneMask, source.PlaneMask);
+            EXPECT_EQ(upload.Bytes, expected) << "level " << int(address.Level) << " page " << address.X << ","
+                                              << address.Z;
+            topUploads += address.Level == top ? 1u : 0u;
+            ++uploads;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(topUploads, topPages) << "the top level did not upload";
+    EXPECT_GT(uploads, topUploads) << "only the top level uploaded";
+
+    // get_terrain_stats lists the surface stream with its wanted and resident pages per level.
+    std::vector<PageStreamCounts> streams;
+    pages.StreamCounts(streams);
+    const auto surface = std::ranges::find(streams, true, &PageStreamCounts::Surface);
+    ASSERT_NE(surface, streams.end()) << "the surface stream is not counted";
+    EXPECT_EQ(surface->Label, "terrain 1");
+    ASSERT_EQ(surface->Levels.size(), levels.size());
+    EXPECT_EQ(surface->Levels[top].Wanted, topPages);
+    EXPECT_EQ(surface->Levels[top].Resident, topPages);
     readers.Shutdown();
 }
 
@@ -4781,6 +4900,104 @@ TEST(TerrainRegionBake, AnEditInsideTheHeightPageOverlayRebakesItInPlace)
     EXPECT_LT(changed.Height(), reach.Height());
     EXPECT_NE(tiled->PageOverlay->Delta(0, changed.MinX + changed.Width() / 2u, changed.MinZ + changed.Height() / 2u),
               0.0f);
+}
+
+namespace
+{
+// Two Average flattens in the shared pool, one on the tile seam: the flatten-pool composition the
+// overlay must reproduce.
+void CreatePooledFlattens(ECS::World& world)
+{
+    for (const ECS::EntityHandle e : {CreateFlattenModifier(world, kTiledTileWorld, 500.0f, 20.0f, 150.0f),
+                                      CreateFlattenModifier(world, kTiledTileWorld + 90.0f, 520.0f, 45.0f, 150.0f)})
+        world.GetComponentForWrite<Components::TerrainFlattenEffect>(e)->Blend =
+            Components::TerrainModifierBlend::Average;
+}
+
+// Every level-0 delta of the overlay, bit for bit, against the composition of the stack minus the
+// composition of the base over the overlay's rect.
+void ExpectOverlayIsTheComposedDelta(const TiledTerrainData& tiled, const TerrainModifierSystem& system)
+{
+    ASSERT_NE(tiled.PageOverlay, nullptr);
+    const PageStreaming::PageSampleRect rect = tiled.PageOverlay->Level0Rect();
+    std::vector<float32> composed;
+    std::vector<float32> base;
+    const TerrainModifierSystem baseOnly;
+    ASSERT_TRUE(system.ComposeTiledGroundBlock(tiled, kTiledHeightScale, 0.0f, rect.MinX, rect.MinZ, rect.Width(),
+                                               rect.Height(), composed));
+    ASSERT_TRUE(baseOnly.ComposeTiledGroundBlock(tiled, kTiledHeightScale, 0.0f, rect.MinX, rect.MinZ, rect.Width(),
+                                                 rect.Height(), base));
+    uint32 mismatches = 0;
+    uint32 modified = 0;
+    for (uint32 z = 0; z < rect.Height(); ++z)
+        for (uint32 x = 0; x < rect.Width(); ++x)
+        {
+            const std::size_t sample = static_cast<std::size_t>(z) * rect.Width() + x;
+            const float32 expected = composed[sample] - base[sample];
+            const float32 actual = tiled.PageOverlay->Delta(0, rect.MinX + x, rect.MinZ + z);
+            mismatches += std::memcmp(&expected, &actual, sizeof(float32)) != 0 ? 1u : 0u;
+            modified += expected != 0.0f ? 1u : 0u;
+        }
+    EXPECT_EQ(mismatches, 0u) << "overlay deltas that differ from the composition";
+    EXPECT_GT(modified, 0u) << "the pooled flattens moved no sample";
+}
+} // namespace
+
+// On a terrain the GPU bake cannot write, the overlay reads the composed height from the baked tiles:
+// the modifier stack runs once per edit (in the tile bake), and the overlay still equals the
+// composition bit for bit, on the first bake and on an edit.
+TEST(TerrainRegionBake, TheHeightPageOverlayReadsTheBakedTilesOfACpuTerrain)
+{
+    ScopedTerrainService scoped;
+    auto& svc = TerrainService::Get();
+    const auto handle = CreateResidentTiledTerrain(svc, 2);
+    auto* tiled = svc.GetTiledTerrainData(handle);
+    ASSERT_NE(tiled, nullptr);
+
+    ECS::World world;
+    RegisterModifierLifecycleEvents(world);
+    CreateTiledTerrainEntity(world, handle, 2);
+    CreatePooledFlattens(world);
+    tiled->PageOverlayByteCap = kDesktopHeightPages.OverlayByteCap;
+    TerrainModifierSystem system;
+    system.Update(world, 1.0f / 60.0f);
+    ASSERT_EQ(tiled->HeightBakeReport.Path, TerrainHeightBakePath::Cpu);
+    ASSERT_NE(tiled->HeightBakeReport.TerrainRefusal, GpuHeightBakeRefusalReason::None);
+    EXPECT_EQ(tiled->HeightBakeReport.PageOverlayComposedSamples, 0u) << "the overlay composed the stack again";
+    ExpectOverlayIsTheComposedDelta(*tiled, system);
+
+    const auto dab = CreateFlattenModifier(world, kTiledTileWorld - 40.0f, 480.0f, 35.0f, 20.0f);
+    world.GetComponentForWrite<Components::TerrainFlattenEffect>(dab)->Blend = Components::TerrainModifierBlend::Average;
+    system.Update(world, 1.0f / 60.0f);
+    EXPECT_EQ(tiled->HeightBakeReport.PageOverlayComposedSamples, 0u) << "the edit composed the stack again";
+    ExpectOverlayIsTheComposedDelta(*tiled, system);
+}
+
+// A terrain the GPU bake can write keeps composing the overlay: its CPU tiles wait for the settle
+// readback after a GPU bake, so they are not the terrain's heights.
+TEST(TerrainRegionBake, TheHeightPageOverlayComposesOnATerrainTheGpuBakeWrites)
+{
+    ScopedTerrainService scoped;
+    SetGpuHeightBakeEnabledForTests(1);
+    auto& svc = TerrainService::Get();
+    const auto handle = CreateResidentTiledTerrain(svc, 2);
+    auto* tiled = svc.GetTiledTerrainData(handle);
+    ASSERT_NE(tiled, nullptr);
+    tiled->AtlasGpuBakeEligible = true;
+
+    ECS::World world;
+    RegisterModifierLifecycleEvents(world);
+    CreateTiledTerrainEntity(world, handle, 2);
+    CreatePooledFlattens(world);
+    tiled->PageOverlayByteCap = kDesktopHeightPages.OverlayByteCap;
+    TerrainModifierSystem system;
+    system.Update(world, 1.0f / 60.0f);
+    SetGpuHeightBakeEnabledForTests(-1);
+    EXPECT_EQ(tiled->HeightBakeReport.Path, TerrainHeightBakePath::Cpu);
+    EXPECT_EQ(tiled->HeightBakeReport.TerrainRefusal, GpuHeightBakeRefusalReason::None);
+    EXPECT_EQ(tiled->HeightBakeReport.ModifierRefusal.Reason, GpuHeightBakeRefusalReason::PooledBlend);
+    EXPECT_GT(tiled->HeightBakeReport.PageOverlayComposedSamples, 0u);
+    ExpectOverlayIsTheComposedDelta(*tiled, system);
 }
 
 namespace
@@ -5036,7 +5253,7 @@ TEST(TerrainRegionBake, AHeightPageOverlayRebuiltFromScratchReportsItsWholeArea)
 
 // Two terrains' data never publish the same overlay version: a scene load rebuilds a terrain's data
 // while its pages stay resident, and the pages tell the rebuilt data's overlay from the one they
-// hold by its version (TerrainHeightPages rewrites every page either overlay reaches).
+// hold by its version (TerrainPages rewrites every page either overlay reaches).
 TEST(TerrainRegionBake, NoTwoTerrainsDataPublishTheSameHeightPageOverlayVersion)
 {
     ScopedTerrainService scoped;

@@ -2,6 +2,7 @@
 
 #include "UI/Controls/Label.h"
 #include "UI/InfoCard.h"
+#include "UI/Registration/ElementRegistration.h"
 #include "UI/UIEvents.h"
 
 #include <memory>
@@ -12,14 +13,15 @@ namespace
 {
 
 constexpr const char* kStyleAssetPath = "UI/controls/CollapsibleInfoCard/CollapsibleInfoCard.css";
+constexpr const char* kChevronBlankClass = "blank";
 
 // A laid-out text height above this means the copy wrapped, so the card is
 // worth folding. Comfortably above one line of the card's 13px text and below
 // two.
 constexpr float kSingleRowHeightLimit = 24.0f;
 
-// The collapsed line: the text's first sentence. The line is clipped where the
-// right-aligned action begins, so the copy uses whatever width the card has
+// The collapsed line: the text's first sentence. The line is cut with an ellipsis
+// where the right-aligned action begins, so the copy uses whatever width the card has
 // rather than a fixed character budget.
 std::string MakePreview(const std::string& text)
 {
@@ -88,10 +90,12 @@ void CollapsibleInfoCard::ApplyState()
     else
         AddClass("collapsed");
 
+    // A card that fits one row keeps the chevron's box with no glyph, so every card's copy
+    // starts at one x.
     if (m_Foldable)
-        m_Chevron->RemoveClass("hidden");
+        m_Chevron->RemoveClass(kChevronBlankClass);
     else
-        m_Chevron->AddClass("hidden");
+        m_Chevron->AddClass(kChevronBlankClass);
 
     if (m_Expanded)
         m_Chevron->RemoveClass("collapsed");
@@ -115,12 +119,8 @@ void CollapsibleInfoCard::SetText(const std::string& text)
     m_FullText = text;
     m_PreviewText = MakePreview(text);
 
-    // Only an expanded card can be measured, so that is the only state in which
-    // new copy re-opens the fold decision. The chevron stays until that
-    // measurement says otherwise: a card whose copy changes every frame would
-    // otherwise lose the chevron's width, and its wrapping, on each change. A
-    // collapsed card keeps the chevron it has rather than losing it to a
-    // measurement taken through the clamp.
+    // Only an expanded card can be measured, so only then does new copy open the
+    // fold decision again. The card keeps its chevron glyph until that measurement.
     if (m_Expanded)
         m_FoldabilityDecided = false;
     ApplyState();
@@ -158,5 +158,14 @@ void CollapsibleInfoCard::OnEvent(UIEvent& e)
         e.Stop();
     }
 }
+
+namespace
+{
+// A layout file declares a card as <CollapsibleInfoCard text="..." />.
+[[maybe_unused]] const auto s_RegisterCollapsibleInfoCard =
+    UIRegistration::RegisterWithFactory<CollapsibleInfoCard>(
+        "CollapsibleInfoCard", []() { return std::make_unique<CollapsibleInfoCard>(std::string()); })
+        .Attr("text", &CollapsibleInfoCard::SetText);
+} // namespace
 
 } // namespace GameEngine::EditorUI

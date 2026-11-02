@@ -9,6 +9,10 @@
   --ui_color_bg_scrollbar_thumb: #383838;
 
   --ui_color_bg_hover: #2A2A2A;
+  /* The plate under a hovered or focused title bar control: a menu heading or a caption button. */
+  --ui_color_caption_hover: rgba(255, 255, 255, 0.12);
+  /* The Windows caption color for a hovered close button, the one platform color in the editor. */
+  --ui_color_caption_close_hover: #C42B1C;
   /* The fill of an inspector value field, one line or several. */
   --ui_color_bg_field: #202020;
   --ui_color_bg_hover_alt: #242424;
@@ -113,9 +117,11 @@
   /* Prefab instances in the Hierarchy: the glyph and the names. Teal, not the accent blue,
      so an instance never reads as focused or selected. Icons/PrefabAsset.svg has the same color. */
   --ui_color_prefab: #2EC4B6;
-  /* The fill of an override pill: the prefab color at 16 percent; muted on a removed component's header. */
+  /* The fill of an override pill: the prefab color at 16 percent. */
   --ui_color_prefab_background: rgba(46, 196, 182, 0.16);
-  --ui_color_prefab_background_muted: rgba(255, 255, 255, 0.08);
+  /* The fill of an override pill on hover and while pressed. */
+  --ui_color_prefab_background_hover: rgba(46, 196, 182, 0.30);
+  --ui_color_prefab_background_pressed: rgba(46, 196, 182, 0.08);
   --ui_color_accent_blue: #006FFF;
   --ui_color_accent_blue_hover: #4C9AFF;
   --ui_color_accent_blue_pressed: #0053BF;
@@ -170,6 +176,14 @@
      inspector notice, controls/InspectorNotice/InspectorNotice.css). */
   --ui_color_warning_text: #e0b050;
   --ui_color_warning_background: rgba(215, 161, 59, 0.12);
+  /* The fill of a warning badge (.inspector-section-header-badge), and of one in a button on hover
+     and while pressed. */
+  --ui_color_warning_badge: #D7A13B;
+  --ui_color_warning_badge_hover: #E6B65C;
+  --ui_color_warning_badge_pressed: #B5852C;
+  /* A warning drawn as a line over the scene (a junction marker whose heights differ): the badge's
+     amber, darker, so it holds its edge on a light surface. */
+  --ui_color_warning_line: #B5852C;
   /* Text, or a field's edge, that says something did not happen (an action or a typed value
      refused, or a failure): the badge's red lightened to read as 12 px text on a panel (5.4:1
      on #272727). */

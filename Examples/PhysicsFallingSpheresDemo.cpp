@@ -532,10 +532,7 @@ int main()
         Rendering::ViewClearConfig clear{};
         clear.clearColor = true;
         clear.clearDepth = true;
-        clear.clearColorValue[0] = 0.08f;
-        clear.clearColorValue[1] = 0.08f;
-        clear.clearColorValue[2] = 0.10f;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue = ColorLinear(0.08f, 0.08f, 0.10f, 1.0f);
         clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
         rs->Views().SetViewTargets(viewId, 0, 0, 0, clear);
 
@@ -554,9 +551,9 @@ int main()
         const Mathematics::Matrix4x4 viewProj = proj * view;
 
         Rendering::CameraData cd{};
-        std::memcpy(cd.view, view.Data(), sizeof(cd.view));
-        std::memcpy(cd.proj, proj.Data(), sizeof(cd.proj));
-        std::memcpy(cd.viewProj, viewProj.Data(), sizeof(cd.viewProj));
+        cd.view = view;
+        cd.proj = proj;
+        cd.viewProj = viewProj;
         rs->Views().SetCameraData(camId, cd);
         rs->Views().SetViewCamera(viewId, camId);
 

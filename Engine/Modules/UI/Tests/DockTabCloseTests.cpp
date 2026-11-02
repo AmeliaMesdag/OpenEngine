@@ -253,7 +253,7 @@ TEST_F(DockTabCloseTests, CancelledMiddlePressStopsPanningAnOverflowingStrip)
 {
     UIElement* bar = m_TabB->GetParent();
     UILayoutAccess::SetLastLayoutRect(*bar, 0.0f, 0.0f, 120.0f, kTabHeight);
-    ASSERT_FALSE(m_TabA->Overrides().Get(Style::PositionLeft).has_value());
+    ASSERT_FALSE(m_TabA->Style().Get(Style::PositionLeft).has_value());
 
     UIEvent down{};
     down.Id = kEventMouseDown;
@@ -277,5 +277,5 @@ TEST_F(DockTabCloseTests, CancelledMiddlePressStopsPanningAnOverflowingStrip)
     move.Y = 12.0f;
     bar->DispatchEvent(move);
 
-    EXPECT_FALSE(m_TabA->Overrides().Get(Style::PositionLeft).has_value());
+    EXPECT_FALSE(m_TabA->Style().Get(Style::PositionLeft).has_value());
 }

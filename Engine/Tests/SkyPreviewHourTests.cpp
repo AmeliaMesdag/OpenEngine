@@ -115,7 +115,7 @@ TEST(SkyDuskHalf, ASunSetByHandTakesTheHalfOfItsDirection)
     {
         PreviewRig driven(hours);
         driven.Run();
-        const float* direction =
+        const Mathematics::Vector3& direction =
             driven.Rig.Services.GetFeature<Engine::Renderer::SkyRenderFeature>()->GetSettings().primarySunDir;
 
         PreviewRig byHand(12.0f);

@@ -38,6 +38,7 @@ namespace GameEngine::PathfindingECS
 struct NavigationBounds;
 struct NavigationStaticGeometry;
 struct NavigationTerrainSource;
+class NavigationGridBake;
 class NavigationMeshBake;
 
 // Bakes every NavigationSurface: when it first appears (or after its map was released) and on
@@ -48,9 +49,10 @@ class NavigationMeshBake;
 // tiles; it takes at most kTileRebakesPerUpdate of them per update, rebuilds those whose content
 // hash changed, and asks the agents whose path crosses a replaced tile to replan. A mesh bakes as
 // Detour tiles built on the job system, at most kTileSnapshotsPerUpdate tiles started per update;
-// a grid bakes in one update. Both read the terrain's heightfield, the collider shapes of static
-// bodies and mesh renderers, never a physics world, so a surface bakes in edit mode, in Play and in
-// a game alike. Also stamps
+// a grid bakes as one Background job (NavigationGridBake) and its map serves the previous grid
+// until the update that publishes the new one. Both read the
+// terrain's heightfield, the collider shapes of static bodies and mesh renderers, never a physics
+// world, so a surface bakes in edit mode, in Play and in a game alike. Also stamps
 // NavigationObstacle footprints into grid surfaces every update, and publishes each surface's bake
 // state into the component for the inspector.
 class NavigationSurfaceSystem : public ECS::ISystem
@@ -79,7 +81,8 @@ private:
                        const Components::WorldTransform* transform, bool placed,
                        JobSystem::WorkStealingThreadPool* pool);
     void StartBake(ECS::World& world, ECS::EntityHandle entity, Components::NavigationSurface& surface,
-                   const Components::WorldTransform* transform, SurfaceRecord& record);
+                   const Components::WorldTransform* transform, JobSystem::WorkStealingThreadPool* pool,
+                   SurfaceRecord& record);
     // The first model the bake reads that is still loading, or a null GUID. Requests the load of
     // every model that is not resident; a model whose load ended without it is left out of the
     // bake, with one warning.
@@ -95,9 +98,16 @@ private:
                        const NavigationTerrainSource& terrain,
                        std::shared_ptr<const NavigationStaticGeometry> geometry, const NavigationBounds& bounds,
                        std::shared_ptr<const Pathfinding::NavSurfaceData> bakedData, SurfaceRecord& record);
-    void BakeGrid(ECS::World& world, ECS::EntityHandle entity, Components::NavigationSurface& surface,
-                  const NavigationTerrainSource& terrain, const NavigationStaticGeometry& geometry,
-                  const NavigationBounds& bounds, SurfaceRecord& record);
+    // Samples the terrain under the cells and starts the grid bake's job; `geometry` is null when
+    // the job builds it from the sources, which are snapshot only once the terrain is resident.
+    void StartGridBake(ECS::World& world, ECS::EntityHandle entity, Components::NavigationSurface& surface,
+                       const NavigationTerrainSource& terrain,
+                       std::shared_ptr<const NavigationStaticGeometry> geometry, const NavigationBounds& bounds,
+                       JobSystem::WorkStealingThreadPool* pool, SurfaceRecord& record);
+    // Puts the finished grid into the surface's map; nothing while the job runs. A bake that threw
+    // leaves the surface Failed, logged once.
+    void PublishGridBake(ECS::World& world, ECS::EntityHandle entity, Components::NavigationSurface& surface,
+                         SurfaceRecord& record);
     void StepMeshBake(ECS::World& world, ECS::EntityHandle entity, Components::NavigationSurface& surface,
                       JobSystem::WorkStealingThreadPool* pool, SurfaceRecord& record);
     // A baked mesh surface's update: queues the tiles the terrain, the carving obstacles and

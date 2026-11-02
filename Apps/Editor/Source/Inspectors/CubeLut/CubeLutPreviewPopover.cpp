@@ -77,7 +77,7 @@ CubeLutPreviewPopover* CubeLutPreviewPopover::Open(CubeLutPreview& preview)
     panel->AddClass("popover-panel");
     panel->AddClass("cube-lut-preview-popover-panel");
     const float width = std::min(kPanelWidth, std::max(window->GetLayoutWidth() - 2.0f * kEdgePadding, 0.0f));
-    panel->Overrides().Set(Style::Width, StyleLength::Px(width)); // the window's width, computed
+    panel->Style().Set(Style::Width, StyleLength::Px(width)); // the window's width, computed
     UIElement* panelRaw = panel.get();
     popover->m_Panel = panelRaw;
     InspectorUI::AddTextBlock(panelRaw, Caption(preview.GetRequest(), preview.ShowsLut()), "cube-lut-preview-caption");
@@ -116,7 +116,7 @@ void CubeLutPreviewPopover::Place(float anchorLeft, float anchorTop, float ancho
                                            {anchorLeft, anchorTop, 0.0f, anchorBottom - anchorTop}, width,
                                            kPanelHeightEstimate, kEdgePadding, kAnchorGap, std::nullopt)
             .Position;
-    m_Panel->Overrides()
+    m_Panel->Style()
         .Set(Style::PositionLeft, StyleLength::Px(placed.X))
         .Set(Style::PositionTop, StyleLength::Px(placed.Y));
 }
@@ -135,7 +135,7 @@ void CubeLutPreviewPopover::Close()
     if (m_Owner)
         m_Owner->m_Enlarged = nullptr;
     m_Owner = nullptr;
-    Overrides().Set(Style::Display, DisplayMode::None);
+    Style().Set(Style::Display, DisplayMode::None);
     // Removed at the next safe point, never inside the call: the manager's dismissal and the
     // panel's own click handler both run on this popup.
     if (UIElement* parent = GetParent())

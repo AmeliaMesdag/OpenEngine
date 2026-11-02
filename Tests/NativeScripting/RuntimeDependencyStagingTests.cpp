@@ -456,7 +456,8 @@ TEST(RuntimeDependencyStaging, ReleaseOnlyPortsStageThroughTrailingReleaseBin)
     StagingDirs dirs("ge_rds_release_only");
     FakeVcpkgTree tree(dirs.Root);
     const fs::path sdkRuntime = dirs.Root / "sdk-runtime";
-    for (const char* name : {"Engine.dll", "GameEngine.Native.dll"})
+    // nethost sits beside the engine. A Linux build of this test requires it.
+    for (const char* name : {"Engine.dll", "GameEngine.Native.dll", "nethost.dll"})
         Touch(sdkRuntime / name);
     for (const char* name : {"glfw3.dll", "lexbor.dll", "utf8proc.dll", "tinyexpr.dll", "thorvg-1.dll",
                              "meshoptimizer.dll", "ktx.dll", "mimalloc-debug.dll", "mimalloc-redirect.dll"})
@@ -726,3 +727,51 @@ TEST(RuntimeDependencyStaging, EveryLoadTimeImportOfTheEngineShipsOrIsPartOfWind
     }
 }
 #endif // _WIN32
+
+// The export finds the compiled Player under the target's executable name: Player in the build
+// directory of a single-config generator (Linux, Steam Deck), Player.exe under the configuration (Windows).
+// A Player of another configuration is not found.
+TEST(RuntimeDependencyStaging, TheCompiledPlayerIsFoundUnderTheTargetsExecutableName)
+{
+    StagingDirs dirs("ge_compiled_player_lookup");
+    Touch(dirs.Source / "Player");
+    Touch(dirs.Source / "Debug" / "Player.exe");
+    const fs::path releaseOnly = dirs.Root / "release-only";
+    Touch(releaseOnly / "Release" / "Player");
+    Touch(releaseOnly / "Release" / "Player.exe");
+    const fs::path debugOnly = dirs.Root / "debug-only";
+    Touch(debugOnly / "Debug" / "Player");
+    Touch(debugOnly / "Debug" / "Player.exe");
+
+    EXPECT_EQ(BuildPipeline::FindCompiledPlayer(dirs.Source, "Debug", "Linux"), dirs.Source / "Player");
+    EXPECT_EQ(BuildPipeline::FindCompiledPlayer(dirs.Source, "Debug", "Steam"), dirs.Source / "Player");
+    EXPECT_EQ(BuildPipeline::FindCompiledPlayer(dirs.Source, "Debug", "Windows"), dirs.Source / "Debug" / "Player.exe");
+    EXPECT_TRUE(BuildPipeline::FindCompiledPlayer(dirs.Dest, "Debug", "Linux").empty());
+    EXPECT_TRUE(BuildPipeline::FindCompiledPlayer(releaseOnly, "Debug", "Linux").empty());
+    EXPECT_TRUE(BuildPipeline::FindCompiledPlayer(releaseOnly, "Debug", "Windows").empty());
+    EXPECT_TRUE(BuildPipeline::FindCompiledPlayer(debugOnly, "Release", "Linux").empty());
+    EXPECT_TRUE(BuildPipeline::FindCompiledPlayer(debugOnly, "Release", "Windows").empty());
+}
+
+// The file names beside a Linux x64 editor: versioned sonames, the Linux names of GLFW and FFmpeg, libnethost.so,
+// and libcurl's OpenSSL and DirectXTex's OpenMP runtime, which a minimal distribution install does not have. Each
+// library ships under its own file name, the name the loader looks for.
+TEST(RuntimeDependencyStaging, LinuxVersionedLibrariesShipUnderTheirOwnNames)
+{
+    StagingDirs dirs("ge_runtime_deps_linux_sonames");
+    const std::vector<std::string> linuxLibraries = {
+        "libEngine.so", "libGameEngine.Native.so", "libglfw.so.3", "libfreetyped.so.6", "libharfbuzz.so.0",
+        "liblexbor.so.3", "libpugixml.so.1", "libutf8proc.so.3", "libtinyexpr.so", "libthorvg-1.so.1",
+        "libmeshoptimizer.so", "libktx.so.4", "libzstd.so.1", "libz.so.1", "libsqlite3.so", "libpng16d.so.16",
+        "libbrotlicommon.so.1", "libbrotlidec.so.1", "libbz2d.so.1.0", "libcurl-d.so.4", "libavutil.so.61",
+        "libavcodec.so.63", "libavformat.so.63", "libswscale.so.10", "libvorbisfile.so.3.3.8", "libClipper2.so.2",
+        "libnethost.so", "libssl.so.3", "libcrypto.so.3", "libDirectXTex.so", "libgomp.so.1"};
+    for (const std::string& library : linuxLibraries)
+        Touch(dirs.Source / library);
+
+    ASSERT_TRUE(StageCuratedDependencySet({dirs.Source}, dirs.Dest, EngineRuntimeDependencySet(), dirs.Errors))
+        << (dirs.Errors.empty() ? "" : dirs.Errors.front());
+    for (const char* library : {"libglfw.so.3", "libavutil.so.61", "libbz2d.so.1.0", "libvorbisfile.so.3.3.8",
+                                "libClipper2.so.2", "libEngine.so", "libssl.so.3", "libcrypto.so.3", "libgomp.so.1"})
+        EXPECT_TRUE(fs::exists(dirs.Dest / library)) << library;
+}

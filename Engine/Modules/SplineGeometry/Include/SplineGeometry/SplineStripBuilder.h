@@ -70,9 +70,11 @@ struct SplineStripParams
     // |x| wherever U reads a face turn: a sweep built in a placer's local space
     // and measured in world metres passes the placer's scale.
     float32 LateralMetresPerUnit = 1.0f;
-    // Honoured only for a closed profile. An open strip has no polygon to
-    // triangulate and capping it would emit a degenerate sliver.
-    bool GenerateCaps = true;
+    // Whether the first and the last ring get an end cap. Honoured only for a
+    // closed profile. An open strip has no polygon to triangulate and capping
+    // it would emit a degenerate sliver.
+    bool CapStart = true;
+    bool CapEnd = true;
     // Finite: the side faces (those whose edge normal is more lateral than
     // vertical) and the caps take V as the vertex's height above this datum
     // times TilesPerMetreV, so coursed stone stays level on a slope and meets

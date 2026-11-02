@@ -210,7 +210,17 @@ const uint CBT_WQ_REST_LIVE_COUNT = 16u;
 const uint CBT_REST_LATCH_DEADBAND_DIVISOR = 1024u;
 // The page samples of this update that found no resident page (CBTLayout.h kWQUnresolvedPageSamples).
 const uint CBT_WQ_UNRESOLVED_PAGE_SAMPLES = 17u;
-const uint CBT_WQ_COUNTER_SLOTS = 18u;
+// The rest's keep floor: one past the highest keep step proven not to fit under the keep ceiling, or a phase below 0:
+// CBT_KEEP_FLOOR_ARRIVING after an update that moved, CBT_KEEP_FLOOR_PROBING while the first step down has no
+// measured tree. CBTLayout.h mirrors all three.
+const uint CBT_WQ_OFF_FRUSTUM_KEEP_FLOOR = 18u;
+const int CBT_KEEP_FLOOR_ARRIVING = -1;
+const int CBT_KEEP_FLOOR_PROBING = -2;
+// The leaves the planar criterion wants to merge, counted only at rest. A leaf that does not want to merge at rest never
+// merges in that rest, so live minus this count is a lower bound on the quiet tree (Kernel_Reset's early up proof).
+// CBTLayout.h mirrors it.
+const uint CBT_WQ_MERGE_CANDIDATE_COUNTER = 19u;
+const uint CBT_WQ_COUNTER_SLOTS = 20u;
 
 // Work-queue payload lanes — 3 ALIASED physical lanes over the 6 logical queues (slot-diet r2;
 // mirror of CBTLayout.h WQ*Offset). The six queues' live spans over the per-frame kernel sequence
@@ -275,8 +285,8 @@ const uint CBT_FOCUS_ROOT_ALL = 0xFFFFFFFFu;
 // CBTLayout.h CBTVertexData — S2a): each corner = (position xyz, uv.x); meta =
 // (uv0.y, uv1.y, uv2.y, terrain normalmap bindless index as float); then the
 // Earth-scale (sector, local) tail. deepTag.x selects the corner meaning PER SLOT:
-//   0 (legacy / dark-ship): corner*.xyz = fp32 WORLD position, tail is zero.
-//   1 (GE_CBT_DEEP_DECODE): corner*.xyz = fp32 SECTOR-LOCAL offset; sector<k>
+//   0 (planar; the sphere on the narrow arm): corner*.xyz = fp32 WORLD position, tail is zero.
+//   1 (the sphere on the wide arm): corner*.xyz = fp32 SECTOR-LOCAL offset; sector<k>
 //     packs corner k's ivec3 world sector (1024 m grid) as 3 x 16-bit lanes.
 //     Consumers reconstruct rel = vec3(sector - originSector) * CBT_SECTOR_SIZE +
 //     local — the GE_ClipFromSectorLocal math (camera_relative.glsl) verbatim.
@@ -551,8 +561,8 @@ struct CBTFrameParams
     vec4 waterPlane;
     // Analytic sphere modifiers (sculpt shape-accuracy S2 — mirror CBTLayout.h AnalyticParams /
     // SphereAnalytic, math in cbt_analytic.glsl). x = flatten count, y = transient brush dab count
-    // (S3 — dabs occupy slots [x, x+y)); integers as float; z = the page-table ring's words per slot
-    // (CBT_PAGE_RING_WORDS_LANE, wide arm); w reserved. Both 0 (the flag-off
+    // (S3 — dabs occupy slots [x, x+y)); integers as float; z = the first word of this frame's page-table
+    // ring slot (CBT_PAGE_RING_BASE_LANE, wide arm); w reserved. Both 0 (the flag-off
     // dark-ship) skips every analytic branch — no float op is added.
     vec4 analyticParams;
     CBTSphereAnalyticFlatten sphereAnalytic[CBT_MAX_SPHERE_ANALYTIC];
@@ -733,14 +743,13 @@ float CBT_AtlasCoarseSample(vec2 uv, float coarseDim, uint frameSlot)
 #if !defined(CBT_DECODE_INT32)
 // The paged height resolve (cbt_page.glsl), wide arm only (mirror CBTLayout.h kCBTPageTableBinding):
 // the narrow arm's VertexEval already binds the WebGPU per-stage storage-buffer limit.
-// Binding 22: the page table, a host-visible ring of equal slots, one per frame slot, written whole
-// when the terrain's table changes (the binding-17 ring discipline); the words per slot ride this
-// frame's params (analyticParams lane CBT_PAGE_RING_WORDS_LANE), never a word of another slot.
+// Binding 22: TerrainPageFeature's page-table ring, one slot per frame in flight; this frame's first
+// word rides its params (analyticParams lane CBT_PAGE_RING_BASE_LANE), never a word of another slot.
 // Layout (mirror CBTLayout.h): [0, 4) CBTPageField's shape, [4] the cache's slot count, [5, 8) the
 // floor level, the tier count and the floor directory's offset (all 0 for a dense table),
 // [8, 8 + 4 * CBT_PAGE_MAX_LEVELS) one CBTPageLevel per level, then one arrival fade per cache slot
 // (float bits), then the table's words (TerrainECS PageTable). The word offsets are in cbt_page.glsl.
-#define CBT_PAGE_RING_WORDS_LANE 2
+#define CBT_PAGE_RING_BASE_LANE 2
 layout(std430, set = CBT_DESCRIPTOR_SET, binding = 22) CBT_SSBO_QUAL buffer CBTPageTableBuffer
 {
     uint Words[];
@@ -755,7 +764,7 @@ layout(set = CBT_DESCRIPTOR_SET, binding = 23) uniform sampler2D gPageCache CBT_
 
 // ---------------------------------------------------------------------------
 // Push constants (compute only; the graphics adapter owns the sole PC block —
-// plan §9). 96 bytes, mirror of CBTPushConstants.
+// plan §9). 92 bytes, mirror of CBTPushConstants.
 // ---------------------------------------------------------------------------
 #ifndef CBT_GRAPHICS_INCLUDE
 layout(push_constant) uniform CBTPushConstants
@@ -800,9 +809,6 @@ layout(push_constant) uniform CBTPushConstants
     // one-root retained ring keeps the base/refined seam out of the visible boundary (design §3
     // candidate 3). 0 = no reseed this dispatch.
     uint regionFreeMask;
-    // Earth-scale (sector, local) storage A/B (arc S2a — mirror CBTPushConstants::DeepDecode).
-    // Only VertexEval reads it (selects what to WRITE); consumers branch on the per-slot deepTag.
-    uint deepDecode;
     uint poolPressure; // 1 = planar pool-pressure scale on; 0 = the A/B arm (tests), scale held at 1x
     // The height build kernels' region at level passIndex (mirror CBTPushConstants::BuildRegionMin): first
     // element (x | z << 16), extent (width | height << 16); samples for Kernel_HeightChainBuild, texels for
@@ -975,16 +981,12 @@ const float CBT_SECTOR_SIZE = 1024.0;
 // (~16,777 km — Earth's 6,371 km has vast margin); the integer sector carries the large scale.
 vec3 CBT_RenderOriginWorld(CBTFrameParams fp) { return fp.renderOriginSector.xyz * CBT_SECTOR_SIZE; }
 
-// S2a corner fetch: one bisector's three corners in BOTH frames every compute consumer
-// needs — planet-center WORLD (horizon cull, crease radius math; fp32 at planet
-// magnitude, the same quality the legacy world store had) and render-origin-RELATIVE
-// (frustum cull + screen metric). Per-slot deepTag selects the storage:
-//   legacy (deepTag.x == 0): world = the stored corner, rel = world - originW —
-//     today's math bit-for-bit (byte-identical dark-ship).
-//   deep (sector, local): rel = vec3(sector - originSector) * CBT_SECTOR_SIZE + local —
-//     the GE_ClipFromSectorLocal reconstruction, an EXACT integer delta + small float,
-//     fp32-precise at any planet radius (the S2a precision win); world = the fp32
-//     recomposition sector * CBT_SECTOR_SIZE + local (planet-magnitude consumers only).
+// One bisector's three corners in the frames every compute consumer needs: planet-center WORLD
+// (horizon cull, crease radius math; fp32 at planet magnitude) and render-origin-RELATIVE
+// (frustum cull, screen metric). deepTag.x selects the store of the slot:
+//   0 (world corners): world = the stored corner, rel = world - originW.
+//   1 (sector, local): rel = vec3(sector - originSector) * CBT_SECTOR_SIZE + local (an exact
+//     integer delta, fp32-precise at any radius); world = sector * CBT_SECTOR_SIZE + local.
 struct CBTCornersWS
 {
     vec3 W0; vec3 W1; vec3 W2; // planet-center world
@@ -1057,7 +1059,7 @@ vec2 CBT_TerrainToWorldXZ(vec2 uv, CBTFrameParams fp)
 uint CBT_PageRingBase()
 {
     uint slot = pc.frameIndex % CBT_FRAME_RING;
-    return slot * uint(gParams.Params[slot].frame.analyticParams[CBT_PAGE_RING_WORDS_LANE]);
+    return uint(gParams.Params[slot].frame.analyticParams[CBT_PAGE_RING_BASE_LANE]);
 }
 
 uint CBT_PageTableWord(uint index)

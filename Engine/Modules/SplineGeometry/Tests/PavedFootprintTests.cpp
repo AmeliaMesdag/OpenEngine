@@ -114,8 +114,9 @@ struct Fixture
     std::vector<AreaRing> Outlines;
     std::vector<PavedArm> Arms;
     std::vector<AreaRing> Excludes;
+    std::vector<AreaRing> FlushCuts;
 
-    PavedFootprintInput Input() const { return PavedFootprintInput{Outlines, Arms, Excludes}; }
+    PavedFootprintInput Input() const { return PavedFootprintInput{Outlines, Arms, Excludes, FlushCuts}; }
 };
 
 // A station's cross-section, left end then right, square to `forward`.
@@ -550,6 +551,30 @@ TEST(PavedFootprint, TheCoverageSamplerCountsTheSamplesOfAMissingPiece)
     EXPECT_GT(coverage.LidMismatches, 3000);
 }
 
+// A flush cut splits the plaza like an exclude, but no border runs along its sides.
+TEST(PavedFootprint, AFlushCutSplitsThePavingWithNoBorderAlongIt)
+{
+    Fixture fixture;
+    fixture.Outlines.push_back(Rectangle(0.0f, 0.0f, 10.0f, 10.0f));
+    fixture.FlushCuts.push_back(Rectangle(4.0f, -1.0f, 6.0f, 11.0f));
+    const PavedFootprint footprint = BuildPavedFootprint(fixture.Input());
+    ASSERT_EQ(footprint.Regions.size(), 1u);
+    ASSERT_EQ(footprint.Regions[0].Pieces.size(), 2u) << "the flush cut cuts the plaza in two";
+    ASSERT_EQ(footprint.Regions[0].Runs.size(), 2u) << "one open run round each piece";
+    for (const PavedBoundaryRun& run : footprint.Regions[0].Runs)
+    {
+        ASSERT_FALSE(run.Closed);
+        for (std::size_t e = 0; e < run.Edges.size(); ++e)
+        {
+            const Vector2& a = run.Points[e];
+            const Vector2& b = run.Points[e + 1];
+            const bool onCut = (std::fabs(a.x - 4.0f) < 1.0e-3f && std::fabs(b.x - 4.0f) < 1.0e-3f) ||
+                               (std::fabs(a.x - 6.0f) < 1.0e-3f && std::fabs(b.x - 6.0f) < 1.0e-3f);
+            EXPECT_FALSE(onCut) << "a border edge on the cut at x " << a.x;
+        }
+    }
+}
+
 // Three roads through one point are three Crossings, twelve arms in all; their footprints are one
 // region with six Open edges, one per direction, the arms of one direction sharing theirs.
 TEST(PavedFootprint, ThreeRoadsThroughOnePointAreOneRegionOpenInSixDirections)
@@ -761,6 +786,37 @@ TEST(PavedFootprint, AnAcuteArmStopsOneWidthPastItsLastOverlap)
         }
     }
     EXPECT_EQ(squareEnds, 2) << "arm 0's two sides end at its Open edge";
+    ExpectAccepted(fixture, footprint);
+}
+
+// A road leaves the square east and turns north 4 m out, where one width past the rim falls inside the
+// turn. The stop moves on to where the cap is square on the north leg, past the turn's inner corner, so
+// neither the road's strip nor the ribbon turns back across the cap.
+TEST(PavedFootprint, AnArmWhoseStopFallsInATurnStopsPastTheTurn)
+{
+    Fixture fixture;
+    fixture.Outlines.push_back(Rectangle(-10.0f, -10.0f, 10.0f, 10.0f));
+    PavedArm arm = StraightArm(0, {10.0f, 0.0f}, {1.0f, 0.0f}, 4.0f, 2.0f, 0.0f, 1.0f);
+    const PavedArm north = StraightArm(0, {14.0f, 0.0f}, {0.0f, 1.0f}, 20.0f, 2.0f, 4.0f, 1.0f);
+    arm.Stations.insert(arm.Stations.end(), north.Stations.begin() + 1, north.Stations.end());
+    fixture.Arms.push_back(arm);
+    const PavedFootprint footprint = BuildPavedFootprint(fixture.Input());
+    ASSERT_EQ(footprint.Regions.size(), 1u);
+    const PavedArmStop& stop = footprint.Arms[0];
+    ASSERT_TRUE(stop.Open);
+    // The first station past the turn's inner corner (12, 2): 2 m up the north leg.
+    EXPECT_NEAR(stop.StopDistance, 6.0f, 1.0e-3f);
+    EXPECT_NEAR(stop.OpenLeft.y, 2.0f, 1.0e-3f);
+    EXPECT_NEAR(stop.OpenRight.y, 2.0f, 1.0e-3f);
+    for (const PavedBoundaryRun& run : footprint.Regions[0].Runs)
+    {
+        for (const Vector2& point : run.Points)
+        {
+            if (point.x > 10.0f + kPavedTouchMeters)
+                EXPECT_LE(point.y, stop.OpenLeft.y + kPavedTouchMeters)
+                    << "the ribbon turns back past its cap at x " << point.x;
+        }
+    }
     ExpectAccepted(fixture, footprint);
 }
 

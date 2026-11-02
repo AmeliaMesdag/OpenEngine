@@ -95,12 +95,12 @@ GridView::GridView()
     // - Disable ScrollView's default horizontal-overflow measurement: it scans labels and can
     //   overestimate content width for virtualized, absolutely positioned cells, which causes
     //   phantom horizontal scrollbars and flicker.
-    m_Scroll->Overrides()
+    m_Scroll->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(0.0f))
         .Set(Style::MinHeight, StyleLength::Px(0.0f));
-    m_Scroll->Overrides().SetCustomNumber(StringId("--ui_scrollview_measure_horizontal"), 0.0f);
-    m_Scroll->Overrides().SetCustomNumber(StringId("--ui_scrollview_primary_modifier_passthrough"), 1.0f);
+    m_Scroll->Style().SetCustomNumber(HashStringId("--ui_scrollview_measure_horizontal"), 0.0f);
+    m_Scroll->Style().SetCustomNumber(HashStringId("--ui_scrollview_primary_modifier_passthrough"), 1.0f);
 
     // Listen for scroll position changes to update virtualization. ScrollView defers
     // these callbacks to UIManager so they execute outside event dispatch.
@@ -431,13 +431,13 @@ void GridView::UpdateThumbSizes()
     {
         if (slot.thumb)
         {
-            slot.thumb->Overrides()
+            slot.thumb->Style()
                 .Set(Style::Width, StyleLength::Px((float)std::lround(m_IconSize)))
                 .Set(Style::Height, StyleLength::Px((float)std::lround(m_IconSize)));
         }
         if (slot.title)
         {
-            slot.title->Overrides()
+            slot.title->Style()
                 .Set(Style::Width, StyleLength::Px(titleW))
                 .Set(Style::Height, StyleLength::Px(titleH));
         }
@@ -535,7 +535,7 @@ void GridView::EnsureCellPoolSize(int desired)
 
         auto thumb = std::make_unique<UIElement>();
         thumb->AddClass("thumb");
-        thumb->Overrides()
+        thumb->Style()
             .Set(Style::Width, StyleLength::Px((float)std::lround(m_IconSize)))
             .Set(Style::Height, StyleLength::Px((float)std::lround(m_IconSize)));
         UIElement* thumbRaw = thumb.get();
@@ -545,7 +545,7 @@ void GridView::EnsureCellPoolSize(int desired)
         // Definite px size on both axes: Label::SetText then takes its
         // content-only fast path, keeping rebind scroll ticks from raising
         // LayoutDirty (which forces a whole-tree Yoga rebuild pre-solve).
-        title->Overrides()
+        title->Style()
             .Set(Style::Width, StyleLength::Px(TitleWidthPx()))
             .Set(Style::Height, StyleLength::Px(TitleHeightPx()));
         Label* titleRaw = title.get();

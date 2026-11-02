@@ -1,14 +1,16 @@
 #include "TerrainECS/TerrainModifierSystem.h"
+#include "AreaFlatten/AreaReferenceSurface.h"
 #include "Mathematics/Interpolation.h"
-#include "TerrainGrassCompose.h"
+#include "TerrainGrass/TerrainGrassCompose.h"
 #include "TerrainRowBands.h"
 #include "TerrainECS/TerrainBakeCache.h"
-#include "TerrainECS/TerrainColorMapBaker.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMapBaker.h"
 #include "Components/SceneEntityTag.h"
+#include "Types/Fnv1a.h"
 #include "TerrainECS/TerrainModifierComponents.h" // the canonical set the gather reads (change gate)
 #include "TerrainECS/TerrainAtlas.h" // shared coarse field lattice
 #include "TerrainECS/TerrainSizingPlan.h" // same unified/atlas engagement rule as extraction
-#include "TerrainECS/TerrainSurfaceRuleEval.h"   // per-texel rule row evaluation
+#include "TerrainECS/TerrainSurface/TerrainSurfaceRuleEval.h"   // per-texel rule row evaluation
 #include "Noise/FractalNoise2D.h"
 #include "TerrainECS/TerrainRuleNoise.h"
 #include "TerrainECS/TerrainSplatComposite.h"    // the RGBA8 splat write paint and rules share
@@ -312,121 +314,209 @@ float32 BlendHeight(float32 current, float32 value, float32 weight,
     }
 }
 
-// Pack the priority-sorted resolved modifiers into the GPU height-bake row layout
-// (slice-1b). Returns false — the caller then falls back to the CPU bake — if any
-// HEIGHT-affecting modifier is a type/shape the slice-1 kernel does not implement
-// (Stamp/Spline/SculptZone, or a spline shape). Splat-only modifiers never touch height,
-// so they are simply not packed.
-bool PackModifiersForGpuBake(const std::vector<ResolvedModifier>& mods,
-                             std::vector<ModifierGpu>& out)
+// The refusal for a volume effect kind the kernel has no row for.
+GpuHeightBakeRefusalReason HeightEffectRefusal(ResolvedEffect::Kind kind)
 {
+    switch (kind)
+    {
+    case ResolvedEffect::Kind::HeightOffset: return GpuHeightBakeRefusalReason::HeightOffset;
+    case ResolvedEffect::Kind::Stamp:        return GpuHeightBakeRefusalReason::Stamp;
+    case ResolvedEffect::Kind::GroundClaim:  return GpuHeightBakeRefusalReason::GroundClaim;
+    default:                                 return GpuHeightBakeRefusalReason::OtherEffect;
+    }
+}
+
+// Why the kernel cannot compute `modifier` as a whole, or None. Checked in this order: shape, global
+// scope, modifier kind, inward feather or weight.
+GpuHeightBakeRefusalReason ModifierGpuRefusal(const ResolvedModifier& modifier)
+{
+    using Reason = GpuHeightBakeRefusalReason;
+    if (modifier.Shape == Components::TerrainModifierShape::Spline)
+        return Reason::SplineShape;
+    // The kernel's ComputeWeight knows circles and rectangles only, and a global volume packed as
+    // either would bake its authored half-extents as a footprint instead of covering the world.
+    if (modifier.GlobalScope)
+        return Reason::GlobalVolume;
+    // A zone's payload has no kernel twin.
+    if (modifier.ModType != ResolvedModifier::Type::Volume)
+        return modifier.ModType == ResolvedModifier::Type::SculptZone ? Reason::SculptZone : Reason::OtherEffect;
+    // A volume packs one record per height effect, which is exact only for the plain outward
+    // falloff. The kernel has no inward feather (one ramp across the edge) and no master weight.
+    if (modifier.FalloffInward > 0.0f || modifier.Weight != 1.0f)
+        return Reason::InwardFeatherOrWeight;
+    return Reason::None;
+}
+
+// Why the kernel cannot compute one height effect of a volume, or None. Checked in this order:
+// pooling, height from the volume, erosion, effect kind.
+GpuHeightBakeRefusalReason EffectGpuRefusal(const ResolvedEffect& fx)
+{
+    using Reason = GpuHeightBakeRefusalReason;
+    // Pooling adds the values of several modifiers, then applies the average once. The kernel reads one
+    // record per texel and has no scratch to add into, and it has no Average id: a packed pooled effect
+    // bakes as Add. Every poolable kind refuses.
+    if (IsPooled(fx))
+        return Reason::PooledBlend;
+    switch (fx.EffectKind)
+    {
+    case ResolvedEffect::Kind::Flatten:
+        // The kernel has no reference-height lookup: only an absolute target is expressible.
+        return fx.Flatten.UseVolumeHeight ? Reason::HeightFromVolume : Reason::None;
+    case ResolvedEffect::Kind::Noise:
+        // The kernel has no erosion twin (no erosion_filter.glsl).
+        return fx.Noise.Erosion.Strength > 0.0f ? Reason::Erosion : Reason::None;
+    default:
+        return HeightEffectRefusal(fx.EffectKind);
+    }
+}
+
+// The kernel row of a volume's flatten or noise effect that EffectGpuRefusal accepts.
+ModifierGpu PackEffectRow(const ResolvedModifier& modifier, const ResolvedEffect& fx)
+{
+    ModifierGpu row{};
+    row.Shape = (modifier.Shape == Components::TerrainModifierShape::Circle)
+                    ? static_cast<uint32>(ModifierGpuShape::Circle)
+                    : static_cast<uint32>(ModifierGpuShape::Rectangle);
+    row.CenterX = modifier.Position.x;
+    row.CenterZ = modifier.Position.z;
+    row.Yaw = modifier.YawRadians;
+    row.Radius = modifier.Radius;
+    row.RectHalfX = modifier.RectHalfX;
+    row.RectHalfZ = modifier.RectHalfZ;
+    row.Falloff = modifier.Falloff;
+    if (fx.EffectKind == ResolvedEffect::Kind::Flatten)
+    {
+        row.Type = static_cast<uint32>(ModifierGpuType::Flatten);
+        row.Blend = static_cast<uint32>(fx.Flatten.Blend);
+        row.BlendSmoothing = fx.Flatten.BlendSmoothing;
+        row.NoiseFreqOrTarget = fx.Flatten.TargetHeight;
+        return row;
+    }
+    row.Type = static_cast<uint32>(ModifierGpuType::Noise);
+    row.Blend = static_cast<uint32>(fx.Noise.Blend);
+    row.BlendSmoothing = fx.Noise.BlendSmoothing;
+    row.Octaves = fx.Noise.Octaves;
+    row.NoiseFreqOrTarget = fx.Noise.Frequency;
+    row.NoiseAmp = fx.Noise.Amplitude;
+    row.NoiseLacunarity = fx.Noise.Lacunarity;
+    row.NoisePersistence = fx.Noise.Persistence;
+    row.Seed = fx.Noise.Seed;
+    return row;
+}
+
+// Keeps the first refusal in `first` and counts each later one in `others`.
+void NoteGpuRefusal(GpuHeightBakeRefusal& first, uint32& others, GpuHeightBakeRefusalReason reason,
+                    ECS::EntityHandle entity)
+{
+    if (first.Reason == GpuHeightBakeRefusalReason::None)
+        first = GpuHeightBakeRefusal{reason, entity};
+    else
+        ++others;
+}
+
+// Packs the priority-sorted modifiers into the GPU height kernel's rows. Returns the first modifier
+// the kernel cannot compute and why (None when all pack), and counts the refusing effects after it in
+// `outOtherRefusals`. `out` is empty on a refusal.
+GpuHeightBakeRefusal PackModifiersForGpuBake(const std::vector<ResolvedModifier>& mods, std::vector<ModifierGpu>& out,
+                                             uint32& outOtherRefusals)
+{
+    using Reason = GpuHeightBakeRefusalReason;
     out.clear();
     out.reserve(mods.size());
-
-    // Shape framing for a volume's effects: the kernel keys on
-    // circle-vs-rectangle plus the entity-space extents.
-    auto packShape = [](const ResolvedModifier& m) {
-        ModifierGpu g{};
-        g.Shape = (m.Shape == Components::TerrainModifierShape::Circle)
-                      ? static_cast<uint32>(ModifierGpuShape::Circle)
-                      : static_cast<uint32>(ModifierGpuShape::Rectangle);
-        g.CenterX = m.Position.x;
-        g.CenterZ = m.Position.z;
-        g.Yaw = m.YawRadians;
-        g.Radius = m.Radius;
-        g.RectHalfX = m.RectHalfX;
-        g.RectHalfZ = m.RectHalfZ;
-        g.Falloff = m.Falloff;
-        return g;
-    };
-
-    for (const auto& m : mods)
+    outOtherRefusals = 0;
+    GpuHeightBakeRefusal first;
+    for (const auto& modifier : mods)
     {
-        if (m.IsSplatOnlyModifier())
+        if (modifier.IsSplatOnlyModifier())
             continue; // paint layer / paint zone / paint-only volume — no height contribution
-        if (m.Shape == Components::TerrainModifierShape::Spline)
-            return false;
-        // The kernel's ComputeWeight knows circles and rectangles only, and a
-        // global volume packed as either would bake its authored half-extents as
-        // a footprint instead of covering the world. There is no SHAPE_GLOBAL to
-        // pack it as, so the whole bake falls back to the CPU — the same refusal
-        // a spline shape takes.
-        if (m.GlobalScope)
-            return false;
-
-        if (m.ModType == ResolvedModifier::Type::Volume)
+        if (const Reason reason = ModifierGpuRefusal(modifier); reason != Reason::None)
         {
-            // The kernel evaluates shape weight per modifier record, so a volume
-            // packs as one record per height effect. That is exact only while
-            // the volume's weight is the plain shape falloff the kernel also
-            // computes: an inward feather or a master weight has no kernel
-            // twin, and effects it cannot evaluate force the whole bake to CPU.
-            //
-            // The inward-feather refusal is what holds CPU/GPU parity: the
-            // kernel implements only ShapeFalloffWeight's outward-only branch,
-            // so a volume with BOTH falloffs — whose weight is one ramp spanning
-            // the edge, not a band that stops at it — must never reach it.
-            if (m.FalloffInward > 0.0f || m.Weight != 1.0f)
-                return false;
-            for (const auto& fx : m.Effects)
-            {
-                // Splat-only effects contribute nothing to the heightfield — ApplySplatModifiers
-                // owns them, on whichever arm runs the splat — so they neither pack a row nor
-                // refuse the height bake. Refusing on them would price a rules or paint effect
-                // as if it were an unimplemented HEIGHT effect, dropping the whole terrain's GPU
-                // height bake to the CPU because of a modifier that never touches a height.
-                if (ResolvedEffect::IsSplat(fx.EffectKind))
-                    continue;
-                // Pooling is a cross-modifier accumulate-then-apply, and the
-                // kernel evaluates one modifier record per texel with no scratch
-                // to accumulate into. Refused rather than packed, for EVERY
-                // poolable kind: the kernel declares no Average id and its blend
-                // switch falls through to Add, so a packed pooled effect would
-                // bake as an additive raise instead of an average.
-                if (IsPooled(fx))
-                    return false;
-                ModifierGpu g = packShape(m);
-                if (fx.EffectKind == ResolvedEffect::Kind::Flatten)
-                {
-                    // The kernel has no reference-height lookup: only an
-                    // absolute target is expressible.
-                    if (fx.Flatten.UseVolumeHeight)
-                        return false;
-                    g.Type = static_cast<uint32>(ModifierGpuType::Flatten);
-                    g.Blend = static_cast<uint32>(fx.Flatten.Blend);
-                    g.BlendSmoothing = fx.Flatten.BlendSmoothing;
-                    g.NoiseFreqOrTarget = fx.Flatten.TargetHeight;
-                }
-                else if (fx.EffectKind == ResolvedEffect::Kind::Noise)
-                {
-                    // The kernel has no erosion twin yet (no erosion_filter.glsl),
-                    // so an armed erosion block forces the whole bake to CPU
-                    // rather than silently baking un-eroded noise on the GPU.
-                    if (fx.Noise.Erosion.Strength > 0.0f)
-                        return false;
-                    g.Type = static_cast<uint32>(ModifierGpuType::Noise);
-                    g.Blend = static_cast<uint32>(fx.Noise.Blend);
-                    g.BlendSmoothing = fx.Noise.BlendSmoothing;
-                    g.Octaves = fx.Noise.Octaves;
-                    g.NoiseFreqOrTarget = fx.Noise.Frequency;
-                    g.NoiseAmp = fx.Noise.Amplitude;
-                    g.NoiseLacunarity = fx.Noise.Lacunarity;
-                    g.NoisePersistence = fx.Noise.Persistence;
-                    g.Seed = fx.Noise.Seed;
-                }
-                else
-                {
-                    return false; // height-offset / stamp not GPU-bakeable in slice 1
-                }
-                out.push_back(g);
-            }
+            NoteGpuRefusal(first, outOtherRefusals, reason, modifier.Entity);
             continue;
         }
-
-        // A sculpt zone's payload has no kernel twin: the whole bake falls to CPU.
-        return false;
+        for (const auto& fx : modifier.Effects)
+        {
+            // Splat-only effects contribute nothing to the heightfield — ApplySplatModifiers
+            // owns them, on whichever arm runs the splat — so they neither pack a row nor
+            // refuse the height bake.
+            if (ResolvedEffect::IsSplat(fx.EffectKind))
+                continue;
+            if (const Reason reason = EffectGpuRefusal(fx); reason != Reason::None)
+                NoteGpuRefusal(first, outOtherRefusals, reason, modifier.Entity);
+            else if (first.Reason == Reason::None)
+                out.push_back(PackEffectRow(modifier, fx));
+        }
     }
-    return true;
+    if (first.Reason != Reason::None)
+        out.clear();
+    return first;
+}
+
+// The heights of a tile the modifier bake has applied every modifier to, or null when the tile is
+// not resident at full detail, not baked yet, or not on the terrain's tile grid.
+const Terrain::HeightfieldData* BakedTileHeights(const TiledTerrainData& tiled, const TileCoord& coord)
+{
+    const auto it = tiled.Tiles.find(coord);
+    if (it == tiled.Tiles.end() || !it->second)
+        return nullptr;
+    const TerrainTileData& tile = *it->second;
+    if (tile.LodState != TileLodState::Full || !tile.ModifiersApplied ||
+        tile.Heightfield.GetWidth() != tiled.Config.TileConfig.HeightmapWidth ||
+        tile.Heightfield.GetHeight() != tiled.Config.TileConfig.HeightmapHeight)
+        return nullptr;
+    return &tile.Heightfield;
+}
+
+// The terrain gates of the GPU height bake, in check order. The kernel writes only through the
+// atlas slot table of a whole-resident terrain and composes only the procedural noise base.
+GpuHeightBakeRefusalReason GpuHeightBakeTerrainRefusal(const TiledTerrainData& tiled)
+{
+    if (!IsGpuHeightBakeEnabled())
+        return GpuHeightBakeRefusalReason::Disabled;
+    if (!tiled.AtlasGpuBakeEligible)
+        return GpuHeightBakeRefusalReason::TextureLayout;
+    if (tiled.Config.Base.Source != Components::TerrainBaseSource::ProceduralNoise)
+        return GpuHeightBakeRefusalReason::BaseSource;
+    return GpuHeightBakeRefusalReason::None;
+}
+
+// Stores the bake decision on the terrain's report. Each change increases the report's revision and
+// logs the decision once, so a drag does not log every step.
+void RecordHeightBakeDecision(TiledTerrainData& tiled, ECS::EntityHandle terrainEntity,
+                              GpuHeightBakeRefusalReason terrainRefusal, const GpuHeightBakeRefusal& modifierRefusal,
+                              uint32 otherModifierRefusals)
+{
+    TerrainHeightBakeReport& report = tiled.HeightBakeReport;
+    const TerrainHeightBakePath path =
+        terrainRefusal == GpuHeightBakeRefusalReason::None && modifierRefusal.Reason == GpuHeightBakeRefusalReason::None
+            ? TerrainHeightBakePath::Gpu
+            : TerrainHeightBakePath::Cpu;
+    const bool changed = report.Path != path || report.TerrainRefusal != terrainRefusal ||
+                         report.ModifierRefusal != modifierRefusal ||
+                         report.OtherModifierRefusals != otherModifierRefusals;
+    if (!changed)
+        return;
+    report.Path = path;
+    report.TerrainRefusal = terrainRefusal;
+    report.ModifierRefusal = modifierRefusal;
+    report.OtherModifierRefusals = otherModifierRefusals;
+    ++report.Revision;
+    if (path == TerrainHeightBakePath::Gpu)
+    {
+        Logger::Log::Info("Terrain.HeightBakePath terrain={} path=gpu", terrainEntity.id);
+        return;
+    }
+    if (terrainRefusal != GpuHeightBakeRefusalReason::None)
+    {
+        // A reason on the terrain itself names no volume; get_terrain_stats names the modifier one.
+        Logger::Log::Info("Terrain.HeightBakePath terrain={} path=cpu refusal=\"{}\" modifierRefusal=\"{}\"",
+                          terrainEntity.id, GpuHeightBakeRefusalName(terrainRefusal),
+                          GpuHeightBakeRefusalName(modifierRefusal.Reason));
+        return;
+    }
+    Logger::Log::Info("Terrain.HeightBakePath terrain={} path=cpu refusal=\"{}\" entity={} otherRefusals={}",
+                      terrainEntity.id, GpuHeightBakeRefusalName(modifierRefusal.Reason), modifierRefusal.Entity.id,
+                      otherModifierRefusals);
 }
 
 // Record one tile's sample rect into the GPU bake batch (slice-1b/1c) so the extraction
@@ -1823,6 +1913,11 @@ void VisitModifierInputs(const ResolvedModifier& mod, Sink& sink)
     // so an edit to that spline has to move the hash.
     if (mod.ResolvedSpline)
         sink.Spline(*mod.ResolvedSpline);
+    // A closed area's reference surface also reads the roads at its openings, so
+    // an edit to one of those roads changes the area's output. The key is a
+    // content hash of every input the surface reads.
+    if (mod.AreaSurface)
+        sink.Value(mod.AreaSurface->GetInputKey());
 
     // A volume's output is its whole ordered effect stack: every parameter, and
     // the order itself (two effects swapping StackOrder changes the result).
@@ -2228,6 +2323,31 @@ bool AnyGrassRegionReaches(std::span<const ResolvedModifier> modifiers, float32 
                 return true;
     }
     return false;
+}
+
+// Reads each modifier's scene identity for BakesBefore. An untagged entity (a runtime
+// spawn) keeps HasSceneId false.
+void AssignSceneIds(const ECS::World& world, std::span<ResolvedModifier> modifiers)
+{
+    for (ResolvedModifier& mod : modifiers)
+    {
+        const auto* tag = world.GetComponent<Components::SceneEntityTag>(mod.Entity);
+        mod.HasSceneId = tag != nullptr;
+        mod.SceneIdHash = tag ? Hashing::Fnv1a64(tag->View()) : 0;
+    }
+}
+
+// The bake order: lower Priority first. A tie resolves by scene identity, then by
+// entity id, so an archetype move (a component added or removed) never reorders it.
+bool BakesBefore(const ResolvedModifier& a, const ResolvedModifier& b)
+{
+    if (a.Priority != b.Priority)
+        return a.Priority < b.Priority;
+    if (a.HasSceneId != b.HasSceneId)
+        return a.HasSceneId;
+    if (a.SceneIdHash != b.SceneIdHash)
+        return a.SceneIdHash < b.SceneIdHash;
+    return a.Entity.id < b.Entity.id;
 }
 
 } // namespace
@@ -2744,19 +2864,20 @@ void TerrainModifierSystem::GatherModifiers(ECS::World& world,
             ComputeModifierBounds(mod);
             m_ColorZones.push_back(mod);
         });
-    // Sort by priority (lower priority first). Stable, so modifiers sharing a
-    // priority keep gather order instead of whatever an unstable sort happens to
-    // produce — cross-volume ordering has to be reproducible bake to bake.
-    std::stable_sort(outModifiers.begin(), outModifiers.end(),
-                     [](const ResolvedModifier& a, const ResolvedModifier& b) {
-                         return a.Priority < b.Priority;
-                     });
+    // The bake order (BakesBefore) is the same in every bake and every process that
+    // loads the same scene. Stable: two records of one entity (a volume and a zone)
+    // keep the fixed query sequence above.
+    AssignSceneIds(world, outModifiers);
+    AssignSceneIds(world, m_ColorZones);
+    std::stable_sort(outModifiers.begin(), outModifiers.end(), BakesBefore);
+
+    // Every volume's bounds and route exist now, so each closed area can read the
+    // roads at its openings.
+    m_AreaSurfaces.Resolve(world, outModifiers, ModifierParallelBakeEnabled() ? m_JobPool : nullptr);
 
     // One gather owns the shapes and ordering, but grass has its own derived
-    // field and invalidation. Removing it before the existing ground hash/bake
-    // keeps grass value edits on mixed volumes from re-cooking ground. Adding
-    // or removing a component still follows the existing archetype tie order
-    // for equal-priority ground volumes; that structural input is not erased.
+    // field and invalidation. Removing it before the ground hash and bake keeps
+    // grass edits on mixed volumes, value or presence, from re-cooking ground.
     for (auto& mod : outModifiers)
     {
         if (mod.ModType != ResolvedModifier::Type::Volume
@@ -2786,8 +2907,7 @@ void TerrainModifierSystem::GatherModifiers(ECS::World& world,
         m_ColorZones.push_back(std::move(writer));
         mod.Effects.erase(color);
     }
-    std::stable_sort(m_ColorZones.begin(), m_ColorZones.end(),
-                     [](const ResolvedModifier& a, const ResolvedModifier& b) { return a.Priority < b.Priority; });
+    std::stable_sort(m_ColorZones.begin(), m_ColorZones.end(), BakesBefore);
     m_ColorZonesStamp = 0;
     for (const ResolvedModifier& zone : m_ColorZones)
         m_ColorZonesStamp = HashCombine(HashCombine(m_ColorZonesStamp, zone.Entity.id), HashModifierState(zone));
@@ -3280,6 +3400,12 @@ float32 TerrainModifierSystem::ComputeVolumeReferenceHeight(const ResolvedModifi
         // The station polyline is the volume's geometry, so the grade the caller
         // already measured against it IS the reference — one object, one answer.
         return routeSample->Height;
+    }
+    if (mod.AreaSurface)
+    {
+        // A closed area grades to the surface its rim and its openings define,
+        // built once per edit; a sample here is a bilinear read.
+        return mod.AreaSurface->Sample(worldX, worldZ);
     }
     if (mod.Shape == Components::TerrainModifierShape::Spline && mod.ResolvedSpline)
     {
@@ -4361,16 +4487,19 @@ bool TerrainModifierSystem::ComposeTiledGroundBlock(const TiledTerrainData& tile
                                                     uint32 countX, uint32 countZ,
                                                     std::vector<float32>& outNormalized) const
 {
-    return ComposeLatticeBlock(tiled, heightScale, terrainOriginY, m_AppliedModifiers, firstLatticeX, firstLatticeZ,
-                               countX, countZ, outNormalized);
+    uint64 composedSamples = 0;
+    return BuildLatticeBlock(tiled, heightScale, terrainOriginY, m_AppliedModifiers, firstLatticeX, firstLatticeZ,
+                             countX, countZ, LatticeBlockSource::Compose, outNormalized, composedSamples);
 }
 
-bool TerrainModifierSystem::ComposeLatticeBlock(const TiledTerrainData& tiled, float32 heightScale,
-                                                float32 terrainOriginY,
-                                                const std::vector<ResolvedModifier>& modifiers,
-                                                int64 firstLatticeX, int64 firstLatticeZ, uint32 countX,
-                                                uint32 countZ, std::vector<float32>& outNormalized)
+bool TerrainModifierSystem::BuildLatticeBlock(const TiledTerrainData& tiled, float32 heightScale,
+                                              float32 terrainOriginY,
+                                              const std::vector<ResolvedModifier>& modifiers,
+                                              int64 firstLatticeX, int64 firstLatticeZ, uint32 countX,
+                                              uint32 countZ, LatticeBlockSource source,
+                                              std::vector<float32>& outNormalized, uint64& outComposedSamples)
 {
+    outComposedSamples = 0;
     const uint32 tileW = tiled.Config.TileConfig.HeightmapWidth;
     const uint32 tileH = tiled.Config.TileConfig.HeightmapHeight;
     const float32 tileSize = tiled.Config.TileWorldSize;
@@ -4433,18 +4562,26 @@ bool TerrainModifierSystem::ComposeLatticeBlock(const TiledTerrainData& tiled, f
             if (minIx > maxIx || minIz > maxIz)
                 continue;
 
-            const float32 tileOriginX =
-                tiled.WorldOriginX + static_cast<float32>(tx) * tileSize;
-            const float32 tileOriginZ =
-                tiled.WorldOriginZ + static_cast<float32>(tz) * tileSize;
+            // A resident tile the bake applied the modifiers to holds this composition already:
+            // the bake ran the same ComposeTileHeights over it.
+            const Terrain::HeightfieldData* heights = nullptr;
+            if (source == LatticeBlockSource::BakedTiles)
+                heights = BakedTileHeights(tiled, TileCoord{static_cast<int32>(tx), static_cast<int32>(tz)});
+            if (!heights)
+            {
+                const float32 tileOriginX =
+                    tiled.WorldOriginX + static_cast<float32>(tx) * tileSize;
+                const float32 tileOriginZ =
+                    tiled.WorldOriginZ + static_cast<float32>(tz) * tileSize;
 
-            // The same composition the bakes run, because it is literally the same
-            // function. Clamping to the sub-rect is exact: both steps inside it
-            // resolve per world sample, so a clamped pass equals a full one within
-            // its rect — which is also what lets BakeTiledRegion re-bake a dirty
-            // rect and leave the rest of the tile standing.
-            ComposeTileHeights(scratch, tiled, tileOriginX, tileOriginZ, heightScale,
-                               terrainOriginY, modifiers, minIx, minIz, maxIx, maxIz);
+                // The tile bake's own function. A pass clamped to the sub-rect equals a full pass
+                // inside it, because each sample resolves on its own world position.
+                ComposeTileHeights(scratch, tiled, tileOriginX, tileOriginZ, heightScale,
+                                   terrainOriginY, modifiers, minIx, minIz, maxIx, maxIz);
+                heights = &scratch;
+                outComposedSamples +=
+                    static_cast<uint64>(maxIx - minIx + 1) * static_cast<uint64>(maxIz - minIz + 1);
+            }
 
             for (int32 iz = minIz; iz <= maxIz; ++iz)
             {
@@ -4454,7 +4591,7 @@ bool TerrainModifierSystem::ComposeLatticeBlock(const TiledTerrainData& tiled, f
                     const int64 outX = tileFirstGlobalX + ix - firstLatticeX;
                     outNormalized[static_cast<std::size_t>(outZ) * countX +
                                   static_cast<std::size_t>(outX)] =
-                        scratch.GetSample(static_cast<uint32>(ix), static_cast<uint32>(iz));
+                        heights->GetSample(static_cast<uint32>(ix), static_cast<uint32>(iz));
                 }
             }
         }
@@ -5613,7 +5750,8 @@ void TerrainModifierSystem::BakeAwaitedPageOverlays(ECS::World& world, TerrainSe
             auto* tiled = terrainService.GetTiledTerrainData(
                 TiledTerrainHandle{terrain.TiledTerrainHandle, terrain.TiledTerrainGeneration});
             if (tiled && tiled->AwaitsPageOverlay())
-                BakeHeightPageOverlay(*tiled, terrain.HeightScale, worldXf.matrix[13], modifiers, false, DirtyUnion{});
+                BakeHeightPageOverlay(*tiled, terrain.HeightScale, worldXf.matrix[13], modifiers, false, DirtyUnion{},
+                                      GpuHeightBakeTerrainRefusal(*tiled) != GpuHeightBakeRefusalReason::None);
         });
 }
 
@@ -6112,10 +6250,13 @@ void TerrainModifierSystem::UpdateBakes(ECS::World& world)
                 // The kernel composes the tile noise as its base (BaseFreq/BaseAmp/... below), so a
                 // terrain with any other base keeps the CPU bake, which fills from that base.
                 std::vector<ModifierGpu> gpuMods;
-                const bool gpuEvalSkip =
-                    IsGpuHeightBakeEnabled() && tiled->AtlasGpuBakeEligible &&
-                    tiled->Config.Base.Source == Components::TerrainBaseSource::ProceduralNoise &&
-                    PackModifiersForGpuBake(modifiers, gpuMods);
+                const GpuHeightBakeRefusalReason terrainRefusal = GpuHeightBakeTerrainRefusal(*tiled);
+                uint32 otherModifierRefusals = 0;
+                const GpuHeightBakeRefusal modifierRefusal =
+                    PackModifiersForGpuBake(modifiers, gpuMods, otherModifierRefusals);
+                const bool gpuEvalSkip = terrainRefusal == GpuHeightBakeRefusalReason::None &&
+                                         modifierRefusal.Reason == GpuHeightBakeRefusalReason::None;
+                RecordHeightBakeDecision(*tiled, entity, terrainRefusal, modifierRefusal, otherModifierRefusals);
                 tiled->GpuBakeBatch.Clear();
 
                 std::vector<TileCoord> bakedTiles;
@@ -6141,7 +6282,8 @@ void TerrainModifierSystem::UpdateBakes(ECS::World& world)
                 // The height pages carry the same modifiers as the tiles (Q1 (a)): what they add
                 // to the base pages, over the whole terrain, not only its resident tiles.
                 if (fullBake || heightDirty.Any || tiled->AwaitsPageOverlay())
-                    BakeHeightPageOverlay(*tiled, terrain.HeightScale, originY, modifiers, fullBake, heightDirty);
+                    BakeHeightPageOverlay(*tiled, terrain.HeightScale, originY, modifiers, fullBake, heightDirty,
+                                          terrainRefusal != GpuHeightBakeRefusalReason::None);
                 if (fullBake || heightDirty.Any || splatDirty.Any)
                     PublishSurfaceChanged(*tiled, fullBake, heightDirty, splatDirty);
 

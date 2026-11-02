@@ -289,7 +289,7 @@ TEST_F(SearchDialogFocusTests, KeepOpenResultRetainsQueryFocus)
 
 TEST_P(SearchDialogPointerFocusTests, ResultPointerReleaseDoesNotRefocusHiddenResults)
 {
-    ui->GetRootElement()->Overrides()
+    ui->GetRootElement()->Style()
         .Set(Style::Width, StyleLength::Px(800.0f))
         .Set(Style::Height, StyleLength::Px(600.0f));
     const auto css = ApplicationPaths::GetExecutableDirectory() / "Assets" / "UI" / "controls" / "SearchDialog.css";

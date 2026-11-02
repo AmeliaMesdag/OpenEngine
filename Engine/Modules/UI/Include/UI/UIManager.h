@@ -21,6 +21,7 @@
 
 #include "AssetCore/GUID.h"
 #include "AssetCore/NineSlice.h"
+#include "GenerationalVector/GenerationalHandle.h"
 #include "Mathematics/Interpolation.h"
 #include "Mathematics/Vector2.h"
 #include "Rendering/Core/RenderGraph/RGFrameStamp.h"
@@ -168,14 +169,9 @@ class UIManager
     /// releases do not cover this.
     void ResetModifierKeys();
 
-    /// Reconcile held modifiers against the platform mask carried by a pointer
-    /// event. A modifier held from before this window took focus produces no key
-    /// event here, so a click is the first and only chance to observe it.
-    void SyncModifierKeys(int mods);
-
-    /// Reconcile held modifiers against a live query of the platform's modifier
-    /// state. Unlike SyncModifierKeys this releases a tracked key the platform
-    /// no longer reports held. See ModifierKeyState::ApplyLiveMask.
+    /// Reconcile held modifiers against the platform's live modifier state: a live
+    /// query or a pointer event's mask. A modifier the mask reports is held, one it
+    /// omits is released. See ModifierKeyState::ApplyLiveMask.
     void ReconcileModifierKeys(int liveMods);
 
     /// True when focus last moved via Tab/Shift+Tab or while a key event was dispatched (a key handler's
@@ -237,7 +233,6 @@ class UIManager
         float    HoverDelaySeconds      = 0.5f;
         float    HoverResetDelaySeconds = 0.5f;
         bool     MiddleMouseShow        = false;
-        uint32_t ArrowColor             = 0; // 0 = use CSS default
     };
     using TooltipConfigProvider = std::function<TooltipConfig()>;
     void SetTooltipConfigProvider(TooltipConfigProvider provider) { m_TooltipConfigProvider = std::move(provider); }
@@ -698,6 +693,9 @@ public:
     // frame's draw order, or -1 when the element emitted nothing. Later
     // positions draw on top. Used by overlay-ordering regression tests.
     int FindDrawOrderPosForTesting(const UIElement& el) const;
+    // Test-only peek at the hover tooltip's arrow primitives this frame, in draw
+    // order. Returns nullptr when the arrow is hidden or `index` is past its count.
+    const UI::UIPrimitive* PeekTooltipArrowForTesting(uint16_t index) const;
     // Test-only read of what the whole-stylesheet analysis concluded a
     // `:focus-visible` flip can disturb. Production reads this pair alone in
     // exactly one place -- the modality-flip branch in UIManager::DispatchEvents
@@ -763,7 +761,6 @@ public:
     void PublishExternalTextureRG(const std::string& name, Rendering::RenderGraph::RGFrame& frame,
                                    Rendering::RenderGraph::RGTexture tex);
     void RemoveExternalTexture(const std::string& name);
-    void ClearElementBackgroundTexture(UIElement& el);
 
     // On-demand external-texture requests. Primitive generation records each
     // engine texture name it cannot resolve this frame; the producer (e.g. the
@@ -1057,9 +1054,9 @@ public:
         //   2   = forceGlobalStyle / computeLayoutSignaturesAll
         //   4   = ChildrenDirty on parent
         //   8   = SubtreeDirty bit
-        //   16  = Overrides::NeedsCascadeRerun
-        //   32  = Overrides::IsLayoutDirty
-        //   64  = Overrides::IsVisualDirty
+        //   16  = Style().NeedsCascadeRerun()
+        //   32  = Style().IsLayoutDirty()
+        //   64  = Style().IsVisualDirty()
         //   128 = DisplayMode == None (skip-skip; expected)
         //   256 = !CachedSubtreeValid
         //   512 = LocalSheetsHash mismatch
@@ -1084,7 +1081,7 @@ public:
         // Broken-out timers for the blocks that were previously lumped into
         // the implicit "untracked" gap (totalMs − sum of other phases).
         // Populated when UI profiling is enabled.
-        double PreSolveDrainMs        = 0.0;  // FlushScrollCallbacks + drainVirtualizationQueueBounded
+        double PreSolveDrainMs        = 0.0;  // FlushScrollCallbacks + DrainVirtualizationQueueBounded
         double IndicesAndClipsMs      = 0.0;  // ApplyScrollTransforms + Clamp + RebuildNodeIndices/ClipCaches/ZIndex
         double SolveAndApplyMs        = 0.0;  // SolveAndApplyLayout (including Yoga + commit)
         double FocusOrderMs           = 0.0;  // BuildFocusOrder + post-rebuild focus refresh
@@ -1507,6 +1504,12 @@ public:
     void UnregisterVirtualizedControl(IVirtualizedControl* control);
 
   private:
+    // Deferred dockspace rebuilds, queued by DockspaceElement::RequestRebuildFromModel
+    // and run by Update after event dispatch.
+    friend class DockspaceElement;
+    void RequestDockspaceRebuild(DockspaceElement* dockspace);
+    void CancelDockspaceRebuild(DockspaceElement* dockspace);
+
     JobSystem::WorkStealingThreadPool* m_JobSystem = nullptr;
     // Shared with the post routes of the elements this manager owns (UI::UiPostTarget), which
     // any thread may read; ~UIManager closes it, so a post that arrives after that is refused
@@ -1976,7 +1979,6 @@ public:
         const std::unordered_set<const UIElement*>* hover,
         uint64_t& outKey, uint16_t& outStateBits, uint32_t& outSheetSetId) const;
     const StylesheetRuleIndex* GetOrBuildRuleIndex(const Stylesheet* s);
-    void ApplyElementStyleOverrides(UIElement* el, ResolvedStyle& cs, bool allowLiveTextureRegistration);
     static void ResetFlatSheetTable(::UpdateContext& ctx, UIManager& mgr);
     static void AddSheetForAnalysis(const Stylesheet* s, ::UpdateContext& ctx);
 
@@ -2023,6 +2025,21 @@ public:
     // Clip / z-index / scroll helpers (extracted from Update).
     void RebuildTypedNodeLists(::UpdateContext& ctx);
     bool FlushScrollCallbacks(::UpdateContext& ctx);
+
+    // Runs queued virtualization work for a bounded number of passes. Returns true when work ran.
+    bool DrainVirtualizationQueueBounded();
+
+    // One scroll-callback flush, then one bounded virtualization drain, before the first Yoga
+    // solve. Both steps always run; the flags tell which step did work.
+    struct PreSolveDrainPass
+    {
+        bool ScrollCallbacksFlushed = false;
+        bool VirtualizationRan = false;
+        uint64_t TreeGenerationAfterFlush = 0;
+        double FlushMs = 0.0;
+        double VirtualizationMs = 0.0;
+    };
+    PreSolveDrainPass RunPreSolveDrainPass(::UpdateContext& updateContext);
 
     // The single Yoga->element rect commit (slice E2). Incremental mode
     // routes changed rects to the primitive drain; blunt mode is for
@@ -2300,11 +2317,11 @@ public:
     std::vector<UI::UIClipRect> m_SdfClipBuffer;
 
     // Deferred RG texture bindings: populated during GenerateAllPrimitives,
-    // consumed during RenderRG. Maps descriptor slot index to the external
+    // consumed during RenderRG. Maps a slot reservation to the external
     // texture name that needs resolving during the render pass.
     struct DeferredRGBinding
     {
-        uint32_t Slot = 0;
+        GenerationalVector::Handle Reservation; // Index() is the descriptor slot
         UIElement* Owner = nullptr; // element that reserved this slot (for per-element release on incremental re-emit)
         // RenderGraph arm: resolve through the per-frame publish map at RenderRG
         // declare time. NEVER an RenderGraph id — bindings outlive frames, RenderGraph ids
@@ -2441,9 +2458,14 @@ public:
     // interactive event-dispatch pass that acts on it.
     bool m_KeyInputSinceLastUpdate = false;
 
-    // Deferred rebuild to avoid modifying tree mid-frame
-    DockspaceElement* m_PendingDockspaceRebuild = nullptr; // not owned
-    bool m_RebuildDockspace = false;
+    // Deferred rebuilds to avoid modifying the tree mid-frame. Not owned; a
+    // dockspace removes itself through CancelDockspaceRebuild before it dies.
+    std::vector<DockspaceElement*> m_PendingDockspaceRebuilds;
+    // Runs the queued dockspace rebuilds; true when any ran.
+    bool RebuildPendingDockspaces();
+    // Frees render slots and resets primitive-gen stamps across a subtree,
+    // including mount targets.
+    void InvalidateDockspaceRenderState(UIElement* el);
 
     // Split dragging state
     bool m_DraggingSplit = false;
@@ -2849,12 +2871,15 @@ public:
     // callbacks) before being marshalled onto the UI thread.
     std::atomic<bool> m_PrimitivesNeedRegen{true};
 
-    // Stage 2: dedicated slot for the tooltip overlay arrow primitive.
+    // Dedicated slot range for the tooltip overlay arrow primitives.
     // The arrow is emitted by m_TooltipOverlay (not a UIElement), so it
     // cannot route through the per-element slot path. Allocated lazily
-    // on first emission, retained for the lifetime of this UIManager.
-    // SlotAllocator::kInvalidSlot when not yet allocated.
+    // on first emission and moved when the arrow needs more primitives
+    // than its capacity. SlotAllocator::kInvalidSlot when not yet allocated.
     uint32_t m_TooltipArrowSlot = 0xFFFFFFFFu;
+    uint16_t m_TooltipArrowSlotCap = 0;
+    // The arrow primitives in this frame's draw order; 0 while it is hidden.
+    uint16_t m_TooltipArrowCount = 0;
 
     // Stage 3: dedicated clip slot for the anonymous viewport clip used by
     // deferred-overlay rendering (tooltips, dropdowns, modals). Lifecycle
@@ -3034,13 +3059,16 @@ struct RetainedYogaNode
     uint64_t InstanceId = 0;
     LayoutInputs PrevLayout{};
     UIManager::MeasureInputs PrevMeasure{};
-    float PrevFlexGrowOverride = 0.0f;
     // Whether the container established block flow at the last push. The
     // effective flex-shrink depends on it (ApplyBlockFlowShrinkDefault), so a
     // parent that flips display leaves this element's own PrevLayout unchanged
     // while its Yoga input has moved — without this the re-push is skipped.
     bool PrevParentBlockFlow = false;
     bool HasPrevInputs = false;
+    // The root's logical size the last push resolved a viewport unit against;
+    // zero when PrevLayout has none. A resize or a UI scale change leaves
+    // PrevLayout unchanged while the resolved px move, so this re-arms the push.
+    Mathematics::Vector2 PrevViewportBasis{};
 
     // UIManager::m_LayoutCommitGeneration at the last CommitLayoutRects
     // visit — "when was this element's rect last rewritten from Yoga".

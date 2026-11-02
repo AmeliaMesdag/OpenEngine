@@ -573,7 +573,7 @@ protected:
         m_Rename.OnRowBound(*m_Row, other);
         Frame();
         EXPECT_EQ(Field(), nullptr) << "the field stayed on a row that shows another entry";
-        const auto display = m_Title->Overrides().Get(GameEngine::Style::Display);
+        const auto display = m_Title->Style().Get(GameEngine::Style::Display);
         EXPECT_FALSE(display.has_value() && *display == GameEngine::DisplayMode::None) << "the title did not come back";
     }
 

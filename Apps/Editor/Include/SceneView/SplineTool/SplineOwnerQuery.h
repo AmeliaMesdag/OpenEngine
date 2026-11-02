@@ -31,7 +31,8 @@ using SplineOwnerQuery = std::function<SplineOwnerClaim(const ECS::World&, ECS::
 
 // Registers the one owner query (the mark-ups module's); an empty query claims nothing.
 void SetSplineOwnerQuery(SplineOwnerQuery query);
-// The claim on the spline of `entity`; nothing claimed without a registered query.
+// The claim on the spline of `entity`: a runtime-only spline is claimed and hidden; nothing else is
+// claimed without a registered query.
 SplineOwnerClaim QuerySplineOwner(const ECS::World& world, ECS::EntityHandle entity);
 
 } // namespace GameEngine::Editor

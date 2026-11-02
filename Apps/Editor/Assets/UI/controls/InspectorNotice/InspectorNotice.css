@@ -1,9 +1,9 @@
 /* InspectorNotice (Apps/Editor/Include/UI/Controls/InspectorNotice.h).
  *
- * The notice is the control's element; the plate, its text and its action come from
+ * The notice is the control's element; the plate, its text, its action and its dismiss come from
  * InspectorNotice.uxml beside this sheet. The control requests this sheet for its own subtree, so
- * nothing loads it unless a notice exists. The action's look is the shared small button
- * (controls/Button.css); this sheet places it and edges it in the kind's color.
+ * nothing loads it unless a notice exists. The buttons' look is the shared small button
+ * (controls/Button.css); this sheet places them and edges them in the kind's color.
  */
 
 /* A notice must never be squeezed by a crowded flex column: a shrunk notice keeps the tops of its
@@ -15,13 +15,15 @@
 	margin: 4px 0;
 }
 
-/* The text and the action share a row, the action on the text's first line (their baselines
-   aligned). The action wraps onto a line of its own under the text only when the row cannot give the
-   text its basis beside it. */
+/* The text and the buttons share a row, the buttons on the text's first line (their baselines
+   aligned). The buttons wrap onto a line of their own under the text only when the row cannot give the
+   text its basis beside them; a wrapped line keeps them at the row's end, the dismiss too when it wraps
+   alone. */
 .inspector-notice-plate {
 	display: flex;
 	flex-direction: row;
 	flex-wrap: wrap;
+	justify-content: flex-end;
 	align-items: baseline;
 	column-gap: 8px;
 	row-gap: 6px;
@@ -29,8 +31,8 @@
 	border-radius: 4px;
 }
 
-/* Asks for 240 px beside the action and wraps inside the width it gets; a row that cannot give that
-   puts the action under the text instead, where the text shrinks to the panel however narrow. A path
+/* Asks for 240 px beside the buttons and wraps inside the width it gets; a row that cannot give that
+   puts the buttons under the text instead, where the text shrinks to the panel however narrow. A path
    or an identifier with no space in it breaks rather than run past the plate. */
 .inspector-notice-text {
 	flex-grow: 1;
@@ -39,15 +41,15 @@
 	overflow-wrap: break-word;
 }
 
-/* Content width, at the end of the row it sits on. */
+/* Content width, at the end of the row it sits on; the dismiss, when given, follows it. */
 .inspector-notice-action {
 	margin-left: auto;
 }
 
 /* The kinds. The control sets one class per part for its kind (inspector-notice-<part>-<kind>), and
-   each rule below follows its part's base rule. The action's edge is drawn in the kind's text color:
-   the shared button's plate is close to every notice plate, and the border is what keeps the action's
-   boundary readable against it. The control attaches this sheet to the action after the shared
+   each rule below follows its part's base rule. The buttons' edges are drawn in the kind's text color:
+   the shared button's plate is close to every notice plate, and the border is what keeps a button's
+   boundary readable against it. The control attaches this sheet to each button after the shared
    button's own (controls/Button.css), so these single-class rules outrank the button's border color.
    A plate's border color shows only where a border is drawn: the opaque variant below. */
 .inspector-notice-plate-warning {
@@ -60,6 +62,10 @@
 }
 
 .inspector-notice-action-warning {
+	border-color: var(--ui_color_warning_text);
+}
+
+.inspector-notice-dismiss-warning {
 	border-color: var(--ui_color_warning_text);
 }
 
@@ -76,6 +82,10 @@
 	border-color: var(--ui_color_text_dim);
 }
 
+.inspector-notice-dismiss-information {
+	border-color: var(--ui_color_text_dim);
+}
+
 .inspector-notice-plate-error {
 	background-color: var(--ui_color_error_background);
 	border-color: var(--ui_color_error_text);
@@ -86,6 +96,10 @@
 }
 
 .inspector-notice-action-error {
+	border-color: var(--ui_color_error_text);
+}
+
+.inspector-notice-dismiss-error {
 	border-color: var(--ui_color_error_text);
 }
 

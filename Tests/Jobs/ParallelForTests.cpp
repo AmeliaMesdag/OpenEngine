@@ -6,7 +6,10 @@
 // forks publish no Normal work, back-to-back forks on a busy pool keep the
 // helpers they leave queued bounded in each lane and get their helper budget
 // back as the helpers start, and forks take no heap allocation once the pool
-// exists.
+// exists. The chunked overload stops, returns and rethrows like the unit form
+// on the parallel and the inline path, calls a void body with no Stop directly
+// on the inline path, and allocates nothing on the calling thread on its
+// default path.
 
 #include "HeldSlabFreelist.h"
 #include "HeldWorkers.h"
@@ -14,6 +17,7 @@
 #include "JobSystem/ParallelAlgorithms.h"
 #include "JobSystem/TaskSlabPool.h"
 #include "JobSystem/WorkStealingThreadPool.h"
+#include "Memory/AllocationCountScope.h"
 
 #include <gtest/gtest.h>
 
@@ -26,6 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace JobSystem;
@@ -788,6 +793,251 @@ TEST(ParallelFor, ARefusedAdmissionLeavesTheUnitsToTheCaller)
             return true;
         }, options));
     EXPECT_EQ(offCaller.load(), 0u);
+}
+
+#if GE_DEBUG_INSTRUMENTATION
+// Five chunks on three parties: the caller and two helpers each hold their first chunk until all three are in one.
+// The caller then stops the run (its Stop or its chunk's false) and the helpers hold until the caller parks on them.
+// At the stop two chunks are left and no claim is open, so a chunk that starts later starts after the stop.
+struct StoppedChunkedRun
+{
+    static constexpr size_t kParties = 3;
+    static constexpr size_t kCount = 10;
+    static constexpr size_t kMinBatchSize = 2;
+
+    WorkStealingThreadPool Pool{4};
+    const std::thread::id Caller = std::this_thread::get_id();
+    const uint64_t ParksBefore = WorkStealingThreadPool::GetClaimCallerParksForTests();
+    std::atomic<size_t> Entered{0};
+    std::atomic<size_t> StartedAfterStop{0};
+
+    bool Chunk(bool callerResult)
+    {
+        if (Entered.fetch_add(1) >= kParties)
+        {
+            StartedAfterStop.fetch_add(1);
+            return true;
+        }
+        EXPECT_TRUE(WaitUntil([this] { return Entered.load() >= kParties; }, std::chrono::seconds(10)))
+            << "the caller and both helpers did not each start a chunk";
+        if (std::this_thread::get_id() == Caller)
+            return callerResult;
+        EXPECT_TRUE(WaitUntil([this] { return WorkStealingThreadPool::GetClaimCallerParksForTests() != ParksBefore; },
+                              std::chrono::seconds(10)))
+            << "the caller did not close the run and park on the helpers";
+        return true;
+    }
+};
+
+TEST(ParallelFor, AStoppedChunkedRunStartsNoChunkAfterItsStop)
+{
+    for (const bool byStop : {true, false})
+    {
+        StoppedChunkedRun run;
+        int polls = 0;
+        // The caller polls before its first claim and again after its chunk.
+        const std::function<bool()> stop = [&polls] { return ++polls >= 2; };
+        ParallelForOptions options;
+        options.Helpers = StoppedChunkedRun::kParties - 1;
+        if (byStop)
+            options.Stop = &stop;
+        const bool finished = ParallelFor(
+            &run.Pool, StoppedChunkedRun::kCount, [&run, byStop](size_t, size_t) { return run.Chunk(byStop); },
+            StoppedChunkedRun::kMinBatchSize, options);
+        const char* source = byStop ? "Stop" : "the caller's chunk returning false";
+        EXPECT_FALSE(finished) << source;
+        EXPECT_EQ(run.StartedAfterStop.load(), 0u) << "a chunk started after " << source << " stopped the run";
+        EXPECT_EQ(run.Entered.load(), StoppedChunkedRun::kParties) << source;
+    }
+}
+#else
+TEST(ParallelFor, AStoppedChunkedRunStartsNoChunkAfterItsStop)
+{
+    GTEST_SKIP() << "needs the Debug-only caller park count (GE_DEBUG_INSTRUMENTATION)";
+}
+#endif
+
+// The result is the unit form's for each way a run ends: true when nothing stopped it, false for a chunk's false
+// (the last chunk's included, with nothing left to skip) and for Stop. A throwing Stop is rethrown.
+TEST(ParallelFor, AChunkedRunReturnsWhetherItWasStopped)
+{
+    WorkStealingThreadPool pool(4);
+    constexpr size_t kCount = 64;
+    constexpr size_t kMinBatchSize = 8;
+    std::atomic<size_t> covered{0};
+    EXPECT_TRUE(ParallelFor(&pool, kCount, [&covered](size_t begin, size_t end) { covered.fetch_add(end - begin); },
+                            kMinBatchSize));
+    EXPECT_EQ(covered.load(), kCount);
+    EXPECT_TRUE(ParallelFor(&pool, kCount, [](size_t, size_t) { return true; }, kMinBatchSize));
+
+    const std::function<bool()> never = [] { return false; };
+    ParallelForOptions neverStops;
+    neverStops.Stop = &never;
+    EXPECT_TRUE(ParallelFor(&pool, kCount, [](size_t, size_t) {}, kMinBatchSize, neverStops));
+
+    EXPECT_FALSE(ParallelFor(&pool, kCount, [](size_t, size_t end) { return end != kCount; }, kMinBatchSize))
+        << "the last chunk's false";
+
+    const std::function<bool()> always = [] { return true; };
+    ParallelForOptions stops;
+    stops.Stop = &always;
+    EXPECT_FALSE(ParallelFor(&pool, kCount, [](size_t, size_t) {}, kMinBatchSize, stops));
+
+    const std::function<bool()> throwing = []() -> bool { throw std::runtime_error("stop threw"); };
+    ParallelForOptions throws;
+    throws.Stop = &throwing;
+    EXPECT_THROW(ParallelFor(&pool, kCount, [](size_t, size_t) {}, kMinBatchSize, throws), std::runtime_error);
+}
+
+// Helpers caps the helpers, not the chunks: with no helper the caller runs every chunk of the default plan.
+TEST(ParallelFor, AChunkedRunWithNoHelperKeepsItsChunks)
+{
+    WorkStealingThreadPool pool(4);
+    constexpr size_t kCount = 64;
+    constexpr size_t kMinBatchSize = 8;
+    const std::thread::id caller = std::this_thread::get_id();
+    std::atomic<size_t> chunks{0};
+    std::atomic<size_t> offCaller{0};
+    const auto countChunk = [&chunks, &offCaller, caller](size_t, size_t) {
+        chunks.fetch_add(1);
+        if (std::this_thread::get_id() != caller)
+            offCaller.fetch_add(1);
+    };
+    ParallelForOptions noHelper;
+    noHelper.Helpers = 0;
+    EXPECT_TRUE(ParallelFor(&pool, kCount, countChunk, kMinBatchSize, noHelper));
+    // min(workers + 1, ceil(count / minBatchSize), 64) chunks, as with the default Helpers.
+    EXPECT_EQ(chunks.load(), pool.GetWorkerCount() + 1);
+    EXPECT_EQ(offCaller.load(), 0u);
+}
+
+// With no pool, or a range at or under its batch size, the range is one chunk
+// on the caller under the same rules: Stop is polled before it, and its false
+// is the result.
+TEST(ParallelFor, AnInlineChunkedRunStopsToo)
+{
+    WorkStealingThreadPool pool(4);
+    constexpr size_t kMinBatchSize = 16;
+    const std::function<bool()> always = [] { return true; };
+    ParallelForOptions stops;
+    stops.Stop = &always;
+    struct InlineRun
+    {
+        WorkStealingThreadPool* Pool;
+        size_t Count;
+        const char* Name;
+    };
+    const InlineRun runs[] = {{nullptr, 4 * kMinBatchSize, "no pool"}, {&pool, kMinBatchSize, "at the batch size"}};
+    for (const InlineRun& run : runs)
+    {
+        size_t chunks = 0;
+        EXPECT_FALSE(ParallelFor(run.Pool, run.Count, [&chunks](size_t, size_t) { ++chunks; }, kMinBatchSize, stops))
+            << run.Name;
+        EXPECT_EQ(chunks, 0u) << run.Name << ": the chunk ran although Stop returned true";
+
+        std::vector<std::pair<size_t, size_t>> ran;
+        EXPECT_FALSE(ParallelFor(
+            run.Pool, run.Count,
+            [&ran](size_t begin, size_t end) {
+                ran.emplace_back(begin, end);
+                return false;
+            },
+            kMinBatchSize))
+            << run.Name;
+        EXPECT_EQ(ran, (std::vector<std::pair<size_t, size_t>>{{0, run.Count}})) << run.Name;
+
+        EXPECT_TRUE(ParallelFor(run.Pool, run.Count, [](size_t, size_t) { return true; }, kMinBatchSize)) << run.Name;
+    }
+}
+
+// A void body with no Stop runs its inline range as a direct call, outside a job body.
+// A bool body, or a call with a Stop, runs the range as one unit of the unit form.
+TEST(ParallelFor, AnInlineVoidChunkedRunIsADirectCall)
+{
+    WorkStealingThreadPool pool(4);
+    constexpr size_t kMinBatchSize = 16;
+    const std::function<bool()> never = [] { return false; };
+    ParallelForOptions neverStops;
+    neverStops.Stop = &never;
+    WorkStealingThreadPool* const pools[] = {nullptr, &pool};
+    for (WorkStealingThreadPool* runPool : pools)
+    {
+        const char* name = runPool == nullptr ? "no pool" : "at the batch size";
+        bool inJob = true;
+        const auto voidBody = [&inJob](size_t, size_t) { inJob = WorkStealingThreadPool::IsExecutingJob(); };
+        EXPECT_TRUE(ParallelFor(runPool, kMinBatchSize, voidBody, kMinBatchSize)) << name;
+        EXPECT_FALSE(inJob) << name << ": a void body with no Stop ran inside a job body";
+
+        inJob = false;
+        EXPECT_TRUE(ParallelFor(runPool, kMinBatchSize, voidBody, kMinBatchSize, neverStops)) << name;
+        EXPECT_TRUE(inJob) << name << ": a void body with a Stop ran outside a job body";
+
+        inJob = false;
+        EXPECT_TRUE(ParallelFor(
+            runPool, kMinBatchSize,
+            [&inJob](size_t, size_t) {
+                inJob = WorkStealingThreadPool::IsExecutingJob();
+                return true;
+            },
+            kMinBatchSize))
+            << name;
+        EXPECT_TRUE(inJob) << name << ": a bool body ran outside a job body";
+    }
+}
+
+// A chunk's throw, from a void or a bool body, reaches the caller on the
+// parallel path and on both inline paths.
+TEST(ParallelFor, AChunkedRunRethrowsAChunksThrowOnEveryPath)
+{
+    WorkStealingThreadPool pool(4);
+    constexpr size_t kParallelCount = 64;
+    constexpr size_t kMinBatchSize = 8;
+    const auto throwsVoid = [](size_t begin, size_t) {
+        if (begin == 0)
+            throw std::runtime_error("chunk zero threw");
+    };
+    const auto throwsBool = [](size_t begin, size_t) {
+        if (begin == 0)
+            throw std::runtime_error("chunk zero threw");
+        return true;
+    };
+    EXPECT_THROW(ParallelFor(&pool, kParallelCount, throwsVoid, kMinBatchSize), std::runtime_error);
+    EXPECT_THROW(ParallelFor(&pool, kParallelCount, throwsBool, kMinBatchSize), std::runtime_error);
+    EXPECT_THROW(ParallelFor(&pool, kMinBatchSize, throwsVoid, kMinBatchSize), std::runtime_error);
+    EXPECT_THROW(ParallelFor(&pool, kMinBatchSize, throwsBool, kMinBatchSize), std::runtime_error);
+    EXPECT_THROW(ParallelFor(nullptr, kParallelCount, throwsVoid, kMinBatchSize), std::runtime_error);
+    EXPECT_THROW(ParallelFor(nullptr, kParallelCount, throwsBool, kMinBatchSize), std::runtime_error);
+}
+
+// The default path (a void body, no options) makes no heap allocation per
+// call on the calling thread, inline or in parallel. A worker allocates once,
+// on its first slab release, so the window counts this thread only.
+TEST(ParallelFor, TheChunkedDefaultPathAllocatesNothing)
+{
+    WorkStealingThreadPool pool(4);
+    constexpr size_t kMinBatchSize = 64;
+    constexpr size_t kParallelCount = 16 * kMinBatchSize;
+    constexpr size_t kWarmupCalls = 16;
+    constexpr size_t kCalls = 1000;
+    std::atomic<size_t> covered{0};
+    const auto cover = [&covered](size_t begin, size_t end) { covered.fetch_add(end - begin); };
+    const auto callEveryPath = [&pool, &cover] {
+        ParallelFor(&pool, kParallelCount, cover, kMinBatchSize);
+        ParallelFor(&pool, kMinBatchSize, cover, kMinBatchSize);
+        ParallelFor(nullptr, kParallelCount, cover, kMinBatchSize);
+    };
+    for (size_t call = 0; call < kWarmupCalls; ++call)
+        callEveryPath();
+
+    uint64_t allocations = 0;
+    {
+        const Memory::AllocationCountScope scope(Memory::CountWindow::ThisThread);
+        for (size_t call = 0; call < kCalls; ++call)
+            callEveryPath();
+        allocations = scope.Count();
+    }
+    EXPECT_EQ(covered.load(), (kWarmupCalls + kCalls) * (2 * kParallelCount + kMinBatchSize));
+    EXPECT_EQ(allocations, 0u);
 }
 
 } // namespace

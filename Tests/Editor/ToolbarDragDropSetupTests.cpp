@@ -253,7 +253,7 @@ DisplayMode IndicatorDisplay(UIElement* root)
     UIElement* indicator = root->FindById("toolbar-insertion-indicator"_sid);
     if (!indicator)
         return DisplayMode::None;
-    return indicator->Overrides().Get(GameEngine::Style::Display).value_or(DisplayMode::None);
+    return indicator->Style().Get(GameEngine::Style::Display).value_or(DisplayMode::None);
 }
 } // namespace
 

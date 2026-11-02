@@ -156,4 +156,27 @@ export const tools: ToolDef[] = [
         .describe("Number of consecutive frames to capture, starting at the next present (default 1, max 60)."),
     },
   }),
+
+  proxyTool({
+    name: "start_frame_recording",
+    category: "capture",
+    description: "Start writing the frames of the Scene View (or the whole editor window) to a new folder as numbered PNG or raw RGBA8 files, for a video of live interaction. Returns the folder. The frames come from the render graph's readback, not the screen. While a recording runs, each frame it takes costs one GPU encode of the target to RGBA8 and its readback, the window composite every frame, and one write on a background job worker (a PNG compress, or a raw byte write that is faster and larger on disk); frames that the readback ring or the encode queue cannot take are dropped, counted, and named in the log once per second. Call stop_frame_recording to end it and get the counts. The recording also ends by itself at maxFrames.",
+    schema: {
+      target: z.enum(["viewport", "window"]).optional()
+        .describe("What to record: 'viewport' (the Scene View's rendered image, default) or 'window' (the full editor, UI included)."),
+      format: z.enum(["png", "raw"]).optional()
+        .describe("'png' (default) or 'raw': the RGBA8 bytes with no header, row 0 first, named frame_NNNNNN.rgba; each frames.csv row gives its file's width and height. Use raw when the stop reply's encodeMsMean shows PNG cannot keep the frame rate."),
+      maxFrames: z.coerce.number().int().min(1).max(36000).optional()
+        .describe("Frames taken after which the recording ends by itself (default 3600: 120 s at the default frame rate). The recording lasts maxFrames / frameRate seconds."),
+      frameRate: z.coerce.number().min(0).max(240).optional()
+        .describe("Frames per second (default 30). The recording takes the first presented frame at or after each tick of a clock at that rate, so the frames are evenly spaced; the frames between ticks are counted as skipped, not dropped. A higher rate gives a smoother sequence and costs one encode and one file write per added frame. 0 takes every presented frame."),
+    },
+  }),
+
+  proxyTool({
+    name: "stop_frame_recording",
+    category: "capture",
+    description: "Stop the frame recording, wait for the frames in flight to finish writing, and write frames.csv in the recording folder: one row per written frame with its index, render-graph frame index, ms since the start, ms since the previous row, width, height and file name. Returns the folder, the listing path, the format, the width and height of the last frame, the presented, written, skipped, dropped and failed counts, the presented and written frame rates, and the mean and longest encode time in ms. If the recording already ended at maxFrames, returns that recording's counts.",
+    schema: {},
+  }),
 ];

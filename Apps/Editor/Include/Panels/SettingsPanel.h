@@ -536,7 +536,6 @@ private:
     // Smart Folder icon tint (special blue folder icons in hierarchy)
     UIElement* m_UISmartFolderIconTintSwatch = nullptr;
     uint32_t m_UISmartFolderIconTint = 0xFF6BA4F8; // default blue tint used in smartfolders.css
-    // Tooltip arrow color swatch
     // Scene View selection highlight color swatches.
     UIElement* m_SelectionBoxColorSwatch = nullptr;
     uint32_t m_SelectionBoxColor = 0x80FFFFFFu;

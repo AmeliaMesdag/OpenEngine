@@ -762,7 +762,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
         if (!vp)
             continue;
         const bool active = (i == static_cast<size_t>(m_ActiveViewportSlot));
-        auto& style = vp->Overrides();
+        auto& style = vp->Style();
         if (active)
             vp->AddClass("active-viewport");
         else
@@ -834,7 +834,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
             handle->RemoveClass("hidden");
             const float leftPx = handleLeftPx(splitX);
             const float splitPx = std::clamp(splitX * hostW, 0.0f, hostW);
-            auto& style = handle->Overrides();
+            auto& style = handle->Style();
             style.Set(Style::Position, PositionType::Absolute)
                  .Set(Style::PositionLeft, StyleLength::Px(leftPx))
                  .Set(Style::PositionTop, StyleLength::Px(topY * hostH))
@@ -843,7 +843,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
             if (UIElement* line = handle->FindById(HashStringId(lineId)))
             {
                 const float lineLeftPx = std::clamp(splitPx - leftPx, 0.0f, kSplitHandleHitPx - kSplitLinePx);
-                line->Overrides()
+                line->Style()
                     .Set(Style::Position, PositionType::Absolute)
                     .Set(Style::PositionLeft, StyleLength::Px(lineLeftPx))
                     .Set(Style::PositionTop, StyleLength::Px(0.0f))
@@ -865,7 +865,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
             handle->RemoveClass("hidden");
             const float topPx = handleTopPx(m_QuadSplitY);
             const float splitPx = std::clamp(m_QuadSplitY * hostH, 0.0f, hostH);
-            auto& style = handle->Overrides();
+            auto& style = handle->Style();
             style.Set(Style::Position, PositionType::Absolute)
                  .Set(Style::PositionLeft, StyleLength::Px(0.0f))
                  .Set(Style::PositionTop, StyleLength::Px(topPx))
@@ -874,7 +874,7 @@ void SceneViewPanel::ApplyQuadViewLayout()
             if (UIElement* line = handle->FindById("SceneViewQuadSplitHorizontalLine"_sid))
             {
                 const float lineTopPx = std::clamp(splitPx - topPx, 0.0f, kSplitHandleHitPx - kSplitLinePx);
-                line->Overrides()
+                line->Style()
                     .Set(Style::Position, PositionType::Absolute)
                     .Set(Style::PositionLeft, StyleLength::Px(0.0f))
                     .Set(Style::PositionTop, StyleLength::Px(lineTopPx))

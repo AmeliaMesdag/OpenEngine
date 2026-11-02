@@ -6,6 +6,7 @@
 // indexed-indirect forward draw from this feature each frame. Lazily initialized on
 // the render thread (first DeclareForView), mirroring OceanRenderFeature.
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -176,6 +177,9 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
         m_ActivityReadback.OnFrameStreamRetired(frame);
     }
     const CBTTerrain::CBTClassifyDesc& GetClassify() const { return m_Classify; }
+    // True when the kernels run the planar off-frustum keep step: a planar domain, the screen-space metric and
+    // demand tuning on. The keep step, its floor and the rest phase mean nothing otherwise.
+    bool RunsOffFrustumKeepStep() const;
     const DomainConfig& GetDomainConfig() const { return m_DomainConfig; }
     float GetTargetPixelError() const { return m_TargetPixelError; }
     // The split threshold (render pixels) and the render height BuildFrameParams applied on its last
@@ -204,6 +208,11 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // (ConsumeTerrainRetire), a drawn-terrain switch (the last BuildFrameParams) or a lowered cap.
     // `frameCounter` is this frame's CBTInstance::AdvanceFrameCounter value. Logs one GE_CBT.Planet line per seed.
     void EnsureSeeded(uint32_t frameCounter);
+
+    // Refines a tree EnsureSeeded restarted in this frame to the shape this frame's camera settles
+    // it to, before its first draw (CBTInstance::RefineToView). Call after BuildFrameParams with its
+    // params. No-op on a frame without a restart.
+    void RefineRestartedTree(const CBTTerrain::CBTFrameParams& params, uint32_t frameCounter);
 
     // In-place re-provision safety. A SamplesPerMeter/size edit that preserves the runtime tiled
     // handle takes the DEBOUNCED re-provision path: ReleaseTerrainResources retires the old unified
@@ -243,6 +252,8 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     Rendering::TextureHandle GetBoundHeightmap() const { return m_BoundHeightmap; }
     // The page cache the full-profile draw binds as gPageCache this frame, or an invalid handle (the flat default).
     Rendering::TextureHandle GetDrawPageCache() const { return m_DrawPageCache; }
+    // The surface plane caches the surface reads this frame (invalid: a plane it does not read).
+    const std::array<Rendering::TextureHandle, 4>& GetDrawSurfacePlanes() const { return m_DrawSurfacePlanes; }
     // The terrain's shadow source set by the most recent BuildFrameParams (no height texture when
     // none is bound or the terrain is atlas-backed), and the bake that turns it into the map.
     const TerrainShadowSource& GetTerrainShadowSource() const { return m_TerrainShadowSource; }
@@ -326,10 +337,14 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     void ApplyHeightChain(const TerrainECS::TerrainInstanceInfo& terrain, const Rendering::CameraData& camera,
                           uint32_t frameIndex, CBTTerrain::CBTFrameParams& out);
     // The height page cache the update samples for terrain `terrainIndex` when its height is paged
-    // (TerrainHeightPageFeature latched its page table and created the cache) and these kernels
+    // (TerrainPageFeature latched its page table and created the cache) and these kernels
     // read pages (the wide arm); invalid otherwise. Its page-table words go to `words`.
     Rendering::TextureHandle PagedHeightSource(uint32_t terrainIndex, std::span<const uint32_t>& words,
                                                uint64_t& version) const;
+    // The CBTTerrain::kCBTSurfacePlane* bits of terrain `terrainIndex`'s paged surface, its committed
+    // surface words in `words`, and each plane's cache texture in m_DrawSurfacePlanes; 0 when its surface
+    // is not paged or has no splat or no normal plane.
+    uint32_t PagedSurfacePlanes(uint32_t terrainIndex, std::span<const uint32_t>& words, uint64_t& version);
     // Logs "Terrain pages: the CBT draws terrain <index> (generation <g>) from its pages|texture
     // from frame <frameIndex>" when the committed source differs from the last one logged.
     void LogCommittedHeightSource(uint32_t terrainIndex, uint32_t generation, bool paged, uint32_t frameIndex);
@@ -356,6 +371,11 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // to index), or the full profile's normal chain and page cache.
     std::vector<Engine::Renderer::DrawBindings::TextureEntry> m_DrawTextures;
     Rendering::TextureHandle m_DrawPageCache; // the page cache the update samples this frame, if any
+    // The paged surface the fragment reads this frame: the first word of its table in the page-table slot,
+    // its plane bits (0: the surface textures) and each plane's cache texture, in kSurfacePlanes order.
+    uint32_t m_DrawSurfacePageBase = 0u;
+    uint32_t m_DrawSurfacePlaneBits = 0u;
+    std::array<Rendering::TextureHandle, 4> m_DrawSurfacePlanes{};
     CBTTerrain::CBTClassifyDesc m_Classify{};
     // Planet-editing sculpt upload gate (v2): the authoritative paged sculpt store lives in
     // TerrainService (dab + baked modifier stack, shared across modules); the feature only uploads
@@ -374,6 +394,7 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     uint32_t m_LoggedDebugView = 0u;      // last-logged value for the one-shot toggle signal
     DomainConfig m_DomainConfig{};       // desired domain + planet tuning (from Terrain)
     CBTTreeSeed m_TreeSeed; // what the instance's tree was seeded for (domain, cap, retire)
+    bool m_RestartedTreeUnrefined = false; // EnsureSeeded restarted the tree; RefineRestartedTree is due
     // Last terrain-texture retire generation consumed (see ConsumeTerrainRetire). Synced to the
     // terrain feature's live value on first sight so a re-provision that happened before CBT went
     // active does not trigger a spurious full-ring rebind; thereafter a bump drives one refresh.
@@ -394,10 +415,9 @@ class CBTRenderFeature final : public Engine::Renderer::IRenderFeature
     // terrain's; the version gate alone would then skip the row upload and the new terrain would
     // resolve through the old terrain's rows. A texture change resets the slot's uploaded version.
     Rendering::TextureHandle m_AtlasBoundTexture[CBTTerrain::kCBTFrameParamsRing] = {};
-    // The paged height resolve's page-table upload gate per ring slot, as the atlas rows' above: the
-    // terrain whose words each slot holds and their version (a terrain change re-uploads).
-    uint64_t m_PageUploadedTableVersion[CBTTerrain::kCBTFrameParamsRing] = {};
-    uint32_t m_PageBoundTerrain[CBTTerrain::kCBTFrameParamsRing] = {};
+    // Where each frame's page tables sit in TerrainPageFeature's ring (bytes), for the fragment's binding.
+    uint64_t m_PageRingOffset[CBTTerrain::kCBTFrameParamsRing] = {};
+    uint64_t m_PageRingBytes[CBTTerrain::kCBTFrameParamsRing] = {};
     // The terrain BuildFrameParams last bound (its render handle index), for TerrainSourceChanged
     // and for ConsumeTerrainRetire's restart decision; m_HasBoundTerrain is false while no terrain
     // is bound (index 0 is a valid handle index).

@@ -9,18 +9,24 @@
 #include <vector>
 
 namespace GameEngine::ECS { class World; }
+namespace GameEngine::Components
+{
+struct SplinePaving;
+struct SplineNetworkMember;
+enum class TerrainVolumeShape : uint8;
+}
 
 namespace GameEngine::SplineRecipes
 {
 class RecipeEditJournal;
 
-// Keeps the terrain effects under a generated run in step with what the run's
-// recipe SAYS about the ground (Components::SplineGroundAuthority).
+// Keeps the terrain effects under a generated run or a paved area in step with
+// the recipe's ground authority (Components::SplineGroundAuthority).
 //
-// A road that grades the ground needs a spline volume with the Spline Path
-// shape, a flatten with the Average blend, a ground claim, and a priority below
-// every pool the claim holds back. The recipe says it is a road; this
-// controller adds those components.
+// A road that owns the ground gets a Spline Path volume, an Average flatten, a ground
+// claim, a grass clear and a Dirt paint. A paved area that owns its ground gets the
+// same pieces on a Spline Area volume; PavingApproachGround copies them out over its
+// approaches.
 //
 // OWNERSHIP, stated because it is the only surprising part: the recipe owns the
 // pieces IT CREATED — recorded per piece on the entity's SplineGroundProvisioned
@@ -52,14 +58,15 @@ class SplineGroundAuthorityController
 {
 public:
     // Provisions, updates or removes the terrain effects for every
-    // (SplineComponent, SplineExtrude) entity whose resolved authority changed.
+    // (SplineComponent, SplineExtrude) entity and every SplinePaving on an Area
+    // network member whose resolved authority changed.
     // Idempotent: an unchanged scene writes no component and stamps no column,
     // which matters because a write here would wake the terrain modifier system's
     // change gate and re-bake the region every frame.
     //
-    // `journal` receives the destructive transitions (recipe-created cleanup);
-    // null applies them with no journal but never skips the ledger, so a
-    // process with no editor still gets provenance-scoped removal.
+    // `journal` records what each sweep adds, rewrites or removes. With a null
+    // journal the sweep still writes the SplineGroundProvisioned marker, so a process with no editor
+    // still removes only the pieces that the recipe made.
     void Update(ECS::World& world, RecipeEditJournal* journal);
 
     // Forgets every per-entity record. The records are scoped to the open scene:
@@ -79,18 +86,25 @@ private:
         Components::SplineGroundAuthority Authority = Components::SplineGroundAuthority::None;
         uint64 SeenGeneration = 0;
     };
-    // A recipe whose ground authority changed. The sweep collects these first and applies them
-    // after the query: a component add or remove moves the entity to another archetype.
+    // A recipe's resolved ground authority. The sweep collects the changed ones first and applies
+    // them after the query: a component add or remove moves the entity to another archetype.
     struct Pending
     {
         ECS::EntityHandle Entity;
         Components::SplineGroundAuthority Authority;
-        Components::SplineExtrude Recipe;
+        // Spline Path for a run, Spline Area for a paved area.
+        Components::TerrainVolumeShape Shape;
+        // An extrude on Auto that is a fixed-width Bevel: it grades like a path.
+        bool FixedWidthBevelOnAuto = false;
     };
 
-    // Records the authority of one recipe, and adds it to `pending` when the authority changed.
-    void SweepRecipe(ECS::World& world, ECS::EntityHandle entity, const Components::SplineExtrude& recipe,
-                     std::vector<Pending>& pending);
+    // Records the authority of one recipe, and adds `recipe` to `pending` when the authority changed.
+    void SweepRecipe(ECS::World& world, const Pending& recipe, std::vector<Pending>& pending);
+    // Sweeps an extrude's run, and a paving on an Area network member.
+    void SweepExtrude(ECS::World& world, ECS::EntityHandle entity, const Components::SplineExtrude& recipe,
+                      std::vector<Pending>& pending);
+    void SweepPaving(ECS::World& world, ECS::EntityHandle entity, const Components::SplinePaving& paving,
+                     const Components::SplineNetworkMember& member, std::vector<Pending>& pending);
 
     FlatMap<ECS::EntityHandle, Provisioned> m_Provisioned;
     uint64 m_SweepGeneration = 0;

@@ -16,10 +16,6 @@ namespace
 constexpr StringId kEmissiveColorName = HashStringId("emissive");
 constexpr StringId kEmissionLuminanceName = HashStringId("emissionLuminance");
 
-// Sentinel for Material::GetGpuSceneMaterialIndex on a material with no SSBO
-// row (Material::kInvalidSSBOIndex, which is private).
-constexpr uint32_t kUnassignedMaterialSlot = 0xFFFFFFFFu;
-
 }  // namespace
 
 void DDGIEmitterMaterials::Refresh(const MaterialSystem& materials)
@@ -36,7 +32,7 @@ void DDGIEmitterMaterials::Refresh(const MaterialSystem& materials)
         [this](const GUID&, const Material& material)
         {
             const uint32_t slotIndex = material.GetGpuSceneMaterialIndex();
-            if (slotIndex == kUnassignedMaterialSlot)
+            if (slotIndex == Material::kInvalidSSBOIndex)
                 return;
             // Material::GetVector fills raw lanes; the tint is a scene-linear color.
             Mathematics::Vector3 tintLanes(0.0f, 0.0f, 0.0f);

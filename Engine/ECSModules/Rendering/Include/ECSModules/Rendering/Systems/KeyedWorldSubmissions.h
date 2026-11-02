@@ -38,8 +38,13 @@ class KeyedWorldSubmissions
 
     std::size_t Size() const { return m_Records.size(); }
 
+    /// Names the records as they are now. A call after an edit gives a new value, a call without
+    /// one gives the same value, and no other set ever gives that value. Never 0.
+    uint64 Revision();
+
   private:
     std::vector<WorldSubmissionRecord> m_Records;
+    uint64 m_Revision = 0; // 0: edited since the last Revision call
     std::vector<uint32> m_RecordCount; // per instance index: the records it holds
     std::vector<uint8> m_Erasing;      // per instance index: marked by the Erase in progress
 };

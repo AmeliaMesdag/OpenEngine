@@ -41,7 +41,8 @@ GE_VP_VEC4(ge_taaJitter)     // 448 xy=current, zw=previous frame sub-pixel NDC 
                              //     zw to land on the previous frame's actual raster grid.
 GE_VP_VEC4(ge_exposureParams) // 464 the exposure the tonemap applies to this view: x = the
                              //     Fixed/Manual/Physical linear scale, y = 1 while auto exposure
-                             //     meters the view (the metered scale is then in ExposureHistory).
-                             //     zw reserved. GE_ViewExposureScale (view_exposure.glsl) resolves it.
+                             //     meters the view (the metered scale is then in ExposureHistory),
+                             //     z = the tonemap's look (tonemap.frag's look values, 3 = no look).
+                             //     w reserved. GE_ViewExposureScale (view_exposure.glsl) resolves xy.
 #endif
 #endif

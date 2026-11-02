@@ -181,14 +181,13 @@ class SceneViewController
     // built from. The pair is captured in one assignment, so a reader can never
     // combine this frame's matrix with the next frame's size across a resize.
     // Returns false until the first frame has been recorded.
-    bool GetLastFrameProjection(float outProj[16],
+    bool GetLastFrameProjection(Mathematics::Matrix4x4& outProj,
                                 std::uint32_t& outViewportWidthPx,
                                 std::uint32_t& outViewportHeightPx) const
     {
         if (!m_HasFrameCameraData)
             return false;
-        for (int i = 0; i < 16; ++i)
-            outProj[i] = m_FrameCameraData.proj[i];
+        outProj = m_FrameCameraData.proj;
         outViewportWidthPx = m_FrameCameraViewportW;
         outViewportHeightPx = m_FrameCameraViewportH;
         return true;
@@ -525,6 +524,9 @@ class SceneViewController
     void HandleHoverDetection(const Editor::SceneTools::ScenePointerEvent& event);
 
     ECS::EntityHandle GetHoveredEntity() const { return m_HoveredEntity; }
+    /// The text of the overlay under the pointer (a junction marker), for the hover pill; empty
+    /// for none or while the gizmos are hidden.
+    const std::string& GetOverlayHoverText() const;
     bool IsHoverNamePillSuppressedBySource() const { return m_SuppressHoverNamePill; }
 
     // Depth position of the current pick within the candidates under the

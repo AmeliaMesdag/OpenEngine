@@ -421,13 +421,15 @@ struct CBTSurfaceParamsData
     CBTSphereAnalyticFlatten SphereAnalytic[CBT_MAX_SPHERE_ANALYTIC];
     // The planet's height pages (mirror the CBTSurfaceParams tail, cbt_planet_page.glsl): per cube face
     // the anchor (x, y its texels, z, w the bits of its fractions), the eye planet-local and relative to
-    // the render origin, and PlanetPaged 1 when the fragment shades from the pages.
+    // the render origin, and PlanetPaged 1 when the fragment shades from the pages. A planar terrain whose
+    // surface is paged: the first word of its surface table in gPageTable, and a bit per plane it has
+    // (CBT_SURF_PLANE_*); 0 reads the surface textures.
     ivec4 PageAnchors[6];
     vec4 PageEye;
     vec4 PageEyeRelative;
     uint PlanetPaged;
-    uint PlanetPagePad0;
-    uint PlanetPagePad1;
+    uint SurfacePageBase;
+    uint SurfacePagedPlanes;
     uint PlanetPagePad2;
 };
 
@@ -489,66 +491,29 @@ layout(std430, set = 2, binding = 7) readonly buffer CBTAtlasRowsSurfBuffer
 #if !defined(GE_COMPAT_PROFILE)
 // The planet's height pages (cbt_page.glsl, cbt_planet_page.glsl), the compute's bindings 22 and 23 here
 // on set 2: gPageTable is offset-bound to this frame's ring slot, gPageCache is this frame's cache texture
-// (CBTRenderFeature). Read only when gCbtSurf.Params.PlanetPaged is 1.
+// (CBTRenderFeature). The slot holds the height table, then a paged planar terrain's surface table at
+// gCbtSurf.Params.SurfacePageBase.
 layout(std430, set = 2, binding = 22) readonly buffer CBTPageTableBuffer
 {
     uint Words[];
 } gPageTable;
 layout(set = 2, binding = 23) uniform sampler2D gPageCache;
-
-#include "cbt_page.glsl"
+// The surface plane caches, read by cbt_surface_pages.glsl. A plane the terrain does not have binds a
+// default texture and is not read.
+layout(set = 2, binding = 34) uniform sampler2D cbt_SurfaceSplat;
+layout(set = 2, binding = 35) uniform sampler2D cbt_SurfaceNormal;
+layout(set = 2, binding = 36) uniform sampler2D cbt_SurfaceGrass;
+layout(set = 2, binding = 37) uniform sampler2D cbt_SurfaceColor;
+#endif
+#include "cbt_surface_pages.glsl"
+#if !defined(GE_COMPAT_PROFILE)
 #include "cbt_planet_page.glsl"
-
-uint CBT_PageTableWord(uint index)
-{
-    return gPageTable.Words[CBT_PAGE_FADE_OFFSET + gPageTable.Words[4u] + index];
-}
-
-float CBT_PageSlotFade(uint slot)
-{
-    return uintBitsToFloat(gPageTable.Words[CBT_PAGE_FADE_OFFSET + slot]);
-}
-
-// The update's VertexEval counts the walks that find no page; the fragment reads the same table.
-void CBT_PageUnresolved()
-{
-}
-
-CBTPageLevel CBT_PageLevelShape(uint level)
-{
-    uint at = CBT_PAGE_HEADER_WORDS + 4u * level;
-    CBTPageLevel shape;
-    shape.FirstEntry = gPageTable.Words[at];
-    shape.PagesX = gPageTable.Words[at + 1u];
-    shape.PagesZ = gPageTable.Words[at + 2u];
-    shape.Pad = 0u;
-    return shape;
-}
-
-float CBT_PageCacheBilinear(float texelX, float texelZ)
-{
-    return textureLod(gPageCache, CBT_PageCacheUV(texelX, texelZ, vec2(textureSize(gPageCache, 0))), 0.0).r;
-}
-
-CBTPageField CBT_SurfPageField()
-{
-    CBTPageField field;
-    field.Level0SamplesX = gPageTable.Words[0];
-    field.Level0SamplesZ = gPageTable.Words[1];
-    field.LevelCount = gPageTable.Words[2];
-    field.SlotsPerRow = gPageTable.Words[3];
-    field.FloorLevel = gPageTable.Words[5];
-    field.TierCount = gPageTable.Words[6];
-    field.DirectoryOffset = gPageTable.Words[7];
-    field.Pad = 0u;
-    return field;
-}
 
 // The planet's paged height and gradient at a fragment whose pixel spans `pixelArc` radians: the level
 // of one level-0 texel of arc per pixel, so the central difference steps one pixel's footprint.
 CBTPlanetPageSurface CBT_SurfPlanetPages(SurfaceInput sIn, float pixelArc, CBTSurfaceParamsData sp)
 {
-    CBTPageField field = CBT_SurfPageField();
+    CBTPageField field = CBT_SurfPageField(0u);
     float texelArc = 1.5707963 / float(max(field.Level0SamplesX, 2u) - 1u);
     float lambda = log2(max(pixelArc / texelArc, 1.0));
     uint face = CBT_PlanetFaceOf(sIn.positionWS);
@@ -1116,6 +1081,8 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
     // unlike derivatives of the huge world position). 0 => no fade (the pre-slice full-variation look).
     float pixelFootprintWS = 0.0;
     const bool isSphere = sIn.custom0.w < -0.5;
+    // A paged planar surface at this fragment (one locate serves the normal, splat, grass and color).
+    CBTSurfacePages surfPages = CBT_SurfPagesNone();
 #if defined(GE_COMPAT_PROFILE)
     // BOTH footprints, before the branch. `isSphere` varies per fragment and a static uniformity
     // analysis cannot see through it, so a derivative taken inside either arm is non-uniform
@@ -1226,11 +1193,23 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
 #if defined(GE_COMPAT_PROFILE)
         pixelFootprintWS = planarFootprintWS;
 #else
-        pixelFootprintWS = length(fwidth(sIn.positionWS)); // planar posWS is not at planetary scale
+        pixelFootprintWS = CBT_SurfPixelFootprint(dFdx(sIn.positionWS), dFdy(sIn.positionWS));
 #endif
         uint normalmapIdx = uint(sIn.custom0.w);
         CBTSurfaceParamsData spN = gCbtSurf.Params;
-        if (CBT_HAS_NORMALMAP(tp, normalmapIdx))
+#if !defined(GE_COMPAT_PROFILE)
+        if (spN.SurfacePagedPlanes != 0u)
+            surfPages = CBT_SurfPagesAt(sIn.uv0, pixelFootprintWS, tp.WorldSizeX, tp.WorldSizeZ,
+                                        spN.SurfacePageBase, spN.SurfacePagedPlanes);
+#endif
+        if (surfPages.Resolved)
+        {
+            // The normal pyramid filters the far field, so the paged arm reads no normal chain.
+            vec2 nXZ = surfPages.NormalXZ;
+            float ny = sqrt(max(1.0 - dot(nXZ, nXZ), 0.0));
+            normalWS = normalize(vec3(nXZ.x, ny, nXZ.y));
+        }
+        else if (CBT_HAS_NORMALMAP(tp, normalmapIdx))
         {
             // Near the eye (weight 0) the level-0 map alone, read at its one mip: the same texels as the
             // implicit tap, and legal where the far branch skips it; far away the normal chain at the
@@ -1365,6 +1344,10 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
         // the true surface between vertices, so rock/snow/grass bands stay crisp on sculpted mesas.
         weights = CBT_PlanetSlopeAltitudeWeights(normalWS, dir, sphereAltitude, sp.ReliefAmplitude);
     }
+    else if (surfPages.Resolved)
+    {
+        weights = surfPages.Splat;
+    }
     else if (CBT_HAS_SPLATMAP(tp))
     {
         weights = CBT_SAMPLE_SPLATMAP(tp.SplatmapBindless, sIn.uv0);
@@ -1428,10 +1411,10 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
             tp.GrassCanopyOcclusion,
             GrassFieldCoverage(
                 GrassSplatCoverage(weights, min(tp.GrassLayerIndex, 3u), tp.GrassMaskThreshold,
-                                   !isSphere && (CBT_HAS_SPLATMAP(tp)
+                                   !isSphere && (surfPages.Resolved || CBT_HAS_SPLATMAP(tp)
                                                 || (gCbtSurf.Params.AtlasBacked != 0u
                                                     && CBT_HAS_ATLAS_MAP(gCbtSurf.Params.AtlasSplatBindless)))),
-                CBT_GrassRegionControls(tp, sIn.uv0)));
+                surfPages.Resolved ? surfPages.Grass : CBT_GrassRegionControls(tp, sIn.uv0)));
     }
 
     // The channel -> material indirection (SF2 telemetry seam): the splat carries four channel
@@ -1504,7 +1487,8 @@ SurfaceOutput EvaluateSurface(SurfaceInput sIn)
     // (grass_root_ground_color.glsl). A planet carries no map.
     if (!isSphere)
     {
-        baseColor = TerrainApplyColorMap(baseColor, CBT_ColorMapTap(tp, sIn.uv0));
+        vec4 colorMap = surfPages.Resolved ? surfPages.Color : CBT_ColorMapTap(tp, sIn.uv0);
+        baseColor = TerrainApplyColorMap(baseColor, colorMap);
     }
 
     // The canopy shade of the grass standing here, the same depth its blade roots take

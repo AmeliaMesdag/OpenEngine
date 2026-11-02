@@ -151,10 +151,12 @@ TEST(ScratchScopeTests, AScopeOpenAcrossAParticipatingWaitSurvivesTheInnerUnitsS
 {
     WorkStealingThreadPool pool(1);
     std::atomic<int> unitsOnTheBodysThread{0};
+    std::atomic<bool> bodyStarted{false};
     bool survived = false;
     JobCounter gate;
     pool.Run(
-        [&pool, &unitsOnTheBodysThread, &survived] {
+        [&pool, &unitsOnTheBodysThread, &bodyStarted, &survived] {
+            bodyStarted.store(true, std::memory_order_release);
             const std::thread::id body = std::this_thread::get_id();
             ScratchScope scratch;
             std::span<std::uint32_t> kept = scratch.AllocateArrayForOverwrite<std::uint32_t>(1024);
@@ -173,6 +175,10 @@ TEST(ScratchScopeTests, AScopeOpenAcrossAParticipatingWaitSurvivesTheInnerUnitsS
             survived = Holds(kept, 3) && scratch.Allocate(16) != nullptr;
         },
         gate);
+    // Not Wait yet: a waiting thread can run the body itself, and then the idle worker runs some
+    // of the units. The body must run on the worker, so that only its own Wait runs the units.
+    while (!bodyStarted.load(std::memory_order_acquire))
+        std::this_thread::yield();
     pool.Wait(gate);
     EXPECT_EQ(unitsOnTheBodysThread.load(), 8);
     EXPECT_TRUE(survived);

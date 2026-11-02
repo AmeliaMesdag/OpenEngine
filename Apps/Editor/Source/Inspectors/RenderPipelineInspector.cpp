@@ -611,7 +611,7 @@ static void NormalizeRenderPipelineFoldoutContent(Foldout* foldout)
         return;
     if (UIElement* content = foldout->GetContentContainer())
     {
-        content->Overrides()
+        content->Style()
             .Set(Style::Gap, StyleLength::Px(0.0f))
             .Set(Style::PaddingTop, StyleLength::Px(0.0f))
             .Set(Style::PaddingBottom, StyleLength::Px(0.0f));
@@ -640,7 +640,7 @@ static void NormalizeRenderPipelineInspectorRows(UIElement* root)
 
         if (el->HasClass("inspector-row"))
         {
-            el->Overrides()
+            el->Style()
                 .Set(Style::FlexWrap, false)
                 .Set(Style::AlignItems, AlignItems::Center);
 
@@ -652,7 +652,7 @@ static void NormalizeRenderPipelineInspectorRows(UIElement* root)
 
                 if (c->HasClass("inspector-label-cell") || c->HasClass("inspector-label"))
                 {
-                    c->Overrides()
+                    c->Style()
                         .Set(Style::FlexGrow, 0.0f)
                         .Set(Style::FlexShrink, 0.0f)
                         .Set(Style::FlexBasis, StyleLength::Percent(labelWidthPercent))
@@ -662,7 +662,7 @@ static void NormalizeRenderPipelineInspectorRows(UIElement* root)
                 }
                 else if (c->HasClass("inspector-field") || c->HasClass("settings-row-field"))
                 {
-                    c->Overrides()
+                    c->Style()
                         .Set(Style::FlexGrow, 1.0f)
                         .Set(Style::FlexShrink, 1.0f)
                         .Set(Style::FlexBasis, StyleLength::Px(0.0f))

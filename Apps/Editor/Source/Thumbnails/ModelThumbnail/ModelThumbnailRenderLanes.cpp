@@ -24,6 +24,7 @@
 namespace GameEngine
 {
 
+// GE_THUMBNAIL_CACHE_FOCUS_BEGIN
 size_t ModelThumbnailHandler::FindFocusedSlot(const WindowState& ws)
 {
     const auto slotFor = [](const std::unordered_map<GUID, size_t>& slotMap, const GUID& guid)
@@ -41,26 +42,20 @@ size_t ModelThumbnailHandler::FindFocusedSlot(const WindowState& ws)
         return slotFor(ws.guidToSlot, s_OrbitFocusGuid);
     return kMaxResidentSlots;
 }
+// GE_THUMBNAIL_CACHE_FOCUS_END
 
 void ModelThumbnailHandler::DispatchPreviewLane(WindowState& ws, RenderArm arm,
                                                 bool shouldAdvanceAngle)
 {
     RenderLane& lane = ws.lanes[kPreviewLane];
-    if (lane.inFlightSlot != kMaxResidentSlots)
+    if (!ws.previewView || !ws.previewView->IsAlive() || lane.inFlightSlot != kMaxResidentSlots)
         return;
     const size_t slotIdx = FindFocusedSlot(ws);
     if (slotIdx >= ws.slots.size())
         return;
     Slot& slot = ws.slots[slotIdx];
-    if (!slot.occupied || slot.inFlight)
+    if (!slot.occupied)
         return;
-    // One frame for the UI to drop its binding of the texture this render
-    // replaces, so the UI never samples it while this frame writes it.
-    if (slot.needsUiDetachBeforeRender)
-    {
-        slot.needsUiDetachBeforeRender = false;
-        return;
-    }
 
     // Material orbit re-renders wait until the material's async textures are
     // bound; a textureless re-render would clobber the eventually-bound frame.
@@ -87,11 +82,15 @@ void ModelThumbnailHandler::DispatchPreviewLane(WindowState& ws, RenderArm arm,
                    ThumbnailCachePolicy::IsSpawnSettling(slot.guid, lane.spawnedModelGuid,
                                                          lane.spawnedSettleFrames);
     }
-    if (slot.ready && !slot.needsOrbitRerender && !animates && !settling)
+    // A resized staging view renders again at its new size.
+    const Engine::Renderer::StagingView& view = *ws.previewView;
+    const bool shown = ws.previewShownSlot == slotIdx && ws.previewShownGuid == slot.guid &&
+                       view.OutputWidth() == view.RenderWidth() && view.OutputHeight() == view.RenderHeight();
+    if (shown && !slot.needsOrbitRerender && !animates && !settling)
         return;
 
     // RunAnimationClipManagement advances the clip only on orbit re-renders.
-    if (slot.ready && animates)
+    if (shown && animates)
         slot.needsOrbitRerender = true;
     DispatchSlotRender(ws, lane, arm, slot.guid, slotIdx);
 }
@@ -131,7 +130,8 @@ void ModelThumbnailHandler::DispatchSlotRender(WindowState& ws, RenderLane& lane
     if (!arm.frame)
         return;
     Slot& slot = ws.slots[slotIdx];
-    if (slot.inFlight)
+    // The preview lane writes the staging view, never the slot texture a queue lane may be writing.
+    if (slot.inFlight && !lane.isPreviewLane)
         return;
 
     // Ensure we have a device and GPUScene to back the world debug pipeline.
@@ -150,18 +150,25 @@ void ModelThumbnailHandler::DispatchSlotRender(WindowState& ws, RenderLane& lane
 
     // Slot target creation, deferred from acquisition (graph-free request
     // contract). Must precede the framing logic below — it reads texWidth.
-    DropBakedImage(ws, slot);
-    EnsureSlotDeviceTexture(slot, slotIdx);
+    if (!lane.isPreviewLane)
+    {
+        DropBakedImage(ws, slot);
+        EnsureSlotDeviceTexture(slot, slotIdx);
+    }
+    // The preview frames its content to the staging view's aspect; tiles are square.
+    const float previewAspect = lane.isPreviewLane
+        ? static_cast<float>(ws.previewView->RenderWidth()) / static_cast<float>(ws.previewView->RenderHeight())
+        : 1.0f;
 
     using GameEngine::Mathematics::Matrix4x4;
     using GameEngine::Mathematics::Vector3;
 
-    const bool isFocusedSlotForOrbit = slot.isMaterial
+    const bool isFocusedSlotForOrbit = lane.isPreviewLane && (slot.isMaterial
         ? (!s_MaterialOrbitFocusGuid.IsNull() && slot.guid == s_MaterialOrbitFocusGuid &&
            slot.previewIblEnabled == s_MaterialOrbitFocusIblEnabled)
         : slot.isLensFlare
             ? (!s_LensFlareFocusGuid.IsNull() && slot.guid == s_LensFlareFocusGuid)
-            : (!s_OrbitFocusGuid.IsNull() && slot.guid == s_OrbitFocusGuid);
+            : (!s_OrbitFocusGuid.IsNull() && slot.guid == s_OrbitFocusGuid));
     float orbitYaw = (slot.listStaticThumb || !isFocusedSlotForOrbit) ? 0.0f : s_OrbitAngleY;
 
     // ---- Lens-flare preview path ----
@@ -209,19 +216,11 @@ void ModelThumbnailHandler::DispatchSlotRender(WindowState& ws, RenderLane& lane
         // The preview camera has a vertical field of view, so a shape covers
         // the same fraction of the frame's height at any width: a wide frame
         // keeps the shape's size, and a tall frame shrinks it by the aspect
-        // so it stays inside the width. Drive this off the slot's actual
-        // cache size — focus alone is wrong when a slot kept its preview-size
-        // cache after losing focus (grow-only resize).
-        const bool renderingAtPreviewSize =
-            s_PreviewWidthPx > 0 && s_PreviewHeightPx > 0 &&
-            slot.texWidth == s_PreviewWidthPx && slot.texHeight == s_PreviewHeightPx;
+        // so it stays inside the width.
+        const bool renderingAtPreviewSize = lane.isPreviewLane;
         float framingMul = 1.0f;
         if (renderingAtPreviewSize)
-        {
-            const float aspect = static_cast<float>(s_PreviewWidthPx) /
-                                 static_cast<float>(s_PreviewHeightPx);
-            framingMul = std::min(aspect, 1.0f) * s_PreviewZoomScale;
-        }
+            framingMul = std::min(previewAspect, 1.0f) * s_PreviewZoomScale;
 
         float shapeScale = 1.05f;
         switch (s_MaterialPreviewShape)
@@ -277,13 +276,7 @@ void ModelThumbnailHandler::DispatchSlotRender(WindowState& ws, RenderLane& lane
     const Vector3 eye(0.9f, 0.9f, 1.8f);
     const Vector3 target(0.0f, 0.0f, 0.0f);
     const float camDist = (eye - target).Length();
-    // Drive the framing scale off the slot's actual cache size, not focus —
-    // a slot that kept its preview-size cache after losing focus still
-    // renders at preview aspect via the matching MSAA attachment.
-    const bool renderingAtPreviewSize =
-        !slot.listStaticThumb &&
-        s_PreviewWidthPx > 0 && s_PreviewHeightPx > 0 &&
-        slot.texWidth == s_PreviewWidthPx && slot.texHeight == s_PreviewHeightPx;
+    const bool renderingAtPreviewSize = lane.isPreviewLane;
     // Bounding-sphere cone fit: R = D * sin(fov/2) is tangent to the frustum.
     // tan(fov/2) oversizes and clips near-side AABB extents — visible on
     // elongated bakes in the inspector orientation strip (square list thumb
@@ -292,13 +285,8 @@ void ModelThumbnailHandler::DispatchSlotRender(WindowState& ws, RenderLane& lane
     constexpr float kGridFramingPadding = 1.25f;
     constexpr float kPreviewFramingPadding = 1.15f;
     float framingPadding = renderingAtPreviewSize ? kPreviewFramingPadding : kGridFramingPadding;
-    if (renderingAtPreviewSize)
-    {
-        const float aspect = static_cast<float>(s_PreviewWidthPx) /
-                             static_cast<float>(s_PreviewHeightPx);
-        if (aspect < 1.0f)
-            framingPadding /= aspect;
-    }
+    if (renderingAtPreviewSize && previewAspect < 1.0f)
+        framingPadding /= previewAspect;
     const float zoom = (renderingAtPreviewSize && s_PreviewZoomScale > 1e-4f)
         ? s_PreviewZoomScale
         : 1.0f;
@@ -340,6 +328,16 @@ void ModelThumbnailHandler::FinalizeInFlightRender(WindowState& ws, RenderLane& 
         return;
 
     const size_t slotIdx = lane.inFlightSlot;
+    if (lane.isPreviewLane)
+    {
+        // The staging view shows this slot's asset; the slot texture is the grid tile's.
+        ws.previewShownSlot = slotIdx;
+        ws.previewShownGuid = slotIdx < ws.slots.size() ? ws.slots[slotIdx].guid : GUID{};
+        lane.inFlightSlot = kMaxResidentSlots;
+        lane.inFlightFrame = 0;
+        m_RenderServices->GetWorldDrawBuilder().ClearView(lane.viewId);
+        return;
+    }
     if (slotIdx < ws.slots.size())
     {
         Slot& slot = ws.slots[slotIdx];
@@ -370,7 +368,8 @@ void ModelThumbnailHandler::FinalizeInFlightRender(WindowState& ws, RenderLane& 
 
 void ModelThumbnailHandler::ResizeSlotTextures(WindowState& ws)
 {
-    const bool havePreviewDims = (s_PreviewWidthPx > 0 && s_PreviewHeightPx > 0);
+    const uint32_t desiredW = static_cast<uint32_t>(s_ThumbnailResolutionPx);
+    const uint32_t desiredH = desiredW;
     for (size_t i = 0; i < ws.slots.size(); ++i)
     {
         Slot& s = ws.slots[i];
@@ -380,29 +379,11 @@ void ModelThumbnailHandler::ResizeSlotTextures(WindowState& ws)
         // creation happens at dispatch.
         if (!s.deviceTex.IsValid())
             continue;
-
-        const bool isFocused = s.isMaterial
-            ? (!s_MaterialOrbitFocusGuid.IsNull() && s.guid == s_MaterialOrbitFocusGuid &&
-               s.previewIblEnabled == s_MaterialOrbitFocusIblEnabled)
-            : s.isLensFlare
-                ? (!s_LensFlareFocusGuid.IsNull() && s.guid == s_LensFlareFocusGuid)
-                : (!s_OrbitFocusGuid.IsNull() && s.guid == s_OrbitFocusGuid);
-        // A baked tile keeps its PNG until it becomes the focused preview, and a
-        // tile that leaves focus after its bake was persisted goes back to its
-        // PNG (RequestBakedImages) instead of rendering again.
-        if (!isFocused && (s.showsBakedImage || (s.ready && m_DiskCacheRequested.count(s.guid))))
+        // A baked tile keeps its PNG; a tile whose bake was persisted goes back
+        // to its PNG (RequestBakedImages) instead of rendering again.
+        if (s.showsBakedImage || (s.ready && m_DiskCacheRequested.count(s.guid)))
             continue;
-        const uint32_t desiredW = (isFocused && havePreviewDims)
-            ? s_PreviewWidthPx
-            : static_cast<uint32_t>(s_ThumbnailResolutionPx);
-        const uint32_t desiredH = (isFocused && havePreviewDims)
-            ? s_PreviewHeightPx
-            : static_cast<uint32_t>(s_ThumbnailResolutionPx);
 
-        // Render attachments must match the requested dimensions exactly.
-        // Treating a larger square thumbnail as "big enough" for a landscape
-        // Asset View preserves the wrong aspect ratio and makes the UI contain
-        // it with side bars instead of letting the panel determine the shape.
         if (s.texWidth == desiredW && s.texHeight == desiredH)
             continue;
 
@@ -441,12 +422,13 @@ void ModelThumbnailHandler::ResizeSlotTextures(WindowState& ws)
     }
 }
 
+// GE_THUMBNAIL_CACHE_DRAIN_BEGIN
 bool ModelThumbnailHandler::IsSettlingInAnotherLane(const WindowState& ws, const RenderLane& lane,
                                                     size_t slotIdx)
 {
     for (const RenderLane& other : ws.lanes)
     {
-        if (&other == &lane || other.spawnedSlot != slotIdx)
+        if (&other == &lane || other.isPreviewLane || other.spawnedSlot != slotIdx)
             continue;
         if (ThumbnailCachePolicy::IsSpawnSettling(ws.slots[slotIdx].guid, other.SpawnedGuid(),
                                                   other.spawnedSettleFrames))
@@ -474,10 +456,10 @@ bool ModelThumbnailHandler::DrainNextPendingSlot(WindowState& ws, const RenderLa
     // dispatched — and only it — until it has rendered for kSpawnSettleFrames
     // fully-ready frames, then advance to the next pending request. The retry
     // cap below bounds a never-ready (geometry-less) model so it can't
-    // head-of-line-block. A slot that became the focused preview meanwhile
-    // belongs to the preview lane, which renders it every frame from then on.
+    // head-of-line-block. The focused asset's tile drains like any other: the
+    // preview lane renders the staging view, not the tile.
     const size_t focusedSlot = FindFocusedSlot(ws);
-    if (lane.spawnedSlot < ws.slots.size() && lane.spawnedSlot != focusedSlot &&
+    if (lane.spawnedSlot < ws.slots.size() &&
         ThumbnailCachePolicy::IsSpawnSettling(lane.SpawnedGuid(), lane.SpawnedGuid(),
                                               lane.spawnedSettleFrames))
     {
@@ -543,12 +525,14 @@ bool ModelThumbnailHandler::DrainNextPendingSlot(WindowState& ws, const RenderLa
                 continue;
 
             Slot& slot = ws.slots[slotIdx];
-            if (!slot.occupied || (slot.ready && !slot.needsOrbitRerender))
+            // The focused slot's re-render flag belongs to the preview lane: its
+            // tile renders until it is ready, then stays.
+            const bool rerender = slot.needsOrbitRerender && slotIdx != focusedSlot;
+            if (!slot.occupied || (slot.ready && !rerender))
                 continue;
 
-            // The preview lane renders the focused slot, and a lane that is still
-            // settling a model re-renders it on its own; either request is spent.
-            if (slotIdx == focusedSlot || IsSettlingInAnotherLane(ws, lane, slotIdx))
+            // A lane that is still settling a model re-renders it on its own; the request is spent.
+            if (IsSettlingInAnotherLane(ws, lane, slotIdx))
                 continue;
 
             // Another lane renders this slot this frame; the request still stands.
@@ -595,6 +579,7 @@ bool ModelThumbnailHandler::DrainNextPendingSlot(WindowState& ws, const RenderLa
 
     return false;
 }
+// GE_THUMBNAIL_CACHE_DRAIN_END
 
 void ModelThumbnailHandler::NoteLoadWait(Slot& slot, const Asset& asset, const char* reason)
 {

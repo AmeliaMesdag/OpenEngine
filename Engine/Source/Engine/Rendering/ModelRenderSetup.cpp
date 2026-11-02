@@ -211,6 +211,17 @@ uint32 ResolveSubmeshIndex(const GUID& modelGuid, const ModelAsset& model,
     return 0;
 }
 
+const Rendering::MeshGPUEntry* FindRendererMeshEntry(const Rendering::MeshGPURegistry& registry,
+                                                     const Components::MeshRenderer& mr)
+{
+    const Rendering::MeshGPUEntry* entry = nullptr;
+    if (mr.meshGpuHandleId != 0u)
+        entry = registry.Find(Rendering::MeshGPUHandle(mr.meshGpuHandleId));
+    if (!entry && !mr.modelAssetGuid.IsNull())
+        entry = registry.FindByKey(Rendering::MeshGPUKey{mr.modelAssetGuid.ToGuid(), mr.meshId});
+    return entry;
+}
+
 std::optional<ModelRenderResources> RegisterModelRenderResources(
     RenderServices& rs, const GUID& modelGuid)
 {

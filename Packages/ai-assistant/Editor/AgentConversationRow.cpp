@@ -45,11 +45,11 @@ T* TakeElement(UIElement& row, const char* id, size_t index)
 
 bool PinHeightPx(UIElement& element, float heightPx)
 {
-    const auto existing = element.Overrides().Get(Style::Height);
+    const auto existing = element.Style().Get(Style::Height);
     if (existing.has_value() && existing->IsPx() && std::fabs(existing->Value - heightPx) <= 0.5f)
         return false;
 
-    element.Overrides().Set(Style::Height, StyleLength::Px(heightPx));
+    element.Style().Set(Style::Height, StyleLength::Px(heightPx));
     element.MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty);
     return true;
 }

@@ -398,7 +398,7 @@ TEST(SubtreeDirtyTests, MountSwapWithPendingInsertNoUaf)
     ASSERT_NO_FATAL_FAILURE(ui.Update(0.0f, /*interactive=*/true));
 }
 
-// Style-override mutation must propagate SubtreeDirty via the StyleOverrides
+// Style-override mutation must propagate SubtreeDirty via the StyleDeclaration
 // dirty callback wired in UIElement's constructor. Before this was added,
 // Override().Set/Reset/Clear flipped internal flags without routing through
 // MarkDirty, so the fast-path had to abort mid-iteration via a per-entry
@@ -415,7 +415,7 @@ TEST(SubtreeDirtyTests, OverrideSetPropagatesSubtreeDirty)
     leaf->ClearDirty(~0u);
 
     // Layout-impact override on leaf — must propagate SubtreeDirty all the way up.
-    leaf->Overrides().Set(Style::Width, StyleLength::Px(42.0f));
+    leaf->Style().Set(Style::Width, StyleLength::Px(42.0f));
 
     EXPECT_TRUE(leaf->IsDirty(UIElement::LayoutDirty));
     EXPECT_TRUE(leaf->IsDirty(UIElement::SubtreeDirty));
@@ -438,7 +438,7 @@ TEST(SubtreeDirtyTests, OverrideSetVisualPropagates)
     leaf->ClearDirty(~0u);
 
     // Visual-impact override (BackgroundColor).
-    leaf->Overrides().Set(Style::BackgroundColor, 0xFFFFFFFFu);
+    leaf->Style().Set(Style::BackgroundColor, 0xFFFFFFFFu);
 
     EXPECT_TRUE(leaf->IsDirty(UIElement::VisualDirty));
     // Visual-only propagation deliberately does NOT set SubtreeDirty (paint-only).
@@ -512,7 +512,7 @@ TEST(SubtreeDirtyTests, DisplayNoneDescendantClearsAncestorSubtreeDirty)
     // Dirty the leaf, then hide its parent via inline display:none. Both
     // actions mark SubtreeDirty up the ancestor chain.
     leaf->MarkDirty(UIElement::StyleDirty);
-    hidden->Overrides().Set(Style::Display, DisplayMode::None);
+    hidden->Style().Set(Style::Display, DisplayMode::None);
     EXPECT_TRUE(r->IsDirty(UIElement::SubtreeDirty));
 
     // Frame 2: the hidden subtree's slow path hits the display:none branch
@@ -574,7 +574,7 @@ TEST(SubtreeDirtyTests, DisplayNoneFlipRebuildsIndicesForAdjacentSiblings)
 
     // Hide 'a' via inline display:none. Its descendants (a1/a2/a3) vanish
     // from ctx.nodes via the display:none early-return. 'b' stays.
-    a->Overrides().Set(Style::Display, DisplayMode::None);
+    a->Style().Set(Style::Display, DisplayMode::None);
     ui.Update(0.0f, true);
 
     // b must still be known to the manager — if the IndicesAndClips skip
@@ -585,7 +585,7 @@ TEST(SubtreeDirtyTests, DisplayNoneFlipRebuildsIndicesForAdjacentSiblings)
     EXPECT_TRUE(b->IsEnabled());
 
     // Show 'a' again. a1/a2/a3 re-appear in ctx.nodes, ctx.nodes size grows.
-    a->Overrides().Reset(Style::Display);
+    a->Style().Reset(Style::Display);
     ui.Update(0.0f, true);
 
     EXPECT_EQ(r->FindById("a1"_sid), a->GetChildren()[0].get());
@@ -824,7 +824,7 @@ TEST(ProductionPathTests, OrderOverrideReordersYogaChildren)
     ASSERT_EQ(YGNodeGetChild(rootYg, 0), aYg) << "Document order before override";
 
     // LayoutDirty-only mutation: no class, no stylesheet, no StyleDirty.
-    a->Overrides().Set(Style::Order, 5);
+    a->Style().Set(Style::Order, 5);
     EXPECT_FALSE(a->IsDirty(UIElement::StyleDirty));
     ui.Update(0.0f, /*interactive=*/true);
     ui.Update(0.0f, /*interactive=*/true);
@@ -835,17 +835,14 @@ TEST(ProductionPathTests, OrderOverrideReordersYogaChildren)
     EXPECT_EQ(YGNodeGetChild(rootYg, 1), aYg);
 
     // And back: clearing the override restores document order.
-    a->Overrides().Reset(Style::Order);
+    a->Style().Reset(Style::Order);
     ui.Update(0.0f, /*interactive=*/true);
     ui.Update(0.0f, /*interactive=*/true);
     EXPECT_EQ(YGNodeGetChild(rootYg, 0), aYg)
         << "resetting the order override must restore document order";
 }
 
-// Splitter regression: WeightedPane::SetFlexWeight raises only LayoutDirty.
-// The rebuild must still re-apply the flex weight to Yoga — skipping
-// LayoutDirty-only elements caused the docked-panel splitter snap-back bug
-// in the Editor.
+// A WeightedPane::SetFlexWeight change reaches Yoga on the next Update.
 TEST(ProductionPathTests, WeightedPaneFlexWeightReachesYoga)
 {
     auto* dev = SharedHeadlessDevice();
@@ -873,11 +870,42 @@ TEST(ProductionPathTests, WeightedPaneFlexWeightReachesYoga)
     YGNodeRef paneYg = paneRaw->m_YogaState ? paneRaw->m_YogaState->Node : nullptr;
     ASSERT_NE(paneYg, nullptr);
     EXPECT_FLOAT_EQ(YGNodeStyleGetFlexGrow(paneYg), 0.75f)
-        << "LayoutDirty-only flex-weight change must reach "
-           "YGNodeStyleSetFlexGrow on the next Update";
+        << "a flex-weight change must reach YGNodeStyleSetFlexGrow on the "
+           "next Update";
     EXPECT_FALSE(paneRaw->IsDirty(UIElement::LayoutDirty))
         << "Update must clear LayoutDirty or the element stays dirty every "
            "frame";
+}
+
+// The weight is the pane's resolved flex-grow and wins over a CSS flex-grow.
+TEST(ProductionPathTests, WeightedPaneWeightIsTheResolvedFlexGrow)
+{
+    auto* dev = SharedHeadlessDevice();
+    if (!dev) GTEST_SKIP() << "Device init failed";
+    UIRegistration::RegisterBuiltInControls();
+
+    auto root = std::make_unique<UIElement>("root");
+    auto paneOwner = std::make_unique<WeightedPane>(0.25f);
+    WeightedPane* paneRaw = paneOwner.get();
+    paneRaw->AddClass("split-pane");
+    root->AddChild(std::move(paneOwner));
+
+    UIManager ui(dev);
+    ui.SetRoot(std::move(root));
+
+    auto sheet = std::make_shared<Stylesheet>();
+    ASSERT_TRUE(CSSParser::ParseStylesFromString(".split-pane { flex-grow: 4; }\n", *sheet));
+    ui.AddStylesheet(StylesheetHandle(sheet));
+
+    ui.Update(0.0f, /*interactive=*/true);
+    EXPECT_FLOAT_EQ(paneRaw->GetResolvedStyle().Layout.FlexGrow, 0.25f);
+
+    paneRaw->SetFlexWeight(0.6f);
+    ui.Update(0.0f, /*interactive=*/true);
+    EXPECT_FLOAT_EQ(paneRaw->GetResolvedStyle().Layout.FlexGrow, 0.6f);
+    YGNodeRef paneYg = paneRaw->m_YogaState ? paneRaw->m_YogaState->Node : nullptr;
+    ASSERT_NE(paneYg, nullptr);
+    EXPECT_FLOAT_EQ(YGNodeStyleGetFlexGrow(paneYg), 0.6f);
 }
 
 // Text elements whose measure context was wiped must get the Yoga measure
@@ -941,7 +969,7 @@ TEST(ProductionPathTests, InheritedFontSizeFansOutOnUpdate)
     ASSERT_NE(b1, nullptr);
     ASSERT_NE(b1->GetResolvedStyle().Visual.FontSize, 24.0f);
 
-    r->Overrides().Set(Style::FontSize, StyleLength::Px(24.0f));
+    r->Style().Set(Style::FontSize, StyleLength::Px(24.0f));
     ui.Update(0.0f, /*interactive=*/true);
     ui.Update(0.0f, /*interactive=*/true);
 

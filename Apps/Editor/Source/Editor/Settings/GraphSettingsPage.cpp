@@ -96,20 +96,18 @@ void AppendTypeColorRows(SettingsCategoryDescriptor& category, std::string_view 
         return a.DisplayName < b.DisplayName;
     });
 
+    // The page has one header level under its title, so each category run is headed
+    // "<kind> Nodes: <category>".
     std::string currentCategory;
     bool first = true;
     for (const NodeTypeMeta& type : types)
     {
         SettingsFieldDescriptor field;
-        if (first)
+        if (first || type.Category != currentCategory)
         {
-            field.SectionHeader = sectionTitle;
-            field.SectionDescription = type.Category.empty() ? "Uncategorized" : type.Category;
+            field.SectionHeader = std::string(sectionTitle) + ": " +
+                                  (type.Category.empty() ? "Uncategorized" : type.Category);
             first = false;
-        }
-        else if (type.Category != currentCategory)
-        {
-            field.SectionHeader = type.Category.empty() ? "Uncategorized" : type.Category;
         }
         currentCategory = type.Category;
 

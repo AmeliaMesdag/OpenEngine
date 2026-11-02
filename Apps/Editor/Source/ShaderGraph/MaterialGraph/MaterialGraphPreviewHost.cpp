@@ -104,10 +104,10 @@ void MaterialGraphPreviewHost::EnsureUi()
 
     auto image = std::make_unique<UIElement>();
     image->AddClass("node-graph-preview-image");
-    image->Overrides()
+    image->Style()
         .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain})
         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
-        .Set(Style::BackgroundPosition, BackgroundPositionValue{50.0f, true, 50.0f, true});
+        .Set(Style::BackgroundPosition, BackgroundPositionValue::Percent(50.0f, 50.0f));
 
     image->RegisterEventHandler(kEventMouseDown, [this](UIEvent& e) {
         if (e.Button != 0 || !m_Active)
@@ -319,7 +319,7 @@ void MaterialGraphPreviewHost::ApplyPreviewBounds(float left, float top, float w
     const float roundedTop = std::round(top);
     const float roundedSize = std::round(size);
 
-    Overrides()
+    Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(roundedLeft))
         .Set(Style::PositionTop, StyleLength::Px(roundedTop))
@@ -499,7 +499,7 @@ void MaterialGraphPreviewHost::SetVisibleForMaterialGraph(bool visible)
 {
     const bool wasActive = m_Active;
     m_Active = visible;
-    Overrides().Set(Style::Display, visible ? DisplayMode::Flex : DisplayMode::None);
+    Style().Set(Style::Display, visible ? DisplayMode::Flex : DisplayMode::None);
     if (visible && !wasActive)
     {
         // The thumbnail orbit this replaces started turning on its own when the
@@ -695,7 +695,7 @@ void MaterialGraphPreviewHost::ApplyPreviewBinding(const Editor::GraphNodePrevie
 
     /* This panel is not a node, so it publishes the plate variable for its own
        subtree the way GraphPortedNode does for the plates inside a node. */
-    Overrides().SetCustomColor(HashStringId("--graph-plate-bg"),
+    Style().SetCustomColor(HashStringId("--graph-plate-bg"),
                                NodeColorSettings::GetNodePlateColorArgb());
 
     if (binding.Resource.empty())
@@ -720,12 +720,12 @@ void MaterialGraphPreviewHost::ApplyPreviewBinding(const Editor::GraphNodePrevie
     /* Sprite addressing into the panel's preview atlas, exactly as a node plate
        does it. Must be set AFTER SetBackgroundResourceName, which force-overrides
        background-size to Contain. */
-    m_Image->Overrides()
+    m_Image->Style()
         .Set(Style::BackgroundSize,
              BackgroundSizeValue{BackgroundSizeMode::Explicit, binding.SizeXPercent, true,
                                  binding.SizeYPercent, true})
         .Set(Style::BackgroundPosition,
-             BackgroundPositionValue{binding.PosXPercent, true, binding.PosYPercent, true});
+             BackgroundPositionValue::Percent(binding.PosXPercent, binding.PosYPercent));
     m_BoundResource = binding.Resource;
     m_BoundSizeXPercent = binding.SizeXPercent;
     m_BoundSizeYPercent = binding.SizeYPercent;

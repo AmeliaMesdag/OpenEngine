@@ -7,6 +7,8 @@ project(Memory LANGUAGES CXX)
 set(MEMORY_SOURCES
     Source/AllocationCounter.cpp
     Source/Arena.cpp
+    Source/FrameJoinedScope.cpp
+    Source/FrameMemory.cpp
     Source/ObjectPool.cpp
     Source/RangeAllocator.cpp
     Source/ScratchScope.cpp

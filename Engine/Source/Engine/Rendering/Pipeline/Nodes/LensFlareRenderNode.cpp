@@ -131,12 +131,12 @@ void BuildViewInstances(const std::vector<ResolvedFlare>& flares,
         // Camera->source vector; the distance fade uses VIEW DEPTH (projection
         // onto the camera forward), not euclidean distance, per the source's
         // dot(heading, cam.forward). Forward = view matrix Z row (LH).
-        const float dx = rf.SunMode ? rf.Forward[0] : rf.WorldPos[0] - cam.cameraPos[0];
-        const float dy = rf.SunMode ? rf.Forward[1] : rf.WorldPos[1] - cam.cameraPos[1];
-        const float dz = rf.SunMode ? rf.Forward[2] : rf.WorldPos[2] - cam.cameraPos[2];
-        const float camFwdX = cam.view[2];
-        const float camFwdY = cam.view[6];
-        const float camFwdZ = cam.view[10];
+        const float dx = rf.SunMode ? rf.Forward[0] : rf.WorldPos[0] - cam.cameraPos.x;
+        const float dy = rf.SunMode ? rf.Forward[1] : rf.WorldPos[1] - cam.cameraPos.y;
+        const float dz = rf.SunMode ? rf.Forward[2] : rf.WorldPos[2] - cam.cameraPos.z;
+        const float camFwdX = cam.view[0][2];
+        const float camFwdY = cam.view[1][2];
+        const float camFwdZ = cam.view[2][2];
 
         const float maxDistance =
             rf.MaxDistanceOverride > 0.0f ? rf.MaxDistanceOverride : g.MaxDistance;

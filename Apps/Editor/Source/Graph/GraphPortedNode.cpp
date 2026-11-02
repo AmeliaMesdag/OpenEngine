@@ -488,8 +488,8 @@ void ClearPortInlineEditor(GraphPort& port)
     HideElement(host);
     if (host)
     {
-        host->Overrides().Reset(Style::Width);
-        host->Overrides().Reset(Style::MaxWidth);
+        host->Style().Reset(Style::Width);
+        host->Style().Reset(Style::MaxWidth);
     }
     port.RemoveClass("has-inline-editor");
     port.RemoveClass("bool-editor");
@@ -695,7 +695,7 @@ void GraphPortedNode::BindModelPorts(const Graph::Node& node)
         const int portCount = isOutput ? outputCount : inputCount;
         const float nodeHeight = RectHeightGraph(node);
         const float nodeWidth = GraphNodeMetrics::GetNodeWidth(node);
-        widget->Overrides()
+        widget->Style()
             .Set(Style::PositionTop, StyleLength::Percent(
                 GraphNodeMetrics::PortTopPercent(portIndex, portCount, nodeHeight)))
             .Set(Style::Width, StyleLength::Percent(GraphNodeMetrics::PortWidthPercent(nodeWidth)))
@@ -704,10 +704,10 @@ void GraphPortedNode::BindModelPorts(const Graph::Node& node)
         /* The CSS -2.5% hang assumes the canonical width; the override keeps
            the dot centered on the edge whatever the rect width. */
         if (isOutput)
-            widget->Overrides().Set(Style::PositionRight,
+            widget->Style().Set(Style::PositionRight,
                 StyleLength::Percent(GraphNodeMetrics::PortSideHangPercent(nodeWidth)));
         else
-            widget->Overrides().Set(Style::PositionLeft,
+            widget->Style().Set(Style::PositionLeft,
                 StyleLength::Percent(GraphNodeMetrics::PortSideHangPercent(nodeWidth)));
         UI::Layout::SetElementHidden(*widget, false);
     }
@@ -894,7 +894,7 @@ void GraphPortedNode::BindDetailRows(const Graph::Node& node, std::string_view k
             return {nullptr, nullptr};
         const float centerUnits =
             GraphNodeMetrics::ExpandedRowCenterGraph(node, static_cast<int>(rowIndex));
-        rowEl->Overrides()
+        rowEl->Style()
             .Set(Style::PositionTop,
                  StyleLength::Percent((centerUnits - halfRow) / layoutHeight * 100.f))
             .Set(Style::Height,
@@ -905,7 +905,7 @@ void GraphPortedNode::BindDetailRows(const Graph::Node& node, std::string_view k
         UIElement* host = rowEl->GetChildren()[1].get();
         if (label)
         {
-            label->Overrides()
+            label->Style()
                 .Set(Style::PositionLeft,
                      StyleLength::Percent(GraphNodeMetrics::kInlineLabelStartGraph /
                                           nodeWidthGraph * 100.f))
@@ -918,7 +918,7 @@ void GraphPortedNode::BindDetailRows(const Graph::Node& node, std::string_view k
         {
             HideDirectChildren(*host);
             ShowElement(host);
-            host->Overrides()
+            host->Style()
                 .Set(Style::PositionLeft,
                      StyleLength::Percent(editorStartGraph / nodeWidthGraph * 100.f))
                 .Set(Style::Width,
@@ -1514,8 +1514,8 @@ void GraphPortedNode::BindPortEditors(const Graph::Node& node, std::string_view 
         if (portKind == InlinePortKind::Bool)
         {
             /* Checkbox hosts keep their own compact CSS geometry. */
-            host->Overrides().Reset(Style::Width);
-            host->Overrides().Reset(Style::MaxWidth);
+            host->Style().Reset(Style::Width);
+            host->Style().Reset(Style::MaxWidth);
         }
         else
         {
@@ -1529,7 +1529,7 @@ void GraphPortedNode::BindPortEditors(const Graph::Node& node, std::string_view 
             const float leftPct = (startUnits + GraphNodeMetrics::kPortHangGraph) /
                 GraphNodeMetrics::kPortSizeGraph * 100.f;
             const float widthPct = widthUnits / GraphNodeMetrics::kPortSizeGraph * 100.f;
-            host->Overrides()
+            host->Style()
                 .Set(Style::PositionLeft, StyleLength::Percent(leftPct))
                 .Set(Style::Width, StyleLength::Percent(widthPct))
                 .Set(Style::MaxWidth, StyleLength::Percent(widthPct));
@@ -1540,7 +1540,7 @@ void GraphPortedNode::BindPortEditors(const Graph::Node& node, std::string_view 
             {
                 if (child && child->HasClass("graph-port-label"))
                 {
-                    child->Overrides().Set(Style::MaxWidth, StyleLength::Percent(
+                    child->Style().Set(Style::MaxWidth, StyleLength::Percent(
                         (startUnits - GraphNodeMetrics::kInlineLabelStartGraph) /
                         GraphNodeMetrics::kPortSizeGraph * 100.f));
                     child->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty);
@@ -1691,7 +1691,7 @@ void GraphPortedNode::BindModel(const Graph::Node& node, std::string_view kindId
     if (m_Header)
     {
         const float nodeHeight = RectHeightGraph(node);
-        m_Header->Overrides().Set(Style::Height,
+        m_Header->Style().Set(Style::Height,
             StyleLength::Percent(GraphNodeMetrics::HeaderHeightPercent(nodeHeight)));
         m_Header->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     }
@@ -1699,15 +1699,15 @@ void GraphPortedNode::BindModel(const Graph::Node& node, std::string_view kindId
     /* The node body and every box inside it read these variables
        (node-graph.css); published per node so they track the body-color
        preference. */
-    Overrides().SetCustomColor(HashStringId("--graph-node-bg"),
+    Style().SetCustomColor(HashStringId("--graph-node-bg"),
                                NodeColorSettings::GetNodeBodyColorArgb());
-    Overrides().SetCustomColor(HashStringId("--graph-node-header-bg"),
+    Style().SetCustomColor(HashStringId("--graph-node-header-bg"),
                                NodeColorSettings::GetNodeColorArgb(kindId, node.TypeId));
-    Overrides().SetCustomColor(HashStringId("--graph-value-bg"),
+    Style().SetCustomColor(HashStringId("--graph-value-bg"),
                                NodeColorSettings::GetNodeValueSurfaceColorArgb());
     /* Same deal for the plates that frame a rendered image: the preview plate
        and the texture drop slot. */
-    Overrides().SetCustomColor(HashStringId("--graph-plate-bg"),
+    Style().SetCustomColor(HashStringId("--graph-plate-bg"),
                                NodeColorSettings::GetNodePlateColorArgb());
 
     BindModelPorts(node);
@@ -1746,7 +1746,7 @@ void GraphPortedNode::Reset()
     HideValueEditors(true);
     HideElement(m_Value, true);
     if (m_Header)
-        m_Header->Overrides().Reset(Style::BackgroundColor);
+        m_Header->Style().Reset(Style::BackgroundColor);
     if (m_Preview)
         m_Preview->Reset();
     HideDetailRows(0);

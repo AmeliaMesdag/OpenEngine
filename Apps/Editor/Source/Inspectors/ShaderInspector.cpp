@@ -47,7 +47,7 @@ constexpr float kShaderInspectorSectionGapPx = 10.0f;
 
 static void ConfigureShaderInspectorLayout(UIElement& root)
 {
-    root.Overrides()
+    root.Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::Gap, StyleLength::Px(kShaderInspectorSectionGapPx));
@@ -221,7 +221,7 @@ static void AddShaderOpenButtons(UIElement* root,
 {
     auto buttonRow = std::make_unique<UIElement>();
     buttonRow->AddClass("inspector-asset-actions");
-    buttonRow->Overrides()
+    buttonRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(6.0f))
@@ -234,7 +234,7 @@ static void AddShaderOpenButtons(UIElement* root,
         editBtn->SetText("Open in Text Editor");
         editBtn->AddClass("inspector-text");
         editBtn->AddClass("small");
-        editBtn->Overrides().Set(Style::Width, StyleLength::Px(150.0f));
+        editBtn->Style().Set(Style::Width, StyleLength::Px(150.0f));
         editBtn->RegisterEventHandler(kEventButtonClick, [openScript = ctx.OpenScript, shaderPath](UIEvent&) { openScript(shaderPath); });
         buttonRow->AddChild(std::move(editBtn));
     }
@@ -244,7 +244,7 @@ static void AddShaderOpenButtons(UIElement* root,
         ideBtn->SetText("Open in IDE");
         ideBtn->AddClass("inspector-text");
         ideBtn->AddClass("small");
-        ideBtn->Overrides().Set(Style::Width, StyleLength::Px(100.0f));
+        ideBtn->Style().Set(Style::Width, StyleLength::Px(100.0f));
         ideBtn->RegisterEventHandler(kEventButtonClick, [shaderPath](UIEvent&) { ExternalScriptEditorLauncher::OpenScript(shaderPath); });
         buttonRow->AddChild(std::move(ideBtn));
     }
@@ -255,7 +255,7 @@ static void AddShaderOpenButtons(UIElement* root,
         graphBtn->SetText("Open in Material Graph");
         graphBtn->AddClass("inspector-text");
         graphBtn->AddClass("small");
-        graphBtn->Overrides().Set(Style::Width, StyleLength::Px(170.0f));
+        graphBtn->Style().Set(Style::Width, StyleLength::Px(170.0f));
         if (!isShaderGraph)
             graphBtn->SetEnabled(false);
         graphBtn->RegisterEventHandler(kEventButtonClick, [openGraph = ctx.OpenMaterialGraph, shaderPath](UIEvent&)

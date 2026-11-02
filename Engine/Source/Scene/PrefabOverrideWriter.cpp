@@ -21,20 +21,11 @@
 namespace GameEngine::Scene
 {
 
-// One component of an entity as the scene saver writes it: its file token and its lines.
-struct ComponentText
-{
-    std::string token;
-    std::string key; // the token lowercased
-    std::vector<std::string> lines;
-};
-
 // The lines the scene saver writes for `entity`, grouped by component: the hand-written schemas',
 // the reflected components', the switch lines of components switched off, the components no build
 // registers, and the authored text of fields the load could not read.
-static void CollectComponentText(ECS::World& world, ECS::EntityHandle entity, const SceneSaveContext& ctx,
-                                 const std::vector<const ISceneComponentSchema*>& schemas,
-                                 std::vector<ComponentText>& out)
+void CollectComponentText(ECS::World& world, ECS::EntityHandle entity, const SceneSaveContext& context,
+                          const std::vector<const ISceneComponentSchema*>& schemas, std::vector<ComponentText>& out)
 {
     out.clear();
     const auto add = [&out](std::string_view token) -> ComponentText& {
@@ -46,7 +37,7 @@ static void CollectComponentText(ECS::World& world, ECS::EntityHandle entity, co
     for (const auto* schema : schemas)
     {
         if (schema && schema->IsPresent(world, entity))
-            schema->Serialize(world, entity, ctx, add(schema->GetComponentName()).lines);
+            schema->Serialize(world, entity, context, add(schema->GetComponentName()).lines);
     }
     auto* arch = world.GetEntityArchetype(entity);
     if (arch)
@@ -55,7 +46,7 @@ static void CollectComponentText(ECS::World& world, ECS::EntityHandle entity, co
         for (ECS::ComponentTypeId typeId : signature.GetComponents())
         {
             if (const ISceneComponentSchema* s = SceneSchemaRegistry::ReflectionSchemaForUnhandledType(typeId))
-                s->Serialize(world, entity, ctx, add(s->GetComponentName()).lines);
+                s->Serialize(world, entity, context, add(s->GetComponentName()).lines);
         }
         for (ECS::ComponentTypeId typeId : signature.GetComponents())
         {
@@ -90,7 +81,7 @@ static void CollectComponentText(ECS::World& world, ECS::EntityHandle entity, co
 
 // The components of an instance's root that place it in the scene rather than override its prefab:
 // written on every instance, whatever the prefab holds.
-static bool IsPlacementComponent(std::string_view key)
+bool IsPlacementComponent(std::string_view key)
 {
     return key == "transform" || key == "name" || key == "hierarchyorder";
 }
@@ -438,13 +429,28 @@ static bool CarriesPathIdentity(ECS::World& world, ECS::EntityHandle child, std:
 bool DescribePrefabInstance(ECS::World& world, ECS::EntityHandle root, std::vector<PrefabInstanceEntity>& out)
 {
     out.clear();
-    EngineCore& engine = EngineCore::GetInstance();
-    PrefabLibrary* library = engine.TryGetPrefabLibrary();
+    PrefabLibrary* library = EngineCore::GetInstance().TryGetPrefabLibrary();
     const auto* marker = world.IsValid(root) ? world.GetComponent<Components::PrefabInstance>(root) : nullptr;
     const auto* rootTag = marker ? world.GetComponent<Components::SceneEntityTag>(root) : nullptr;
     const PrefabTemplate* prefab = library && rootTag ? library->FindByGuid(marker->Source) : nullptr;
     if (!prefab)
         return false;
+    std::vector<std::string> addresses;
+    DescribePrefabInstanceAgainst(world, root, *library, *prefab, out, addresses);
+    return true;
+}
+
+void DescribePrefabInstanceAgainst(ECS::World& world, ECS::EntityHandle root, PrefabLibrary& library,
+                                   const PrefabTemplate& generation, std::vector<PrefabInstanceEntity>& out,
+                                   std::vector<std::string>& outAddresses)
+{
+    out.clear();
+    outAddresses.clear();
+    EngineCore& engine = EngineCore::GetInstance();
+    const PrefabTemplate* prefab = &generation;
+    const auto* rootTag = world.GetComponent<Components::SceneEntityTag>(root);
+    if (!rootTag)
+        return;
 
     const std::string instanceId(rootTag->View());
     FlatMap<std::string, std::size_t> templateIndexByAddress;
@@ -456,7 +462,8 @@ bool DescribePrefabInstance(ECS::World& world, ECS::EntityHandle root, std::vect
     }
 
     const auto childrenOf = CollectChildren(world);
-    std::vector<std::string> addresses{std::string()};
+    std::vector<std::string>& addresses = outAddresses;
+    addresses.push_back(std::string());
     std::unordered_map<ECS::EntityId, std::string> instanceTags{{root.id, instanceId}};
     FlatSet<std::string> taken;
     taken.Insert(std::string());
@@ -495,7 +502,7 @@ bool DescribePrefabInstance(ECS::World& world, ECS::EntityHandle root, std::vect
     instanceCtx.WriteEveryField = true;
     SceneSaveContext templateCtx = instanceCtx;
     templateCtx.EntityTagById = &templateTags;
-    templateCtx.Unresolved = library->GetWorld().TryGetUnresolvedComponents();
+    templateCtx.Unresolved = library.GetWorld().TryGetUnresolvedComponents();
 
     const auto schemas = SceneSchemaRegistry::GetAllSorted();
     std::vector<ComponentText> instanceText;
@@ -508,7 +515,7 @@ bool DescribePrefabInstance(ECS::World& world, ECS::EntityHandle root, std::vect
         const std::string& address = addresses[index];
         entryByAddress.InsertOrAssign(address, index);
         CollectComponentText(world, out[index].Entity, instanceCtx, schemas, instanceText);
-        CollectComponentText(library->GetWorld(), prefab->Entities[*templateIndexByAddress.Find(address)], templateCtx,
+        CollectComponentText(library.GetWorld(), prefab->Entities[*templateIndexByAddress.Find(address)], templateCtx,
                              schemas, templateText);
         CollectEntityOverrides(address, instanceText, templateText, out[index].Overrides);
     }
@@ -523,7 +530,6 @@ bool DescribePrefabInstance(ECS::World& world, ECS::EntityHandle root, std::vect
         if (const std::size_t* parent = entryByAddress.Find(parentAddress))
             out[*parent].Overrides.push_back({PrefabOverrideKind::RemovedChild, {}, address});
     }
-    return true;
 }
 
 } // namespace GameEngine::Scene

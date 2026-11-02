@@ -31,6 +31,8 @@
 
 #include "ECS/World.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <format>
 
 namespace GameEngine::Editor
@@ -242,12 +244,33 @@ std::size_t SceneDocumentManager::OutstandingDegradedSkipCount() const
     return Scene::OutstandingSkipCount(*m_World, m_LastLoadDegraded->Census);
 }
 
+std::optional<Scene::SceneLoadSkip> SceneDocumentManager::DiscardLoadSkip(std::size_t index)
+{
+    if (!m_LastLoadDegraded.has_value() || index >= m_LastLoadDegraded->Census.skips.size())
+        return std::nullopt;
+    std::vector<Scene::SceneLoadSkip>& skips = m_LastLoadDegraded->Census.skips;
+    Scene::SceneLoadSkip skip = std::move(skips[index]);
+    skips.erase(skips.begin() + static_cast<std::ptrdiff_t>(index));
+    MarkDirty();
+    return skip;
+}
+
+void SceneDocumentManager::RestoreLoadSkip(std::size_t index, Scene::SceneLoadSkip skip)
+{
+    if (!m_LastLoadDegraded.has_value())
+        return;
+    std::vector<Scene::SceneLoadSkip>& skips = m_LastLoadDegraded->Census.skips;
+    skips.insert(skips.begin() + static_cast<std::ptrdiff_t>(std::min(index, skips.size())), std::move(skip));
+    MarkDirty();
+}
+
 bool SceneDocumentManager::WouldRefuseDegradedOverwrite(const std::filesystem::path& targetPath,
                                                         DegradedSavePolicy policy) const
 {
     // Counted, not merely present: once the user has discarded every preserved override the guard
     // is protecting nothing, and refusing the save would be nagging about a decision they made.
-    // Never-preserved skips never retire, so a scene that would genuinely lose data stays guarded.
+    // A never-preserved skip retires only with its entity or component, so a scene that would
+    // genuinely lose data stays guarded.
     if (OutstandingDegradedSkipCount() == 0)
         return false;
     if (policy == DegradedSavePolicy::SaveAnyway)
@@ -988,8 +1011,14 @@ bool SceneDocumentManager::SaveBackupCopy()
     // fully preserved — that backup round-trips and crash protection is worth keeping — but it will
     // not write one that DROPS data, because crash recovery would later restore that stripped file
     // as though it were the user's work.
-    if (m_LastLoadDegraded.has_value() && m_LastLoadDegraded->DroppedCount() > 0)
-        return false;
+    if (m_LastLoadDegraded.has_value())
+    {
+        for (const Scene::SceneLoadSkip& skip : m_LastLoadDegraded->Census.skips)
+        {
+            if (!skip.preserved && Scene::SkipIsOutstanding(*m_World, skip))
+                return false;
+        }
+    }
 
     auto& am = EngineCore::GetInstance().GetAssetManager();
     auto& reg = am.GetRegistry();

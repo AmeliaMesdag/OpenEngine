@@ -12,7 +12,6 @@
 #include "PathfindingECS/NavigationService.h"
 #include "PathfindingECS/Systems/NavigationWorldHooks.h"
 
-#include "Components/Terrain/Terrain.h"
 #include "ECS/Component/ComponentRegistry.h"
 #include "Pathfinding/DetourNavMap.h"
 #include "Pathfinding/NavigationWorld.h"
@@ -72,33 +71,6 @@ protected:
         entity.Set(surface);
         world->ProcessCommands();
         return entity;
-    }
-
-    // A flat 128 m terrain about the origin with a 1 m lattice.
-    TE::TerrainData* CreateTerrain()
-    {
-        Terrain::TerrainConfig config{};
-        config.HeightmapWidth = config.HeightmapHeight = 129;
-        config.WorldSizeX = config.WorldSizeZ = 128.0f;
-        config.HeightScale = 10.0f;
-        config.LODLevels = 2;
-        const auto handle = TE::TerrainService::Get().CreateTerrain(config);
-        auto* data = TE::TerrainService::Get().GetTerrainData(handle);
-        data->MarkFullDirty();
-        auto entity = world->Create();
-        Components::Terrain terrain{};
-        terrain.SizeX = terrain.SizeZ = 128.0f;
-        terrain.HeightScale = 10.0f;
-        terrain.BaseSource = Components::TerrainBaseSource::Flat;
-        terrain.TerrainDataHandle = handle.Index;
-        terrain.TerrainDataGeneration = handle.Generation;
-        entity.Set(terrain);
-        entity.Set(Components::Transform{});
-        Components::WorldTransform placed{};
-        placed.Version = 1u;
-        entity.Set(placed);
-        world->ProcessCommands();
-        return data;
     }
 
     // A static 1 m high box of half size halfX x halfZ about (x, z) on the ground: geometry the
@@ -184,7 +156,7 @@ protected:
 // Raising the ground under (0, 0) changes tile (1, 1) and no other: only it rebakes.
 TEST_F(NavigationSurfaceDirtyTileTest, ATerrainEditRebakesExactlyItsTiles)
 {
-    TE::TerrainData* terrain = CreateTerrain();
+    TE::TerrainData* terrain = Testing::CreateFlatTerrain(*world);
     auto surface = CreateSurface(48.0f);
     BakeAndSettle(surface);
     const TileBytes before = Tiles(surface);
@@ -206,7 +178,7 @@ TEST_F(NavigationSurfaceDirtyTileTest, ATerrainEditRebakesExactlyItsTiles)
 // is rebuilt or replaced.
 TEST_F(NavigationSurfaceDirtyTileTest, ADirtyTileWhoseContentDidNotChangeIsNotRebuilt)
 {
-    TE::TerrainData* terrain = CreateTerrain();
+    TE::TerrainData* terrain = Testing::CreateFlatTerrain(*world);
     auto surface = CreateSurface(48.0f);
     BakeAndSettle(surface);
     const NavigationSurface start = *surface.Get<NavigationSurface>();

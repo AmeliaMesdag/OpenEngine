@@ -451,10 +451,10 @@ float PointShadowScreenCoverageRadiusPx(const ::GameEngine::Rendering::CameraDat
     // scale to a reference screen half-height so the planner's pixel thresholds
     // are viewport-agnostic. Camera INSIDE the sphere => a very large coverage.
     constexpr float kReferenceScreenHalfHeightPx = 540.0f; // half a 1080p view
-    const Mathematics::Vector3 camPos{camData.cameraPos[0], camData.cameraPos[1],
-                                      camData.cameraPos[2]};
+    const Mathematics::Vector3 camPos{camData.cameraPos.x, camData.cameraPos.y,
+                                      camData.cameraPos.z};
     const float dist = std::max((lightPositionWS - camPos).Length(), 1e-3f);
-    const float focalY = std::fabs(camData.proj[5]);
+    const float focalY = std::fabs(camData.proj[1][1]);
     return (focalY * range / dist) * kReferenceScreenHalfHeightPx;
 }
 
@@ -463,7 +463,7 @@ std::optional<PointShadowCameraCull> MakePointShadowCullInputs(
 {
     // Degenerate camera (thumbnail before its first update): a zero projection
     // inverts to NaN corners. Skip culling — every face renders (safe fallback).
-    if (camData.proj[0] == 0.0f && camData.proj[5] == 0.0f)
+    if (camData.proj[0][0] == 0.0f && camData.proj[1][1] == 0.0f)
         return std::nullopt;
 
     const ::GameEngine::Rendering::CameraDerivedData cam =

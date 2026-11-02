@@ -535,7 +535,7 @@ void PromptPanel::ApplyPromptInputPaneHeight(float heightPx)
     if (!m_InputPane)
         return;
 
-    m_InputPane->Overrides()
+    m_InputPane->Style()
         .Set(Style::Height, StyleLength::Px(m_InputPaneHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(m_InputPaneHeightPx))
         .Set(Style::MaxHeight, StyleLength::Px(m_InputPaneHeightPx))
@@ -700,19 +700,19 @@ void PromptPanel::FitModeControl()
         ShowModeLabels(m_ModeDropdown->GetSelectedIndex());
     }
     const std::optional<float>& minimum = layout.MinimumPx;
-    const auto current = m_ModeDropdown->Overrides().Get(Style::MinWidth);
+    const auto current = m_ModeDropdown->Style().Get(Style::MinWidth);
     if (minimum)
     {
         if (current && current->IsPx() && std::fabs(current->Value - *minimum) <= 0.5f)
             return;
-        m_ModeDropdown->Overrides().Set(Style::MinWidth, StyleLength::Px(*minimum));
+        m_ModeDropdown->Style().Set(Style::MinWidth, StyleLength::Px(*minimum));
     }
     else
     {
         // Back to the stylesheet's minimum.
         if (!current)
             return;
-        m_ModeDropdown->Overrides().Reset(Style::MinWidth);
+        m_ModeDropdown->Style().Reset(Style::MinWidth);
     }
     m_ModeDropdown->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty);
 }
@@ -1062,10 +1062,10 @@ void PromptPanel::OnPostLayout()
         if (viewport > 0.0f)
         {
             const float padding = std::max(10.0f, (viewport - textHeight) * 0.5f);
-            const auto oldPadding = m_PromptText->Overrides().Get(Style::PaddingTop);
+            const auto oldPadding = m_PromptText->Style().Get(Style::PaddingTop);
             if (!oldPadding || !oldPadding->IsPx() || std::fabs(oldPadding->Value - padding) > 0.25f)
             {
-                m_PromptText->Overrides()
+                m_PromptText->Style()
                     .Set(Style::PaddingTop, StyleLength::Px(padding))
                     .Set(Style::PaddingBottom, StyleLength::Px(padding));
                 m_PromptText->MarkDirty(StyleDirty | LayoutDirty | VisualDirty);
@@ -1304,7 +1304,7 @@ void PromptPanel::ApplyTextSize(float px)
     if (scale == m_TextScale)
         return;
     m_TextScale = scale;
-    Overrides().SetCustomNumber("--prompt_text_scale"_sid, scale);
+    Style().SetCustomNumber("--prompt_text_scale"_sid, scale);
     MarkDirtySubtree(StyleDirty | LayoutDirty | VisualDirty);
 }
 

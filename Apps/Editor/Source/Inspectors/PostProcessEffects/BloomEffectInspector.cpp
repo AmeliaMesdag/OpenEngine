@@ -76,7 +76,7 @@ std::string FormatVignetteColor(const float (&color)[3])
 
 void StyleVignetteSwatch(UIElement* swatch, uint32_t argb)
 {
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kVignetteSwatchSize))
         .Set(Style::Height, StyleLength::Px(kVignetteSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kVignetteSwatchSize))
@@ -105,7 +105,7 @@ void AddBloomColorRow(
         label->AddClass("inspector-label-no-drag");
 
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -119,7 +119,7 @@ void AddBloomColorRow(
     Label* rgbLabelRaw = rgbLabel.get();
     rgbLabelRaw->AddClass("inspector-text");
     rgbLabelRaw->SetText(FormatVignetteColor(initialColor));
-    rgbLabelRaw->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    rgbLabelRaw->Style().Set(Style::Cursor, CursorStyle::Pointer);
     field->AddChild(std::move(rgbLabel));
 
     // The picker's callbacks outlive an inspector rebuild: resolve the row through weak
@@ -247,21 +247,21 @@ void UpdateBloomResponseCurve(CurveField& graph, float threshold, float knee)
 CurveField* AddBloomResponseCurve(UIElement* parent, float threshold, float knee)
 {
     UIElement* row = InspectorUI::AddRow(parent);
-    row->Overrides().Set(Style::AlignItems, AlignItems::FlexStart);
+    row->Style().Set(Style::AlignItems, AlignItems::FlexStart);
     if (Label* label = InspectorUI::AddLabel(
             row, "Brightness Response (linear)",
             "Live scene-linear bright-pass response produced by Threshold and Knee"))
         label->AddClass("inspector-label-no-drag");
 
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Stretch);
 
     auto graph = std::make_unique<CurveField>();
     CurveField* graphRaw = graph.get();
     UpdateBloomResponseCurve(*graph, threshold, knee);
-    graph->Overrides()
+    graph->Style()
         .Set(Style::Height, StyleLength::Px(110.0f))
         .Set(Style::MinHeight, StyleLength::Px(110.0f))
         .Set(Style::MaxHeight, StyleLength::Px(110.0f))
@@ -409,7 +409,7 @@ void RegisterBloomEffectInspector()
         {
             auto depthVeilControls = std::make_unique<UIElement>();
             UIElement* depthVeilControlsRaw = depthVeilControls.get();
-            depthVeilControlsRaw->Overrides()
+            depthVeilControlsRaw->Style()
                 .Set(Style::Display, effect->DepthVeilEnabled ? DisplayMode::Flex : DisplayMode::None)
                 .Set(Style::FlexDir, FlexDirection::Column)
                 .Set(Style::AlignItems, AlignItems::Stretch);
@@ -417,7 +417,7 @@ void RegisterBloomEffectInspector()
             AddToggleRow(ctx.Parent, "Depth Veil", effect->DepthVeilEnabled,
                 [w, e, n, undo, depthVeilControlsRaw](bool value)
                 {
-                    depthVeilControlsRaw->Overrides().Set(
+                    depthVeilControlsRaw->Style().Set(
                         Style::Display, value ? DisplayMode::Flex : DisplayMode::None);
                     CommitComponentWithUndo<Bloom>(w, e, n, undo, "Toggle Bloom Depth Veil",
                         [value](Bloom& u) { u.DepthVeilEnabled = value; });
@@ -454,7 +454,7 @@ void RegisterBloomEffectInspector()
 
         auto lensDirtControls = std::make_unique<UIElement>();
         UIElement* lensDirtControlsRaw = lensDirtControls.get();
-        lensDirtControlsRaw->Overrides()
+        lensDirtControlsRaw->Style()
             .Set(Style::Display, effect->LensDirtEnabled ? DisplayMode::Flex : DisplayMode::None)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::AlignItems, AlignItems::Stretch);
@@ -462,7 +462,7 @@ void RegisterBloomEffectInspector()
         AddToggleRow(ctx.Parent, "Lens Dirt", effect->LensDirtEnabled,
             [w, e, n, undo, lensDirtControlsRaw](bool value)
             {
-                lensDirtControlsRaw->Overrides().Set(
+                lensDirtControlsRaw->Style().Set(
                     Style::Display, value ? DisplayMode::Flex : DisplayMode::None);
                 CommitComponentWithUndo<Bloom>(w, e, n, undo, "Toggle Bloom Lens Dirt",
                     [value](Bloom& u) { u.LensDirtEnabled = value; });
@@ -471,7 +471,7 @@ void RegisterBloomEffectInspector()
 
         auto lensDirtVignetteControls = std::make_unique<UIElement>();
         UIElement* lensDirtVignetteControlsRaw = lensDirtVignetteControls.get();
-        lensDirtVignetteControlsRaw->Overrides()
+        lensDirtVignetteControlsRaw->Style()
             .Set(Style::Display, effect->LensDirtVignette ? DisplayMode::Flex : DisplayMode::None)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::AlignItems, AlignItems::Stretch);
@@ -479,7 +479,7 @@ void RegisterBloomEffectInspector()
         AddToggleRow(lensDirtControlsRaw, "Lens Dirt Vignette", effect->LensDirtVignette,
             [w, e, n, undo, lensDirtVignetteControlsRaw](bool value)
             {
-                lensDirtVignetteControlsRaw->Overrides().Set(
+                lensDirtVignetteControlsRaw->Style().Set(
                     Style::Display, value ? DisplayMode::Flex : DisplayMode::None);
                 CommitComponentWithUndo<Bloom>(w, e, n, undo, "Toggle Bloom Lens Dirt Vignette",
                     [value](Bloom& u) { u.LensDirtVignette = value; });

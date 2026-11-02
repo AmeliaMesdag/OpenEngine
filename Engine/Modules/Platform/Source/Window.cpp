@@ -50,6 +50,8 @@ extern "C" {
     void GE_MacOS_RemoveTitleBarRightClickMonitor(void* monitor);
 }
 #elif defined(__linux__)
+#include "WebView/WebViewHost_Linux.h"
+
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/cursorfont.h>
@@ -240,6 +242,26 @@ inline void ApplyExecutableIconToWindow(GLFWwindow* handle)
 
     SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hIcon));
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hIcon));
+}
+
+// Measures the frame of a window that is not fullscreen or minimized: each side of the outer
+// rect minus the client rect. GLFW assumes a standard caption, but a custom title bar puts the
+// caption in the client rect.
+bool MeasureWindowFrame(GLFWwindow* handle, HWND& outWindow, RECT& outFrame)
+{
+    if (glfwGetWindowMonitor(handle))
+        return false;
+    outWindow = glfwGetWin32Window(handle);
+    if (!outWindow || IsIconic(outWindow))
+        return false;
+    RECT outer{};
+    GetWindowRect(outWindow, &outer);
+    RECT client{};
+    GetClientRect(outWindow, &client);
+    MapWindowPoints(outWindow, nullptr, reinterpret_cast<POINT*>(&client), 2);
+    outFrame = {client.left - outer.left, client.top - outer.top, outer.right - client.right,
+                outer.bottom - client.bottom};
+    return true;
 }
 } // namespace
 #endif
@@ -689,6 +711,16 @@ void Window::SetWindowSize(int width, int height)
 {
     if (!m_Handle)
         return;
+#if defined(_WIN32)
+    HWND hwnd = nullptr;
+    RECT frame{};
+    if (MeasureWindowFrame(m_Handle, hwnd, frame))
+    {
+        SetWindowPos(hwnd, nullptr, 0, 0, width + frame.left + frame.right, height + frame.top + frame.bottom,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+#endif
     glfwSetWindowSize(m_Handle, width, height);
 }
 
@@ -771,8 +803,18 @@ void Window::GetPosition(int& outX, int& outY) const
 
 void Window::SetPosition(int x, int y)
 {
-    if (m_Handle)
-        glfwSetWindowPos(m_Handle, x, y);
+    if (!m_Handle)
+        return;
+#if defined(_WIN32)
+    HWND hwnd = nullptr;
+    RECT frame{};
+    if (MeasureWindowFrame(m_Handle, hwnd, frame))
+    {
+        SetWindowPos(hwnd, nullptr, x - frame.left, y - frame.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+#endif
+    glfwSetWindowPos(m_Handle, x, y);
 }
 
 void Window::GetFrameSize(int& left, int& top, int& right, int& bottom) const
@@ -956,6 +998,9 @@ void Window::PollEvents()
         ~PollScope() { pollingWindowEvents = false; }
     } scope;
     glfwPollEvents();
+#if defined(__linux__)
+    PumpWebViewEvents();
+#endif
     for (Window* window : s_Windows)
     {
         if (window)
@@ -1587,6 +1632,10 @@ void Window::MouseButtonThunk(GLFWwindow* win, int button, int action, int mods)
             glfwGetCursorPos(win, &cx, &cy);
             self->m_MouseMove(static_cast<float>(cx), static_cast<float>(cy));
         }
+#endif
+#if defined(__linux__)
+        if (action == GLFW_PRESS)
+            ReturnWebViewFocus(win);
 #endif
         if (self->m_MouseButton)
             self->m_MouseButton(button, action == GLFW_PRESS, mods);

@@ -284,7 +284,7 @@ TEST(UIManagerPseudoInvalidationTests, HoverWithOverridesDoesNotStompBackground)
     ASSERT_NE(btn, nullptr);
 
     btn->AddClass("btn");
-    btn->Overrides()
+    btn->Style()
         .Set(Style::PaddingTop, StyleLength::Px(8.0f))
         .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{4.0f, 4.0f, 4.0f, 4.0f})
         .Set(Style::Cursor, CursorStyle::Pointer)
@@ -871,7 +871,7 @@ std::unique_ptr<UIElement> MakePseudoCard(const char* id)
     card->AddClass("card");
     auto overlay = std::make_unique<UIElement>();
     overlay->AddClass("overlay");
-    overlay->Overrides().Set(Style::PointerEvents, false);
+    overlay->Style().Set(Style::PointerEvents, false);
     card->AddChild(std::move(overlay));
     return card;
 }
@@ -952,10 +952,10 @@ TEST(UIManagerPseudoInvalidationTests, HoverDescendantRuleAppliesToRuntimeAddedS
     // Runtime add while the grid is display:none, flipped visible the same
     // frame (community-grid shape: cards rebuilt when the fetch lands, the
     // status view swap happens right after, both before the next Update).
-    gridPtr->Overrides().Set(Style::Display, DisplayMode::None);
+    gridPtr->Style().Set(Style::Display, DisplayMode::None);
     ui.Update(0.0f, /*interactive=*/true);
     gridPtr->AddChild(MakePseudoCard("card-hidden-add"));
-    gridPtr->Overrides().Set(Style::Display, DisplayMode::Flex);
+    gridPtr->Style().Set(Style::Display, DisplayMode::Flex);
     ui.Update(0.0f, /*interactive=*/true);
     ExpectCardHoverWorks(ui, "card-hidden-add", 250.0f, "hidden-then-shown card");
 }
@@ -1002,7 +1002,7 @@ TEST(UIManagerPseudoInvalidationTests, HoverDescendantTransitionAppliesToRuntime
     // per-frame logo hue rotation.
     uint32_t hue = 0;
     auto tick = [&]() {
-        churnPtr->Overrides().Set(Style::BackgroundColor, 0xFF000000u | hue++);
+        churnPtr->Style().Set(Style::BackgroundColor, 0xFF000000u | hue++);
         churnPtr->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
         ui.Update(0.016f, /*interactive=*/true);
     };
@@ -1031,10 +1031,10 @@ TEST(UIManagerPseudoInvalidationTests, HoverDescendantTransitionAppliesToRuntime
 
     expectHoverTintWorks("card-static", 50.0f, "ctor-built card under churn");
 
-    gridPtr->Overrides().Set(Style::Display, DisplayMode::None);
+    gridPtr->Style().Set(Style::Display, DisplayMode::None);
     tick();
     gridPtr->AddChild(MakePseudoCard("card-hidden-add"));
-    gridPtr->Overrides().Set(Style::Display, DisplayMode::Flex);
+    gridPtr->Style().Set(Style::Display, DisplayMode::Flex);
     tick();
     expectHoverTintWorks("card-hidden-add", 150.0f, "hidden-then-shown card under churn");
 }

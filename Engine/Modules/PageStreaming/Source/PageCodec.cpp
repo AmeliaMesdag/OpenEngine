@@ -1,6 +1,6 @@
 #include "PageCodec.h"
 
-#include "HeightPageCodec.h"
+#include "Height/HeightPageCodec.h"
 #include "Bc5PageCodec.h"
 #include "BytePageCodec.h"
 

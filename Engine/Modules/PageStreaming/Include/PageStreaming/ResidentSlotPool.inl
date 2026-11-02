@@ -18,6 +18,7 @@ void ResidentSlotPool<Key, KeyHash>::Initialize(uint32 slotCount, uint32 framesI
     m_FramesInFlight = framesInFlight;
     m_CurrentFrame = 0;
     m_ResidentCount = 0;
+    m_QuarantinedCount = 0;
     m_AssignsThisFrame = 0;
     m_EvictionsThisFrame = 0;
 }
@@ -40,6 +41,7 @@ void ResidentSlotPool<Key, KeyHash>::Reset()
     }
     m_KeyToSlot.clear();
     m_ResidentCount = 0;
+    m_QuarantinedCount = 0;
     m_AssignsThisFrame = 0;
     m_EvictionsThisFrame = 0;
 }
@@ -51,13 +53,14 @@ void ResidentSlotPool<Key, KeyHash>::BeginFrame(uint64 frameIndex)
     m_AssignsThisFrame = 0;
     m_EvictionsThisFrame = 0;
 
-    for (uint32 i = 0; i < m_Slots.size(); ++i)
+    for (uint32 i = 0; m_QuarantinedCount != 0 && i < m_Slots.size(); ++i)
     {
         Slot& s = m_Slots[i];
         if (s.State == SlotState::Quarantined && frameIndex >= s.QuarantineUntilFrame)
         {
             s.State = SlotState::Free;
             m_FreeList.push_back(i);
+            --m_QuarantinedCount;
         }
     }
 }
@@ -99,6 +102,7 @@ void ResidentSlotPool<Key, KeyHash>::QuarantineSlot(uint32 slotIndex)
     {
         s.State = SlotState::Quarantined;
         s.QuarantineUntilFrame = m_CurrentFrame + m_FramesInFlight;
+        ++m_QuarantinedCount;
     }
 }
 
@@ -164,16 +168,6 @@ ResidentSlotRef ResidentSlotPool<Key, KeyHash>::Acquire(const Key& key, float32 
         ++m_EvictionsThisFrame;
     }
     return {}; // not resident this frame
-}
-
-template <typename Key, typename KeyHash>
-uint32 ResidentSlotPool<Key, KeyHash>::QuarantinedCount() const
-{
-    uint32 n = 0;
-    for (const Slot& s : m_Slots)
-        if (s.State == SlotState::Quarantined)
-            ++n;
-    return n;
 }
 
 template <typename Key, typename KeyHash>

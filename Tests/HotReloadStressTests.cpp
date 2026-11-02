@@ -150,7 +150,7 @@ TEST_F(HotReloadStressTest, RapidFileChanges) {
 
                     if (stats.result == HotReloadResult::Success) {
                         successCount.fetch_add(1);
-                    } else if (stats.result == HotReloadResult::Cancelled) {
+                    } else if (IsCancellation(stats.result)) {
                         cancelledCount.fetch_add(1);
                     } else {
                         failureCount.fetch_add(1);
@@ -446,7 +446,7 @@ TEST_F(HotReloadStressTest, CancellationStressTest) {
                 }
                 auto stats = future.get();
 
-                if (stats.result == HotReloadResult::Cancelled) {
+                if (IsCancellation(stats.result)) {
                     cancelledOperations.fetch_add(1);
                 } else {
                     completedOperations.fetch_add(1);

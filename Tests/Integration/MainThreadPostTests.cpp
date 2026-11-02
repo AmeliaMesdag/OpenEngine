@@ -10,6 +10,7 @@
 #include "Core/Application.h"
 #include "Core/Engine.h"
 #include "Engine/Build/PackagedGameLayout.h"
+#include "JobSystem/JobChannel.h"
 #include "EngineLogCapture.h"
 #include "PluginAPI/EnginePlugin.h"
 #include "Scripting/ScriptingABI.h"
@@ -123,7 +124,11 @@ class MainThreadPostTest : public ::testing::Test
         Posts().TakeAndRun(false);
     }
 
-    void TearDown() override { EngineCore::GetInstance().Shutdown(); }
+    void TearDown() override
+    {
+        EngineCore::GetInstance().SetStartupJobsHook(nullptr);
+        EngineCore::GetInstance().Shutdown();
+    }
 
     // Initializes the engine on this thread, which marks it as the main thread.
     bool Initialize(const GameEngine::ScriptsConfig& scripts = NativeAotPlayerScripts(), bool standaloneHosted = false)
@@ -133,6 +138,16 @@ class MainThreadPostTest : public ::testing::Test
         config.AssetDirectory = "Assets";
         config.StandaloneHosted = standaloneHosted;
         EngineCore::GetInstance().SetScriptsConfig(scripts);
+        return EngineCore::GetInstance().Initialize(config);
+    }
+
+    // An Initialize that the layout check refuses before it starts: the host reports other debug instrumentation.
+    bool InitializeWithAnotherHostLayout()
+    {
+        GameEngine::ApplicationConfig config{};
+        config.WorkspaceDirectory = m_Workspace.Path().string();
+        config.AssetDirectory = "Assets";
+        config.HostDebugInstrumentation = GE_DEBUG_INSTRUMENTATION + 1;
         return EngineCore::GetInstance().Initialize(config);
     }
 
@@ -434,4 +449,76 @@ TEST_F(MainThreadPostTest, APostLoopAcrossShutdownAndReinitializeIsClean)
     EXPECT_TRUE(initialized);
     EXPECT_GT(answered.load(), 0);
     EXPECT_EQ(unexpected.load(), 0);
+}
+
+namespace
+{
+// What the startup jobs hook saw when Initialize called it.
+struct StartupJobsHookCall
+{
+    int Count = 0;
+    bool ReceivedTheStartupChannel = false;
+    bool OnTheMainThread = false;
+    bool AssetManagerExisted = true;
+    bool JobRan = false;
+};
+
+void RecordStartupJobsHookCall(StartupJobsHookCall& call, JobSystem::JobChannel& channel)
+{
+    EngineCore& engine = EngineCore::GetInstance();
+    ++call.Count;
+    call.ReceivedTheStartupChannel = &channel == &engine.GetStartupChannel();
+    call.OnTheMainThread = engine.IsMainThread();
+    call.AssetManagerExisted = engine.TryGetAssetManager() != nullptr;
+    bool ran = false;
+    JobSystem::TaskHandle job = channel.Submit([&ran] { ran = true; });
+    job.Wait();
+    call.JobRan = ran;
+}
+} // namespace
+
+// Initialize calls the hook once, on its own thread, with the startup channel, when jobs run and before the
+// asset manager exists; a later Initialize does not call it again.
+TEST_F(MainThreadPostTest, TheStartupJobsHookRunsOnceWhenJobsRunAndBeforeTheAssetManager)
+{
+    StartupJobsHookCall call;
+    EngineCore::GetInstance().SetStartupJobsHook([&call](JobSystem::JobChannel& channel)
+                                                 { RecordStartupJobsHookCall(call, channel); });
+    ASSERT_TRUE(Initialize());
+    EXPECT_EQ(call.Count, 1);
+    EXPECT_TRUE(call.ReceivedTheStartupChannel);
+    EXPECT_TRUE(call.OnTheMainThread);
+    EXPECT_FALSE(call.AssetManagerExisted);
+    EXPECT_TRUE(call.JobRan) << "a job submitted on the startup channel inside the hook did not run";
+
+    EngineCore::GetInstance().Shutdown();
+    ASSERT_TRUE(Initialize());
+    EXPECT_EQ(call.Count, 1) << "the hook ran again on the next Initialize";
+}
+
+// An Initialize that the layout check refuses clears the hook: the next Initialize does not call it.
+TEST_F(MainThreadPostTest, ARefusedInitializeClearsTheStartupJobsHook)
+{
+    StartupJobsHookCall call;
+    EngineCore::GetInstance().SetStartupJobsHook([&call](JobSystem::JobChannel& channel)
+                                                 { RecordStartupJobsHookCall(call, channel); });
+    ASSERT_FALSE(InitializeWithAnotherHostLayout());
+    ASSERT_TRUE(Initialize());
+    EXPECT_EQ(call.Count, 0) << "a hook set for the refused Initialize ran in the next one";
+}
+
+// A hook that throws: the exception reaches the host, the rollback leaves the engine uninitialized, and the
+// next Initialize succeeds without the hook.
+TEST_F(MainThreadPostTest, AThrowingStartupJobsHookReachesTheHostAndTheNextInitializeSucceeds)
+{
+    int calls = 0;
+    EngineCore::GetInstance().SetStartupJobsHook([&calls](JobSystem::JobChannel&)
+                                                 {
+                                                     ++calls;
+                                                     throw std::runtime_error("startup jobs hook failed");
+                                                 });
+    EXPECT_THROW((void)Initialize(), std::runtime_error);
+    EXPECT_FALSE(EngineCore::GetInstance().IsInitialized());
+    ASSERT_TRUE(Initialize());
+    EXPECT_EQ(calls, 1);
 }

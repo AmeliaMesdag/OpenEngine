@@ -3,12 +3,13 @@
 // requestAnimationFrame runner calls PollEventsAndTick(). These tests pin the
 // properties they rely on: a requested exit makes both return false without
 // running a frame, each manual call advances exactly one frame until exit
-// (PollEventsAndTick included, when its pump ran no frame), a frame reports
-// nothing unless asked to, and a frame waits on the CPU only when GE_FRAME_CAP
-// asks for a limiter.
+// (PollEventsAndTick included, when its pump ran no frame), each frame's update
+// may use frame memory, a frame reports nothing unless asked to, and a frame
+// waits on the CPU only when GE_FRAME_CAP asks for a limiter.
 
 #include "Core/Application.h"
 #include "Core/Engine.h"
+#include "Memory/FrameMemory.h"
 #include "Scripting/ScriptsConfig.h"
 
 #include "EngineLogCapture.h"
@@ -35,11 +36,14 @@ public:
     int ExitAfterUpdates = -1;
     bool RequestNestedTick = false;
     bool NestedTickResult = false;
+    std::vector<void*> FrameMemoryPerUpdate;
 
 protected:
     void Update(GameEngine::float64) override
     {
         ++UpdateCalls;
+        // Debug asserts here unless Tick started a frame and joined this thread.
+        FrameMemoryPerUpdate.push_back(GameEngine::Memory::FrameMemory::Allocate(16));
         if (RequestNestedTick)
         {
             RequestNestedTick = false;
@@ -187,6 +191,9 @@ TEST(ApplicationTick, ManualTicksAdvanceOneFrameEachAndStopOnExit)
         EXPECT_EQ(app.UpdateCalls, 3);
         EXPECT_EQ(app.RenderCalls, 3);
         EXPECT_EQ(app.GetFrameCount(), 3u);
+        // Each tick starts a frame, so the third frame reuses the first frame's memory.
+        ASSERT_EQ(app.FrameMemoryPerUpdate.size(), 3u);
+        EXPECT_EQ(app.FrameMemoryPerUpdate[2], app.FrameMemoryPerUpdate[0]) << "Tick did not start a new frame";
 
         // Once exited, further ticks are inert.
         EXPECT_FALSE(app.Tick());

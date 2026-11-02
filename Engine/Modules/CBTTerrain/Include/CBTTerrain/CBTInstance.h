@@ -74,14 +74,6 @@ struct CBTClassifyDesc
     // drives it from GE_CBT_NEARFIELD_GATE so the fix can be A/B'd — and disabled — on the same build.
     uint32_t NearFieldGate = 1u;
 
-    // Earth-scale (sector, local) gVertex storage A/B (decode-precision arc S2a). 1 = spherical
-    // VertexEval decodes corners via the df64 path (cbt_deep_decode.glsl, GLSL twin of
-    // CBTDeepDecode.h) and stores (integer 1024 m sector anchor, fp32 local offset) — the
-    // GE_ClipFromSectorLocal representation, immune to the Earth-magnitude fp32 store
-    // quantization the S1 probes measured. 0 (default) = the fp32 world store, byte-identical to
-    // the pre-S2a pipeline (the dark-ship). CBTUpdateSystem drives it from GE_CBT_DEEP_DECODE.
-    uint32_t DeepDecode = 0u;
-
     // Planar pool-pressure scale. 1 (default) = a planar view whose visible field exceeds the pool
     // has its split/merge thresholds scaled up until the pool holds it with headroom (Kernel_Reset
     // steps the scale; Kernel_Classify applies it). 0 holds the scale at 1x. This is an A/B arm for
@@ -160,6 +152,11 @@ struct CBTTessellationStats
     // Planar off-frustum keep step (kWQOffFrustumKeepStep): how far the off-frustum keep band has
     // collapsed under pool pressure, 0 (ungated) to kOffFrustumKeepSteps (band 0).
     int32_t OffFrustumKeepStep = 0;
+    // The rest's keep floor (kWQOffFrustumKeepFloor): >= 0 a floor, or kKeepFloorArriving /
+    // kKeepFloorProbing, the rest phase.
+    int32_t OffFrustumKeepFloor = 0;
+    // The leaves the planar criterion wanted to merge last update, counted at rest only (kWQMergeCandidateCounter).
+    int32_t MergeCandidates = 0;
 };
 
 class CBTInstance
@@ -209,6 +206,12 @@ class CBTInstance
     // frames, with this frame's counter (its UBO ring element is rewritten by that frame's
     // update). No-op when `depth` does not exceed the base depth.
     void RefineUniform(uint32_t depth, uint32_t frameCounter);
+
+    // Refines a tree RefineUniform took to `uniformDepth` to its settled shape at `params`, before its
+    // first draw: one synchronous update per level to the cap, plus one. Call after SetHeightSource,
+    // between frames, with this frame's counter. Returns the passes it ran.
+    uint32_t RefineToView(const CBTClassifyDesc& classify, const CBTFrameParams& params, uint32_t uniformDepth,
+                      uint32_t frameCounter);
 
     // This frame's ring frame counter — see CBTResources::AdvanceFrameCounter, which owns it.
     // Every per-frame entry point below takes the returned value, and RecordUpdate pushes it
@@ -288,11 +291,7 @@ class CBTInstance
     {
         m_Resources.SetPageCacheSource(frameCounter, cacheTexture);
     }
-    bool ProvisionPageTableWords(uint32_t words) { return m_Resources.ProvisionPageTableWords(words); }
-    void UploadPageTable(uint32_t frameCounter, std::span<const uint32_t> words)
-    {
-        m_Resources.UploadPageTable(frameCounter, words);
-    }
+    void SetPageTable(Rendering::BufferHandle ring, uint32_t firstWord) { m_Resources.SetPageTable(ring, firstWord); }
 
     // Uploads the sphere sculpt page POOL + page TABLE into this frame's ring slot (planet editing
     // v2). Call with the SAME frameCounter passed to RecordUpdate; a host-visible write that completes
@@ -383,6 +382,11 @@ class CBTInstance
                                          uint32_t firstWord = 0);
 
   private:
+    // Records, submits and waits one update per pass; `forceFirstVertexEval` re-evaluates every
+    // corner in the first pass.
+    void SubmitUpdatesAndWait(CBTClassifyDesc classify, const CBTFrameParams& params, uint32_t passes,
+                              uint32_t frameCounter, bool forceFirstVertexEval);
+
     // One word of a render-loop-owned buffer, read through its region of the shared readback
     // buffer with a copy this call records itself.
     uint32_t ReadSharedReadbackWord(CBTBinding binding, uint64_t readbackOffset,

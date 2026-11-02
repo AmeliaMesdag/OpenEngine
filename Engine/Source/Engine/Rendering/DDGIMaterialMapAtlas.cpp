@@ -34,11 +34,6 @@ constexpr StringId kEmissiveSlotName = HashStringId("emissiveMap");
 // the blit stores its channels untouched.
 constexpr StringId kMetallicSlotName = HashStringId("metallicRoughnessMap");
 
-// Sentinel for Material::GetGpuSceneMaterialIndex on a material with no SSBO
-// row. Mirrors Material::kInvalidSSBOIndex, which is private (same duplication,
-// same reason, as DDGISceneService's copy).
-constexpr uint32_t kUnassignedMaterialSlot = 0xFFFFFFFFu;
-
 // Guards against a corrupt slot index turning into a multi-gigabyte table.
 constexpr uint32_t kMaxMaterialSlots = 65536u;
 
@@ -180,7 +175,7 @@ void DDGIMaterialMapAtlas::Refresh()
         [&](const GUID&, const Material& material)
         {
             const uint32_t slot = material.GetGpuSceneMaterialIndex();
-            if (slot == kUnassignedMaterialSlot || slot >= kMaxMaterialSlots)
+            if (slot == Material::kInvalidSSBOIndex || slot >= kMaxMaterialSlots)
                 return;
 
             MaterialRecord record{};

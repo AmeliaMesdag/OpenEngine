@@ -78,6 +78,14 @@ struct ConformHold
 void ReportConformMisses(const ConformMissTally& tally, uint32 entityId,
                          uint32& lastReportedMisses);
 
+// Meters a paving and a road's strip sit above the ground they conform to. A surface at the
+// ground's own height fights the terrain for its pixels, also where the terrain's far tessellation is coarse.
+inline constexpr float32 kGroundSurfaceLiftMeters = 0.05f;
+
+// The system that composes a tiled terrain's ground. It lives on the rendering loop's schedule;
+// null in a headless or pre-init process, where a tiled read reports no terrain.
+[[nodiscard]] const TerrainECS::TerrainModifierSystem* ResolveTerrainModifierSystem();
+
 // A digest of the terrain ground the conform rays measure: the seven pick inputs (translation, SizeX, SizeZ,
 // HeightScale, Domain) and the heightfield's content and identity. It does not cover mesh ground or a planet's drawn
 // surface. Pass `modifierSystem` to read the composed ground of a tiled terrain, or null to conform by raycast.

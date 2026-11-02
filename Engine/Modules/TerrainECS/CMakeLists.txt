@@ -31,8 +31,9 @@ add_library(TerrainECS OBJECT
     Source/SurfaceHeightQuery.cpp
     Source/TerrainSkyline.cpp
     Source/TerrainHeightSource.cpp
-    Source/TerrainHeightPages.cpp
-    Source/TerrainHeightPageFeature.cpp
+    Source/TerrainPages.cpp
+    Source/TerrainPageFeature.cpp
+    Source/TerrainPageTableRing.cpp
     Source/TerrainHeightPageDriver.cpp
     Source/HeightPageStoreLoader.cpp
     Source/Systems/TerrainExtractionSystem.cpp
@@ -42,18 +43,21 @@ add_library(TerrainECS OBJECT
     Source/Systems/TerrainModifierSystem.cpp
     Source/Systems/TerrainModifierPageOverlay.cpp
     Source/Systems/TerrainModifierSurfacePages.cpp
-    Source/TerrainSurfacePageBaker.cpp
-    Source/TerrainSurfacePageDriver.cpp
-    Source/TerrainSurfaceStore.cpp
+    Source/TerrainSurface/TerrainSurfacePageBaker.cpp
+    Source/TerrainSurface/TerrainSurfacePageDriver.cpp
+    Source/TerrainSurface/TerrainSurfacePages.cpp
+    Source/TerrainSurface/TerrainSurfaceStore.cpp
     Source/TileStreamingManager.cpp
     Source/TerrainModifierComponents.cpp
-    Source/TerrainColorMap.cpp
-    Source/TerrainColorMapBaker.cpp
-    Source/TerrainGrassField.cpp
-    Source/TerrainGrassCompose.cpp
+    Source/TerrainColorMap/TerrainColorMap.cpp
+    Source/TerrainColorMap/TerrainColorMapBaker.cpp
+    Source/TerrainGrass/TerrainGrassField.cpp
+    Source/TerrainGrass/TerrainGrassCompose.cpp
     Source/TerrainFieldUploader.cpp
     Source/TerrainRowBands.cpp
     Source/TerrainRoutePolyline.cpp
+    Source/AreaFlatten/AreaReferenceSurface.cpp
+    Source/AreaFlatten/AreaReferenceSurfaceCache.cpp
     Source/TerrainZonePayload.cpp
     Source/TerrainZoneAuthoring.cpp
     Source/Scene/TerrainSceneSchemas.cpp

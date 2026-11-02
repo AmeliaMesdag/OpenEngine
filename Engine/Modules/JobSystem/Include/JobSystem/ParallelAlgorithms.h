@@ -8,10 +8,13 @@
 // have started, never for a helper still queued. The width is
 // min(workers + 1, chunks) threads (the caller plus at most kStackBatch
 // helpers), helpers publish at the class of the body that forks, and a call
-// makes no heap allocation at steady state. A chunk that throws stops the
-// run (chunks not yet started do not run) and its exception is rethrown on
-// the caller once the chunks in flight have finished. With no pool, or a
-// range at or under its batch size, the work runs sequentially on the caller.
+// makes no heap allocation at steady state. Each chunk is one unit of the
+// unit form, so its stop rules hold per chunk: a chunk that returns false or
+// throws, or the chunked overload's options.Stop returning true, stops the
+// run (chunks not yet started do not run, chunks in flight finish), and the
+// first exception is rethrown on the caller once the chunks in flight have
+// finished. With no pool, or a range at or under its batch size, the range is
+// one chunk on the caller, under the same rules.
 
 #include "JobSystem/WorkStealingThreadPool.h"
 
@@ -28,39 +31,63 @@ namespace JobSystem
 /**
  * @brief The chunked overload: run `body(chunkBegin, chunkEnd)` over
  * [0, count) split into at most min(workers + 1, ceil(count / minBatchSize),
- * 64) chunks of equal size, one unit of the unit form per chunk; a range at or
- * under `minBatchSize` runs on the caller. Returns once every chunk has run.
- * For work too
+ * 64) chunks of equal size, one unit of the unit form per chunk; no pool, or a
+ * range at or under `minBatchSize`, is one chunk on the caller. For work too
  * fine to claim one element at a time, or a body that sets up per-chunk
  * state.
- * @throws The first exception a chunk threw (see the file comment).
+ * @param body Callable as void(size_t chunkBegin, size_t chunkEnd) or
+ *        bool(size_t chunkBegin, size_t chunkEnd); false stops the run.
+ * @param options The unit form's options, per chunk: Helpers caps the helpers
+ *        (not the chunk count), Stop is polled by the caller before each chunk
+ *        it claims, Admission is taken per chunk a helper runs. Stop does not
+ *        reach a helper between its chunks: a body that must stop helpers
+ *        returns false.
+ * @return The unit form's result: false when a chunk returned false or
+ *         options.Stop returned true, true otherwise; always true for a void
+ *         body without a Stop.
+ * @throws The first exception a chunk, options.Stop or an admission hook
+ *         threw (see the file comment).
  */
 template <typename Body>
     requires std::invocable<Body&, size_t, size_t>
-void ParallelFor(WorkStealingThreadPool* pool, size_t count, Body&& body, size_t minBatchSize)
+bool ParallelFor(WorkStealingThreadPool* pool, size_t count, Body&& body, size_t minBatchSize,
+                 const ParallelForOptions& options = {})
 {
+    using ChunkResult = std::invoke_result_t<Body&, size_t, size_t>;
+    static_assert(std::is_void_v<ChunkResult> || std::is_same_v<ChunkResult, bool>,
+                  "ParallelFor: the chunk body returns void or bool (false stops the run)");
     if (count == 0)
-        return;
+        return true;
 
     minBatchSize = std::max<size_t>(1, minBatchSize);
-    if (!pool || count <= minBatchSize)
+    const bool runsInline = pool == nullptr || count <= minBatchSize;
+    // A void body with no Stop cannot stop the run, so its inline range is a direct call.
+    if constexpr (std::is_void_v<ChunkResult>)
     {
-        body(size_t{0}, count);
-        return;
+        if (runsInline && options.Stop == nullptr)
+        {
+            body(size_t{0}, count);
+            return true;
+        }
     }
-
-    const size_t workerCount = std::max<size_t>(1, pool->GetWorkerCount());
-    const size_t lanes = std::min({workerCount + 1, (count + minBatchSize - 1) / minBatchSize,
-                                   WorkStealingThreadPool::kStackBatch});
-    const size_t chunkSize = (count + lanes - 1) / lanes;
+    size_t chunkSize = count;
+    if (!runsInline)
+    {
+        const size_t workerCount = std::max<size_t>(1, pool->GetWorkerCount());
+        const size_t lanes = std::min({workerCount + 1, (count + minBatchSize - 1) / minBatchSize,
+                                       WorkStealingThreadPool::kStackBatch});
+        chunkSize = (count + lanes - 1) / lanes;
+    }
     const size_t chunkCount = (count + chunkSize - 1) / chunkSize;
 
-    ParallelFor(pool, chunkCount,
-                [&body, count, chunkSize](size_t chunk)
-                {
-                    const size_t chunkBegin = chunk * chunkSize;
-                    body(chunkBegin, std::min(chunkBegin + chunkSize, count));
-                });
+    return ParallelFor(
+        pool, chunkCount,
+        [&body, count, chunkSize](size_t chunk) -> ChunkResult
+        {
+            const size_t chunkBegin = chunk * chunkSize;
+            return body(chunkBegin, std::min(chunkBegin + chunkSize, count));
+        },
+        options);
 }
 
 /**

@@ -118,6 +118,13 @@ class EngineCore
     void SetScriptsConfig(const ScriptsConfig& config);
 
     /**
+     * @brief Set the work the next Initialize runs once, on its own thread, after the job
+     * system and the startup channel exist and before the asset manager and the script
+     * manager start. Initialize clears the hook, also when it fails.
+     */
+    void SetStartupJobsHook(std::function<void(JobSystem::JobChannel&)> hook);
+
+    /**
      * @brief Shutdown the engine
      */
     void Shutdown();
@@ -484,6 +491,8 @@ class EngineCore
     // The "Engine startup" channel (GetStartupChannel); created by Initialize after the
     // job system, destroyed by Shutdown (and a failed Initialize) before it.
     UniquePtr<JobSystem::JobChannel> m_StartupChannel;
+    // SetStartupJobsHook's hook: called once by the next Initialize, then cleared.
+    std::function<void(JobSystem::JobChannel&)> m_StartupJobsHook;
 
     // Engine-owned AudioSystem/backend (may remain null if init fails).
     UniquePtr<Audio::AudioSystem> m_AudioSystem;

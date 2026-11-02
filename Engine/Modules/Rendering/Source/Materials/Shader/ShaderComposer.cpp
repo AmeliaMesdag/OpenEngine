@@ -23,6 +23,7 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace GameEngine
 {
@@ -277,17 +278,6 @@ std::vector<std::string> DiagnoseUnreadDeclaredProperties(const ShaderPropertyTa
     return lines;
 }
 
-// Through the shared source cache: every variant of every material composes from the same
-// adapters and surfaces, and the compile that follows reads the same held bytes.
-static bool ReadFile(const std::filesystem::path& p, std::string& out)
-{
-    const ShaderSourceCache::EntryPtr entry = ShaderSourceCache::Get().Read(p, ShaderSourceCache::NormalizedKey(p));
-    if (!entry)
-        return false;
-    out = entry->Bytes;
-    return true;
-}
-
 // Quote a resolved shader path as a literal #include argument. The composed
 // source is a cache key input, so an absolute spelling here would pin every
 // compiled variant to the machine that composed it.
@@ -359,8 +349,8 @@ static bool IsGraphLivePreviewMaterialDirectory(const std::filesystem::path& mat
 // The surface a document that authors none composes with.
 static constexpr const char* kDefaultSurfaceShader = "Surfaces/standard_surface.glsl";
 
-// The first probe of ResolveShaderReference: a relative reference that names a file inside the
-// material's own directory. An absolute reference never resolves through a directory.
+// True when a relative reference names a file inside the material's own directory.
+// An absolute reference never resolves through a directory.
 static bool ResolvesInMaterialDirectory(const std::filesystem::path& reference,
                                         const std::filesystem::path& materialDir)
 {
@@ -662,31 +652,18 @@ std::filesystem::path ShaderComposer::ResolveShaderReference(const std::string& 
     if (p.is_absolute())
         return fs::absolute(p);
 
-    // An empty materialDir means the material's asset path is UNAVAILABLE
-    // (cache-driven compile that could not recover it) — never a real root.
-    // It is skipped entirely so a stand-in directory can't masquerade as the
-    // material's own and shadow the project/package/engine chain.
-    if (ResolvesInMaterialDirectory(p, materialDir))
-        return fs::absolute((materialDir / p).lexically_normal());
-
-    std::error_code ec;
-    for (const fs::path& projectRoot : context.ProjectRoots)
-    {
-        const fs::path fromProject = (projectRoot / p).lexically_normal();
-        if (fs::exists(fromProject, ec))
-            return fs::absolute(fromProject);
-    }
-
-    for (const fs::path& packageDir : context.PackageShaderDirs)
-    {
-        const fs::path fromPackage = (packageDir / p).lexically_normal();
-        if (fs::exists(fromPackage, ec))
-            return fs::absolute(fromPackage);
-    }
-
-    const fs::path fromAdapter = (context.AdapterShaderDir / p).lexically_normal();
-    if (fs::exists(fromAdapter, ec))
-        return fs::absolute(fromAdapter);
+    // Search order: materialDir, ProjectRoots, PackageShaderDirs, AdapterShaderDir. An empty
+    // materialDir means the material's asset path is unknown, so that step is skipped.
+    // ShaderSourceCache holds the answer until the next announcement, so a repeat touches no file.
+    std::vector<fs::path> roots;
+    roots.reserve(context.ProjectRoots.size() + context.PackageShaderDirs.size() + 1);
+    roots.insert(roots.end(), context.ProjectRoots.begin(), context.ProjectRoots.end());
+    roots.insert(roots.end(), context.PackageShaderDirs.begin(), context.PackageShaderDirs.end());
+    roots.push_back(context.AdapterShaderDir);
+    const ShaderSourceCache::ResolutionPtr resolution = ShaderSourceCache::Get().Resolve(
+        materialDir, roots, ShaderSourceCache::MakeRootsSignature(roots), relativePath);
+    if (resolution)
+        return fs::absolute(resolution->Candidate.lexically_normal());
 
     // Nowhere found: name a concrete candidate for the caller's diagnostics —
     // the materialDir one when a material dir exists, the engine-tree one
@@ -765,7 +742,7 @@ ComposedShaderSource ShaderComposer::Compose(const MaterialDocument& doc,
     const std::filesystem::path resolvedSurfacePath =
         ResolveSurfaceShaderPath(doc.surfaceShader, materialDir, context);
     std::string surfaceSource;
-    const bool haveSurface = ReadFile(resolvedSurfacePath, surfaceSource);
+    const bool haveSurface = ShaderSourceCache::Get().ReadText(resolvedSurfacePath, surfaceSource);
 
     // An AUTHORED surface that cannot be resolved is a HARD compose failure.
     // Composing anyway would either error late inside shaderc (phantom
@@ -854,7 +831,7 @@ ComposedShaderSource ShaderComposer::Compose(const MaterialDocument& doc,
 
     // Read adapter vertex source.
     std::string vsSrc;
-    if (!ReadFile(vsPath, vsSrc))
+    if (!ShaderSourceCache::Get().ReadText(vsPath, vsSrc))
     {
         addError("ShaderComposer: could not read vertex adapter: " + vsPath.string());
         return result;
@@ -862,7 +839,7 @@ ComposedShaderSource ShaderComposer::Compose(const MaterialDocument& doc,
 
     // Read adapter fragment source.
     std::string fsSrc;
-    if (!ReadFile(fsPath, fsSrc))
+    if (!ShaderSourceCache::Get().ReadText(fsPath, fsSrc))
     {
         addError("ShaderComposer: could not read fragment adapter: " + fsPath.string());
         return result;
@@ -898,7 +875,7 @@ ComposedShaderSource ShaderComposer::Compose(const MaterialDocument& doc,
     {
         std::string modifierSource;
         if (!vertexModifierPath.empty())
-            ReadFile(vertexModifierPath, modifierSource);
+            ShaderSourceCache::Get().ReadText(vertexModifierPath, modifierSource);
         for (const std::string& line : DiagnoseUnreadDeclaredProperties(
                  *declared, StripComments(surfaceSource), StripComments(modifierSource),
                  StripComments(vsSrc) + StripComments(fsSrc)))

@@ -216,7 +216,7 @@ struct CascadeFrameData
     bool CasterFootprintApplies[kMaxShadowCascades]{};
     // GPU LOD selection inputs for this cascade's bucketer slice (xyz + the
     // 2D-ortho flag in w), plus |proj[1][1]| — MakeViewLODParams' inputs.
-    float LodCameraPos[kMaxShadowCascades][4]{};
+    Mathematics::Vector4 LodCameraPos[kMaxShadowCascades]{};
     float LodProjScaleY[kMaxShadowCascades]{};
 };
 
@@ -1534,7 +1534,7 @@ class ShadowMapRenderFeature : public IRenderFeature
         Mathematics::Vector3 LightDir;    // normalized, exact-compare
         Mathematics::Vector3 CameraPos;   // LOD drift reference
         Mathematics::Matrix4x4 CullCameraViewProj;
-        float LodCameraPos[4]{};
+        Mathematics::Vector4 LodCameraPos;
         float LodProjScaleY = 0.0f;
         // View depth of the capture-time slice's far end (the LOD drift bound
         // scales with it).

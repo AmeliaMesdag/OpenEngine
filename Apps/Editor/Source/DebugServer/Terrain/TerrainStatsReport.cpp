@@ -1,7 +1,7 @@
 #include "DebugServer/Terrain/TerrainStatsReport.h"
 
 #include "CBTTerrain/CBTScreenTarget.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "Types/FormatNumber.h"
 
 #include <string>
@@ -36,7 +36,7 @@ nlohmann::json DescribeTerrainSplitThreshold(float targetPixelError, float appli
     return out;
 }
 
-nlohmann::json DescribePlanetPageTable(const TerrainECS::HeightPageStreamCounts& stream)
+nlohmann::json DescribePlanetPageTable(const TerrainECS::PageStreamCounts& stream)
 {
     nlohmann::json faces = nlohmann::json::array();
     for (const TerrainECS::HeightPageFaceTable& face : stream.Faces)

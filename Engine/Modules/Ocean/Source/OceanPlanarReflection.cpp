@@ -146,10 +146,8 @@ CameraData OceanPlanarReflection::MakeMirroredCamera(const CameraData& main, flo
     using GameEngine::Mathematics::Matrix4x4;
 
     // Rebuild the main view matrix (column-major, matches Matrix4x4/glm storage).
-    Matrix4x4 viewM;
-    std::memcpy(viewM.Data(), main.view, sizeof(float) * 16);
-    Matrix4x4 projM;
-    std::memcpy(projM.Data(), main.proj, sizeof(float) * 16);
+    Matrix4x4 viewM = main.view;
+    Matrix4x4 projM = main.proj;
 
     // Householder reflection across the plane y = seaLevel: (x, y, z) -> (x,
     // 2*sea - y, z). Column-major, column-vector convention (M * p): column 1's
@@ -164,13 +162,13 @@ CameraData OceanPlanarReflection::MakeMirroredCamera(const CameraData& main, flo
     const Matrix4x4 reflViewProj = reflProj * reflView;
 
     CameraData out{};
-    std::memcpy(out.view, reflView.Data(), sizeof(float) * 16);
-    std::memcpy(out.proj, reflProj.Data(), sizeof(float) * 16);
-    std::memcpy(out.viewProj, reflViewProj.Data(), sizeof(float) * 16);
-    out.cameraPos[0] = main.cameraPos[0];
-    out.cameraPos[1] = 2.0f * seaLevel - main.cameraPos[1];
-    out.cameraPos[2] = main.cameraPos[2];
-    out.cameraPos[3] = main.cameraPos[3];
+    out.view = reflView;
+    out.proj = reflProj;
+    out.viewProj = reflViewProj;
+    out.cameraPos.x = main.cameraPos.x;
+    out.cameraPos.y = 2.0f * seaLevel - main.cameraPos.y;
+    out.cameraPos.z = main.cameraPos.z;
+    out.cameraPos.w = main.cameraPos.w;
     return out;
 }
 
@@ -269,7 +267,7 @@ bool OceanPlanarReflection::DeclareForView(Engine::Renderer::Pipeline::ViewDecla
     const CameraData mainCam = *mainCamData;
     // Uninitialized camera (e.g. a thumbnail before its first update): inverting a
     // zero projection produces NaNs that poison culling.
-    if (mainCam.proj[0] == 0.0f && mainCam.proj[5] == 0.0f)
+    if (mainCam.proj[0][0] == 0.0f && mainCam.proj[1][1] == 0.0f)
         return false;
 
     EnsureView(rs, mirror, renderLayerMask, worldId);
@@ -315,10 +313,7 @@ bool OceanPlanarReflection::DeclareForView(Engine::Renderer::Pipeline::ViewDecla
     // Transparent background (alpha 0 = no reflected geometry), reverse-Z far.
     Rendering::ViewClearConfig clear{};
     clear.clearColor = true;
-    clear.clearColorValue[0] = 0.0f;
-    clear.clearColorValue[1] = 0.0f;
-    clear.clearColorValue[2] = 0.0f;
-    clear.clearColorValue[3] = 0.0f;
+    clear.clearColorValue = ColorLinear(0.0f, 0.0f, 0.0f, 0.0f);
     clear.clearDepth = true;
     clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
     rs.Views().SetViewClearConfig(mirror.ViewId, clear);

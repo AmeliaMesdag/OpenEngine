@@ -43,11 +43,11 @@ void ApplyTreeTitleIconLayoutVars(UIElement* scope, float iconSizePx)
     const float paddingRtl = clamped + 4.0f;
     const float foldoutPx = TreeFoldoutGlyphSizePxForTreeIconSize(clamped);
     const float badgePx = kTreeIconBadgeBasePx + clamped * kTreeIconBadgePxPerIconPx;
-    scope->Overrides().SetCustom(HashStringId("--ui_tree_icon_size"), FormatTreeIconPx(clamped));
-    scope->Overrides().SetCustom(HashStringId("--ui_tree_foldout_size"), FormatTreeIconPx(foldoutPx));
-    scope->Overrides().SetCustom(HashStringId("--ui_tree_icon_padding"), FormatTreeIconPx(padding));
-    scope->Overrides().SetCustom(HashStringId("--ui_tree_icon_padding_rtl"), FormatTreeIconPx(paddingRtl));
-    scope->Overrides().SetCustom(HashStringId("--ui_tree_icon_badge_size"), FormatTreeIconPx(badgePx));
+    scope->Style().SetCustom(HashStringId("--ui_tree_icon_size"), FormatTreeIconPx(clamped));
+    scope->Style().SetCustom(HashStringId("--ui_tree_foldout_size"), FormatTreeIconPx(foldoutPx));
+    scope->Style().SetCustom(HashStringId("--ui_tree_icon_padding"), FormatTreeIconPx(padding));
+    scope->Style().SetCustom(HashStringId("--ui_tree_icon_padding_rtl"), FormatTreeIconPx(paddingRtl));
+    scope->Style().SetCustom(HashStringId("--ui_tree_icon_badge_size"), FormatTreeIconPx(badgePx));
     if (clamped >= kTreeIconBadgeMinIconPx)
         scope->AddClass(kTreeIconsShowBadgesClass);
     else

@@ -93,7 +93,7 @@ struct BareManagerFixture
         Ui = std::make_unique<UIManager>(Device);
         Ui->SetLayoutSizeOverride(kViewportW, kViewportH);
 
-        control->Overrides()
+        control->Style()
             .Set(Style::Width, StyleLength::Px(kControlWidthPx))
             .Set(Style::Height, StyleLength::Px(kControlHeightPx));
         auto document = std::make_unique<UIElement>();

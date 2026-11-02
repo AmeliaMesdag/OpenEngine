@@ -2,6 +2,7 @@
 
 #include "Network/SplineNetworkDetect.h"
 #include "SplineECS/SplineService.h"
+#include "Core/CpuProfiler.h"
 
 #include "Components/SceneEntityTag.h"
 #include "Components/Spline/SplineComponent.h"
@@ -783,6 +784,8 @@ std::vector<SplineNodeChange> SplineNetwork::State::Derive(ECS::World& world, ui
         else if (hasCache || generations[0] != LastGeneration(Members[i]->Entity.id) ||
                  generations[1] != LastGeneration(Members[j]->Entity.id))
         {
+            // One scope call per pair searched: the profiler shows how many pairs an edit derives again.
+            GE_CPU_PROFILE_SCOPE("SplineNetwork.SearchPair");
             Network::DetectPairNodes(Members, i, j, raw);
         }
         for (const RawNode& found : raw)
@@ -946,6 +949,56 @@ void SplineNetwork::Update(ECS::World& world)
         m_States.Erase(worldId);
     if (!changes.empty())
         NodesChanged.Invoke(world, changes);
+}
+
+std::optional<SplineSnapTarget> SplineNetwork::FindSnapTarget(const ECS::World& world, const Vector3& point,
+                                                              float32 reachMetres, ECS::EntityHandle exclude) const
+{
+    const std::unique_ptr<State>* found = m_States.Find(world.GetWorldId());
+    const SplineService* service = SplineService::TryGet();
+    if (!found || !service || !(reachMetres > 0.0f))
+        return std::nullopt;
+    std::optional<SplineSnapTarget> best;
+    for (const auto& [id, cached] : (*found)->Curves)
+    {
+        const MemberCurve& curve = cached.Curve;
+        if (curve.Entity == exclude || curve.RunBounds.empty() ||
+            (curve.Kind == SplineNetworkMemberKind::Area && !curve.Closed))
+            continue;
+        const Mathematics::AABB& bounds = curve.Bounds;
+        if (point.x < bounds.min.x - reachMetres || point.x > bounds.max.x + reachMetres ||
+            point.z < bounds.min.z - reachMetres || point.z > bounds.max.z + reachMetres)
+            continue;
+        // The nearest-point query refines on the spline the last Update read. A spline that
+        // moved in the spline storage or was edited since then is skipped until the next Update.
+        const auto* component = world.GetComponent<Components::SplineComponent>(curve.Entity);
+        const Spline::SplineData* data =
+            component ? service->GetSplineData(SplineHandle(component->SplineDataIndex, component->SplineDataGeneration))
+                      : nullptr;
+        if (!data || data != curve.Spline || data->Dirty || data->Version != cached.SplineVersion)
+            continue;
+        const Network::CurvePoint nearest = Network::NearestPointXZ(curve, point);
+        SplineSnapTarget target{curve.Entity, nearest.Point, nearest.Distance};
+        if (curve.Kind == SplineNetworkMemberKind::Road)
+        {
+            const float32 halfWidth = curve.HalfWidthAt(nearest.ArcLength);
+            if (nearest.Distance <= halfWidth)
+            {
+                target.Point = Vector3{point.x, nearest.Point.y, point.z};
+                target.DistanceMetres = 0.0f;
+            }
+            else
+            {
+                const Vector3 away{point.x - nearest.Point.x, 0.0f, point.z - nearest.Point.z};
+                target.Point = nearest.Point + away * (halfWidth / nearest.Distance);
+                target.DistanceMetres = nearest.Distance - halfWidth;
+            }
+        }
+        if (target.DistanceMetres > reachMetres || (best && best->DistanceMetres <= target.DistanceMetres))
+            continue;
+        best = target;
+    }
+    return best;
 }
 
 const SplineNetwork::State* SplineNetwork::FindState(const ECS::World& world) const

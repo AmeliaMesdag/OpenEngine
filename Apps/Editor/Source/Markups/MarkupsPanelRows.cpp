@@ -56,7 +56,7 @@ std::unique_ptr<Label> MakeStatusPill(uint32 status)
     if (MarkupTagReadsDarkText(status))
         pill->AddClass("markups-status-pill-dark-text");
     // The fill is the vocabulary's color for the status: project data, not a theme color.
-    pill->Overrides().Set(Style::BackgroundColor, *fill);
+    pill->Style().Set(Style::BackgroundColor, *fill);
     return pill;
 }
 
@@ -144,7 +144,7 @@ std::unique_ptr<UIElement> BuildMarkupRow(MarkupEditorBridge& bridge, const ECS:
     // The color the volume and its Scene View label draw in: its own, else its status's.
     auto swatch = std::make_unique<UIElement>();
     swatch->AddClass("markups-color-dot");
-    swatch->Overrides().Set(Style::BackgroundColor, MarkupDisplayArgb(markup));
+    swatch->Style().Set(Style::BackgroundColor, MarkupDisplayArgb(markup));
     row->AddChild(std::move(swatch));
     row->AddChild(BuildMarkupKindGlyph(ReadMarkupKind(world, entity)));
     row->AddChild(MakeLabel(MarkupTitle(world, entity), "markups-title"));

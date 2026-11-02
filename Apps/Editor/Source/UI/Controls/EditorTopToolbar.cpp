@@ -520,7 +520,7 @@ void EditorTopToolbar::UpdatePlayModeState(Editor::PlayModeState s)
     {
         const bool enablePause =
             (s == Editor::PlayModeState::Play || s == Editor::PlayModeState::Paused);
-        m_PauseButton->SetDisabled(!enablePause);
+        m_PauseButton->SetEnabled(enablePause);
         if (s == Editor::PlayModeState::Paused)
             m_PauseButton->AddClass("pressed");
         else
@@ -534,7 +534,7 @@ void EditorTopToolbar::UpdatePlayModeState(Editor::PlayModeState s)
              s == Editor::PlayModeState::ChangeReview ||
              s == Editor::PlayModeState::EnteringPlay ||
              s == Editor::PlayModeState::ExitingPlay);
-        m_StopButton->SetDisabled(!enableStop);
+        m_StopButton->SetEnabled(enableStop);
     }
 }
 

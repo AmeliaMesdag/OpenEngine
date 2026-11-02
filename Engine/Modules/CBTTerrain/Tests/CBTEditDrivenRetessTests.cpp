@@ -137,11 +137,8 @@ class CBTEditDrivenRetess : public ::testing::Test
 
     std::vector<float> ReadVerts(CBTInstance& inst)
     {
-        const auto w = inst.DebugReadWords(CBTBinding::CurrentVertex,
-                                                 kDefaultBisectorPoolSize * kVertexWordsPerSlot);
-        std::vector<float> f(w.size());
-        std::memcpy(f.data(), w.data(), w.size() * sizeof(uint32_t));
-        return f;
+        return VertexFloatsWithWorldCorners(
+            inst.DebugReadWords(CBTBinding::CurrentVertex, kDefaultBisectorPoolSize * kVertexWordsPerSlot));
     }
     std::vector<uint64_t> ReadHeap(CBTInstance& inst)
     {

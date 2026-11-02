@@ -5,6 +5,8 @@
 #include "Editor/Settings/ExperimentalRenderingSettingsPage.h"
 #include "Editor/Entities/DDGIVolumeComponentTraits.h"
 #include "Prefabs/PrefabHierarchyRows.h"
+#include "PlayMode/PlayModeManager.h"
+#include "Scene/SceneEditorController.h"
 #include "Editor/Settings/InterfaceSettingsPage.h"
 #include "Editor/Settings/AssetPreviewSettings.h"
 #include "Editor/Settings/InfoCardAppearanceSettings.h"
@@ -395,16 +397,6 @@ void EditorApplication::InitializeAssetsGridAndSmartFolderSettings(SettingsPanel
         middleMouse.Control = middleToggle;
         tooltips.Fields.push_back(std::move(middleMouse));
 
-        SettingsFieldDescriptor arrowColor;
-        arrowColor.Label = "Arrow Color";
-        arrowColor.SearchKeywords = "tooltips arrow color pointer";
-        SettingsFieldDescriptor::ColorField colorField;
-        colorField.DefaultArgb = 0xFF000000u;
-        colorField.Get = []() { return TooltipSettings::Get().GetArrowColor(); };
-        colorField.Set = [](uint32_t argb) { TooltipSettings::Get().SetArrowColor(argb); };
-        arrowColor.Control = colorField;
-        tooltips.Fields.push_back(std::move(arrowColor));
-
         Editor::EditorSettingsRegistry::Get().RegisterCategory(std::move(tooltips));
 
         SettingsCategoryDescriptor onlineAssets;
@@ -485,7 +477,9 @@ void EditorApplication::InitializeAssetsGridAndSmartFolderSettings(SettingsPanel
     // registry rather than another branch in the built-in icon chains.
     Editor::RegisterDDGIVolumeComponentTraits();
     // Prefabs: the pick climb, the Hierarchy glyph and rows, the context menu entries, the Assets tile.
-    Editor::RegisterPrefabEditor(*m_ChangeNotifications, m_ThumbnailProvider.get());
+    Editor::RegisterPrefabEditor(*m_ChangeNotifications, m_ThumbnailProvider.get(),
+                                 [this]() { return m_PlayMode && m_PlayMode->IsPlayingOrPaused(); },
+                                 [this]() { return m_SceneEditor ? m_SceneEditor->GetDocument() : nullptr; });
     // Shared info-card background / outline / shadow on UI > Appearance.
     Editor::RegisterInfoCardAppearanceSettingsCategory();
     // Asset Preview (scroll-wheel dolly) registers declaratively and seeds

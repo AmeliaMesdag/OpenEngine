@@ -98,7 +98,7 @@ struct MountedTabs
 std::unique_ptr<UIElement> MakeTabPanel()
 {
     auto panel = std::make_unique<UIElement>();
-    panel->Overrides().Set(Style::Width, StyleLength::Px(120.0f)).Set(Style::Height, StyleLength::Px(80.0f));
+    panel->Style().Set(Style::Width, StyleLength::Px(120.0f)).Set(Style::Height, StyleLength::Px(80.0f));
     return panel;
 }
 
@@ -112,7 +112,7 @@ MountedTabs MountTabs(UITesting::IsolatedUIFixture& fixture)
     tabs.First = MakeTabPanel();
     tabs.Second = MakeTabPanel();
     auto source = std::make_unique<UIElement>();
-    source->Overrides().Set(Style::Width, StyleLength::Px(60.0f)).Set(Style::Height, StyleLength::Px(20.0f));
+    source->Style().Set(Style::Width, StyleLength::Px(60.0f)).Set(Style::Height, StyleLength::Px(20.0f));
     source->SetTooltip(kShortText);
     tabs.Source = source.get();
     tabs.First->AddChild(std::move(source));

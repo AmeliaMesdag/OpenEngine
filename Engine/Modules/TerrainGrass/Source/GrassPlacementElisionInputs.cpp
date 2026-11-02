@@ -37,12 +37,10 @@ void BuildGrassPlacementElisionBlob(const GrassPlacementElisionInputs& inputs,
     AppendSpan(blob, inputs.TerrainMaterials);
     blob.Append(inputs.TerrainContentEpoch);
 
-    blob.Append(inputs.AtlasIdentity);
-    blob.Append(inputs.AtlasTableVersion);
-    AppendSpan(blob, inputs.AtlasRows);
-    blob.Append(static_cast<uint64>(inputs.AtlasBindlessIndices.size()));
-    for (const uint32 index : inputs.AtlasBindlessIndices)
-        blob.Append(index);
+    blob.Append(inputs.SurfacePageIdentity);
+    blob.Append(inputs.PageDeviceEpoch);
+    blob.Append(inputs.PageWindowSerial);
+    blob.Append(inputs.SurfacePlanes);
 
     blob.Append(static_cast<uint64>(inputs.SeededIndirectWords.size()));
     for (const uint32 word : inputs.SeededIndirectWords)

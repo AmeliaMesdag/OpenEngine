@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "Core/CpuProfiler.h"
@@ -29,6 +30,13 @@ public:
     // The Delete key while the tool is active, before the view deletes the selected
     // entity: true when the tool took the key (it holds a selection of its own).
     virtual bool DeleteSelection() { return false; }
+    // The text the Scene View's hover pill shows for what the tool points at, in place of the
+    // hovered entity's name; empty for none. Shown during the tool's own drags too.
+    virtual const std::string& GetHoverText() const
+    {
+        static const std::string kNone;
+        return kNone;
+    }
 
     virtual void GatherGizmos(GizmoCollector& collector) = 0;
 };

@@ -1,5 +1,10 @@
 #pragma once
 
+#include "Mathematics/Vector2.h"
+
+#include <cstddef>
+#include <vector>
+
 #include <nlohmann/json.hpp>
 
 namespace GameEngine::Editor
@@ -29,5 +34,16 @@ bool ReadPointerCoords(const nlohmann::json& params, const char* xKey, const cha
 // fills `error` with the RefuseRequest refusal, which names the accepted values and echoes
 // the raw request value.
 bool ReadClickCount(const nlohmann::json& params, int maxCount, int& clickCount, nlohmann::json& error);
+
+// Appends the points a drag walks after its start: the "path" points {"x","y"} in order, then
+// "endX"/"endY", in UI-logical pixels. Refuses a request with no path point and no end, a
+// malformed point, more than `maxPathPoints` path points or a coordinate out of float range.
+bool ReadDragPath(const nlohmann::json& params, std::size_t maxPathPoints, std::vector<Mathematics::Vector2>& points,
+                  nlohmann::json& error);
+
+// The pointer position of each move of a drag along `points`, the start first. Each segment gets
+// moves in proportion to its length, at least one, and its last move lands on its end point.
+// Returns `steps` positions, or one per segment when there are more segments than steps.
+std::vector<Mathematics::Vector2> SampleDragPath(const std::vector<Mathematics::Vector2>& points, int steps);
 
 } // namespace GameEngine::Editor

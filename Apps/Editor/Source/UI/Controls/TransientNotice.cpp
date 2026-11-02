@@ -48,9 +48,9 @@ void TransientNotice::Show(const std::string& text, std::chrono::steady_clock::t
         m_Text->SetText(text);
     // A placed notice overrides the sheet's bottom edge; an unplaced one returns to it.
     if (top)
-        Overrides().Set(Style::PositionTop, StyleLength::Px(*top)).Set(Style::PositionBottom, StyleLength::Auto());
+        Style().Set(Style::PositionTop, StyleLength::Px(*top)).Set(Style::PositionBottom, StyleLength::Auto());
     else
-        Overrides().Reset(Style::PositionTop).Reset(Style::PositionBottom);
+        Style().Reset(Style::PositionTop).Reset(Style::PositionBottom);
     MarkDirty(LayoutDirty);
     m_HideAt = now + kShownDuration;
     if (m_Shown)

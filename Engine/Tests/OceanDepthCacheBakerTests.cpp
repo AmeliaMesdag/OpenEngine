@@ -1,3 +1,6 @@
+#include "Assets/AssetManager.h"
+#include "Assets/ModelAsset.h"
+#include "Components/Rendering/MeshRenderer.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Terrain/TerrainModifierEffects.h"
 #include "Components/Terrain/TerrainModifierVolume.h"
@@ -6,6 +9,7 @@
 #include "Core/Engine.h"
 #include "ECS/ECSTemplates.h"
 #include "Engine/Rendering/OceanDepthCacheBaker.h"
+#include "Mathematics/Vector2.h"
 #include "SplineECS/SplineService.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "TerrainECS/TerrainModifierSystem.h"
@@ -209,6 +213,41 @@ TEST_F(OceanSceneTerrainBake, TranslatedRectangularTerrainPreservesHeightfieldCo
             mismatch += std::abs(cache.GetDepths()[z * desc.Width + x] - expected) > 1e-4f;
         }
     EXPECT_EQ(mismatch, 0u);
+}
+
+// A MeshRenderer bakes at its world position: the entity's world transform moves the model's
+// local quad (y = -3 over x, z in [0, 2]) under the cache rectangle and lowers it 2 m.
+TEST_F(OceanSceneTerrainBake, AMeshRendererBakesAtItsWorldTransform)
+{
+    Mesh quad;
+    quad.Vertices.resize(4);
+    const Mathematics::Vector2 corners[4] = {{0, 0}, {2, 0}, {2, 2}, {0, 2}};
+    for (uint32 i = 0; i < 4; ++i)
+    {
+        quad.Vertices[i].Position[0] = corners[i].x;
+        quad.Vertices[i].Position[1] = -3;
+        quad.Vertices[i].Position[2] = corners[i].y;
+    }
+    quad.Indices = {0, 1, 2, 0, 2, 3};
+    auto model = std::make_shared<ModelAsset>(GUID::Generate(), std::filesystem::path("quad.gltf"));
+    model->SetMeshesForTest({quad});
+    EngineCore::GetInstance().GetAssetManager().RegisterLoadedAsset(model->GetGUID(), model);
+
+    Components::MeshRenderer renderer;
+    renderer.modelAssetGuid.Set(model->GetGUID());
+    const auto entity = World.CreateEntity();
+    World.AddComponentImmediate(entity, renderer);
+    World.AddComponentImmediate(entity, At(10, -2, 20));
+
+    const Ocean::OceanDepthCacheBakeDesc desc{2, 2, 10, 20, 2, 2, 1, 60000};
+    Ocean::OceanDepthCacheAsset cache;
+    Engine::Renderer::OceanSceneDepthBakeStats stats;
+    std::string error;
+    ASSERT_TRUE(Engine::Renderer::BakeOceanDepthCacheFromSceneMeshes(
+        World, desc, Engine::Renderer::OceanSceneDepthBakeOptions{}, cache, &stats, &error)) << error;
+    EXPECT_EQ(stats.MeshSources, 1u);
+    for (const float depth : cache.GetDepths())
+        EXPECT_NEAR(depth, 6, 1e-4f);
 }
 
 // A paged tiled terrain is baked at its finest height away from every CPU window and where its tile is

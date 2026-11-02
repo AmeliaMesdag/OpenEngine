@@ -6,6 +6,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Rendering/Core/Device.h"
+#include "IsolatedUIFixture.h"
 #include "SharedHeadlessDevice.h"
 #include "UIRgTestHarness.h"
 #include "UI/Assets/UILayoutAsset.h"
@@ -19,6 +20,8 @@
 #include "UI/Controls/Label.h"
 #include "UI/Controls/Mount.h"
 #include "UI/Controls/DockspaceElement.h"
+#include "UI/Controls/Splitter.h"
+#include "UI/Controls/WeightedPane.h"
 
 #include "UI/Controls/TextField.h"
 #include "UI/Controls/TextArea.h"
@@ -538,15 +541,15 @@ TEST(UIManagerInputTests, PointerMaskAdoptsModifierHeldBeforeFocus)
     // and the platform sends no synthetic press. The click's mask is the only
     // chance to see it, or the Shift-click arrives as a plain click.
     EXPECT_EQ(ui.GetModifierKeys(), 0);
-    ui.SyncModifierKeys(Input::kModShift);
+    ui.ReconcileModifierKeys(Input::kModShift);
     EXPECT_EQ(ui.GetModifierKeys(), Input::kModShift);
 
     // A later click with Shift no longer down clears it again.
-    ui.SyncModifierKeys(0);
+    ui.ReconcileModifierKeys(0);
     EXPECT_EQ(ui.GetModifierKeys(), 0);
 }
 
-TEST(UIManagerInputTests, PointerMaskDoesNotClearPhysicallyHeldModifier)
+TEST(UIManagerInputTests, PointerMaskReleasesAModifierWhoseKeyUpWasLost)
 {
     auto* dev = SharedHeadlessDevice();
     if (!dev)
@@ -555,12 +558,18 @@ TEST(UIManagerInputTests, PointerMaskDoesNotClearPhysicallyHeldModifier)
     }
     UIManager ui(dev);
 
-    // A key press this manager saw stays authoritative until its release: a
-    // pointer mask that omits it must not drop it.
-    ui.OnKey(Input::kKeyCode_LeftShift, Input::kKeyActionPress, Input::kModShift);
-    ui.SyncModifierKeys(0);
-    EXPECT_EQ(ui.GetModifierKeys(), Input::kModShift);
+    // Ctrl went down here, then its release was swallowed by a native menu's
+    // nested loop. The next click's mask is the OS's live state and says Ctrl
+    // is up; the click must be a plain click, not a phantom Ctrl-click.
+    ui.OnKey(Input::kKeyCode_LeftControl, Input::kKeyActionPress, Input::kModControl);
+    EXPECT_EQ(ui.GetModifierKeys(), Input::kModControl);
+    ui.ReconcileModifierKeys(0);
+    EXPECT_EQ(ui.GetModifierKeys(), 0);
 
+    // A mask that still reports the modifier keeps it held.
+    ui.OnKey(Input::kKeyCode_LeftShift, Input::kKeyActionPress, Input::kModShift);
+    ui.ReconcileModifierKeys(Input::kModShift);
+    EXPECT_EQ(ui.GetModifierKeys(), Input::kModShift);
     ui.OnKey(Input::kKeyCode_LeftShift, Input::kKeyActionRelease, 0);
     EXPECT_EQ(ui.GetModifierKeys(), 0);
 }
@@ -1681,6 +1690,90 @@ TEST(UIManagerDockingIntegrationTests, DockedPanelsReceiveOwnerManager)
 
     EXPECT_EQ(panel->GetOwnerManager(), &ui);
     EXPECT_EQ(tfRaw->GetOwnerManager(), &ui);
+}
+
+// Every dockspace that requests a rebuild rebuilds in the same Update.
+TEST(UIManagerDockingIntegrationTests, EveryRequestingDockspaceRebuildsInOneUpdate)
+{
+    auto* dev = SharedHeadlessDevice();
+    if (!dev)
+    {
+        GTEST_SKIP() << "Device init failed";
+    }
+    UiRgHarness rg(dev);
+    UIRegistration::RegisterBuiltInControls();
+
+    DockingManager models[2];
+    UIElement panels[2];
+    UIManager ui(dev);
+    auto root = std::make_unique<UIElement>();
+    DockspaceElement* docks[2] = {};
+    for (int dockIndex = 0; dockIndex < 2; ++dockIndex)
+    {
+        const std::string panelId = dockIndex == 0 ? "Left" : "Right";
+        models[dockIndex].RegisterPanel(panelId, &panels[dockIndex]);
+        auto leaf = DockNode::MakeLeaf();
+        leaf->AddTab(panelId);
+        models[dockIndex].SetRoot(std::move(leaf));
+        auto dock = std::make_unique<DockspaceElement>();
+        dock->BindModel(&models[dockIndex]);
+        docks[dockIndex] = dock.get();
+        root->AddChild(std::move(dock));
+    }
+    ui.SetRoot(std::move(root));
+    ui.Update(0.0f, /*interactive=*/true);
+
+    const uint32_t rebuildsBefore[2] = {docks[0]->GetInstrumentation().fullRebuilds,
+                                        docks[1]->GetInstrumentation().fullRebuilds};
+    docks[0]->RequestRebuildFromModel();
+    docks[1]->RequestRebuildFromModel();
+    ui.Update(0.0f, /*interactive=*/true);
+
+    EXPECT_EQ(docks[0]->GetInstrumentation().fullRebuilds, rebuildsBefore[0] + 1u);
+    EXPECT_EQ(docks[1]->GetInstrumentation().fullRebuilds, rebuildsBefore[1] + 1u);
+}
+
+// A dockspace that moves to another manager takes its queued rebuild with it.
+TEST(UIManagerDockingIntegrationTests, QueuedDockspaceRebuildMovesWithTheDockspace)
+{
+    auto* dev = SharedHeadlessDevice();
+    if (!dev)
+    {
+        GTEST_SKIP() << "Device init failed";
+    }
+    UiRgHarness rg(dev);
+    UIRegistration::RegisterBuiltInControls();
+
+    DockingManager model;
+    UIElement panel;
+    model.RegisterPanel("Only", &panel);
+    auto leaf = DockNode::MakeLeaf();
+    leaf->AddTab("Only");
+    model.SetRoot(std::move(leaf));
+    UIManager first(dev);
+    UIManager second(dev);
+    auto firstRoot = std::make_unique<UIElement>();
+    UIElement* firstRootRaw = firstRoot.get();
+    auto dockOwner = std::make_unique<DockspaceElement>();
+    DockspaceElement* dock = dockOwner.get();
+    dock->BindModel(&model);
+    firstRoot->AddChild(std::move(dockOwner));
+    first.SetRoot(std::move(firstRoot));
+    first.Update(0.0f, /*interactive=*/true);
+
+    const uint32_t rebuildsBefore = dock->GetInstrumentation().fullRebuilds;
+    dock->RequestRebuildFromModel();
+    std::unique_ptr<UIElement> moved = firstRootRaw->TakeChild(dock);
+    first.Update(0.0f, /*interactive=*/true);
+    EXPECT_EQ(dock->GetInstrumentation().fullRebuilds, rebuildsBefore)
+        << "the old manager must not rebuild a dockspace that left it";
+
+    auto secondRoot = std::make_unique<UIElement>();
+    secondRoot->AddChild(std::move(moved));
+    second.SetRoot(std::move(secondRoot));
+    second.Update(0.0f, /*interactive=*/true);
+    EXPECT_EQ(dock->GetInstrumentation().fullRebuilds, rebuildsBefore + 1u)
+        << "the new manager must run the request the dockspace brought";
 }
 
 TEST(UIManagerFocusTests, TabIndexOrdersAndFocusableFlag)
@@ -3626,4 +3719,38 @@ TEST(UIManagerMountTests, SameElementFanoutDoesNotLeakIntoBubbling)
            "press, so the ancestor must not see it";
 
     std::filesystem::remove(css);
+}
+
+TEST(UIManagerOrderTests, SplitterDragAccountsForItsMargins)
+{
+    UITesting::IsolatedUIFixture fixture;
+    const bool built = fixture.Build(1.0f,
+        R"(<uielement id="root"><pane id="left" weight="0.5"/><splitter id="split" class="row"/><pane id="right" weight="0.5"/></uielement>)",
+        R"(
+#root { width: 600px; height: 400px; flex-direction: row; }
+#left { flex-grow: 1; min-width: 0; }
+#right { flex-grow: 1; min-width: 0; }
+#split { width: 4px; margin-left: 20px; margin-right: 20px; flex-shrink: 0; }
+)");
+    if (!fixture.DeviceAvailable())
+        GTEST_SKIP() << "No Vulkan device available";
+    ASSERT_TRUE(built) << fixture.Diagnostic();
+    auto* splitter = dynamic_cast<Splitter*>(fixture.Element("split"));
+    auto* left = dynamic_cast<WeightedPane*>(fixture.Element("left"));
+    ASSERT_NE(splitter, nullptr);
+    ASSERT_NE(left, nullptr);
+    const float initialX = splitter->GetLayoutX();
+    UIEvent down{};
+    down.Id = kEventMouseDown;
+    down.X = initialX;
+    splitter->OnEvent(down);
+    UIEvent move{};
+    move.Id = kEventMouseMove;
+    move.X = initialX + 100.0f;
+    splitter->OnEvent(move);
+    fixture.Settle();
+    EXPECT_NEAR(splitter->GetLayoutX(), initialX + 100.0f, 1.0f);
+    UIEvent up{};
+    up.Id = kEventMouseUp;
+    splitter->OnEvent(up);
 }

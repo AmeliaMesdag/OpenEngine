@@ -1,7 +1,6 @@
 #pragma once
 #include "UI/UiDispatcher.h"
 #include "UI/ITextMeasurable.h"
-#include "Scheduler/Scheduler.h"
 #include "UI/UiContext.h"
 #include "UI/UiPostHandle.h"
 #include "UI/UiPostTarget.h"
@@ -27,7 +26,7 @@
 #include "Types/StringId.h"
 #include "UI/UIEvents.h"
 #include "UI/UIStyle.h"
-#include "UI/StyleOverrides.h"
+#include "UI/StyleDeclaration.h"
 #include "UI/ResolvedStyle.h"
 #include "Mathematics/Rect.h"
 #include "Mathematics/Vector2.h"
@@ -177,16 +176,13 @@ enum class OverlayLayer : uint8_t
     HoverTooltip
 };
 
-// Type tag for fast UIElement kind dispatch without dynamic_cast. Debug builds
-// pay a non-trivial RTTI string-compare per dynamic_cast; BuildYogaRecursive
-// does `dynamic_cast<Mount*>` and the signature block does
-// `dynamic_cast<WeightedPane*>` on every traversed element, so a virtual
-// one-byte-returning Kind() shaves measurable time off the slow path.
+// Type tag for UIElement kind dispatch without dynamic_cast. BuildYogaRecursive
+// checks for a Mount on every element it visits, and in Debug each dynamic_cast
+// costs an RTTI string compare.
 enum class UIElementKind : uint8_t
 {
     Default = 0,
     Mount,
-    WeightedPane,
 };
 
 class UIElement {
@@ -216,8 +212,8 @@ public:
     explicit UIElement(const std::string& id);
     virtual ~UIElement();
 
-    // UIElement is not copyable or movable. The StyleOverrides dirty callback
-    // captures `this` as its context pointer (see WireOverridesDirtyCallback),
+    // UIElement is not copyable or movable. The StyleDeclaration dirty callback
+    // captures `this` as its context pointer (see WireStyleDirtyCallback),
     // so a copy would cross-point and a move would dangle. UI trees are
     // always owned through std::unique_ptr<UIElement>, so this restriction
     // is consistent with how every caller uses the class.
@@ -268,7 +264,7 @@ public:
     }
 
     // One-byte type tag used to dispatch without dynamic_cast on hot paths
-    // (BuildYogaRecursive Mount branch, signature-block WeightedPane branch).
+    // (BuildYogaRecursive Mount branch).
     // Subclasses override and return a value from the UIElementKind enum;
     // the default here keeps the common case cheap.
     virtual UIElementKind Kind() const { return UIElementKind::Default; }
@@ -518,15 +514,40 @@ public:
     /// FindById(0) returns nullptr.
     UIElement* FindById(StringId id);
 
+    /// FindById that returns a weak handle of type T. The handle is empty when no element has
+    /// the id or when the element is not a T.
+    template <typename T>
+    WeakRef<T> FindById(StringId id)
+    {
+        return MakeWeakRef(dynamic_cast<T*>(FindById(id)));
+    }
+
     // Tooltip text shown on hover. Empty string means no tooltip.
-    void SetTooltip(std::string text) { m_TooltipText = std::move(text); }
-    const std::string& GetTooltip() const { return m_TooltipText; }
+    void SetTooltip(std::string text);
+    const std::string& GetTooltip() const;
 
     // Preferred tooltip placement direction relative to the source element.
     // Auto picks above/below the cursor (existing behaviour).
     enum class TooltipPlacement : uint8_t { Auto = 0, Right, Left, Above, Below };
     void SetTooltipPlacement(TooltipPlacement p) { m_TooltipPlacement = p; }
     TooltipPlacement GetTooltipPlacement() const { return m_TooltipPlacement; }
+
+    // Fills a mounted tooltip template: sets the text of its labels and shows or hides its
+    // parts. `tooltip` holds the layout's children.
+    using TooltipBinder = std::function<void(UIElement& tooltip)>;
+    struct TooltipTemplate
+    {
+        std::string LayoutPath;
+        TooltipBinder Binder;
+    };
+    // A tooltip built from a layout instead of a text. Each time the tooltip shows for this
+    // element, the overlay mounts the layout at `layoutPath` (an asset path, as
+    // UIManager::InstantiateLayoutChildrenFromAssetPath takes) in the bubble and calls
+    // `binder` with it, then measures and places the bubble. The template wins over the
+    // text tooltip. An empty path removes the template.
+    void SetTooltipTemplate(std::string layoutPath, TooltipBinder binder);
+    // Null when the element has no template.
+    const TooltipTemplate* GetTooltipTemplate() const;
 
     // Inline style text (original string, kept for inspection/serialization).
     const std::string& GetInlineStyleText() const { return m_InlineStyleText; }
@@ -585,6 +606,10 @@ public:
         const std::unordered_map<std::string, std::string>& /*attrsLower*/)
     {
     }
+
+    // True when OnAuthoredAttributesApplied takes this lower-case name. The registry reports an
+    // authored name as unknown only when no handler and no override takes it.
+    virtual bool BindsAuthoredAttribute(std::string_view /*nameLower*/) const { return false; }
 
     // Called when this element's mount visibility changes (attached to or detached
     // from a visible Mount). Fired exactly once per transition:
@@ -656,66 +681,14 @@ public:
     // Internal: record a resolved style GUID (deduped).
     void AddRequestedSubtreeStyleGuid(const GUID& guid);
 
-    // Live background image override (programmatic, fast-path).
-    // Applied by UIManager after CSS resolution
-    // so it behaves like a highest-priority inline override without string parsing.
-    struct LiveTextureRef
-    {
-        uint32_t Handle = 0; // Rendering::RGTextureHandle (kept as uint32_t to avoid heavyweight includes)
-        std::function<uint32_t()> Getter{};
-        bool IsValid() const { return Handle != 0 || (bool)Getter; }
-    };
-
-    struct StyleWriter
-    {
-        UIElement* el = nullptr;
-        explicit StyleWriter(UIElement* e) : el(e) {}
-
-        // Example:
-        //   el->Styles()
-        //     .SetBackgroundResourceName("scene_main")
-        //     .SetBackgroundSizeContain()
-        //     .SetBackgroundTint(0xFFFFFFFF);
-        //
-        // Notes:
-        // - Live textures are routed through UIManager's external texture registry using a stable internal key.
-        // - CSS `background-image` still works; these overrides behave like a high-priority inline style.
-
-        // Background image sources
-        StyleWriter& SetBackgroundResourceName(const std::string& name);
-        StyleWriter& SetBackgroundImageNone();    // override to none
-        StyleWriter& ResetBackgroundImage();      // remove override; fallback to CSS
-
-        // Background image parameters
-        StyleWriter& SetBackgroundTint(uint32_t argb);
-        StyleWriter& ResetBackgroundTint();
-
-        StyleWriter& SetBackgroundRepeat(BackgroundRepeat repeat);
-        StyleWriter& ResetBackgroundRepeat();
-
-        StyleWriter& SetBackgroundSizeAuto();
-        StyleWriter& SetBackgroundSizeCover();
-        StyleWriter& SetBackgroundSizeContain();
-        StyleWriter& SetBackgroundSizeExplicit(float x, bool xIsPercent, float y, bool yIsPercent);
-        StyleWriter& ResetBackgroundSize();
-
-        StyleWriter& SetBackgroundPosition(float x, bool xIsPercent, float y, bool yIsPercent);
-        StyleWriter& SetBackgroundPositionPercent(float xPercent, float yPercent);
-        StyleWriter& ResetBackgroundPosition();
-    };
-
-    StyleWriter Styles() { return StyleWriter(this); }
-    const LiveTextureRef* GetBackgroundImageTextureOverride() const
-    {
-        return m_BackgroundImageTextureRef.IsValid() ? &m_BackgroundImageTextureRef : nullptr;
-    }
-    bool HasBackgroundImageTextureOverride() const { return m_BackgroundImageTextureRef.IsValid(); }
-
-    // Typed style overrides (sparse property bag).
-    StyleOverrides& Overrides() { return m_Overrides; }
-    const StyleOverrides& Overrides() const { return m_Overrides; }
-    StyleOverrides& InlineOverrides() { return m_InlineOverrides; }
-    const StyleOverrides& InlineOverrides() const { return m_InlineOverrides; }
+    // This element's own style, set by code: el.Style().Set(Style::Opacity, 0.5f). It wins over the
+    // stylesheets and the `style` attribute (InlineStyle()). A write marks the element dirty for what
+    // the property affects; a write of the value already set does nothing.
+    StyleDeclaration& Style() { return m_CodeStyle; }
+    const StyleDeclaration& Style() const { return m_CodeStyle; }
+    // The parsed `style="..."` attribute. Owned by the markup: a re-parse replaces it.
+    StyleDeclaration& InlineStyle() { return m_InlineStyle; }
+    const StyleDeclaration& InlineStyle() const { return m_InlineStyle; }
 
     const ResolvedStyle& GetResolvedStyle() const { return m_ResolvedStyle; }
     ResolvedStyle& GetMutableResolvedStyle() { return m_ResolvedStyle; }
@@ -1135,12 +1108,6 @@ public:
     // contract as PostAction.
     bool PostSafeAction(std::function<void()> action);
 
-    // The scheduler of the UIManager whose update is running on this thread; null outside one.
-    GameEngine::Scheduler::IScheduler* GetScheduler() const {
-        if (auto* ctx = UI::GetTlsUiContext()) return ctx->Scheduler;
-        return nullptr;
-    }
-
     // Event-dispatch state (set by UIManager during event routing).
     // The public API stays bool-based for call sites, but internally we track depth
     // so nested dispatch scopes do not accidentally clear the state too early.
@@ -1156,7 +1123,7 @@ public:
     static bool IsInEventDispatch();
 
 	    // Last computed layout rectangle (absolute coordinates). Read-only
-	    // outside the layout solver — mutate via Overrides() /
+	    // outside the layout solver — mutate via Style() /
 	    // UI::Layout::SetAbsolutePosition, not by writing this cache.
 	    float GetLayoutX() const { return m_LastX; }
 	    float GetLayoutY() const { return m_LastY; }
@@ -1238,7 +1205,6 @@ public:
         m_Enabled = enabled;
         MarkDirtySubtree(StyleDirty | LayoutDirty | VisualDirty);
     }
-    void SetDisabled(bool disabled) { SetEnabled(!disabled); }
     bool IsEnabled() const { return m_Enabled; }
     // False when this element or any ancestor is disabled. Disabling a container
     // disables what it contains, the rule HTML gives the contents of a disabled
@@ -1286,16 +1252,6 @@ public:
 	    }
 
 
-	    // Hook for scrollable containers (e.g., ScrollView) to observe viewport
-	    // layout for descendants marked with the "scroll-viewport" class
-	    // without UIManager needing direct knowledge of their types.
-	    virtual void OnScrollViewportLayout(UIElement* viewport, float W, float H)
-	    {
-	        (void)viewport;
-	        (void)W;
-	        (void)H;
-	    }
-	
 	    // Focus proxy: optional indirection for internal editors (e.g. TextInput)
 	    // that want focus/tab/keyboard routing to go through an owning control.
 	    void SetFocusProxy(UIElement* el) { m_FocusProxy = el; }
@@ -1348,11 +1304,11 @@ public:
 	    {
 	        if ((m_DirtyFlags & flags) != 0)
 	            return true;
-	        if ((flags & LayoutDirty) != 0 && m_Overrides.IsLayoutDirty())
+	        if ((flags & LayoutDirty) != 0 && m_CodeStyle.IsLayoutDirty())
 	            return true;
-	        if ((flags & VisualDirty) != 0 && m_Overrides.IsVisualDirty())
+	        if ((flags & VisualDirty) != 0 && m_CodeStyle.IsVisualDirty())
 	            return true;
-	        if ((flags & StyleDirty) != 0 && m_Overrides.NeedsCascadeRerun())
+	        if ((flags & StyleDirty) != 0 && m_CodeStyle.NeedsCascadeRerun())
 	            return true;
 	        return false;
 	    }
@@ -1360,7 +1316,7 @@ public:
 	    {
 	        m_DirtyFlags &= ~flags;
 	        if ((flags & (LayoutDirty | VisualDirty | StyleDirty)) != 0)
-	            m_Overrides.ClearDirty();
+	            m_CodeStyle.ClearDirty();
 	    }
 
     // Content-only mutation: this element's primitive BYTES changed (text
@@ -1521,26 +1477,30 @@ public:
     bool IsClipCullingDisabled() const { return m_DisableClipCulling; }
 
 private:
-    // Wire the StyleOverrides dirty callback on construction so any mutation
-    // to this element's overrides (Set/Reset/Clear, SetCustom, etc.) routes
-    // through MarkDirty — which propagates SubtreeDirty up the ancestor chain.
-    // Without this the override dirty bits stayed internal to StyleOverrides
-    // and the Slice 2 fast path had to abort any subtree containing a
-    // descendant with override-dirty.
-    void WireOverridesDirtyCallback()
+    // Routes every write to Style() through MarkDirty, which sets SubtreeDirty on the ancestors.
+    // Without it the dirty bits stay in the StyleDeclaration, and the layout fast path must skip
+    // every subtree that holds a style-dirty descendant.
+    void WireStyleDirtyCallback()
     {
-        m_Overrides.SetDirtyCallback(
+        m_CodeStyle.SetDirtyCallback(
             +[](void* ctx, uint32_t f) {
                 auto* self = static_cast<UIElement*>(ctx);
                 unsigned mark = 0;
-                if (f & StyleOverrides::Layout)  mark |= LayoutDirty;
-                if (f & StyleOverrides::Visual)  mark |= VisualDirty;
-                if (f & StyleOverrides::Cascade) mark |= StyleDirty;
+                if (f & StyleDeclaration::Layout)  mark |= LayoutDirty;
+                if (f & StyleDeclaration::Visual)  mark |= VisualDirty;
+                if (f & StyleDeclaration::Cascade) mark |= StyleDirty;
                 if (mark)
                     self->MarkDirty(mark);
+                if (f & StyleDeclaration::CustomScope)
+                    self->MarkCustomPropertyReadersDirty();
             },
             this);
     }
+
+    // StyleDirty on every element that inherits this element's custom
+    // properties: its children, recursively, and a Mount's portal target, whose
+    // cascade parent is the Mount.
+    void MarkCustomPropertyReadersDirty();
 
     inline static std::atomic<uint64_t> s_NextInstanceId{1};
     uint64_t m_InstanceId = 0;
@@ -1684,7 +1644,13 @@ protected:
     // of them). Both stamp it at creation. Empty means "ask the registry", which is right for
     // every ordinary control, where the C++ type does identify the tag.
     std::string m_TagName;
-    std::string m_TooltipText;
+    // The tooltip's text and template, allocated only for an element that has a tooltip.
+    struct TooltipData
+    {
+        std::string Text;
+        TooltipTemplate Template;
+    };
+    std::unique_ptr<TooltipData> m_TooltipData;
     TooltipPlacement m_TooltipPlacement = TooltipPlacement::Auto;
     std::vector<std::string> m_ClassNames;
     std::vector<StringId> m_ClassIds;
@@ -1727,14 +1693,17 @@ protected:
     std::vector<SubtreeStyleAssetRequest> m_RequestedSubtreeStyleAssetPaths;
     std::vector<GUID> m_RequestedSubtreeStyleAssetGuids;
 
-    // Programmatic style overrides (allocated only when needed to keep UIElement lean).
-    LiveTextureRef m_BackgroundImageTextureRef{};
-    // Inline style overrides (parsed from "style" attribute).
+    // The authored `style` attribute text, as last parsed into m_InlineStyle.
     std::string m_InlineStyleText;
 
-    // Typed style overrides (sparse property bag).
-    StyleOverrides m_Overrides;
-    StyleOverrides m_InlineOverrides;
+  private:
+    // Style(): what code declares. InlineStyle(): the parsed `style` attribute. Subclasses
+    // reach them through those accessors. Declared here, between the protected members, so
+    // the element's layout is the one its size pin states.
+    StyleDeclaration m_CodeStyle;
+    StyleDeclaration m_InlineStyle;
+
+  protected:
     ResolvedStyle m_ResolvedStyle;
     OverlayLayer m_OverlayLayer = OverlayLayer::None;
 

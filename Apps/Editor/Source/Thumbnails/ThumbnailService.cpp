@@ -944,34 +944,6 @@ void ThumbnailService::EnsureEngineThumbnailRequested(uint64_t windowId,
     }
 }
 
-std::string ThumbnailService::RequestLiveMaterialPreview(uint64_t windowId,
-                                                         const GUID& materialGuid,
-                                                         uint32_t widthPx,
-                                                         uint32_t heightPx,
-                                                         bool previewIblEnabled)
-{
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    auto it = m_Handlers.find(AssetType::Model);
-    if (it == m_Handlers.end() || !it->second)
-        return {};
-    if (auto* modelHandler = dynamic_cast<ModelThumbnailHandler*>(it->second.get()))
-        return modelHandler->RequestLiveMaterialPreview(windowId, materialGuid, widthPx,
-                                                        heightPx, previewIblEnabled);
-    return {};
-}
-
-bool ThumbnailService::IsLiveMaterialPreviewReady(uint64_t windowId,
-                                                  const std::string& engineName) const
-{
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    auto it = m_Handlers.find(AssetType::Model);
-    if (it == m_Handlers.end() || !it->second)
-        return false;
-    if (auto* modelHandler = dynamic_cast<ModelThumbnailHandler*>(it->second.get()))
-        return modelHandler->IsEngineThumbnailReadyForWindow(windowId, engineName);
-    return false;
-}
-
 bool ThumbnailService::RegisterReadyThumbnails(uint64_t windowId, UIManager* ui)
 {
     return RegisterReadyThumbnailsRG(windowId, ui, nullptr);

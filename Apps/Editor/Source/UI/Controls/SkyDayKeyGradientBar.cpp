@@ -23,7 +23,7 @@ constexpr float kDragThresholdPx = 3.0f;
 SkyDayKeyGradientBar::SkyDayKeyGradientBar()
 {
     AddClass("sky-day-key-gradient-bar");
-    Overrides()
+    Style()
         .Set(Style::Height, StyleLength::Px(18.0f))
         .Set(Style::MinHeight, StyleLength::Px(18.0f))
         .Set(Style::Cursor, CursorStyle::Pointer);

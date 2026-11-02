@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include "Rendering/Core/Device.h"
+#include "Rendering/Core/HotReloadIntegration.h"
 #include "Rendering/Materials/MaterialDocument.h"
 #include "Rendering/Materials/MaterialBuildService.h"
 #include "Rendering/Materials/MaterialShaderIncludeRoots.h"
@@ -92,23 +93,51 @@ TEST(ShaderComposerPackageRoots, ResolutionOrder_MaterialDirThenPackagesThenEngi
 
     // Highest-priority package wins once the materialDir copy is gone.
     fs::remove(materialDir / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(pkgA / rel));
 
     // Package order is the context order (mount priority), not alphabetical luck.
     fs::remove(pkgA / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(pkgB / rel));
 
     // Engine tree is the final fallback.
     fs::remove(pkgB / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(engine / rel));
 
     // Nowhere found: the materialDir candidate names the concrete miss.
     fs::remove(engine / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(materialDir / rel));
+}
+
+// A material registration resolves its surface several times per frame: the answer is held, so a
+// repeat touches no file, and a file that appears or disappears is seen after the next announcement.
+TEST(ShaderComposerPackageRoots, AResolvedReferenceIsHeldUntilAnEditIsAnnounced)
+{
+    TempTree tree("ge_shader_reference_held");
+    const fs::path materialDir = tree.Root / "Materials";
+    const fs::path package = tree.Root / "Pkg" / "Shaders";
+    const char* reference = "Surfaces/held_surface.glsl";
+    WriteTextFile(package / reference, "// package copy\n");
+
+    MaterialBuildContext context{};
+    context.AdapterShaderDir = tree.Root / "Engine" / "Shaders";
+    context.PackageShaderDirs = {package};
+    ASSERT_EQ(Norm(ShaderComposer::ResolveShaderReference(reference, materialDir, context)), Norm(package / reference));
+
+    fs::remove(package / reference);
+    EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(reference, materialDir, context)), Norm(package / reference))
+        << "a repeat resolution must answer from memory, not from the disk";
+
+    NotifyShaderSourcesChanged();
+    EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(reference, materialDir, context)), Norm(materialDir / reference))
+        << "after an announcement the removed file is seen";
 }
 
 // The material directory takes part in a build exactly when something the build
@@ -400,14 +429,17 @@ TEST(ShaderComposerProjectRoots, ResolutionOrder_ProjectRootBetweenMaterialDirAn
 
     // The live project root wins over packages once the materialDir copy is gone.
     fs::remove(materialDir / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(projectRoot / rel));
 
     fs::remove(projectRoot / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(pkg / rel));
 
     fs::remove(pkg / rel);
+    NotifyShaderSourcesChanged();
     EXPECT_EQ(Norm(ShaderComposer::ResolveShaderReference(rel, materialDir, ctx)),
               Norm(engine / rel));
 }

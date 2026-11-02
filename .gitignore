@@ -468,7 +468,6 @@ cmake-build-debug/*
 !.claude/skills/empirical-validation/
 !.claude/skills/html-doc-format/
 !.claude/skills/writing-simplified-technical-english/
-!.claude/skills/agent-mailbox/
 !.claude/skills/coordinator/
 
 # Temporary screenshots

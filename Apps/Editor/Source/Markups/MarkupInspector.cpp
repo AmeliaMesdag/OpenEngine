@@ -413,7 +413,7 @@ void AddActionsRow(const InspectorContext& ctx)
         for (const auto& child : button->GetChildren())
         {
             if (child->HasClass("inspector-action-icon") && !action->Icon.empty())
-                child->Overrides().Set(Style::BackgroundImage,
+                child->Style().Set(Style::BackgroundImage,
                                        BackgroundImageSource{BackgroundImageSource::SourceKind::Path, GUID::Null(),
                                                              action->Icon});
         }

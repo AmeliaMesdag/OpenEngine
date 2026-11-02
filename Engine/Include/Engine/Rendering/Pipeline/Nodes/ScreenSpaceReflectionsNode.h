@@ -3,6 +3,7 @@
 #include "Engine/Rendering/Pipeline/Nodes/DepthResolveNode.h"
 #include "Engine/Rendering/Pipeline/Nodes/HZBBuildNode.h"
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
+#include "Engine/Rendering/Pipeline/ViewContentStamp.h"
 #include "Engine/Rendering/Pipeline/ViewMotionVectors.h"
 #include "Engine/Rendering/PostProcessSettings.h"
 
@@ -10,11 +11,11 @@
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/Pipeline/PipelineIdentifiers.h"
 #include "Rendering/Materials/Shader/ShaderMeta.h"
+#include "Types/FlatMap.h"
 
 #include <array>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 namespace GameEngine::Engine::Renderer
 {
@@ -55,6 +56,11 @@ class ScreenSpaceReflectionsNode final : public IRenderPipelineNode
     static Mathematics::Rect ComputeViewportRect(const ViewLetterbox& letterbox,
                                                  uint32_t targetWidth, uint32_t targetHeight);
 
+    /// The frame index the view's last declared SSSR passes push as `frameIndex`. It holds while
+    /// the view is still (ViewContentStamp::ViewIsStill), so the trace repeats its samples; a
+    /// frame that can change the image advances it. 0 for a view the node has not declared.
+    uint32_t TraceFrameIndex(Rendering::ViewId view) const;
+
   private:
     enum Program : size_t
     {
@@ -81,6 +87,9 @@ class ScreenSpaceReflectionsNode final : public IRenderPipelineNode
         uint64_t HistoryFrame = 0;
         uint32_t Width = 0;
         uint32_t Height = 0;
+        ViewContentStamp Content{};
+        uint32_t NoiseFrame = 0;
+        uint32_t TraceFrame = 0; // NoiseFrame, or GE_SSSR_FRAME_PIN when set
     };
 
     // Declares the SSSR chain for the view; false when the view renders without it this frame.
@@ -121,6 +130,6 @@ class ScreenSpaceReflectionsNode final : public IRenderPipelineNode
     // Precomputed void-and-cluster blue-noise tile (RG8), uploaded once in
     // LoadShaders and sampled by the intersect pass with a per-frame R2 rotation.
     Rendering::TextureHandle m_BlueNoiseTexture{};
-    std::unordered_map<uint32_t, ViewHistory> m_ViewHistory;
+    FlatMap<uint32_t, ViewHistory> m_ViewHistory;
 };
 } // namespace GameEngine::Engine::Renderer::Pipeline::Nodes

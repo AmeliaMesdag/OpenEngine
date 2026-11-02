@@ -34,7 +34,8 @@ constexpr RuntimeDependency kEngineLibraryDependencies[] = {
     // Ship it when present; otherwise the end user's driver-installed loader
     // serves (a machine without one cannot run the game regardless).
     {"Vulkan loader", "vulkan-1", false},
-    {"GLFW", "glfw3", true},
+    // The second candidate of an entry is the Linux name where it differs (libglfw.so.3).
+    {"GLFW", "glfw3;glfw", true},
     {"FreeType", "freetyped;freetype", true},
     {"HarfBuzz", "harfbuzz", true},
     {"lexbor", "lexbor", true},
@@ -50,6 +51,9 @@ constexpr RuntimeDependency kEngineLibraryDependencies[] = {
     // source-dir order picks the flavor. The vcpkg dependency is platform-gated
     // (windows | linux | osx), so not every engine imports it — ship when present.
     {"DirectXTex", "DirectXTex", false},
+    // DirectXTex's OpenMP runtime on Linux (GCC's libgomp). A minimal distribution install does
+    // not have it, so the game ships the copy that the build stages beside the engine.
+    {"OpenMP runtime (libgomp)", "gomp", false},
     // Ogg Vorbis decode (miniaudio's libvorbis backend): Engine.dll imports vorbisfile,
     // which imports vorbis and ogg. Same file names in both vcpkg flavors. The static triplets
     // (macOS, the web) link them in and have no library file; the shared ones (Windows, Linux,
@@ -65,10 +69,15 @@ constexpr RuntimeDependency kEngineLibraryDependencies[] = {
     {"Brotli (decoder)", "brotlidec", true},
     {"bzip2", "bz2d;bz2", true},
     {"libcurl", "libcurl-d;libcurl", true},
-    {"FFmpeg avutil", "avutil-*", true},
-    {"FFmpeg avcodec", "avcodec-*", true},
-    {"FFmpeg avformat", "avformat-*", true},
-    {"FFmpeg swscale", "swscale-*", true},
+    // libcurl's TLS backend where it is OpenSSL (Linux; Windows uses Schannel): ship when present.
+    {"OpenSSL (libssl)", "ssl", false},
+    {"OpenSSL (libcrypto)", "crypto", false},
+    {"FFmpeg avutil", "avutil-*;avutil", true},
+    {"FFmpeg avcodec", "avcodec-*;avcodec", true},
+    {"FFmpeg avformat", "avformat-*;avformat", true},
+    {"FFmpeg swscale", "swscale-*;swscale", true},
+    // Linux builds Clipper2 as a shared library and other triplets link it statically. Ship it when present.
+    {"Clipper2", "Clipper2", false},
     // Present only when the engine builds against the shaderc-shared overlay
     // port (cmake/ports/shaderc) — then Engine.dll imports it, so ship when
     // present; static-shaderc builds ship none. Same file name in both vcpkg
@@ -80,6 +89,10 @@ constexpr RuntimeDependency kEngineLibraryDependencies[] = {
     // a fallback dir, so candidate order is what picks the flavor.
     {"mimalloc", "mimalloc-debug;mimalloc", false},
     {"mimalloc redirect", "mimalloc-redirect", false},
+#if defined(__linux__) && defined(NETHOST_AVAILABLE)
+    // Windows delay-loads nethost. On Linux, libEngine.so and the Player load it at start, so every game ships it.
+    {".NET nethost", "nethost", true},
+#endif
 };
 
 constexpr RuntimeDependency kManagedHostingSet[] = {
@@ -141,6 +154,19 @@ std::string NormalizedDependencyStem(std::string stem)
     return stem;
 }
 
+// The file name without its shared-library suffix, or empty for a file that is not a shared
+// library. A Linux library carries its version after ".so" (libglfw.so.3 -> libglfw).
+std::string SharedLibraryStem(const std::string& fileName)
+{
+    for (const std::string_view extension : {".dll", ".so", ".dylib"})
+    {
+        if (fileName.size() > extension.size() && fileName.ends_with(extension))
+            return fileName.substr(0, fileName.size() - extension.size());
+    }
+    const std::size_t versioned = fileName.find(".so.");
+    return versioned == std::string::npos || versioned == 0 ? std::string() : fileName.substr(0, versioned);
+}
+
 std::vector<RuntimeDependency> JoinEngineRuntimeDependencySet()
 {
     std::vector<RuntimeDependency> set(std::begin(kEngineRuntimeLibraries), std::end(kEngineRuntimeLibraries));
@@ -187,12 +213,12 @@ bool StageCuratedDependencySet(const std::vector<fs::path>& sourceDirs, const fs
         {
             if (!entry.is_regular_file())
                 continue;
-            const std::string ext = entry.path().extension().string();
-            if (ext != ".dll" && ext != ".so" && ext != ".dylib")
+            std::string stem = SharedLibraryStem(entry.path().filename().string());
+            if (stem.empty())
                 continue;
             if (!seenFileNames.insert(NormalizedDependencyStem(entry.path().filename().string())).second)
                 continue;
-            libraries.push_back({entry.path(), NormalizedDependencyStem(entry.path().stem().string())});
+            libraries.push_back({entry.path(), NormalizedDependencyStem(std::move(stem))});
         }
         ec.clear();
     }

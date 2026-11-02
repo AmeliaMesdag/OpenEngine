@@ -1,7 +1,7 @@
 #include "Terrain/TerrainRule/TerrainRuleWeightProfileStrip.h"
 
 #include "Mathematics/Interpolation.h"
-#include "TerrainECS/TerrainSurfaceRuleEval.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceRuleEval.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIPrimitive.h"
 
@@ -48,7 +48,7 @@ TerrainRuleWeightProfileStrip::TerrainRuleWeightProfileStrip()
 {
     AddClass("terrain-rule-weight-profile");
     // Inert by construction: the slider above owns the domain's interaction.
-    Overrides().Set(Style::PointerEvents, false);
+    Style().Set(Style::PointerEvents, false);
 }
 
 void TerrainRuleWeightProfileStrip::SetCondition(

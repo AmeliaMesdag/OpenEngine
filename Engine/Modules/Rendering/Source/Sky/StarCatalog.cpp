@@ -1,6 +1,9 @@
 #include "StarCatalog.h"
 
+#include "Types/Color.h"
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <random>
@@ -69,22 +72,52 @@ double CieLobe(double nm, double peak, double widthBelow, double widthAbove)
     return std::exp(-0.5 * t * t);
 }
 
+// The temperature-independent terms of the blackbody integral at each sample wavelength.
+struct SpectralSample
+{
+    double Metres;
+    double MetresPow5;
+    double X;
+    double Y;
+    double Z;
+};
+constexpr double kSpectralFirstNm = 380.0;
+constexpr double kSpectralLastNm = 780.0;
+constexpr double kSpectralStepNm = 2.0;
+constexpr size_t kSpectralSampleCount = static_cast<size_t>((kSpectralLastNm - kSpectralFirstNm) / kSpectralStepNm) + 1;
+
+std::array<SpectralSample, kSpectralSampleCount> BuildSpectralSamples()
+{
+    std::array<SpectralSample, kSpectralSampleCount> samples{};
+    double nm = kSpectralFirstNm;
+    for (SpectralSample& sample : samples)
+    {
+        sample.Metres = nm * 1e-9;
+        sample.MetresPow5 = std::pow(sample.Metres, 5.0);
+        sample.X = 1.056 * CieLobe(nm, 599.8, 37.9, 31.0) + 0.362 * CieLobe(nm, 442.0, 16.0, 26.7) -
+                   0.065 * CieLobe(nm, 501.1, 20.4, 26.2);
+        sample.Y = 0.821 * CieLobe(nm, 568.8, 46.9, 40.5) + 0.286 * CieLobe(nm, 530.9, 16.3, 31.1);
+        sample.Z = 1.217 * CieLobe(nm, 437.0, 11.8, 36.0) + 0.681 * CieLobe(nm, 459.0, 26.0, 13.8);
+        nm += kSpectralStepNm;
+    }
+    return samples;
+}
+
 } // namespace
 
-std::array<float, 3> BlackbodyLinearRec709(float kelvin)
+ColorLinear BlackbodyLinearRec709(float kelvin)
 {
     constexpr double kSecondRadiation = 1.4387769e-2; // m K
+    static const std::array<SpectralSample, kSpectralSampleCount> kSamples = BuildSpectralSamples();
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
-    for (double nm = 380.0; nm <= 780.0; nm += 2.0)
+    for (const SpectralSample& sample : kSamples)
     {
-        const double metres = nm * 1e-9;
-        const double planck = 1.0 / (std::pow(metres, 5.0) * (std::exp(kSecondRadiation / (metres * kelvin)) - 1.0));
-        x += planck * (1.056 * CieLobe(nm, 599.8, 37.9, 31.0) + 0.362 * CieLobe(nm, 442.0, 16.0, 26.7) -
-                       0.065 * CieLobe(nm, 501.1, 20.4, 26.2));
-        y += planck * (0.821 * CieLobe(nm, 568.8, 46.9, 40.5) + 0.286 * CieLobe(nm, 530.9, 16.3, 31.1));
-        z += planck * (1.217 * CieLobe(nm, 437.0, 11.8, 36.0) + 0.681 * CieLobe(nm, 459.0, 26.0, 13.8));
+        const double planck = 1.0 / (sample.MetresPow5 * (std::exp(kSecondRadiation / (sample.Metres * kelvin)) - 1.0));
+        x += planck * sample.X;
+        y += planck * sample.Y;
+        z += planck * sample.Z;
     }
     x /= y;
     z /= y;
@@ -94,8 +127,8 @@ std::array<float, 3> BlackbodyLinearRec709(float kelvin)
     for (double& channel : rgb)
         channel = std::max(channel, 0.0);
     const double luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-    return {static_cast<float>(rgb[0] / luminance), static_cast<float>(rgb[1] / luminance),
-            static_cast<float>(rgb[2] / luminance)};
+    return ColorLinear(static_cast<float>(rgb[0] / luminance), static_cast<float>(rgb[1] / luminance),
+                       static_cast<float>(rgb[2] / luminance));
 }
 
 uint32_t StarFieldCountBrighterThan(float magnitude)
@@ -127,10 +160,10 @@ std::vector<StarInstanceGPU> BuildStarField()
         star.dirAndMagnitude[1] = static_cast<float>(z);
         star.dirAndMagnitude[2] = static_cast<float>(ring * std::sin(azimuth));
         star.dirAndMagnitude[3] = MagnitudeOfRank(rank);
-        const std::array<float, 3> color = BlackbodyLinearRec709(TemperatureOfStar(classPick, withinClass));
-        star.colorAndSeed[0] = color[0];
-        star.colorAndSeed[1] = color[1];
-        star.colorAndSeed[2] = color[2];
+        const ColorLinear color = BlackbodyLinearRec709(TemperatureOfStar(classPick, withinClass));
+        star.colorAndSeed[0] = color.r;
+        star.colorAndSeed[1] = color.g;
+        star.colorAndSeed[2] = color.b;
         star.colorAndSeed[3] = static_cast<float>(seed);
         stars.push_back(star);
     }

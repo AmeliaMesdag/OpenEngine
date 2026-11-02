@@ -1,5 +1,6 @@
 #include "Assets/Parsers/ModelAssetParser.h"
 #include "Assets/Parsers/ParserExtractionHelpers.h"
+#include "Assets/ModelAsset.h"
 
 #include "AssetCore/DepEdge.h"
 #include "AssetCore/GUID.h"
@@ -173,6 +174,15 @@ bool ModelAssetParser::ExtractDependencies(const GUID& referrer,
     // suppresses the syntactic fallback's misfire on binary content.
     // Future workstream: parse .mtl for .obj, ufbx for .fbx, fbtBlend for .blend.
     return true;
+}
+
+// The AssetManager goes unused: ModelAsset::LoadGLTF asks the engine's manager whether an external
+// image is tracked, and the files read for the decode must be the ones it copies, so
+// ModelAsset::ResolveDecodeInputs asks the same manager.
+AssetDecodeInputs ModelAssetParser::ResolveDecodeInputs(
+    const AssetMetadata& metadata, const Vector<uint8>& bytes, AssetManager& /*assetManager*/) const
+{
+    return {.Files = ModelAsset::ResolveDecodeInputs(bytes, metadata.Path)};
 }
 
 } // namespace GameEngine

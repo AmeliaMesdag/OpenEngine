@@ -83,11 +83,14 @@ bool AStarSolver::Solve(const GridMap::ReadView& grid, uint32 startIndex, uint32
     grid.CellFromIndex(endIndex, endX, endZ);
     if (grid.IsCellBlocked(startX, startZ) || grid.IsCellBlocked(endX, endZ))
         return false;
+    // A goal outside the start's region cannot be reached: fail here, before the scratch is sized,
+    // instead of expanding every cell the start reaches.
+    if (!grid.InSameRegion(startIndex, endIndex))
+        return false;
 
-    // Every cell is expanded at most once (the closed set), so a solve expands at most cellCount
-    // cells: a path that exists is found on any grid, however far it detours. The cost is one
-    // expansion per reachable cell in the worst case, a goal that cannot be reached: about 210 ms
-    // on a 1024 x 1024 grid in Release (a detour around a wall across it, about 55 ms).
+    // Every cell is expanded at most once (the closed set), so a path that exists is found however
+    // far it detours. The worst case is a goal in the start's region that the agent still cannot
+    // reach (dynamic obstacles, slopes, its own width): one expansion per cell the start reaches.
     const uint32 maxExpansions = cellCount;
 
     // Growth reserves exactly cellCount, so capacity is the largest grid solved on: ReleaseScratchAbove

@@ -27,6 +27,13 @@ bool BuildHostCompilesTarget(BuildHost host, std::string_view platformName)
     return false;
 }
 
+ExecutableFiles TargetExecutableFiles(std::string_view platformName, std::string_view baseName)
+{
+    if (platformName == "Windows")
+        return {std::string(baseName) + ".exe", std::string(baseName) + ".pdb"};
+    return {std::string(baseName), {}};
+}
+
 std::string_view UnsupportedBuildTargetMessage(BuildHost host)
 {
     switch (host)

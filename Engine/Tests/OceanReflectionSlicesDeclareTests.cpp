@@ -152,10 +152,10 @@ class WaterReflectionSlices
             Mathematics::Matrix4x4::PerspectiveReverseZ(1.0471976f, 1.0f, 0.5f, 600.0f);
         const Mathematics::Matrix4x4 viewProj = projection * view;
         CameraData camera{};
-        std::memcpy(camera.view, view.Data(), sizeof(camera.view));
-        std::memcpy(camera.proj, projection.Data(), sizeof(camera.proj));
-        std::memcpy(camera.viewProj, viewProj.Data(), sizeof(camera.viewProj));
-        camera.cameraPos[1] = 50.0f;
+        camera.view = view;
+        camera.proj = projection;
+        camera.viewProj = viewProj;
+        camera.cameraPos.y = 50.0f;
         const CameraId cam = m_Rs->Views().AllocateCamera("WaterSlicesCam");
         m_Rs->Views().SetCameraData(cam, camera);
         m_View = m_Rs->Views().AllocateView("WaterSlicesView", cam);

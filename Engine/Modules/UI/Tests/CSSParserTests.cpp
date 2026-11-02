@@ -1689,13 +1689,13 @@ TEST(CSSParserTests, InlineStyleImportantMarkerStrippedFromStoredValue)
     // always win, so the importance bit is dropped — but the value must
     // still parse cleanly.)
     UIElement el;
-    StyleOverrides ov;
+    StyleDeclaration ov;
     CSSParser::ParseInlineStyleToOverrides("width: 50px !important", ov);
 
     // The override should be present with the parsed numeric value.
     EXPECT_TRUE(ov.Has(StylePropertyId::Width));
 
-    StyleOverrides ovEmpty;
+    StyleDeclaration ovEmpty;
     // A value that's only the marker should be skipped entirely.
     CSSParser::ParseInlineStyleToOverrides("width: !important", ovEmpty);
     EXPECT_FALSE(ovEmpty.Has(StylePropertyId::Width));
@@ -2308,7 +2308,7 @@ TEST(CSSParserTests, CustomVarStyleDeltaOverridesParticipateInVarResolution)
 
     ElementState st{};
     UIElement el; el.SetId("e");
-    el.Overrides().SetCustom(HashStringId("--c"), "#112233");
+    el.Style().SetCustom(HashStringId("--c"), "#112233");
     const auto parentStyle = CSSParser::ComputeStyleFor(el, sheet, st);
     EXPECT_EQ(parentStyle.Visual.Color, 0xFF112233u);
 

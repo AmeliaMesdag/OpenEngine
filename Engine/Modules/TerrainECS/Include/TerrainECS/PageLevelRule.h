@@ -43,6 +43,8 @@ struct PageLevelView
 {
     float32 FocalPixels = 0.0f;
     float32 TargetPixels = 0.0f;
+
+    bool operator==(const PageLevelView&) const = default;
 };
 
 /// The level rule's view at a render height (pixels), vertical field of view (radians) and the
@@ -72,37 +74,101 @@ struct PageRequestTerrain
     uint32 CacheSlots = 0;      ///< the slots of the field's height cache (the profile's budget)
 };
 
+/// True when a requester configured with `a` asks for the same pages as one configured with `b`: the
+/// same pyramid at the same world position and height range.
+bool SamePagePlacement(const PageRequestTerrain& a, const PageRequestTerrain& b);
+
 /// The first pinned level of a pyramid of `faces` faces, level-0 texel `level0Texel` meters: 0 when
 /// all its pages fit cacheSlots / kPinWholePyramidCacheFraction, else the coarsest levels that fit
 /// with a texel of at least kPinnedPageTexelMeters, and at least the top level (planets 3.5).
 uint32 FirstPinnedPageLevel(std::span<const PageStreaming::PageStoreLevel> levels, uint32 faces, float32 level0Texel,
                             uint32 cacheSlots);
 
-/// The pages a terrain's geometry needs for its cameras, each frame. Holds the terrain's pyramid and
+/// One view a terrain's pages are requested for.
+struct PageRequestCamera
+{
+    Mathematics::Vector3 Position;
+    Mathematics::Vector3 Forward;      ///< the view direction, unit length when HasDirection
+    float32 HorizontalHalfFov = 0.0f;  ///< radians, half the horizontal field of view
+    bool HasDirection = false;         ///< false: the view looks every way (a bake, a probe)
+};
+
+/// Where on a terrain a requester refines: the whole disc around each camera (the geometry, which
+/// casts shadows and collides behind the camera), or the view wedge (the shading fields).
+enum class PageRequestArea : uint8
+{
+    Disc,
+    /// The pages whose footprint meets some camera's horizontal field plus kPageWedgeMarginRadians,
+    /// or lies within kPageWedgeFootPages page widths of some camera's foot (planets design 3.5), or
+    /// any page when some camera has no direction.
+    Wedge,
+};
+
+/// The angle the wedge adds to each side of a camera's horizontal field: 15 degrees.
+inline constexpr float32 kPageWedgeMarginRadians = 0.2617994f;
+/// The page widths around a camera's foot that the wedge refines in every direction.
+inline constexpr float32 kPageWedgeFootPages = 2.0f;
+
+/// The pages a terrain's field needs for its cameras, each frame. Holds the terrain's pyramid and
 /// its scratch, so a frame allocates nothing once the request set's size has been seen.
-class HeightPageRequester
+class PageRequester
 {
 public:
-    /// (Re)configure for `terrain`: its pyramid and pinned levels.
-    void Configure(const PageRequestTerrain& terrain);
-
-    /// Every page of the pinned levels, then down the quadtree from each page some point of whose
-    /// footprint needs a finer level than its own (lambda at the footprint's nearest point below the
-    /// page's level), the children whose own nearest point needs the child's level (lambda below the
-    /// child's level + 1). Each request's parent is requested too, so the set is closed under parents
-    /// (the parent-first rule). Distance is to the footprint box (its rectangle and the
-    /// field's height range), so every point of a page is at least that far away and the rule is
-    /// conservative.
-    void Build(std::span<const Mathematics::Vector3> cameras, const PageLevelView& view,
+    /// (Re)configure for `terrain`: its pyramid and pinned levels, refined over `area`.
+    void Configure(const PageRequestTerrain& terrain, PageRequestArea area);
+    /// Every page of the pinned levels, then each child whose footprint box's nearest point needs the
+    /// child's level for a camera whose area holds it; the set is closed under parents. Returns false,
+    /// `out` untouched, when the cameras and the view equal the last Build's since Configure.
+    bool Build(std::span<const PageRequestCamera> cameras, const PageLevelView& view,
                std::vector<PageStreaming::PageWant>& out);
 
     uint32 FirstPinnedLevel() const { return m_FirstPinned; }
 
 private:
+    // The world rectangle of a page's footprint.
+    struct Footprint
+    {
+        float32 MinX = 0.0f;
+        float32 MinZ = 0.0f;
+        float32 MaxX = 0.0f;
+        float32 MaxZ = 0.0f;
+    };
+    // A camera as the wedge test reads it, prepared once per Build.
+    struct WedgeView
+    {
+        Mathematics::Vector3 Position;
+        float32 ForwardX = 0.0f; // the horizontal forward, unit length
+        float32 ForwardZ = 0.0f;
+        float32 CosReach = -1.0f; // the cosine of the half field plus kPageWedgeMarginRadians
+        bool EveryBearing = true;
+    };
+    // A page on the walk's frontier and its distance over the requester's area.
+    struct FrontierPage
+    {
+        PageStreaming::PageAddress Address;
+        float32 Distance = 0.0f;
+    };
+
+    static Footprint FootprintOf(const PageRequestTerrain& terrain, const PageStreaming::PageAddress& address);
+    // Distance from `camera` to the box of a page's footprint: its rectangle and the field's height range.
+    static float32 DistanceToFootprint(const PageRequestTerrain& terrain, const Footprint& box,
+                                       const Mathematics::Vector3& camera);
+    // True when `box` meets the wedge of `view` (PageRequestArea::Wedge).
+    static bool InWedge(const Footprint& box, const WedgeView& view);
+    void PrepareViews(std::span<const PageRequestCamera> cameras);
+    // The nearest distance to a page's footprint box from the views whose `area` holds it; the
+    // largest float when none does.
+    float32 NearestDistance(const PageStreaming::PageAddress& address, PageRequestArea area) const;
+
     PageRequestTerrain m_Terrain;
     std::vector<PageStreaming::PageStoreLevel> m_Levels;
-    std::vector<PageStreaming::PageAddress> m_Frontier;
+    std::vector<WedgeView> m_Views;
+    std::vector<FrontierPage> m_Frontier;
+    std::vector<PageRequestCamera> m_BuiltCameras; // the last Build's inputs
+    PageLevelView m_BuiltView;
+    bool m_Built = false;
     uint32 m_FirstPinned = 0;
+    PageRequestArea m_Area = PageRequestArea::Disc;
 };
 
 } // namespace GameEngine::TerrainECS

@@ -332,7 +332,7 @@ void LogChannelPopover::Place()
         return;
     m_PlacedX = localX;
     m_PlacedY = localY;
-    m_Panel->Overrides()
+    m_Panel->Style()
         .Set(Style::PositionLeft, StyleLength::Px(localX))
         .Set(Style::PositionTop, StyleLength::Px(localY));
     MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);

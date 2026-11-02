@@ -1,10 +1,12 @@
 #pragma once
 
 #include "AssetCore/GUID.h"
+#include "Mathematics/Matrix4x4.h"
 #include "PathfindingECS/Navigation.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "Types/Types.h"
 
+#include <atomic>
 #include <vector>
 
 namespace GameEngine::ECS
@@ -17,6 +19,16 @@ namespace GameEngine::Components
 struct NavigationSurface;
 struct WorldTransform;
 } // namespace GameEngine::Components
+
+namespace GameEngine::Rendering
+{
+class MeshGPURegistry;
+} // namespace GameEngine::Rendering
+
+namespace JobSystem
+{
+class WorkStealingThreadPool;
+} // namespace JobSystem
 
 namespace GameEngine::PathfindingECS
 {
@@ -47,12 +59,12 @@ struct NavigationTriangles
 
 // The static geometry a surface bakes besides the terrain, in world space: the collider shapes of
 // Static physics bodies (box, sphere, capsule, plane) and the meshes of MeshRenderer entities
-// (model submeshes and primitives) that the entity's NavigationSource policy admits. Under Auto,
+// (model submeshes, primitives and generated meshes such as spline chunks) that the entity's
+// NavigationSource policy admits. Under Auto,
 // the default, a mesh is left out when it or any ancestor has a Dynamic or Kinematic body or a
 // navigation agent: they move, so the surface does not bake them. Under an inherited Include a
 // mesh is baked where it stands unless it moves on its own below the Include's entity. Gathered
-// on the main thread when a bake starts and never changed afterwards, so tile jobs read it
-// concurrently.
+// when a bake starts and never changed afterwards, so tile jobs read it concurrently.
 struct NavigationStaticGeometry
 {
     // One shape or mesh: a run of Triangles.Indices, its bounds and the entity it came from.
@@ -76,10 +88,48 @@ struct NavigationStaticGeometry
     uint64 HashOverlapping(float32 minX, float32 minZ, float32 maxX, float32 maxZ) const;
 };
 
-NavigationStaticGeometry GatherNavigationStaticGeometry(ECS::World& world);
+// What NavigationStaticGeometry is built from, copied out of the world when a bake starts: the
+// collider shapes, already as triangles (they are few and small), and every mesh renderer as its
+// world matrix, the index of its mesh and its bake source, each distinct mesh copied once in its own
+// space.
+// BuildNavigationStaticGeometry reads nothing else, so it runs on any thread.
+struct NavigationGeometrySources
+{
+    struct MeshInstance
+    {
+        uint32 Mesh = 0;
+        Mathematics::Matrix4x4 World;
+        Navigation::BakeSource Source;
+    };
+
+    NavigationStaticGeometry Shapes;
+    // Local positions and triangles, one per distinct mesh.
+    std::vector<NavigationTriangles> Meshes;
+    // In the order the mesh renderers are gathered.
+    std::vector<MeshInstance> Instances;
+};
+
+// `meshes` supplies the kept CPU copy of each generated mesh a renderer with no model draws; null
+// reads none. The snapshot can run in an ECS wave on a job: it copies the mesh owners it needs under
+// one TableScope, then copies their triangles with no lock.
+NavigationGeometrySources SnapshotNavigationGeometrySources(ECS::World& world, const Rendering::MeshGPURegistry* meshes);
+
+// The shapes, then every mesh instance transformed to world space as one item, in order. Spreads the
+// instances over `pool` (null runs them on the caller). A chunk of instances that starts once `cancelled` is
+// set (null: never) is skipped, its vertices and indices left zero and its items' bounds empty: the geometry
+// is partial, and the caller that set the flag drops it.
+NavigationStaticGeometry BuildNavigationStaticGeometry(NavigationGeometrySources sources,
+                                                       JobSystem::WorkStealingThreadPool* pool,
+                                                       const std::atomic<bool>* cancelled);
+
+// SnapshotNavigationGeometrySources and BuildNavigationStaticGeometry on the caller.
+NavigationStaticGeometry GatherNavigationStaticGeometry(ECS::World& world, const Rendering::MeshGPURegistry* meshes);
+
+// The mesh registry of the engine's renderer, or null when no renderer runs.
+const Rendering::MeshGPURegistry* FindEngineMeshRegistry();
 
 // The models the mesh renderers GatherNavigationStaticGeometry reads show that are not resident,
-// each once. Primitives have no asset behind them and are never listed.
+// each once. Primitives and generated meshes have no asset behind them and are never listed.
 std::vector<GUID> FindUnloadedNavigationModels(ECS::World& world);
 
 // The terrain a surface bakes: the planar terrain under the surface's origin, as TerrainECS resolves it.

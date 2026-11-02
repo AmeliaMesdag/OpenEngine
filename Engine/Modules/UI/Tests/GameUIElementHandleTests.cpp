@@ -848,13 +848,10 @@ TEST(GameUIElementHandleTests, TextPayloadSurvivesAMidDispatchWriteThroughTheRea
            "never about dropping the write";
 }
 
-// ARM 5 — what a reconcile DOES clobber. The handle survives and stays writable, but the
-// authored `text` attribute is re-applied, so a one-shot text write is lost while a style
-// override written through Overrides() survives (a different bag from the inline-style
-// attribute). This is the contract the managed API documents: a per-frame driver self-heals
-// in one frame, a one-shot writer does not. Red if `text` is ever added to the reconcile's
-// preserve list without updating that contract.
-TEST(GameUIElementHandleTests, ReconcileRestoresAuthoredTextButNotStyleOverrides)
+// ARM 5: a reconcile re-applies the authored `text` and `style` attributes, so a one-shot text write
+// is lost and a Style() write survives, the contract the managed API documents. Red if `text` joins
+// the reconcile's preserve list without a change to that contract.
+TEST(GameUIElementHandleTests, ReconcileRestoresAuthoredTextButNotTheElementStyle)
 {
     auto dev = MakeHeadlessDevice();
     if (!dev)
@@ -873,7 +870,7 @@ TEST(GameUIElementHandleTests, ReconcileRestoresAuthoredTextButNotStyleOverrides
 
     // What the ABI's SetLabelText and SetWidthPercent do.
     label->SetText("100 / 100");
-    label->Overrides().Set(Style::Width, StyleLength::Percent(42.0f));
+    label->Style().Set(Style::Width, StyleLength::Percent(42.0f));
 
     hud.HotReload(kLabelHud);
 
@@ -882,8 +879,8 @@ TEST(GameUIElementHandleTests, ReconcileRestoresAuthoredTextButNotStyleOverrides
     EXPECT_EQ(label->GetText(), "-- / --")
         << "the authored text was NOT re-applied — the managed contract says a one-shot text write "
            "is lost across a .uxml reconcile; update the contract if this changed deliberately";
-    EXPECT_EQ(after->Overrides().Get(Style::Width), std::optional<StyleLength>(StyleLength::Percent(42.0f)))
-        << "a style override written through the override bag must survive a reconcile";
+    EXPECT_EQ(after->Style().Get(Style::Width), std::optional<StyleLength>(StyleLength::Percent(42.0f)))
+        << "a write to the element's code style, Style(), must survive a reconcile";
 }
 
 // ARM 7 — Overlay suppression is display:none on the per-entity container, never a detach,
@@ -942,20 +939,20 @@ TEST(GameUIElementHandleTests, InstanceIdStaysValidWhileOverlayIsSuppressed)
         << "fixture precondition: the Fullscreen document must be ready";
     UIElement* hudRoot = host.FindDocumentRoot(hudE.GetHandle().id);
     ASSERT_NE(hudRoot, nullptr);
-    ASSERT_EQ(hudRoot->Overrides().Get(Style::Display), std::optional<DisplayMode>(DisplayMode::None))
+    ASSERT_EQ(hudRoot->Style().Get(Style::Display), std::optional<DisplayMode>(DisplayMode::None))
         << "fixture precondition: the Overlay must actually be suppressed";
 
     EXPECT_EQ(host.GetUIManager()->FindElementByInstanceId(instanceId), leaf)
         << "hidden is not dead — a suppressed Overlay's elements must stay resolvable";
 
     // A write lands while suppressed and is still there when the menu goes away.
-    leaf->Overrides().Set(Style::Width, StyleLength::Percent(42.0f));
+    leaf->Style().Set(Style::Width, StyleLength::Percent(42.0f));
     menuE.SetEnabled<Components::UIDocument>(false);
     GameUIHostTestAccess::SyncFromWorld(host, world);
     EXPECT_EQ(host.GetUIManager()->FindElementByInstanceId(instanceId), leaf);
-    EXPECT_FALSE(hudRoot->Overrides().Get(Style::Display).has_value())
+    EXPECT_FALSE(hudRoot->Style().Get(Style::Display).has_value())
         << "fixture precondition: the Overlay must be restored";
-    EXPECT_EQ(leaf->Overrides().Get(Style::Width), std::optional<StyleLength>(StyleLength::Percent(42.0f)))
+    EXPECT_EQ(leaf->Style().Get(Style::Width), std::optional<StyleLength>(StyleLength::Percent(42.0f)))
         << "a write made while suppressed must still be there when the document is shown again";
 }
 
@@ -1285,7 +1282,7 @@ TEST(GameUIElementHandleTests, AnOffsetPlacesAnAbsoluteElementInItsParentAndMove
     ASSERT_NE(flowing, nullptr);
     UIElement* parent = placed->GetParent();
     ASSERT_NE(parent, nullptr);
-    parent->Overrides().Set(Style::PaddingLeft, StyleLength::Px(8.0f)).Set(Style::PaddingTop, StyleLength::Px(8.0f));
+    parent->Style().Set(Style::PaddingLeft, StyleLength::Px(8.0f)).Set(Style::PaddingTop, StyleLength::Px(8.0f));
     hud.Pump();
     const auto flowingBefore = flowing->GetWindowRect();
 
@@ -1315,7 +1312,7 @@ TEST(GameUIElementHandleTests, TheRectIsTheDrawnBoxInWindowSpace)
     UIElement* button = hud.Find("take-damage"_sid);
     ASSERT_NE(button, nullptr);
     UIElement* parent = button->GetParent();
-    parent->Overrides().Set(Style::Transform,
+    parent->Style().Set(Style::Transform,
                             TransformValue{}.Translate(StyleLength::Px(15.0f), StyleLength::Px(25.0f)));
     hud.Pump();
     const auto parentRect = parent->GetWindowRect();

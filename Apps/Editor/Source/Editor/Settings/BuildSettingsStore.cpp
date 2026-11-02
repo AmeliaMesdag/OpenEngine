@@ -137,7 +137,10 @@ std::vector<std::string> LoadEffectiveBuildScenes(const std::string& platformNam
     if (!platformScenes.empty())
         return platformScenes;
     const std::filesystem::path& projectRoot = EngineCore::GetInstance().GetWorkspaceRoot();
-    std::string startupScene = LoadBuildStringSetting(kProjectStartupSceneKey);
+    SettingsStore settings = OpenBuildSettingsStore();
+    std::string err;
+    settings.Load(&err);
+    std::string startupScene = ReadProjectStartupScene(settings);
     if (projectRoot.empty() || !ResolveNamedScene(projectRoot / "Assets", startupScene, kProjectStartupSceneKey))
         return {};
     return {std::move(startupScene)};

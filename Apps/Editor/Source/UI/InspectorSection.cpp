@@ -16,7 +16,7 @@ class CollapseArrowElement : public UIElement {
 public:
     CollapseArrowElement()
     {
-        Overrides()
+        Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionRight, StyleLength::Px(8.0f))
             .Set(Style::PositionBottom, StyleLength::Px(-6.0f))
@@ -74,9 +74,9 @@ void InspectorSection::SetHeaderIconTint(uint32_t argb)
     if (!m_Icon)
         return;
     if (argb == 0)
-        m_Icon->Overrides().Reset(Style::BackgroundTint);
+        m_Icon->Style().Reset(Style::BackgroundTint);
     else
-        m_Icon->Overrides().Set(Style::BackgroundTint, argb);
+        m_Icon->Style().Set(Style::BackgroundTint, argb);
     m_Icon->MarkDirty(StyleDirty | VisualDirty);
 }
 

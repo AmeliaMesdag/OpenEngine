@@ -15,6 +15,7 @@
 #include "Rendering/Core/CommandList.h"
 #include "StagedTestPaths.h"
 #include "TestDeviceHelper.h"
+#include "TestTempDir.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -63,9 +64,15 @@ struct TextureCoverageUploadTestAccess
     }
     static TextureHandle Cached(TextureService& service, const GUID& texture)
     {
-        TextureHandle handle;
-        service.m_TextureGPUCache.TryGet(texture, handle);
-        return handle;
+        TextureGPUCache::Entry entry;
+        service.m_TextureGPUCache.TryGet(texture, entry);
+        return entry.Texture;
+    }
+    static TextureHandle CachedCompanion(TextureService& service, const GUID& texture)
+    {
+        TextureGPUCache::Entry entry;
+        service.m_TextureGPUCache.TryGet(texture, entry);
+        return entry.NormalVarianceCompanion;
     }
 };
 } // namespace GameEngine::Engine::Renderer
@@ -83,11 +90,12 @@ class TextureCoverageGPU : public testing::Test
     PipelineHandle m_Pipeline;
     SamplerHandle m_Sampler;
     DescriptorSetLayoutDesc m_Layout;
+    TextureGpuTranscodeTarget m_PreviousTranscodeTarget = TextureAsset::GetGpuTranscodeTarget();
 
     static void SetUpTestSuite()
     {
         s_PreviousDirectory = fs::current_path();
-        s_Workspace = fs::temp_directory_path() / ("ge-coverage-gpu-" + GUID::Generate().ToString());
+        s_Workspace = TestUtils::MakeUniqueTempDirectory("ge-coverage-gpu");
         fs::create_directories(s_Workspace / "Assets");
         auto& engine = EngineCore::GetInstance();
         ScriptsConfig scripts;
@@ -144,6 +152,7 @@ class TextureCoverageGPU : public testing::Test
     }
     void TearDown() override
     {
+        TextureAsset::SetGpuTranscodeTarget(m_PreviousTranscodeTarget);
         if (!m_Device)
             return;
         m_Device->WaitForIdle();
@@ -155,6 +164,7 @@ class TextureCoverageGPU : public testing::Test
         m_Materials.Shutdown();
         m_Device.reset();
     }
+    void BindCookedNormalMap(const GUID& material, GUID& outTexture);
     static std::vector<uint8> Read(const fs::path& path)
     {
         std::ifstream stream(path, std::ios::binary);
@@ -398,6 +408,107 @@ TEST_F(TextureCoverageGPU, AssigningATextureThatIsNotLoadedCooksItOnAWorkerAndBi
     ASSERT_NE(bound, nullptr);
     EXPECT_TRUE(bound->GetTexture(HashStringId("albedoMap")).IsValid());
     EXPECT_EQ(CookedArtifacts(texture), 1u) << "the assign uploaded a raw decode instead of cooking";
+}
+
+// A normal map's cook writes a BC4 variance companion beside it. Binding the map to the normal
+// slot puts the companion's bindless index in the material's row lane, and an eviction returns
+// the lane to the black default and frees the companion with its parent.
+TEST_F(TextureCoverageGPU, ANormalMapsVarianceCompanionBindsWithTheNormalSlotAndLeavesWithIt)
+{
+    const GUID material = GUID::Generate();
+    GUID texture;
+    BindCookedNormalMap(material, texture);
+    if (IsSkipped() || HasFatalFailure())
+        return;
+    const uint32_t black = m_Textures.DefaultBlackBindlessIndex();
+    const Engine::Renderer::Material* bound = m_Materials.Find(material);
+    const uint32_t normalIndex = bound->GetBindlessTextureIndex(Engine::Renderer::TextureSlot::kNormal);
+    EXPECT_NE(bound->GetNormalVarianceIndex(), black) << "the cooked normal map's companion did not bind";
+    EXPECT_NE(bound->GetNormalVarianceIndex(), 0u);
+    EXPECT_NE(bound->GetNormalVarianceIndex(), normalIndex);
+    const TextureHandle parent = Engine::Renderer::TextureCoverageUploadTestAccess::Cached(m_Textures, texture);
+    const TextureHandle companion = Engine::Renderer::TextureCoverageUploadTestAccess::CachedCompanion(m_Textures, texture);
+    ASSERT_TRUE(companion.IsValid()) << "the cache entry does not own the companion";
+    ASSERT_TRUE(m_Device->IsTextureAlive(companion));
+
+    m_Textures.Evict(texture);
+    EXPECT_EQ(bound->GetNormalVarianceIndex(), black) << "the evicted normal map left its companion's index bound";
+    EXPECT_FALSE(m_Device->IsTextureAlive(parent)) << "the evicted normal map is still alive";
+    EXPECT_FALSE(m_Device->IsTextureAlive(companion)) << "the eviction freed the parent but not its companion";
+}
+
+// A hot swap re-uploads the normal map with a new companion: the lane moves to the new
+// companion's index, and the old companion is freed with the old texture.
+TEST_F(TextureCoverageGPU, AHotSwapRetiresTheOldVarianceCompanionWithTheOldTexture)
+{
+    const GUID material = GUID::Generate();
+    GUID texture;
+    BindCookedNormalMap(material, texture);
+    if (IsSkipped() || HasFatalFailure())
+        return;
+    const Engine::Renderer::Material* bound = m_Materials.Find(material);
+    const uint32_t oldLane = bound->GetNormalVarianceIndex();
+    const TextureHandle oldParent = Engine::Renderer::TextureCoverageUploadTestAccess::Cached(m_Textures, texture);
+    const TextureHandle oldCompanion = Engine::Renderer::TextureCoverageUploadTestAccess::CachedCompanion(m_Textures, texture);
+    ASSERT_TRUE(oldCompanion.IsValid()) << "the cache entry does not own the companion";
+
+    m_Textures.RequestReupload(texture);
+    m_Textures.FlushPendingUploads();
+    const TextureHandle newParent = Engine::Renderer::TextureCoverageUploadTestAccess::Cached(m_Textures, texture);
+    const TextureHandle newCompanion = Engine::Renderer::TextureCoverageUploadTestAccess::CachedCompanion(m_Textures, texture);
+    ASSERT_TRUE(newParent.IsValid()) << "the swap left no texture";
+    ASSERT_NE(newParent, oldParent) << "the swap kept the old texture";
+    ASSERT_TRUE(newCompanion.IsValid()) << "the swapped normal map has no companion";
+    EXPECT_NE(newCompanion, oldCompanion);
+    EXPECT_EQ(bound->GetNormalVarianceIndex(), m_Textures.GetBindlessIndex(newCompanion))
+        << "the lane does not point at the new companion";
+    EXPECT_NE(bound->GetNormalVarianceIndex(), oldLane);
+    EXPECT_FALSE(m_Device->IsTextureAlive(oldParent)) << "the swap kept the old texture alive";
+    EXPECT_FALSE(m_Device->IsTextureAlive(oldCompanion)) << "the swap retired the old texture but not its companion";
+}
+
+// Cooks a 64x64 normal map, binds it to a new material's normal slot and waits for the bind.
+// Writes the texture to outTexture; the caller returns on a skip or a fatal failure.
+void TextureCoverageGPU::BindCookedNormalMap(const GUID& material, GUID& outTexture)
+{
+    if (!IsTextureCookEncoderAvailable() || !m_Device->GetCapabilities().supportsTextureCompressionBC)
+        GTEST_SKIP() << "BC encode or BC sampling unavailable";
+    TextureAsset::SetGpuTranscodeTarget(TextureGpuTranscodeTarget::BC7);
+    constexpr int kSize = 64;
+    const auto path = s_Workspace / "Assets" / (GUID::Generate().ToString() + ".tga");
+    std::vector<uint8> bytes(18, 0);
+    bytes[2] = 2;
+    bytes[12] = bytes[14] = uint8(kSize);
+    bytes[16] = 32;
+    bytes[17] = 0x28;
+    for (int y = 0; y < kSize; ++y)
+        for (int x = 0; x < kSize; ++x)
+            bytes.insert(bytes.end(), {uint8(238), uint8(((x + y) & 1) ? 64 : 191), uint8(128), uint8(255)});
+    std::ofstream(path, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    Set(path, kTextureUsageMetaKey, "normal");
+    const GUID texture = EngineCore::GetInstance().GetAssetManager().GetRegistry().GetAssetGUID(path);
+    MaterialDocument doc{};
+    doc.schemaVersion = 3;
+    doc.materialName = "NormalVarianceCompanion";
+    doc.lightingModel = "StandardPBR";
+    doc.surfaceShader = "Surfaces/standard_pbr.glsl";
+    ASSERT_NE(m_Materials.Register(material, doc), nullptr);
+    const uint32_t black = m_Textures.DefaultBlackBindlessIndex();
+    ASSERT_NE(black, 0u);
+    EXPECT_EQ(m_Materials.Find(material)->GetNormalVarianceIndex(), black) << "an unbound normal slot has no variance";
+
+    doc.textures["normalMap"] = texture.ToString();
+    m_Textures.UpdateMaterialTextures(material, doc);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (!m_Textures.IsMaterialTextureBindingComplete(material) && std::chrono::steady_clock::now() < deadline)
+    {
+        EngineCore::GetInstance().GetAssetManager().Update();
+        m_Textures.FlushPendingUploads();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_TRUE(m_Textures.IsMaterialTextureBindingComplete(material)) << "the normal map never bound";
+    ASSERT_NE(m_Materials.Find(material), nullptr);
+    outTexture = texture;
 }
 
 // A terrain material library's texture (a GUID consumer with no Material: TerrainExtractionSystem,

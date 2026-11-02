@@ -19,7 +19,7 @@ namespace GameEngine.Scripting
 
     public enum SplineWallCorner : int
     {
-        Mitre = 0,
+        Miter = 0,
         Round = 1,
     }
 
@@ -58,7 +58,7 @@ namespace GameEngine.Scripting
             readonly get => m_Corner;
             set => m_Corner = (uint)value <= 1u
                 ? value
-                : throw new ArgumentOutOfRangeException(nameof(value), value, "SplineWall.Corner is Mitre or Round.");
+                : throw new ArgumentOutOfRangeException(nameof(value), value, "SplineWall.Corner is Miter or Round.");
         }
 
         [FieldOffset(16)]

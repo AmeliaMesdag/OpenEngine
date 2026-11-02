@@ -403,7 +403,7 @@ TEST(SceneSwapOrdering, EveryGroundReadingGeneratorHoldsItsFirstBuildForProvisio
          "void SplineFenceController::Update("},
         {"SplineExtrudeController.cpp", "SplineExtrudeController::",
          "void SplineExtrudeController::Update("},
-        {"SplineWallController.cpp", "SplineWallController::",
+        {"SplineWall/SplineWallController.cpp", "SplineWallController::",
          "void SplineWallController::Update("},
     };
 

@@ -1,5 +1,6 @@
 #include "Rendering/Sky/SkySunState.h"
 
+#include "Mathematics/Vector3.h"
 #include "Rendering/Sky/SkySystem.h"
 #include "Rendering/Sky/SolarPath.h"
 
@@ -12,7 +13,7 @@ namespace {
 
 constexpr float kTwoPi = 6.2831853f;
 
-Mathematics::Radians ElevationOf(const float direction[3])
+Mathematics::Radians ElevationOf(const Mathematics::Vector3& direction)
 {
     return std::asin(std::clamp(direction[1], -1.0f, 1.0f));
 }
@@ -33,8 +34,8 @@ Mathematics::Radians HorizonDipRadians(float altitudeMeters, float planetRadiusM
 } // namespace
 
 SkySunState ComputeSkySunState(const SolarFrame& frame,
-                               const float sunDir[3],
-                               const float moonDir[3],
+                               const Mathematics::Vector3& sunDir,
+                               const Mathematics::Vector3& moonDir,
                                float moonArcPosition,
                                float cameraAltitudeMeters,
                                float planetRadiusMeters)

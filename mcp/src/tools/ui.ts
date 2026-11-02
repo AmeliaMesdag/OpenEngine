@@ -94,6 +94,27 @@ export const tools: ToolDef[] = [
   }),
 
   proxyTool({
+    name: "simulate_mouse_drag",
+    category: "ui",
+    description:
+      "Press, move and release the editor's pointer across frames, as a mouse drag does: controls that arm on the press, drag on later moves and commit on the release see the same events. The pointer moves from the start along the path points and then to endX/endY, one move per presented frame, and releases on the last point. steps moves are spread over the segments by length, and every segment ends exactly on its point, so a path traces a freehand stroke: with the spline tool, a path that comes back to its start closes the loop. Only the editor's pointer moves: the desktop cursor stays where it is. dragDropSession says whether the gesture started a drag-and-drop session; perform_drop makes a drop without one.",
+    schema: {
+      elementId: z.string().optional().describe("Start at this element's center. Must have a layout box"),
+      startX: z.coerce.number().optional().describe("Start X in the editor window's UI coordinates (the logical pixels get_ui_tree reports)"),
+      startY: z.coerce.number().optional().describe("Start Y in the editor window's UI coordinates"),
+      path: z.array(z.object({ x: z.coerce.number(), y: z.coerce.number() })).optional().describe("Points the pointer passes through after the start, in UI coordinates, in order (at most 240). Give path, endX/endY or both; the release is on the last point"),
+      endX: z.coerce.number().optional().describe("End X in UI coordinates, after the path"),
+      endY: z.coerce.number().optional().describe("End Y in UI coordinates, after the path"),
+      steps: z.coerce.number().int().optional().describe("Pointer moves over the whole drag, one per frame (default 20, at most 240; never fewer than the path's segments)"),
+      button: z.enum(["left", "right", "middle"]).optional().describe("Mouse button (default left)"),
+      holdFrames: z.coerce.number().int().optional().describe("Frames the button stays down at the start before the first move (default 1, at most 4)"),
+      holdBeforeReleaseFrames: z.coerce.number().int().optional().describe("Frames the button stays down on the last point before the release (default 0, at most 1200)"),
+      captureAtFrame: z.coerce.number().int().optional().describe("Take a window capture at this hold frame (0 to holdBeforeReleaseFrames - 1); the reply carries its file and the pointer state of that frame"),
+      windowIndex: z.coerce.number().optional().describe("Editor window (default 0, the main window)"),
+    },
+  }),
+
+  proxyTool({
     name: "send_key",
     category: "ui",
     description: "Inject a keyboard event into the editor along the path a real key takes: global editor shortcuts first, then the focused element, then a running game's HUD and input, then editor actions. Use it for keyboard-driven behavior like Tab focus traversal, Enter commit and Escape cancel, and for typing into a game HUD while play mode runs. Pair with take_screenshot to observe focus highlights.",

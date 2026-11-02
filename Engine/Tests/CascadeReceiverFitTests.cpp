@@ -109,12 +109,12 @@ Rendering::CameraData MakeCamera(const Pose& pose, const Lens& lens = {})
             ? MakeOrthographicLH_ZO_ReverseZ(-halfY * lens.Aspect, halfY * lens.Aspect, -halfY, halfY, kNear, kFar)
             : MakePerspectiveLH_ZO_ReverseZ(lens.FovYDeg * kPi / 180.0f, lens.Aspect, kNear, kFar);
     const Matrix4x4 viewProj = proj * view;
-    std::memcpy(cam.view, view.Data(), sizeof(cam.view));
-    std::memcpy(cam.proj, proj.Data(), sizeof(cam.proj));
-    std::memcpy(cam.viewProj, viewProj.Data(), sizeof(cam.viewProj));
-    cam.cameraPos[0] = pose.Position.x;
-    cam.cameraPos[1] = pose.Position.y;
-    cam.cameraPos[2] = pose.Position.z;
+    cam.view = view;
+    cam.proj = proj;
+    cam.viewProj = viewProj;
+    cam.cameraPos.x = pose.Position.x;
+    cam.cameraPos.y = pose.Position.y;
+    cam.cameraPos.z = pose.Position.z;
     return cam;
 }
 
@@ -958,7 +958,7 @@ TEST(CascadeReceiverFit, TheWindowCheckSeesTheFieldOfViewAspectOrthographicSizeA
         Rendering::CameraData cam = MakeCamera(pose);
         const Matrix4x4 proj = MakeOrthographicLH_ZO_ReverseZ(-halfHeight * kAspect, halfHeight * kAspect,
                                                               -halfHeight, halfHeight, kNear, kFar);
-        std::memcpy(cam.proj, proj.Data(), sizeof(cam.proj));
+        cam.proj = proj;
         ShadowReceiverMeasurement::Context c{};
         Renderer::SetShadowReceiverCamera(cam, true, c);
         return c;

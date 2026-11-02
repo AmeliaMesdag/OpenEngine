@@ -13,6 +13,7 @@
 #include "UI/Controls/ListView.h"
 #include "UI/Controls/ScrollView.h"
 #include "UI/Controls/TreeView.h"
+#include "UI/Layout/ElementOverrideHelpers.h"
 #include "UI/Parsers/CSSParser.h"
 #include "UI/Registration/ElementRegistration.h"
 #include "UI/StyleProperties.h"
@@ -532,7 +533,7 @@ TEST(UIScrollVirtualizationTests, TreeView_CollectBoundIdsReportsTheRowsItHolds)
     auto owner = std::make_unique<TreeView>();
     TreeView* tree = owner.get();
     tree->SetDataProvider(&provider);
-    tree->Overrides().Set(Style::Width, StyleLength::Px(320.0f)).Set(Style::Height, StyleLength::Px(900.0f));
+    tree->Style().Set(Style::Width, StyleLength::Px(320.0f)).Set(Style::Height, StyleLength::Px(900.0f));
     root->AddChild(std::move(owner));
     UIManager ui(dev);
     ui.SetLayoutSizeOverride(400, 1000);
@@ -560,7 +561,7 @@ TEST(UIScrollVirtualizationTests, TreeView_CollectBoundIdsReportsTheRowsItHolds)
     EXPECT_EQ(tall, rowIds());
 
     // Shrink; the view trims its pool after enough unchanged passes of its virtualization.
-    tree->Overrides().Set(Style::Height, StyleLength::Px(60.0f));
+    tree->Style().Set(Style::Height, StyleLength::Px(60.0f));
     for (int i = 0; i < 60; ++i)
     {
         tree->EnqueuePumpWork(ui);
@@ -587,7 +588,7 @@ TEST(UIScrollVirtualizationTests, TreeView_FindsOnlyTheRowsItHoldsBound)
     auto owner = std::make_unique<TreeView>();
     TreeView* tree = owner.get();
     tree->SetDataProvider(&provider);
-    tree->Overrides().Set(Style::Width, StyleLength::Px(320.0f)).Set(Style::Height, StyleLength::Px(900.0f));
+    tree->Style().Set(Style::Width, StyleLength::Px(320.0f)).Set(Style::Height, StyleLength::Px(900.0f));
     root->AddChild(std::move(owner));
     UIManager ui(dev);
     ui.SetLayoutSizeOverride(400, 1000);
@@ -599,7 +600,7 @@ TEST(UIScrollVirtualizationTests, TreeView_FindsOnlyTheRowsItHoldsBound)
     ASSERT_FALSE(tall.empty());
 
     // Shrink for fewer passes than the trim waits for: the pool keeps rows it no longer binds.
-    tree->Overrides().Set(Style::Height, StyleLength::Px(60.0f));
+    tree->Style().Set(Style::Height, StyleLength::Px(60.0f));
     for (int i = 0; i < 3; ++i)
     {
         tree->EnqueuePumpWork(ui);
@@ -831,6 +832,130 @@ TEST(UIScrollVirtualizationTests, ListView_RebindsVisibleCellsImmediatelyAfterSc
 
     runCase(/*correctnessMode=*/false);
     runCase(/*correctnessMode=*/true);
+}
+
+namespace
+{
+// A work item that queues itself again on every run, so each drain point spends its whole pass
+// budget and leaves the item queued for the next drain point of the frame.
+struct VirtualizationChainState
+{
+    int Runs = 0;
+    bool RequestsRelayout = false;
+    bool DirtiesLayout = false;
+    bool Requeues = true;
+};
+VirtualizationChainState s_VirtualizationChain;
+
+// The chain alternates the host between this height and one pixel more, so each run dirties layout.
+constexpr int kChainHostHeightPx = 100;
+
+void RunVirtualizationChain(UIElement* host, UIManager& ui, VirtualizationCoordinator::Reason reason)
+{
+    ++s_VirtualizationChain.Runs;
+    if (s_VirtualizationChain.RequestsRelayout)
+        ui.RequestRelayout();
+    if (s_VirtualizationChain.DirtiesLayout)
+        UI::Layout::SetForcedHeight(*host, kChainHostHeightPx + (s_VirtualizationChain.Runs % 2));
+    if (s_VirtualizationChain.Requeues)
+        ui.EnqueueVirtualizationWork(host, &RunVirtualizationChain, reason);
+}
+
+// Builds a 200x100 host, settles two frames and queues the chain on the host.
+std::unique_ptr<UIManager> MakeVirtualizationChainHost(IDevice* device)
+{
+    UIRegistration::RegisterBuiltInControls();
+    auto root = std::make_unique<UIElement>();
+    root->SetId("root");
+    auto host = std::make_unique<UIElement>();
+    host->SetId("host");
+    root->AddChild(std::move(host));
+
+    auto ui = std::make_unique<UIManager>(device);
+    ui->SetUpdateProfilingEnabled(true);
+    ui->SetRoot(std::move(root));
+    Stylesheet sheet{};
+    EXPECT_TRUE(CSSParser::ParseStylesFromString(R"(
+#root { width: 200px; height: 100px; }
+#host { width: 200px; height: 100px; }
+)", sheet));
+    ui->AddStylesheet(std::make_shared<Stylesheet>(sheet));
+    ui->Update(0.0f, /*interactive=*/false);
+    ui->Update(0.0f, /*interactive=*/false);
+
+    UIElement* hostElement = ui->GetRootElement()->FindById("host"_sid);
+    EXPECT_NE(hostElement, nullptr);
+    s_VirtualizationChain = {};
+    if (hostElement)
+        ui->EnqueueVirtualizationWork(hostElement, &RunVirtualizationChain, VirtualizationCoordinator::Reason::DataChanged);
+    return ui;
+}
+
+// Runs one Update and returns how many passes the chain ran in it.
+int RunsInOneUpdate(UIManager& ui, uint32_t expectedLateRelayouts)
+{
+    s_VirtualizationChain.Runs = 0;
+    ui.Update(0.0f, /*interactive=*/false);
+    UIManager::UpdateProfileFrame profile{};
+    EXPECT_TRUE(ui.GetLastUpdateProfileFrame(profile));
+    EXPECT_EQ(profile.LateRelayoutCount, expectedLateRelayouts);
+    return s_VirtualizationChain.Runs;
+}
+
+void StopVirtualizationChain(UIManager& ui)
+{
+    s_VirtualizationChain.RequestsRelayout = false;
+    s_VirtualizationChain.DirtiesLayout = false;
+    s_VirtualizationChain.Requeues = false;
+    ui.Update(0.0f, /*interactive=*/false);
+}
+} // namespace
+
+// Work that is still queued when the late relayout runs drains in that relayout, also when the
+// post-event drain of the same Update already ran work. Otherwise it waits one frame.
+TEST(UIScrollVirtualizationTests, VirtualizationCoordinator_LateRelayoutDrainsAfterEarlierDrainRan)
+{
+    auto* dev = SharedHeadlessDevice();
+    if (!dev)
+    {
+        GTEST_SKIP() << "Device init failed";
+    }
+    std::unique_ptr<UIManager> ui = MakeVirtualizationChainHost(dev);
+
+    const int runsWithoutLateRelayout = RunsInOneUpdate(*ui, /*expectedLateRelayouts=*/0u);
+    ASSERT_GT(runsWithoutLateRelayout, 0);
+
+    s_VirtualizationChain.RequestsRelayout = true;
+    const int runsWithLateRelayout = RunsInOneUpdate(*ui, /*expectedLateRelayouts=*/1u);
+    EXPECT_GT(runsWithLateRelayout, runsWithoutLateRelayout)
+        << "The late-relayout drain did not run after the post-event drain ran work.";
+
+    StopVirtualizationChain(*ui);
+}
+
+// When the first pre-solve drain dirties layout, the Yoga tree is rebuilt and a second flush and
+// drain run before the solve, also when the first drain already ran work.
+TEST(UIScrollVirtualizationTests, VirtualizationCoordinator_PreSolveRebuildDrainsAfterFirstDrainRan)
+{
+    auto* dev = SharedHeadlessDevice();
+    if (!dev)
+    {
+        GTEST_SKIP() << "Device init failed";
+    }
+    std::unique_ptr<UIManager> ui = MakeVirtualizationChainHost(dev);
+
+    // Both frames run a late relayout, so only the second pre-solve pass can differ between them.
+    s_VirtualizationChain.RequestsRelayout = true;
+    const int runsWithoutRebuild = RunsInOneUpdate(*ui, /*expectedLateRelayouts=*/1u);
+    ASSERT_GT(runsWithoutRebuild, 0);
+
+    s_VirtualizationChain.RequestsRelayout = false;
+    s_VirtualizationChain.DirtiesLayout = true;
+    const int runsWithRebuild = RunsInOneUpdate(*ui, /*expectedLateRelayouts=*/1u);
+    EXPECT_GT(runsWithRebuild, runsWithoutRebuild)
+        << "The pre-solve drain after the Yoga rebuild did not run after the first drain ran work.";
+
+    StopVirtualizationChain(*ui);
 }
 
 TEST(UIScrollVirtualizationTests, CorrectnessMode_DisablesFastPathsAndForcesHeavyPass)

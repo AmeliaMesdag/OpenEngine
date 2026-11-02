@@ -169,18 +169,15 @@ PassDepthDecl DeclareTransmissiveWorld(Rendering::IDevice* device, uint32_t samp
 
     const CameraId camId = rs.Views().AllocateCamera("TransCam");
     CameraData cd{};
-    for (int i = 0; i < 16; i += 5)
-    {
-        cd.view[i] = 1.0f;
-        cd.proj[i] = 1.0f;
-        cd.viewProj[i] = 1.0f;
-    }
+    cd.view = Mathematics::Matrix4x4::Identity();
+    cd.proj = Mathematics::Matrix4x4::Identity();
+    cd.viewProj = Mathematics::Matrix4x4::Identity();
     rs.Views().SetCameraData(camId, cd);
     const ViewId viewId = rs.Views().AllocateView("TransView", camId);
     rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
     Rendering::ViewClearConfig clear{};
     clear.clearColor = true;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue.a = 1.0f;
     clear.clearDepth = true;
     clear.clearDepthValue = 0.0f; // reverse-Z far
     rs.Views().SetViewTargets(viewId, 0, 0, 0, clear);
@@ -294,18 +291,15 @@ PassDepthDecl DeclareLateTransparentWorld(Rendering::IDevice* device, uint32_t s
 
     const CameraId camId = rs.Views().AllocateCamera("LateCam");
     CameraData cd{};
-    for (int i = 0; i < 16; i += 5)
-    {
-        cd.view[i] = 1.0f;
-        cd.proj[i] = 1.0f;
-        cd.viewProj[i] = 1.0f;
-    }
+    cd.view = Mathematics::Matrix4x4::Identity();
+    cd.proj = Mathematics::Matrix4x4::Identity();
+    cd.viewProj = Mathematics::Matrix4x4::Identity();
     rs.Views().SetCameraData(camId, cd);
     const ViewId viewId = rs.Views().AllocateView("LateView", camId);
     rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
     Rendering::ViewClearConfig clear{};
     clear.clearColor = true;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue.a = 1.0f;
     clear.clearDepth = true;
     clear.clearDepthValue = 0.0f; // reverse-Z far
     rs.Views().SetViewTargets(viewId, 0, 0, 0, clear);
@@ -468,12 +462,9 @@ ReflectionSliceDecl DeclareGlassUnderReflections(Rendering::IDevice* device, boo
 
     const CameraId camId = rs.Views().AllocateCamera("GlassReflectCam");
     CameraData cd{};
-    for (int i = 0; i < 16; i += 5)
-    {
-        cd.view[i] = 1.0f;
-        cd.proj[i] = 1.0f;
-        cd.viewProj[i] = 1.0f;
-    }
+    cd.view = Mathematics::Matrix4x4::Identity();
+    cd.proj = Mathematics::Matrix4x4::Identity();
+    cd.viewProj = Mathematics::Matrix4x4::Identity();
     rs.Views().SetCameraData(camId, cd);
     const ViewId viewId = rs.Views().AllocateView("GlassReflectView", camId);
     rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());

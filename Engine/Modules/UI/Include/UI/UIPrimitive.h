@@ -569,6 +569,15 @@ inline UIPrimitive MakeTriangle(float x0, float y0,
     return p;
 }
 
+// The direction the tip of a pointer arrow points.
+enum class ArrowDirection : uint8_t
+{
+    Up,
+    Down,
+    Left,
+    Right,
+};
+
 // Set clip index on an existing primitive.
 inline void SetClip(UIPrimitive& p, uint16_t clipIndex)
 {

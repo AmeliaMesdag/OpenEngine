@@ -5,18 +5,18 @@ namespace GameEngine::ECS { class World; }
 namespace GameEngine::SplineRecipes
 {
 
-struct SplineGroundCleanup;
+struct SplineGroundEdit;
 
-// The undo journal as the recipe controllers see it. A destructive transition of a controller (the ground authority
-// removes the terrain pieces it made) goes through it, so an undo restores what it removed. A process with no
-// journal (the Player, a test) passes null, and the controller applies the transition itself.
+// The undo journal as the recipe controllers see it. A controller applies a transition (the ground authority adds,
+// rewrites or removes the terrain pieces it makes) and records it here, so one undo reverts the edit that caused it
+// and the transition. A process with no journal (the Player, a test) passes null.
 class RecipeEditJournal
 {
 public:
     virtual ~RecipeEditJournal() = default;
 
-    // Applies `cleanup` to `world` and records it as one undo step.
-    virtual void RecordGroundCleanup(ECS::World& world, const SplineGroundCleanup& cleanup) = 0;
+    // Records `edit`, which the controller applied to `world`, in the undo step of the edit that caused it.
+    virtual void RecordGroundEdit(ECS::World& world, const SplineGroundEdit& edit) = 0;
 };
 
 } // namespace GameEngine::SplineRecipes

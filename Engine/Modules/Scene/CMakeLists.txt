@@ -62,6 +62,7 @@ if(BUILD_TESTING)
     target_include_directories(SceneTests PRIVATE
         ${CMAKE_SOURCE_DIR}/Engine/Include
         ${CMAKE_SOURCE_DIR}/Engine/ECSModules/Rendering/Include
+        ${CMAKE_SOURCE_DIR}/Tests  # DeathTestChild.h
     )
     # Engine ONLY — Scene is an OBJECT module already spliced into Engine.dll;
     # linking it here as well would give the exe a second copy of the module's

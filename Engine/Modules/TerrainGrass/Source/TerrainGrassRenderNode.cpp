@@ -1,6 +1,7 @@
 #include "TerrainGrass/TerrainGrassRenderNode.h"
 
 #include "GrassBladeInstanceGPU.h"
+#include "TerrainECS/TerrainPageFeature.h"
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "TerrainGrass/TerrainGrassPlacementStats.h"
 #include "TerrainGrass/TerrainGrassRenderFeature.h"
@@ -151,7 +152,8 @@ void TerrainGrassRenderNode::DeclareForView(Engine::Renderer::Pipeline::ViewDecl
     // re-run would write, so the pass is not declared at all. The imports, the world-read emit and the
     // readback below still happen — an elided frame's grass is drawn from retained buffers and the
     // instrument keeps reporting the numbers that describe them, rather than going dark.
-    if (!grass.ShouldSkipPlacement(*terrainFeature, viewId, frameIndex))
+    if (!grass.ShouldSkipPlacement(*terrainFeature, rs.GetFeature<TerrainECS::TerrainPageFeature>(), viewId,
+                                    frameIndex))
     {
         const RenderGraph::RGPass placePass = d.Frame.AddPass(
             d.PassName("Place").c_str(), Rendering::PassPhase::kEarlySetup,

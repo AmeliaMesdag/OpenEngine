@@ -808,10 +808,8 @@ void ParticleExtraction::Extract(ECS::World& world, uint64 worldId, RenderServic
         const auto* camera = rs->Views().FindCameraData(view->cameraId);
         if (!camera)
             continue;
-        Rendering::Matrix4x4 viewProjection;
-        std::copy_n(camera->viewProj, 16, viewProjection.Data());
         Rendering::Vector4 planes[6];
-        Rendering::ExtractFrustumPlanes(viewProjection, planes);
+        Rendering::ExtractFrustumPlanes(camera->viewProj, planes);
         m_Impl->m_Indices.clear();
         bool viewSeesMotion = false;
         for (uint32 i = 0; i < m_Impl->m_Particles.size(); ++i)
@@ -825,7 +823,7 @@ void ParticleExtraction::Extract(ECS::World& world, uint64 worldId, RenderServic
                 continue;
             if (item.LodEnd > item.LodStart)
             {
-                const float dx = p[0] - camera->cameraPos[0], dy = p[1] - camera->cameraPos[1], dz = p[2] - camera->cameraPos[2];
+                const float dx = p[0] - camera->cameraPos.x, dy = p[1] - camera->cameraPos.y, dz = p[2] - camera->cameraPos.z;
                 const float fraction = Math::Clamp01((item.LodEnd - std::sqrt(dx * dx + dy * dy + dz * dz)) / (item.LodEnd - item.LodStart));
                 uint32 hash = item.SpawnIndex * 747796405u + static_cast<uint32>(item.Emitter) * 2891336453u;
                 hash = (hash ^ (hash >> 16)) * 2246822519u;

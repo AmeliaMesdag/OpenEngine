@@ -31,7 +31,7 @@ The channel registers when its accessor runs the first time. Nothing lists the c
 GE_LOG(Inventory::InventoryLog, Warning, "slot {} holds {} items, the limit is {}", slot, count, limit);
 ```
 
-When the channel does not pass the level, `GE_LOG` formats nothing and does not evaluate the arguments. Trace and Debug calls compile to nothing in a build that defines `NDEBUG`, such as Release.
+When the channel does not pass the level, `GE_LOG` formats nothing and does not evaluate the arguments. Trace and Debug calls compile to nothing when the engine is built in a configuration other than Debug and DebugFast, such as Release. The configuration of the engine decides this, not the configuration of the code that logs.
 
 `LOG_INFO`, `LOG_WARNING` and the other `LOG_` macros log on the `Core` channel with the same source information. They are in `Logger/LogChannel.h` too, so a file that only logs needs no other logger header. The `Logger::Log::Info` family of functions also logs on `Core`, without the source.
 

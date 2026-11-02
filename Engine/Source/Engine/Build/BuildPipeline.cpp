@@ -2076,53 +2076,56 @@ bool BuildPipeline::CopyThirdPartyNotices(const fs::path& contentRoot, const Bui
 // CopyRuntimeDependencies
 // ---------------------------------------------------------------------------
 
+fs::path BuildPipeline::FindCompiledPlayer(const fs::path& playerBuildDir, std::string_view buildConfiguration,
+                                           std::string_view platformName)
+{
+    const std::string playerName = TargetExecutableFiles(platformName, "Player").Executable;
+    std::error_code ec;
+    for (const fs::path& candidate : {
+        playerBuildDir / buildConfiguration / playerName,
+        playerBuildDir / playerName,
+    })
+    {
+        if (fs::is_regular_file(candidate, ec))
+            return candidate;
+    }
+    return {};
+}
+
 bool BuildPipeline::CopyRuntimeDependencies(const fs::path& stagingDir, const BuildSettings& s)
 {
     std::error_code ec;
 
-    // Copy Player.exe from the build output.
     const fs::path playerBuildDir = s.projectRoot / ".Build" / "Player" / "build";
-    fs::path playerExe;
-
-    // Search common output locations.
-    for (const auto& candidate : {
-        playerBuildDir / s.buildConfiguration / "Player.exe",
-        playerBuildDir / "Player.exe",
-        playerBuildDir / "Debug" / "Player.exe",
-        playerBuildDir / "Release" / "Player.exe",
-    })
-    {
-        if (fs::exists(candidate, ec))
-        {
-            playerExe = candidate;
-            break;
-        }
-    }
-
+    const ExecutableFiles playerFiles = TargetExecutableFiles(s.platformName, "Player");
+    const fs::path playerExe = FindCompiledPlayer(playerBuildDir, s.buildConfiguration, s.platformName);
     if (playerExe.empty())
     {
-        m_Progress.errors.push_back("Player.exe not found in build output");
+        m_Progress.errors.push_back(playerFiles.Executable + " not found in the " + s.platformName +
+                                    " Player build output " + playerBuildDir.generic_string() +
+                                    ": the Player build passed but left no executable there. Delete that folder, "
+                                    "then build again.");
         return false;
     }
 
-    // Copy Player exe, renamed to the game name.
-    const std::string exeName = s.playerConfig.gameName + ".exe";
-    fs::copy_file(playerExe, stagingDir / exeName, fs::copy_options::overwrite_existing, ec);
+    // The packaged executable takes the game name.
+    const ExecutableFiles gameFiles = TargetExecutableFiles(s.platformName, s.playerConfig.gameName);
+    fs::copy_file(playerExe, stagingDir / gameFiles.Executable, fs::copy_options::overwrite_existing, ec);
     if (ec)
     {
-        m_Progress.errors.push_back("Failed to copy Player.exe: " + ec.message());
+        m_Progress.errors.push_back("Failed to copy " + playerFiles.Executable + ": " + ec.message());
         return false;
     }
 
-    // Ship separate symbols only when the requested Player configuration includes them.
-    fs::path playerPdb = playerExe;
-    playerPdb.replace_extension(".pdb");
-    if (PlayerBuildConfigIncludesDebugSymbols(s.buildConfiguration) && fs::exists(playerPdb, ec))
+    // Ship separate symbols only when the target keeps them in a file of their own and the
+    // requested Player configuration includes them.
+    const fs::path playerSymbols = playerExe.parent_path() / playerFiles.Symbols;
+    if (!playerFiles.Symbols.empty() && PlayerBuildConfigIncludesDebugSymbols(s.buildConfiguration) &&
+        fs::exists(playerSymbols, ec))
     {
-        const std::string pdbName = s.playerConfig.gameName + ".pdb";
-        fs::copy_file(playerPdb, stagingDir / pdbName, fs::copy_options::overwrite_existing, ec);
+        fs::copy_file(playerSymbols, stagingDir / gameFiles.Symbols, fs::copy_options::overwrite_existing, ec);
         if (ec)
-            Logger::Log::Warning("Build: Failed to copy PDB: {}", ec.message());
+            Logger::Log::Warning("Build: Failed to copy {}: {}", playerFiles.Symbols, ec.message());
     }
 
     if (!fs::is_directory(s.runtimeDepsPath, ec))

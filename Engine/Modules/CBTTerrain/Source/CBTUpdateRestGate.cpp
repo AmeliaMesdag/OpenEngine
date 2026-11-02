@@ -1,9 +1,20 @@
 #include "CBTTerrain/CBTUpdateRestGate.h"
 
+#include "CBTTerrain/CBTLayout.h"
+
 #include <algorithm>
 
 namespace GameEngine::CBTTerrain
 {
+
+bool CBTKeepSearchOpen(int32_t offFrustumKeepStep, int32_t offFrustumKeepFloor)
+{
+    if (offFrustumKeepFloor == kKeepFloorProbing)
+        return true;
+    if (offFrustumKeepFloor == kKeepFloorArriving)
+        return offFrustumKeepStep > 0;
+    return offFrustumKeepStep > offFrustumKeepFloor;
+}
 
 bool CBTUpdateRestGate::CanSkip(std::span<const uint8_t> inputs)
 {
@@ -33,7 +44,8 @@ void CBTUpdateRestGate::OnActivityRead(uint64_t sequence, const CBTUpdateActivit
         return;
     const bool stepsUnchanged = m_HasSteps && activity.PressureStep == m_PressureStep &&
                                 activity.OffFrustumKeepStep == m_OffFrustumKeepStep;
-    const bool quiet = activity.SplitServed == 0 && activity.MergeServed == 0 && stepsUnchanged;
+    const bool quiet = activity.SplitServed == 0 && activity.MergeServed == 0 && stepsUnchanged &&
+                       !CBTKeepSearchOpen(activity.OffFrustumKeepStep, activity.OffFrustumKeepFloor);
     m_QuietReadings = quiet ? m_QuietReadings + 1u : 0u;
     m_HasSteps = true;
     m_PressureStep = activity.PressureStep;

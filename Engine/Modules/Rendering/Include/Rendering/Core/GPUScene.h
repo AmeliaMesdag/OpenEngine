@@ -13,10 +13,10 @@
 #include "Rendering/Core/CullDeformationMargins.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
+#include "Types/FunctionRef.h"
 
 #include <atomic>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -371,8 +371,7 @@ class GPUScene
     // Runs body(begin, end) over [0, count), possibly concurrently on disjoint
     // ranges, and returns once every range has run. The caller owns the threads:
     // this module has no job system.
-    using RangeRunner = std::function<void(size_t count,
-                                           const std::function<void(size_t begin, size_t end)>& body)>;
+    using RangeRunner = FunctionRef<void(size_t count, FunctionRef<void(size_t begin, size_t end)> body)>;
     // Batched UpdateInstance for bulk motion. The scene afterwards equals calling
     // UpdateInstance for each write in span order: the same rows, scatter-hot
     // mirror rows, batch-registry membership, and the same set of dirty words
@@ -382,7 +381,7 @@ class GPUScene
     // scene is reported and skipped. Only the writes that changed a batch key
     // then update the registry, on the calling thread, in span order. No other
     // GPUScene mutator may run until it returns: debug builds assert that.
-    void UpdateInstances(std::span<const InstanceWrite> writes, const RangeRunner& runRanges);
+    void UpdateInstances(std::span<const InstanceWrite> writes, RangeRunner runRanges);
 
     // Batched removal for HLOD cluster flips. The single-index path guards
     // double-removes with an O(free-list) std::find and trims trailing free

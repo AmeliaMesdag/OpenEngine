@@ -4,6 +4,7 @@ set(EDITOR_SOURCES
     Source/main.cpp
     Source/Editor/Application/BuildConfigStatus.cpp
     Source/Editor/Application/EditorVersion.cpp
+    Source/Editor/Application/MainWindowTitle.cpp
     Source/EditorApplication/EditorApplication.cpp
     Source/DeviceLossSurfacer.cpp
     Source/Diagnostics/MainThreadHangWatchdog.cpp
@@ -31,6 +32,7 @@ set(EDITOR_SOURCES
     Source/Editor/Settings/Render/RenderLayersSettingsPage.cpp
     Source/Editor/Settings/ScriptPackages/ScriptPackagesSettingsPage.cpp
     Source/Editor/Settings/ScriptPackages/ScriptPackagesList.cpp
+    Source/Editor/Settings/SettingsSectionBreak.cpp
     Source/Editor/Settings/SettingsTextFieldRow.cpp
     Source/Editor/Settings/PhysicsProjectSettings.cpp
     Source/Editor/Settings/ProjectUIScaleBinding.cpp
@@ -45,6 +47,7 @@ set(EDITOR_SOURCES
 	Source/Editor/Hierarchy/HierarchyLightIconTint.cpp
 	Source/Editor/Hierarchy/HierarchyNavigationBar.cpp
 	Source/Editor/Hierarchy/HierarchyRenderLayerEdit.cpp
+	Source/Editor/Hierarchy/HierarchyDataProvider.cpp
 	Source/Editor/Hierarchy/HierarchyReparentRules.cpp
 	Source/Startup/BuiltinAssetSync.cpp
 	Source/Startup/EditorCommandLine.cpp
@@ -160,6 +163,7 @@ set(EDITOR_SOURCES
     Source/ColorPicker/ColorPickerWindow/ColorPickerWindowInput.cpp
 	Source/Panels/DiffPanel.cpp
     Source/Panels/Animation/AnimationWindowPanel.cpp
+    Source/Panels/Animation/ElementInstanceLedger.cpp
     Source/Panels/MixerPanel.cpp
     Source/Panels/TimelineBarElement.cpp
     Source/Panels/DopeSheetView.cpp
@@ -228,6 +232,7 @@ set(EDITOR_SOURCES
 	Source/Docking/WorkingLayoutPersistence.cpp
 	Source/EditorDockNodeJson.cpp
 	Source/Display/HdrOutputMatch.cpp
+	Source/Display/WindowSwapchainResize.cpp
 	Source/Docking/FloatingFrameHost.cpp
 	Source/Docking/WindowDockingController.cpp
 	Source/UI/EditorTags.cpp
@@ -245,9 +250,13 @@ set(EDITOR_SOURCES
 	Source/UI/Controls/SceneViewToolbar.cpp
 	Source/UI/Controls/SceneViewLayersField.cpp
 	Source/UI/Controls/ScenePostFxMenu.cpp
+	# A pooled staging view shown in any panel, with its own orbit camera.
+	Source/UI/Controls/StagingViewport.cpp
 	Source/UI/Controls/LayoutPresetToolbar.cpp
 	Source/UI/Controls/DraggableModal.cpp
 	Source/UI/Controls/EditorTopToolbar.cpp
+	Source/UI/Controls/EditorTitleBar.cpp
+	Source/UI/Controls/EditorBuildStatus.cpp
 	Source/UI/Controls/InspectorNotice.cpp
 	Source/UI/Controls/ListItemActions.cpp
 	Source/UI/Controls/PictureChoiceField.cpp
@@ -261,6 +270,8 @@ set(EDITOR_SOURCES
 	Source/UI/Controls/CurvePresetPicker.cpp
 	Source/UI/Controls/EntityMemberList/EntityMemberList.cpp
 	Source/UI/Controls/EntityMemberList/EntityMemberList.h
+	Source/UI/Controls/SplineJunctionList/SplineJunctionList.cpp
+	Source/UI/Controls/SplineJunctionList/SplineJunctionList.h
 	Source/UI/Layout/DockConfigElements.cpp
 	Source/UI/Layout/EditorDockConfigParser.cpp
 	Source/Inspectors/TransformInspector.cpp
@@ -280,6 +291,8 @@ set(EDITOR_SOURCES
 	Source/Inspectors/Navigation/NavigationSourceComponentTraits.cpp
 	Source/Inspectors/Navigation/NavigationSurfaceInspector.cpp
 	Source/Inspectors/SplineRecipe/SplineRecipeInspector.cpp
+	Source/Inspectors/SplineRecipe/Paving/SplinePavingInspector.cpp
+	Source/Inspectors/SplineRecipe/Paving/SplinePavingSettingRows.cpp
 	Source/Inspectors/Spline/SplineExtrudeInspector.cpp
 	Source/Inspectors/SkinnedMeshRendererInspector.cpp
 	Source/Inspectors/AnimatorInspector.cpp
@@ -418,6 +431,7 @@ set(EDITOR_SOURCES
 	Source/Editor/Assets/AssetOpenRouting.cpp
 
 	Modules/EditorToolbar/EditorToolbar.cpp
+	Modules/EditorToolbar/EditorMenuBarBuilder.cpp
 	Modules/EditorContextMenu/ContextMenuBackendPolicy.cpp
 	Modules/EditorContextMenu/DirectoryMenuEditItems.cpp
 	Modules/EditorContextMenu/EditorContextMenu.cpp
@@ -508,9 +522,11 @@ set(EDITOR_SOURCES
 	Source/SceneView/SplineTool/SplineOwnerQuery.cpp
 	Source/SceneView/SplineTool/SplineStrokeCapture.cpp
 	Source/SceneView/SplineTool/SplineSceneGizmo.cpp
+	Source/SceneView/SplineTool/SplineJunctionMarkers.cpp
 	Source/SceneView/SplineTool/SplineDrapePolylines.cpp
 	Source/SceneView/SceneViewDropPlacement.cpp
 	Source/SceneView/SceneViewNoticeOverlay.cpp
+	Source/SceneView/SceneViewExposureHintOverlay.cpp
 	Source/SceneView/SceneViewFraming.cpp
 	Source/SceneView/SceneViewLayerFilter.cpp
 	Source/Markups/ConvertMarkupShapeCommand.cpp
@@ -582,8 +598,13 @@ set(EDITOR_SOURCES
 	Source/Picking/ScenePick.cpp
 	Source/Picking/PickRootResolver.cpp
 	# Prefabs: placing, creating and unpacking instances of .prefab assets.
+	Source/Prefabs/ApplyRevert/ApplyPrefabOverrideCommand.cpp
+	Source/Prefabs/ApplyRevert/PrefabOverrideMenu.cpp
 	Source/Prefabs/CreatePrefab/CreatePrefabCommand.cpp
 	Source/Prefabs/CreatePrefab/CreatePrefabDialog.cpp
+	Source/Prefabs/PrefabOverridesList/DiscardStaleOverrideCommand.cpp
+	Source/Prefabs/PrefabOverridesList/PrefabOverridesList.cpp
+	Source/Prefabs/PrefabOverridesList/PrefabOverridesListModel.cpp
 	Source/Prefabs/PrefabBar.cpp
 	Source/Prefabs/PrefabEditorRegistration.cpp
 	Source/Prefabs/PrefabHierarchyRows.cpp
@@ -647,6 +668,9 @@ set(EDITOR_SOURCES
 	Source/DebugServer/Capture/RenderDocCapture.cpp
 	Source/DebugServer/Capture/NsightGraphicsCapture.cpp
 	Source/DebugServer/Capture/WindowPrintCapture.cpp
+	Source/DebugServer/Capture/ScreenshotUtils.cpp
+	Source/DebugServer/Capture/FrameSequence/FrameSequenceRecorder.cpp
+	Source/DebugServer/Capture/FrameSequence/FrameSequenceRecording.cpp
 )
 
 set(EDITOR_HEADERS
@@ -691,6 +715,9 @@ set(EDITOR_HEADERS
 	Source/DebugServer/Capture/RenderDocCapture.h
 	Source/DebugServer/Capture/NsightGraphicsCapture.h
 	Source/DebugServer/Capture/WindowPrintCapture.h
+	Source/DebugServer/Capture/ScreenshotUtils.h
+	Source/DebugServer/Capture/FrameSequence/FrameSequenceRecorder.h
+	Source/DebugServer/Capture/FrameSequence/FrameSequenceRecording.h
 	Source/Startup/EditorCommandLine.h
 	Source/Startup/EditorPathPolicy.h
 	Source/Startup/EditorSessionDescriptor.h
@@ -793,6 +820,7 @@ set(EDITOR_HEADERS
 	Include/Packages/PackageManagerController.h
 	Include/Display/HdrOutputController.h
 	Include/Display/HdrOutputMatch.h
+	Source/Display/WindowSwapchainResize.h
 	Include/Docking/FloatingFrameHost.h
 	Include/Docking/WindowDockingController.h
 	Include/UI/DragDropGhostRenderers.h
@@ -900,6 +928,7 @@ set(EDITOR_HEADERS
 	Source/ColorPicker/ColorPickerWindow/ColorPickerWindowInput.h
 	Include/Panels/DiffPanel.h
 	Include/Panels/Animation/AnimationWindowPanel.h
+	Include/Panels/Animation/ElementInstanceLedger.h
 	Include/Panels/TimelineBarElement.h
 	Include/Panels/DopeSheetView.h
 	Include/Panels/CurvesGraphView.h
@@ -924,6 +953,7 @@ set(EDITOR_HEADERS
 	Include/SceneView/SceneViewGridRenderer.h
 	Include/SceneView/SceneViewDropPlacement.h
 	Include/SceneView/SceneViewNoticeOverlay.h
+	Include/SceneView/SceneViewExposureHintOverlay.h
 	Include/SceneView/SceneViewRenderCoordinator.h
 	Include/SceneView/MountedViewPanels.h
 	Include/SceneView/ViewPresentationSnapshot.h
@@ -943,6 +973,7 @@ set(EDITOR_HEADERS
 	Include/SceneView/EditorSceneViewDropWiring.h
 	Include/SceneView/SceneViewEntityLinks.h
 	Modules/EditorToolbar/EditorToolbar.h
+	Modules/EditorToolbar/EditorMenuBarBuilder.h
 	Modules/EditorContextMenu/ContextMenuBackendPolicy.h
 	Modules/EditorContextMenu/DirectoryMenuEditItems.h
 	Modules/EditorContextMenu/EditMenuGroup.h
@@ -1980,6 +2011,12 @@ set_target_properties(Editor PROPERTIES UNITY_BUILD OFF)
 
 # Output layout: bin/<Config>/Apps/Editor
 ge_set_output_app(Editor "Editor")
+
+# The Linux web view module loads from the folder libEngine.so is staged in (WebView_Linux.cpp).
+if (TARGET PlatformWebViewGtk)
+    ge_set_output_app(PlatformWebViewGtk "Editor")
+    add_dependencies(Editor PlatformWebViewGtk)
+endif()
 
 # Stage runtime DLL dependencies (e.g. GameEngine.Native.dll, vcpkg DLLs) next to Editor.exe
 ge_stage_runtime_dependencies(Editor)

@@ -408,7 +408,8 @@ class PipelineVariantCache
     void EnqueueColorVariantPublishForTesting(const InstancedVariantKey& key,
                                               GraphicsPipelineId pipelineId,
                                               uint32_t materialVersion,
-                                              const GUID& materialGuid);
+                                              const GUID& materialGuid,
+                                              uint64_t registrationGeneration);
 
     // Device-rebuilt hook (RenderServices::OnDeviceRebuilt, alongside the device
     // cache's ClearConcreteOnly): the waits describe builds against the
@@ -537,6 +538,10 @@ class PipelineVariantCache
         std::string Name;
         std::filesystem::path MaterialAssetPath;
         uint32_t MaterialVersion = 0;
+        // The registry binding the compile was submitted for: the material's
+        // GUID and its MaterialRegistry registration generation at the drain.
+        GUID MaterialGuid;
+        uint64_t RegistrationGeneration = 0;
         GraphicsPipelineId BaseGraphicsPipelineId{}; // color only (base template copy)
         bool IsDepth = false;
     };
@@ -556,8 +561,8 @@ class PipelineVariantCache
     void ReleaseVariantCompile(const InstancedVariantKey& key, bool isDepth);
 
     // A compiled variant unit handed back by a worker (or the inline headless
-    // path), waiting for the serial apply. Carries the material GUID for the
-    // VariantPublished event — Key.material is never dereferenced at apply.
+    // path), waiting for the serial apply. The apply drops it unless its GUID is
+    // still bound under RegistrationGeneration. Key.material is never dereferenced.
     struct PendingVariantPublish
     {
         InstancedVariantKey Key;
@@ -566,6 +571,7 @@ class PipelineVariantCache
         std::vector<DescriptorSetLayoutId> SetLayouts;
         std::shared_ptr<ShaderMeta> VariantMeta;
         GUID MaterialGuid;
+        uint64_t RegistrationGeneration = 0;
         bool IsDepth = false;
     };
     void QueueVariantPublish(PendingVariantPublish&& publish);

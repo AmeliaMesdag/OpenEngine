@@ -5,6 +5,7 @@
 #include "ECS/ECS.h"
 #include "Engine/Rendering/MeshGPURegistry.h"
 #include "Mathematics/Matrix4x4.h"
+#include "SplineRecipes/Paving/PavingRoadTrim.h"
 #include "SplineRecipes/SplineChunkCommit.h"
 #include "SplineRecipes/SplineFillRebuild.h"
 #include "SplineRecipes/SplinePieceMaterial.h"
@@ -12,6 +13,7 @@
 #include "Types/FlatMap.h"
 #include "Types/Types.h"
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +24,7 @@ struct SplineComponent;
 struct WorldTransform;
 } // namespace GameEngine::Components
 namespace GameEngine::ECS { class World; }
+namespace GameEngine::SplineGeometry { struct SplineStripMesh; }
 namespace GameEngine::Engine::Renderer { class RenderServices; }
 
 namespace GameEngine::SplineRecipes
@@ -35,15 +38,20 @@ class RecipeBuildStates;
 class SplineExtrudeController
 {
 public:
-    // Rebuilds every extrude whose spline, transform, recipe or conformed ground changed, once the edit is
-    // stable for the settle window, and retires the chunks of a recipe entity that is gone.
+    // Rebuilds every extrude whose inputs changed once the edit settles (a trim change at once), and
+    // retires the chunks of a recipe entity that is gone. A road's strip skips the arc length in its
+    // `roadTrims`; a road in `heldRoads` (sorted ids) keeps its pieces while its region waits.
     void Update(ECS::World& world, Engine::Renderer::RenderServices& renderServices,
-                float32 deltaSeconds, RecipeBuildStates& states);
+                float32 deltaSeconds, RecipeBuildStates& states, const PavingRoadTrims& roadTrims,
+                std::span<const uint32> heldRoads);
 
     // Releases every chunk mesh and destroys every chunk entity. Run it against the outgoing world before a
     // clear: the registry does not refcount, and World::Clear restarts entity versions. Update guards the
     // clears that no caller sees (World::DeserializeWorld) with the reset generation.
     void Shutdown(ECS::World& world, Engine::Renderer::RenderServices* renderServices);
+    // The half-width of the top of the strip `recipe` sweeps, at a station of `stationHalfWidth` (the
+    // spline's width channel): where its walkable surface meets the edge drop or the shoulder.
+    static float32 StripTopHalfWidth(const Components::SplineExtrude& recipe, float32 stationHalfWidth);
 
 private:
     // The recipe fields that only change how the chunks draw. A change rebinds the chunk
@@ -51,6 +59,7 @@ private:
     struct ExtrudeLook
     {
         Components::MaterialRef Material;
+        Components::MaterialRef VergeMaterial;
         bool CastShadows = true;
         bool ReceiveShadows = true;
 
@@ -68,6 +77,10 @@ private:
         // path rebuilds it. Zero for a recipe that reads no ground (Components::ReadsSurface); a FitToBanks
         // recipe reads its banks in every ConformMode.
         uint64 SurfaceRevision = 0;
+        // The arc length paved regions take over (SplinePavingController::RoadTrims).
+        std::vector<PavingRoadTrim> Trims;
+        // The strip sits kGroundSurfaceLiftMeters above the ground: a conformed road.
+        bool LiftsOffTheGround = false;
 
         bool operator==(const ObservedState&) const = default;
     };
@@ -92,8 +105,12 @@ private:
         SplineGeometry::SplineFillDiagnostics LastFillDiagnostics{};
         WaterFillOutcome LastFillOutcome = WaterFillOutcome::Built;
         SplineChunkCommit Chunks;
+        // The verge's chunks (Components::BuildsVerge), one per strip chunk, under their own material.
+        SplineChunkCommit VergeChunks;
         // The look the chunk renderers carry.
         ExtrudeLook AppliedLook;
+        // The trims the chunks were built with.
+        std::vector<PavingRoadTrim> AppliedTrims;
         // Why the last build made no chunk. Empty when it made one.
         std::string_view EmptyReason;
         uint64 VisitStamp = 0;
@@ -116,7 +133,15 @@ private:
                                    const Components::SplineExtrude& recipe, const Components::WorldTransform& transform);
 
     bool Rebuild(ECS::World& world, Engine::Renderer::RenderServices& renderServices,
-                 const Candidate& candidate, ExtrudeState& state);
+                 const Candidate& candidate, std::span<const PavingRoadTrim> trims, ExtrudeState& state);
+    // Destroys the strip's and the verge's chunk entities and releases their keys. Returns true when an
+    // entity was destroyed.
+    static bool RetireChunks(ECS::World& world, Rendering::MeshGPURegistry* registry, ExtrudeState& state);
+    // Commits the verge meshes, one per strip chunk slot, under the verge's material
+    // (Components::SplineExtrude::VergeMaterial, else the strip's).
+    bool CommitVergeMeshes(ECS::World& world, Engine::Renderer::RenderServices& renderServices,
+                           const Candidate& candidate, ExtrudeState& state,
+                           const std::vector<SplineGeometry::SplineStripMesh>& vergeMeshes);
     // Binds the recipe's material and commits a built set of chunk meshes (SplineChunkCommit.h).
     // A template only because the two emitters return two mesh types of the same shape.
     template <typename MeshT>

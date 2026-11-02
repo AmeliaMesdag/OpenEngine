@@ -5,6 +5,8 @@
 
 #include "ECS/Entity.h"
 #include "SceneView/SplineTool/SplineDrapePolylines.h"
+#include "SceneView/SplineTool/SplineJunctionMarkers.h"
+#include "Spline/SplineTypes.h"
 
 #include <cstdint>
 #include <functional>
@@ -33,11 +35,17 @@ public:
         m_IsEntitySelectedQuery = std::move(query);
     }
 
+    /// Picks the junction marker under the pointer, whatever tool is active.
+    void UpdateMarkerHover(const GizmoRay& ray) { m_JunctionMarkers.UpdateHover(m_State->World(), ray); }
+    /// The hovered junction marker's text; empty for none.
+    const std::string& GetMarkerHoverText() const { return m_JunctionMarkers.GetHoverText(); }
+
     // IGizmo
     void Render(GizmoRenderContext& context) override;
 
 private:
     std::shared_ptr<SplineInteractionState> m_State;
+    SplineJunctionMarkers m_JunctionMarkers;
     struct PassiveLineCache
     {
         uint32_t DataIndex = 0;
@@ -79,6 +87,34 @@ private:
     mutable uint64_t m_CacheEpoch = 0;
     mutable std::unordered_map<uint32_t, PassiveLineCache> m_PassiveLineCache;
     mutable std::unordered_map<uint32_t, DrapeCache> m_DrapeCache;
+
+    // The vertex lists one Render fills and flushes. Render clears them and keeps their
+    // capacity, so a frame that draws what the frame before drew allocates nothing.
+    struct DrawBatches
+    {
+        std::vector<Mathematics::Vector3> Centerline;
+        std::vector<Mathematics::Vector3> Knot;
+        std::vector<Mathematics::Vector3> Handle;
+        std::vector<Mathematics::Vector3> Selected;
+        std::vector<Mathematics::Vector3> HoverKnot;
+        std::vector<Mathematics::Vector3> HoverHandle;
+        std::vector<Mathematics::Vector3> KnotStems;
+        std::vector<Mathematics::Vector3> Envelope;
+        std::vector<Mathematics::Vector3> EnvelopeFill;
+        // The line pairs of one passive draped centerline.
+        std::vector<Mathematics::Vector3> PassiveDraped;
+
+        void Clear()
+        {
+            for (std::vector<Mathematics::Vector3>* batch :
+                 {&Centerline, &Knot, &Handle, &Selected, &HoverKnot, &HoverHandle, &KnotStems, &Envelope,
+                  &EnvelopeFill, &PassiveDraped})
+                batch->clear();
+        }
+    };
+    DrawBatches m_Batches;
+    // One spline's control points in world space, rebuilt for each spline that shows its controls.
+    std::vector<Spline::SplineControlPoint> m_WorldPoints;
 };
 
 } // namespace GameEngine::Editor::SceneTools

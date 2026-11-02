@@ -106,22 +106,16 @@ Components::LocalBounds BoxBounds(float extent) {
     return lb;
 }
 
-void SetIdentity(float* m) {
-    for (int i = 0; i < 16; ++i)
-        m[i] = 0.0f;
-    m[0] = m[5] = m[10] = m[15] = 1.0f;
-}
-
-// A camera at (x,y,z) with an identity projection (projScaleY = proj[5] = 1).
+// A camera at (x,y,z) with an identity projection (projScaleY = proj[1][1] = 1).
 Rendering::CameraData CameraAt(float x, float y, float z) {
     Rendering::CameraData cam{};
-    SetIdentity(cam.view);
-    SetIdentity(cam.proj);
-    SetIdentity(cam.viewProj);
-    cam.cameraPos[0] = x;
-    cam.cameraPos[1] = y;
-    cam.cameraPos[2] = z;
-    cam.cameraPos[3] = 0.0f; // not a 2D ortho view -> LOD enabled
+    cam.view = Mathematics::Matrix4x4::Identity();
+    cam.proj = Mathematics::Matrix4x4::Identity();
+    cam.viewProj = Mathematics::Matrix4x4::Identity();
+    cam.cameraPos.x = x;
+    cam.cameraPos.y = y;
+    cam.cameraPos.z = z;
+    cam.cameraPos.w = 0.0f; // not a 2D ortho view -> LOD enabled
     return cam;
 }
 

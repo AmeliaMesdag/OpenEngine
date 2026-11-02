@@ -69,7 +69,8 @@ class Window
     void* GetNativeHandle() const;     // returns GLFWwindow*
     GLFWwindow* GetGLFWHandle() const; // convenience
 
-    // Window queries
+    // Window queries. Every window size and position is that of the client area, with or without
+    // a custom title bar: SetWindowSize(1920, 1080) gives a 1920x1080 client area.
     void GetFramebufferSize(int& outWidth, int& outHeight) const;   // pixels
     void GetWindowSize(int& outWidth, int& outHeight) const;        // screen coords (DIP)
     void SetWindowSize(int width, int height);                      // screen coords (DIP)

@@ -10,13 +10,13 @@
 #include "ECS/Entity.h"
 #include "ECS/World.h"
 #include "SplineECS/SplineService.h"
-#include "TerrainECS/TerrainColorMap.h"
-#include "TerrainECS/TerrainColorMapBaker.h"
-#include "TerrainECS/TerrainGrassField.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMap.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMapBaker.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassField.h"
 #include "TerrainECS/TerrainModifierComponents.h"
 #include "TerrainECS/TerrainModifierSystem.h"
 #include "TerrainECS/TerrainService.h"
-#include "TerrainColorMapCompose.h"
+#include "TerrainColorMap/TerrainColorMapCompose.h"
 #include "Types/Color.h"
 
 #include <algorithm>

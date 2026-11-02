@@ -651,7 +651,7 @@ Rendering::RenderGraph::RGTexture RTShadowMaskService::DeclareMaskPass(
         return {};
     // Thumbnail cameras before their first update: inverting a zero proj
     // produces NaN that propagates into every ray.
-    if (cam.proj[0] == 0.0f && cam.proj[5] == 0.0f)
+    if (cam.proj[0][0] == 0.0f && cam.proj[1][1] == 0.0f)
         return {};
 
     LoadMaskShader();
@@ -715,11 +715,9 @@ Rendering::RenderGraph::RGTexture RTShadowMaskService::DeclareMaskPass(
     if (!ub.Valid())
         return {};
 
-    GameEngine::Mathematics::Matrix4x4 projM;
-    std::memcpy(projM.Data(), cam.proj, sizeof(cam.proj));
+    GameEngine::Mathematics::Matrix4x4 projM = cam.proj;
     const GameEngine::Mathematics::Matrix4x4 invProjM = GameEngine::Mathematics::Inverse(projM);
-    GameEngine::Mathematics::Matrix4x4 viewM;
-    std::memcpy(viewM.Data(), cam.view, sizeof(cam.view));
+    GameEngine::Mathematics::Matrix4x4 viewM = cam.view;
     const GameEngine::Mathematics::Matrix4x4 invViewM = GameEngine::Mathematics::Inverse(viewM);
 
     MaskParamsUBO ubo{};
@@ -943,8 +941,7 @@ Rendering::RenderGraph::RGTexture RTShadowMaskService::DeclareDenoisePass(
     if (!ub.Valid())
         return {};
 
-    GameEngine::Mathematics::Matrix4x4 projM;
-    std::memcpy(projM.Data(), cam.proj, sizeof(cam.proj));
+    GameEngine::Mathematics::Matrix4x4 projM = cam.proj;
     const GameEngine::Mathematics::Matrix4x4 invProjM = GameEngine::Mathematics::Inverse(projM);
 
     DenoiseParamsUBO ubo{};

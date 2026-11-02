@@ -7,12 +7,12 @@
 
 #include "AssetCore/GUID.h"
 #include "ECS/Systems.h"
+#include "Types/FlatMap.h"
 #include "Types/Types.h"
 
 #include <array>
 #include <filesystem>
 #include <memory>
-#include <unordered_map>
 
 namespace GameEngine::Engine::Renderer
 {
@@ -85,7 +85,7 @@ private:
     // Previous-frame world XYZ per OceanWaterInteraction entity, so wake/splash
     // injection can derive horizontal and vertical speed from the position delta
     // (no physics dependency — works for kinematic and simulated bodies alike).
-    std::unordered_map<uint32, std::array<float32, 3>> m_PrevInteractionXYZ;
+    FlatMap<uint32, Mathematics::Vector3> m_PrevInteractionXYZ;
 
     GUID m_LastCollisionAssetGuid{};
     std::shared_ptr<const OceanFFTCollisionAsset> m_CollisionAsset;

@@ -6,12 +6,15 @@
 #include "UndoRedo/UndoRedoService.h"
 #include "ECS/Entity.h"
 #include "Mathematics/Vector3.h"
+#include "SplineECS/SplineNetwork.h"
 #include "SplineECS/SplineService.h"
 
 #include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace GameEngine::Editor { class EditorChangeNotifications; }
@@ -58,12 +61,21 @@ struct SplineHover
     int32 Kind = 0; // 0=none, 1=knot, 2=handleIn, 3=handleOut
 };
 
+// Where a dragged knot or a stroke's last point snaps onto a network member; no Target when
+// nothing is within the snap's reach. SplineSceneGizmo draws the ring at Point.
+struct SplineSnapPreview
+{
+    ECS::EntityHandle Target{};
+    Mathematics::Vector3 Point{};
+};
+
 class SplineInteractionState
 {
 public:
     explicit SplineInteractionState(ECS::World& world);
     SplineSelection& Selection();
     SplineHover& Hover();
+    SplineSnapPreview& SnapPreview();
     ECS::World& World() const { return m_World; }
 
 private:
@@ -72,6 +84,7 @@ private:
     uint64 m_Generation;
     SplineSelection m_Selection;
     SplineHover m_Hover;
+    SplineSnapPreview m_SnapPreview;
 };
 
 std::shared_ptr<SplineInteractionState> AcquireSplineInteractionState(ECS::World& world);
@@ -96,6 +109,15 @@ float32 PickScreenScale(const GizmoRay& ray,
                         const Mathematics::Vector3& worldPosition,
                         bool constantScreenSizeEnabled,
                         bool smartDistanceScalingEnabled);
+
+// The knot's pick radius before PickScreenScale: the knot size, never under the controls' minimum.
+float32 SplineKnotPickBase();
+
+// How far, in world meters, an end at worldPosition reaches when it snaps: the knot's pick
+// radius (the knot size times PickScreenScale with the current settings) times
+// kSplineSnapReachScale. The stroke merge, the loop close and the snap onto a rim or a band
+// read it, so a snap reaches as far as the knot looks big at every zoom.
+float32 SplineSnapReach(const GizmoRay& ray, const Mathematics::Vector3& worldPosition);
 
 // Plane normal for knot/handle wire circles: world +Y in 3D; camera-facing in editor 2D view.
 Mathematics::Vector3 SplineCirclePlaneNormal(const GizmoRenderContext& context,
@@ -185,6 +207,7 @@ public:
     void SetUndoRedoService(UndoRedoService* undo) { m_UndoRedo = undo; }
     void SetChangeNotifications(Editor::EditorChangeNotifications* n) { m_ChangeNotifications = n; }
     void SetTransformTool(TransformTool* tool) { m_TransformTool = tool; }
+    const std::string& GetHoverText() const override { return m_HoverText; }
     // The world position of the selected knot or handle (the last one picked); false
     // when no control is selected. Reads the shared spline selection, so it needs no tool.
     static bool GetActiveControlWorldPosition(ECS::World& world, Mathematics::Vector3& outWorldPosition);
@@ -267,8 +290,9 @@ private:
     // final knot count.
     void SnapPointsToSurface(std::vector<Mathematics::Vector3>& points);
 
-    // Finalize the current stroke: create an entity with SplineComponent.
-    void FinalizeSpline();
+    // Finalize the current stroke: create an entity with SplineComponent. The release event's
+    // ray sizes the snap reach at the stroke's ends.
+    void FinalizeSpline(const GizmoRay& releaseRay);
 
     // Cancel the current stroke without creating anything.
     void CancelStroke();
@@ -283,12 +307,21 @@ private:
                         bool hit,
                         const Mathematics::Vector3& hitPos);
 
-    // Auto-connect: if the stroke's first or last point is within tolerance
+    // Auto-connect: if the stroke's first or last point is within the snap reach
     // of an existing spline's endpoint, merge the stroke into that spline
     // instead of creating a new entity. Returns true if the stroke was
     // consumed by an existing spline.
-    bool TryExtendExistingSpline(const std::vector<Mathematics::Vector3>& stroke,
-                                 float32 toleranceSq);
+    bool TryExtendExistingSpline(std::vector<Mathematics::Vector3> stroke, const GizmoRay& ray);
+
+    // The point on a network member (an area's outline, a road's band) where an end at `point`
+    // snaps, when Snap Ends to Nearby Splines is on and one lies within SplineSnapReach; never on `exclude`.
+    std::optional<SplineECS::SplineSnapTarget> FindNetworkSnap(const Mathematics::Vector3& point,
+                                                               const GizmoRay& ray,
+                                                               ECS::EntityHandle exclude) const;
+    // Shows the snap's ring and its hover text, or clears both.
+    void ShowNetworkSnap(const std::optional<SplineECS::SplineSnapTarget>& snap);
+    // True when the drag moves one end knot of an open spline: the knot the snap moves.
+    bool IsDraggingOneEndKnot() const;
 
     // Marquee drag (rectangle or lasso). Active while a spline is selected,
     // the user is not interacting with a knot/handle, and Shift is not held.
@@ -310,6 +343,8 @@ private:
     void ClearSelectedControlTransformEdit();
 
     UndoRedoService* m_UndoRedo = nullptr;
+    // What the hover pill shows for the tool: where a dragged or placed end snaps.
+    std::string m_HoverText;
     Editor::EditorChangeNotifications* m_ChangeNotifications = nullptr;
 
     UndoRedoService::InteractiveEdit m_SplineDragUndo{};
@@ -327,17 +362,14 @@ private:
     bool m_IsDrawingBrush = false;  // Currently in brush drag
     bool m_DragMoved = false;       // Did the drag produce any Move events
     bool m_HasStroke = false;       // Has uncommitted points
-    // Latched during the stroke whenever a move sample came within the
-    // close-loop tolerance of the stroke start. Checked at finalize so the
-    // actual closure matches what the live preview indicator showed, even if
-    // the cursor drifted a pixel away on release.
+    // Set when a move sample comes back within the close-loop reach of the stroke start after the
+    // close is armed. Finalize reads it, so the closure matches the live preview.
     bool m_StrokeCloseLoopLatched = false;
+    // Set when a move sample of the stroke is farther than twice the close-loop reach from its start.
+    bool m_StrokeCloseLoopArmed = false;
 
-    // Sticky-mesh state: during an active brush stroke we remember the first
-    // entity whose surface the user hit. As long as StickToMesh is enabled we
-    // prefer raycasts against that entity, so drifting the cursor off the
-    // silhouette keeps the stroke on the target mesh instead of snapping to
-    // whatever's behind it. Cleared at stroke start / cancel.
+    // The entity the first sample of the stroke hit: 0 for terrain, the plane or generator output.
+    // While StickToMesh is on, the stroke raycasts only this entity. Cleared at stroke start, release and cancel.
     uint32 m_StickyEntityId = 0;
 
     // Edit drag state. When non-zero kind, the tool is dragging a knot or
@@ -361,6 +393,10 @@ private:
         Mathematics::Matrix4x4 WorldMatrix{};
         Mathematics::Matrix4x4 InverseWorldMatrix{};
         bool HasTransform = false;
+
+        // A point of the spline's data in world space, and back.
+        Mathematics::Vector3 ToWorld(const Mathematics::Vector3& local) const;
+        Mathematics::Vector3 ToLocal(const Mathematics::Vector3& world) const;
     };
     std::vector<EditDragControl> m_EditDragControls;
     Mathematics::Vector3 m_EditDragAnchorWorld{0.0f, 0.0f, 0.0f};

@@ -122,13 +122,15 @@ The Scene View shows a night by the same rule as a game camera: the same **Min E
 |---|---|---|
 | Exposure | Auto | Auto |
 | Meter | Picture | Lights |
-| Min EV | -7 | -7, the lowest the slider goes |
+| Min EV | -7 | -7; the slider goes down to -14, below a moonless night |
 | Compensation Curve | The camera's own | The scene's main camera's; the default when the scene has none |
 | Max EV | 18 | 20, the highest the slider goes |
 | Adaptation | Speed Up 1, Speed Down 3 | At once (**Adaptation Delay** off); on smooths at Speed Up 1, Speed Down 3 |
-| Exposure Compensation | 0 | 0 |
+| Exposure Compensation | 0 | 0; the slider goes from -8 to +8 stops |
 
 Change the Scene View's exposure from the Scene View toolbar's camera button (the **Exposure** section; under the Lights meter its **Reading** line shows the EV100 the lights give and, when the clamps or the curve move it, the EV100 the view is exposed at), from the right-click menu on the toolbar's post-processing button (**Exposure: Auto, Picture**, **Exposure: Auto, Lights**, **Exposure: Fixed**), or in **Project Settings > Scene View > Exposure**. **EV Compensation** applies on top in every mode.
+
+When the Scene View's exposure differs from the game camera's, a notice along the top of the Scene View says so. When the editor can measure both views' exposure, the notice says which way the Scene View is exposed and how the game will look. Otherwise it says that the exposure settings differ. A Scene View and a camera that both keep their default settings count as matched. **Match game camera** gives the Scene View the game camera's exposure settings until the editor restarts; change an exposure setting to make the values your own and save them. **Dismiss** hides the notice until the editor restarts.
 
 ## Troubleshooting
 

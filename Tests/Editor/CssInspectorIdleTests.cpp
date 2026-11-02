@@ -18,7 +18,7 @@ void InstallOverlays(UIManager& manager)
     {
         auto element = std::make_unique<UIElement>();
         element->SetId(id);
-        element->Overrides().Set(Style::Display, DisplayMode::Block);
+        element->Style().Set(Style::Display, DisplayMode::Block);
         root->AddChild(std::move(element));
     }
     manager.SetRoot(std::move(root));
@@ -27,13 +27,13 @@ void InstallOverlays(UIManager& manager)
 void SetOverlayDisplay(UIManager& manager, DisplayMode display)
 {
     for (const char* id : {"css-inspector-overlay", "css-inspector-highlight"})
-        manager.GetRootElement()->FindById(HashStringId(id))->Overrides().Set(Style::Display, display);
+        manager.GetRootElement()->FindById(HashStringId(id))->Style().Set(Style::Display, display);
 }
 
 void ExpectOverlayDisplay(UIManager& manager, DisplayMode display)
 {
     for (const char* id : {"css-inspector-overlay", "css-inspector-highlight"})
-        EXPECT_EQ(manager.GetRootElement()->FindById(HashStringId(id))->Overrides().Get(Style::Display), display);
+        EXPECT_EQ(manager.GetRootElement()->FindById(HashStringId(id))->Style().Get(Style::Display), display);
 }
 
 } // namespace

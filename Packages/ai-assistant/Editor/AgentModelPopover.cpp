@@ -129,7 +129,7 @@ void AgentModelPopover::Update()
     if (AiAssistantSettings::ModelGeneration() != m_Generation)
         Refresh();
     // The button's text is measured once it has been laid out as text.
-    else if (!m_Button.Overrides().Get(Style::Width) && !m_Button.HasClass("hidden"))
+    else if (!m_Button.Style().Get(Style::Width) && !m_Button.HasClass("hidden"))
         SizeButton();
     else if (std::fabs(m_Button.GetLayoutWidth() - m_FittedWidthPx) > kPlacementEpsilonPx)
         FitButtonText();
@@ -215,10 +215,10 @@ void AgentModelPopover::SizeButton()
     if (widest <= 0.0f)
         return;
     const float width = std::ceil(widest);
-    const auto current = m_Button.Overrides().Get(Style::Width);
+    const auto current = m_Button.Style().Get(Style::Width);
     if (current && current->IsPx() && std::fabs(current->Value - width) <= kPlacementEpsilonPx)
         return;
-    m_Button.Overrides().Set(Style::Width, StyleLength::Px(width));
+    m_Button.Style().Set(Style::Width, StyleLength::Px(width));
     m_Button.MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty);
 }
 
@@ -284,10 +284,10 @@ void AgentModelPopover::Place()
 
     const auto moved = [](const std::optional<StyleLength>& current, float value)
     { return !current || !current->IsPx() || std::fabs(current->Value - value) > kPlacementEpsilonPx; };
-    if (!moved(m_Panel->Overrides().Get(Style::PositionLeft), placed.X) &&
-        !moved(m_Panel->Overrides().Get(Style::PositionTop), placed.Y))
+    if (!moved(m_Panel->Style().Get(Style::PositionLeft), placed.X) &&
+        !moved(m_Panel->Style().Get(Style::PositionTop), placed.Y))
         return;
-    m_Panel->Overrides()
+    m_Panel->Style()
         .Set(Style::PositionLeft, StyleLength::Px(placed.X))
         .Set(Style::PositionTop, StyleLength::Px(placed.Y));
     MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);

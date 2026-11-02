@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace GameEngine::Components
@@ -87,6 +88,14 @@ struct PrefabInstanceEntity
     bool HasOverrides() const { return !Overrides.empty(); }
 };
 
+/// A prefab file's text before and after an apply: an apply's undo writes Before, its redo After.
+struct PrefabFileEdit
+{
+    std::filesystem::path File;
+    std::string Before;
+    std::string After;
+};
+
 /// The editor's Place: SpawnPrefab after it loads `prefab` and the prefabs its PrefabRef fields name, and keeps
 /// them resident while `world` exists, as a scene load does. Each entity gets a new scene identity, so a scene
 /// save writes a [prefab] section. Returns the root, or an invalid handle with the cause logged. Main thread only.
@@ -118,6 +127,46 @@ void RestorePrefabIdentities(ECS::World& world, std::span<const PrefabIdentityBe
 /// write the file watcher has not reported yet. A template that does not build is logged and keeps its
 /// previous generation. Main thread only.
 void RebuildPrefab(const GUID& prefab);
+
+/// Gives the prefab entity `entity` the prefab's value for `prefabOverride`: the field's value, the component
+/// removed when the instance added it, or the component with the prefab's values when the instance
+/// removed it. False, with the cause in `outError`, when the prefab does not have the target. Main thread only.
+bool RevertPrefabOverride(ECS::World& world, ECS::EntityHandle entity, const PrefabOverride& prefabOverride,
+                          std::string& outError);
+
+/// The entity of the prefab template that the prefab entity `entity` instantiates, in the prefab library's world:
+/// it holds the prefab's values. A null world when `entity` is in no resident prefab instance. Main thread only.
+struct PrefabTemplateEntity
+{
+    const ECS::World* World = nullptr;
+    ECS::EntityHandle Entity;
+};
+PrefabTemplateEntity FindPrefabTemplateEntity(ECS::World& world, ECS::EntityHandle entity);
+
+/// The entity of the prefab template at `address` (entity ids joined by '.', the root's is empty), in the prefab of
+/// the outermost instance that holds `entity`. A null world when the prefab is not resident or has no entity at
+/// `address`. Main thread only.
+PrefabTemplateEntity FindPrefabTemplateEntityAt(ECS::World& world, ECS::EntityHandle entity, std::string_view address);
+
+/// One override of one prefab entity, for ApplyPrefabOverrides.
+struct PrefabOverrideTarget
+{
+    ECS::EntityHandle Entity;
+    PrefabOverride Override;
+};
+
+/// Writes each of `targets` into the innermost prefab file that authors its entity, with one write per file, then
+/// rebuilds the written files once and updates the instances in `world` as WritePrefabFileText does. `outEdits` holds
+/// the text before and after of each written file. False, with the cause in `outError`, when the prefab does not have
+/// a target (then no file is written) or a write fails. Main thread only.
+bool ApplyPrefabOverrides(ECS::World& world, std::span<const PrefabOverrideTarget> targets,
+                          std::vector<PrefabFileEdit>& outEdits, std::string& outError);
+
+/// Writes `text` to the prefab file `file`, rebuilds every resident prefab that reads it, and gives each
+/// instance of those prefabs in `world` the new prefab values of every field and component it does not
+/// override. False, with the cause in `outError`, when the file cannot be written. Main thread only.
+bool WritePrefabFileText(ECS::World& world, const std::filesystem::path& file, const std::string& text,
+                         std::string& outError);
 
 /// An entity field under a prefab's root that names an entity outside the prefab.
 struct OutgoingReference

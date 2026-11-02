@@ -32,6 +32,7 @@
 #include "Assets/TextureAsset.h"
 #include "Assets/RenderPipelineAsset.h"
 
+#include "Memory/FrameJoinedScope.h"
 #include "Memory/ImagePins.h"
 #include "NativeScripting/NativeScriptManager.h"
 #include "UI/ModuleOwnedHandlers.h"
@@ -356,6 +357,7 @@ class EngineCore::InitializeTransaction
             return;
         m_Engine.DiscardAudioInitAfterFailedInitialize();
         m_Engine.m_StartupChannel.reset();
+        m_Engine.m_StartupJobsHook = nullptr;
         m_Engine.m_ShaderHookState.reset();
         // The manager this Initialize may have opened the gate on is never pumped.
         m_Engine.SetPostGate(PostGate::ShutDown);
@@ -444,6 +446,11 @@ void EngineCore::SetScriptsConfig(const ScriptsConfig& config)
     m_ScriptsConfig = config;
 }
 
+void EngineCore::SetStartupJobsHook(std::function<void(JobSystem::JobChannel&)> hook)
+{
+    m_StartupJobsHook = std::move(hook);
+}
+
 bool EngineCore::Initialize(const ApplicationConfig& config)
 {
     // Layout agreement before anything reads a shared object. The host filled
@@ -462,6 +469,7 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
             "engine it runs with: SDK consumers get the value from "
             "find_package(GameEngine), in-tree targets from the repository's CMake.",
             config.HostDebugInstrumentation, static_cast<uint32>(GE_DEBUG_INSTRUMENTATION));
+        m_StartupJobsHook = nullptr;
         return false;
     }
 
@@ -591,6 +599,15 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
     {
         m_PrimaryWorld->SetJobSystem(m_JobSystem.get());
         Logger::Log::Info("[Startup] Primary world pool: backfilled (world predates JobSystem)");
+    }
+
+    m_StartupChannel = MakeUnique<JobSystem::JobChannel>(
+        *m_JobSystem, JobSystem::JobChannelDesc{.Name = "Engine startup", .MaxRunning = 2});
+    if (m_StartupJobsHook)
+    {
+        const std::function<void(JobSystem::JobChannel&)> hook = std::move(m_StartupJobsHook);
+        m_StartupJobsHook = nullptr;
+        hook(*m_StartupChannel);
     }
 
     // Create asset manager instance. We register core asset types *before*
@@ -916,8 +933,6 @@ bool EngineCore::Initialize(const ApplicationConfig& config)
     // A headless host opens no audio device: the engine runs as it does when the device
     // fails to open, with no AudioSystem and no audio systems in the schedule.
     tPhase = std::chrono::high_resolution_clock::now();
-    m_StartupChannel = MakeUnique<JobSystem::JobChannel>(
-        *m_JobSystem, JobSystem::JobChannelDesc{.Name = "Engine startup", .MaxRunning = 2});
     if (config.Headless)
     {
         Logger::Log::Info("[Startup] AudioSystem: none (headless)");
@@ -1138,8 +1153,8 @@ void EngineCore::Shutdown()
     // Join the async audio init before tearing audio down: the init job must
     // not outlive the AudioSystem it is initializing.
     (void)GetAudioSystem();
-    // The startup jobs are joined (the audio init above, an application's
-    // preloads by the application before this Shutdown).
+    // The startup jobs that use engine state are joined (the audio init above, an application's
+    // preloads by the application). The package-cache maintenance job uses process state only.
     m_StartupChannel.reset();
     // Shutdown audio before AssetManager so any clip resolution/handles are no longer used.
     if (m_AudioSystem)
@@ -1330,6 +1345,10 @@ void EngineCore::Update(float64 deltaTime)
     // CRITICAL: Process main thread tasks for hot reload system
     if (m_ScriptManager)
     {
+#if GE_DEBUG_INSTRUMENTATION
+        // Scripting posts these from work that can outlive the frame, so they never get frame memory.
+        const Memory::Detail::FrameJoinedScope notFrameJoined(false);
+#endif
         size_t tasksProcessed = m_ScriptManager->ProcessMainThreadTasks();
         if (tasksProcessed > 0)
         {

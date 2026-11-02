@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "EditorChangeNotifications.h"
+#include "Editor/Registries/EditorMenuRegistry.h"
 #include "Panels/SaveSceneAsModal.h"
 #include "Scene/DefaultSceneEntities.h"
 #include "Scene/SceneEditorController.h"
@@ -24,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace GameEngine;
 
@@ -96,6 +98,62 @@ class NewSceneSeedTests : public ::testing::Test
     Editor::SceneEditorController m_Controller;
 };
 } // namespace
+
+TEST_F(NewSceneSeedTests, FileMenuListsSceneActionsInOrder)
+{
+    std::vector<std::string> paths;
+    for (const auto& item : Editor::EditorMenuRegistry::Get().Snapshot())
+    {
+        if (item.Path.starts_with("File/") && item.Path != "File/Exit")
+            paths.push_back(item.Path);
+    }
+    EXPECT_EQ(paths, (std::vector<std::string>{"File/New Scene", "File/Open Scene...", "File/Save Scene",
+                                               "File/Save Scene As..."}));
+}
+
+TEST_F(NewSceneSeedTests, FileSaveItemsNameTheirCatalogShortcuts)
+{
+    // Each row names its Shortcuts catalog entry as (group, name).
+    std::vector<std::string> shortcutItems;
+    for (const auto& item : Editor::EditorMenuRegistry::Get().Snapshot())
+    {
+        if (item.Path.starts_with("File/") && !item.ShortcutGroup.empty() && !item.ShortcutName.empty())
+            shortcutItems.push_back(item.Path + "=" + item.ShortcutGroup + "/" + item.ShortcutName);
+    }
+    EXPECT_EQ(shortcutItems, (std::vector<std::string>{"File/Save Scene=Global/Save Scene",
+                                                       "File/Save Scene As...=Global/Save Scene As"}));
+}
+
+TEST_F(NewSceneSeedTests, FileNewSceneUsesTheDirtyScenePrompt)
+{
+    m_Controller.RequestNewScene();
+    m_Controller.Update(nullptr);
+    m_Controller.MarkSceneDirty();
+    bool invoked = false;
+    for (const auto& item : Editor::EditorMenuRegistry::Get().Snapshot())
+    {
+        if (item.Path == "File/New Scene")
+            invoked = Editor::EditorMenuRegistry::Get().TryInvoke(item.CommandId);
+    }
+    ASSERT_TRUE(invoked);
+    m_Controller.Update(nullptr);
+    EXPECT_EQ(m_Controller.GetActiveModalKind(), "saveChanges");
+    EXPECT_TRUE(m_Controller.IsSceneDirty());
+}
+
+TEST_F(NewSceneSeedTests, FileSaveSceneNamesAnUntitledScene)
+{
+    m_Controller.RequestNewScene();
+    m_Controller.Update(nullptr);
+    bool invoked = false;
+    for (const auto& item : Editor::EditorMenuRegistry::Get().Snapshot())
+    {
+        if (item.Path == "File/Save Scene")
+            invoked = Editor::EditorMenuRegistry::Get().TryInvoke(item.CommandId);
+    }
+    ASSERT_TRUE(invoked);
+    EXPECT_EQ(m_Controller.GetActiveModalKind(), "saveAs");
+}
 
 TEST_F(NewSceneSeedTests, HierarchyAndPickerSeedTheSameEntitiesAsStartup)
 {

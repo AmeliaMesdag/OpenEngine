@@ -409,6 +409,8 @@ void Material::SetTextureSlotMap(std::vector<std::pair<std::string, uint8_t>> sl
         if (m_BindlessTextureIndices[ordinal] == m_DefaultWhiteIndex)
             continue;
         m_BindlessTextureIndices[ordinal] = m_DefaultWhiteIndex;
+        if (ordinal == static_cast<uint8_t>(TextureSlot::kNormal))
+            m_NormalVarianceIndex = m_DefaultBlackIndex;
         MarkDirty();
     }
 }
@@ -499,6 +501,8 @@ void Material::SetBindlessTextureIndex(StringId name, uint32_t descriptorIndex)
     if (m_BindlessTextureIndices[slot] == descriptorIndex)
         return;
     m_BindlessTextureIndices[slot] = descriptorIndex;
+    if (slot == static_cast<uint32_t>(TextureSlot::kNormal))
+        m_NormalVarianceIndex = m_DefaultBlackIndex;
     MarkDirty();
 }
 
@@ -516,6 +520,8 @@ void Material::SetBindlessTextureIndex(TextureSlot slot, uint32_t descriptorInde
     if (m_BindlessTextureIndices[static_cast<size_t>(slot)] == descriptorIndex)
         return;
     m_BindlessTextureIndices[static_cast<size_t>(slot)] = descriptorIndex;
+    if (slot == TextureSlot::kNormal)
+        m_NormalVarianceIndex = m_DefaultBlackIndex;
     MarkDirty();
 }
 
@@ -528,6 +534,14 @@ uint32_t Material::GetBindlessTextureIndex(TextureSlot slot) const
 const uint32_t (&Material::GetBindlessTextureIndices() const)[kTextureSlotArraySize]
 {
     return m_BindlessTextureIndices;
+}
+
+void Material::SetNormalVarianceIndex(uint32_t descriptorIndex)
+{
+    if (m_NormalVarianceIndex == descriptorIndex)
+        return;
+    m_NormalVarianceIndex = descriptorIndex;
+    MarkDirty();
 }
 
 void Material::SetTextureTransform(TextureSlot slot, float scaleX, float scaleY, float offsetX, float offsetY)
@@ -598,6 +612,8 @@ void Material::InitBindlessDefaults(uint32_t whiteIdx, uint32_t flatNormalIdx, u
         }
     }
     m_DefaultWhiteIndex = whiteIdx;
+    m_DefaultBlackIndex = blackIdx;
+    m_NormalVarianceIndex = blackIdx;
     m_HasBindlessDefaults = true;
 
     // The ladder above is keyed by what a slot MEANS, and a user @texture name

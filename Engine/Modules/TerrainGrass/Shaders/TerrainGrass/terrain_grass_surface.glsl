@@ -29,16 +29,10 @@ layout(location = 4) flat in float vGrassCoverage;
 #include "TerrainGrass/grass_clump.glsl"
 
 #if defined(GE_COMPAT_PROFILE)
-// The resident-window atlas resolve, then the ground splat resolve built on it — the SAME file the
-// placement compute runs, so a blade's colour and its placement mask read one answer. Spelled
-// "CBT/..." because the surface is compiled by MaterialBuildService, whose include roots are the
-// Assets/Shaders tree; the compute, whose path carries the CBT directory itself, says
-// "cbt_atlas.glsl". The full profile resolves the ground in the placement compute
-// (grass_root_ground_color.glsl), so only this profile's surface reads the splat.
+// The terrain lattice helper of the ground resolve, as "CBT/..." because MaterialBuildService compiles
+// the surface from the Assets/Shaders tree. Only this profile's surface reads the splat: the full
+// profile resolves the ground in the placement compute (grass_root_ground_color.glsl).
 #include "CBT/cbt_atlas.glsl"
-#define GRASS_ATLAS_SET 2
-#define GRASS_ATLAS_PARAMS_BINDING 5
-#define GRASS_ATLAS_ROWS_BINDING 6
 #endif
 
 // --- Compat profile (WebGPU class): named bindings, no descriptor indexing --------------------
@@ -104,18 +98,12 @@ vec3 GrassCompatLayerAlbedo(uint slot, vec2 uv, vec2 ddx, vec2 ddy)
 #define CBT_LAYER_TAP_EDGE(slot, tex, uv, ddx, ddy, bias) CBT_LAYER_TAP(slot, tex, uv, ddx, ddy, bias)
 #endif
 
-// The splat taps of TerrainGrass/grass_atlas_splat.glsl, which is written against the bindless
-// array this profile does not have. The unified splatmap is bound by name. The ATLAS-resident
-// pair is NOT bound on this profile — no CPU binding fills it — so those two answer with zero
-// weights, which grassNormalizeLayerWeights turns into the same channel-0 result the file already
-// returns when no splat source is bound. An atlas terrain's grass therefore takes the ground's
-// first layer here instead of its resolved blend: a documented limitation of this profile, not a
-// wrong texel.
+// The ground resolve the placement compute runs (TerrainGrass/grass_surface_pages.glsl), so a blade's
+// color and its placement mask read one answer. This profile has no surface pages: the unified
+// splatmap is bound by name.
 #if defined(GE_COMPAT_PROFILE)
-#define GRASS_SPLAT_TAP_UNIFIED(idx, uv) GRASS_COMPAT_LATTICE_TAP(gGrassSplatmap, uv)
-#define GRASS_SPLAT_TAP_ATLAS_SLOT(idx, uv) vec4(0.0)
-#define GRASS_SPLAT_TAP_ATLAS_COARSE(idx, uv) vec4(0.0)
-#include "TerrainGrass/grass_atlas_splat.glsl"
+#define GRASS_SPLAT_TAP_UNIFIED(bindlessIndex, uv) GRASS_COMPAT_LATTICE_TAP(gGrassSplatmap, uv)
+#include "TerrainGrass/grass_surface_pages.glsl"
 #endif
 
 struct TerrainParamsEntry
@@ -222,13 +210,9 @@ layout(std430, set = 2, binding = 1) readonly buffer TerrainParamsBuffer
 // contribution and cuts to the same heaviest few on both sides, so the ranking a blade blends by is
 // the ranking its ground blends by.
 //
-// What that does NOT make identical is where the four raw weights come from. The ground picks
-// between four sources (planet slope+altitude, the painted planar splat, the resident-window atlas
-// splat, and channel 0 when nothing is bound); the blend below resolves the planar three of those
-// through grass_atlas_splat.glsl — the same file the placement compute resolves them through — and
-// addresses them from world XZ rather than the ground's interpolated uv0. The remaining gap is the
-// SPHERE, whose radial slope+altitude blend has no splat to sample and which sources no grass
-// today (placement is planar-only).
+// The raw weights: the blend below reads the unified splat (or channel 0) through
+// grass_surface_pages.glsl, as the placement compute does, at world XZ and not the ground's uv0. A
+// sphere has no splat and places no grass (placement is planar-only).
 //
 // Nameless on purpose: MaterialBinder keys set-2 buffers on the reflected INSTANCE name, so an
 // instance name here would leave the binding unresolvable, and MaterialBinder then drops the draw
@@ -247,21 +231,12 @@ layout(std430, set = 2, binding = 4) readonly buffer TerrainMaterialTableBuffer
 #include "Includes/terrain_blend_resolve.glsl"
 
 // The terrain's own surface normal at a blade's XZ, for the triplanar projection weights the shared
-// albedo resolve blends its taps by. Same textures, same decode, same resolve the GROUND taps at
-// that point: the pre-baked R16G16 world nx/nz normalmap on a planar terrain, the resident-window
-// normal atlas (or its coarse field) on an atlas-backed one.
-//
-// That includes the coarse->slot upgrade CROSSFADE: for the ~0.4 s (kAtlasUpgradeFadeSeconds) after
-// a tile becomes resident, cbt_surface mixes the coarse normal into the slot normal by the row's
-// Fade, and so does this. The weight comes from GrassAtlas_SlotUpgradeWeight on the row THIS resolve
-// read, so the blade and the ground move on one clock rather than two that could drift.
+// albedo resolve blends its taps by: the pre-baked R16G16 world nx/nz normalmap the ground taps at
+// that point.
 //
 // Only called when a contributing material is TEXTURED. An untextured record resolves to its tint
 // through the value-noise variation and never touches the projection weights, so the shipped
 // untextured palette pays nothing for this.
-//
-// The ATLAS normal pair is not bound on this profile — no CPU binding fills it, the same limitation
-// the splat seams document — so an atlas terrain falls through to the flat normal below.
 vec3 grassTerrainNormalWS(TerrainParamsEntry tp, vec2 uv)
 {
     if (tp.NormalmapBindless != 0u)
@@ -294,15 +269,9 @@ vec3 sampleTerrainBaseColor(TerrainParamsEntry tp, vec3 posWS, vec3 posRelWS)
         (posWS.z - tp.WorldOriginZ) / max(tp.WorldSizeZ, 0.0001)
     ), vec2(0.0), vec2(1.0));
 
-    // The blade's ground weights, through the shared resolve: the unified splatmap on a planar
-    // terrain, the resident-window atlas slot (or its coarse field) on an atlas-backed one, and
-    // channel 0 when nothing is bound. An atlas terrain carries SplatmapBindless == 0 by
-    // construction, so reading that field alone answered channel 0 for the whole world.
-    //
-    // SHOWING the coarse->slot upgrade crossfade, unlike the placement compute: this is the colour
-    // the ground beside the blade is rendering, and the ground spends kAtlasUpgradeFadeSeconds
-    // arriving at it. Leading it there is a visible seam for the length of that window.
-    vec4 weights = GrassAtlas_ResolveSplat(tp.Flags, tp.SplatmapBindless, uv, true);
+    // The blade's ground weights, through the shared resolve the placement mask reads: the unified
+    // splatmap, or channel 0 when nothing is bound.
+    vec4 weights = GrassSurface_UnifiedSplat(tp.SplatmapBindless, uv);
 
     // The ground's own resolve, on the ground's own roles — resolved BEFORE the blend for the same
     // reason cbt_surface does it there: from here on a weight belongs to a material, not a channel.
@@ -343,7 +312,7 @@ vec3 sampleTerrainBaseColor(TerrainParamsEntry tp, vec3 posWS, vec3 posRelWS)
     }
     // The colour map, mixed in as the ground mixes it (cbt_surface.glsl). The atlas map is not bound
     // on this profile, so an atlas-backed terrain's blades read none, as its ground does.
-    if ((tp.Flags & kGrassTerrainFlagHasColorMap) != 0u && !grassAtlasBacked(tp.Flags))
+    if ((tp.Flags & kGrassTerrainFlagHasColorMap) != 0u && (tp.Flags & kTerrainFlagAtlasBacked) == 0u)
     {
         color = TerrainApplyColorMap(color, GRASS_COMPAT_LATTICE_TAP(gGrassColormap, uv));
     }

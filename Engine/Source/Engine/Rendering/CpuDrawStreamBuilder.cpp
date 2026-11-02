@@ -136,7 +136,7 @@ void CpuDrawStreamBuilder::BuildView(Rendering::ViewId viewId, const WorldDrawBu
     Rendering::ExtractFrustumPlanes(camDerived.ViewProjMatrix, inputs.Planes);
     {
         const auto originSector =
-            ComputeRenderOriginSector(cam.cameraPos[0], cam.cameraPos[1], cam.cameraPos[2]);
+            ComputeRenderOriginSector(cam.cameraPos.x, cam.cameraPos.y, cam.cameraPos.z);
         SectorToWorld(originSector, inputs.Origin.x, inputs.Origin.y, inputs.Origin.z);
     }
     Rendering::MakeFrustumPlanesCameraRelative(inputs.Planes, inputs.Origin);

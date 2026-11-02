@@ -27,7 +27,7 @@ kExcludedModules = {"Mathematics", "Noise"}
 def _piece_for(function_name):
     name = function_name.lower()
     if name.startswith(("lerp", "mix")):
-        return "Math::Lerp (Mathematics/Interpolation.h)"
+        return "Math::Lerp (Mathematics/Interpolation.h) for a float, Mathematics::Lerp (Mathematics/Geometry.h) for a vector"
     if "inverselerp" in name:
         return "Math::InverseLerp (Mathematics/Interpolation.h)"
     if name.startswith(("clamp01", "saturate")):
@@ -83,7 +83,7 @@ class Rule:
             elif kInlineClamp.search(code):
                 sites.append(Site(path, line_number, "inline_clamp_minmax", "std::clamp"))
             if kInlineLerp.search(code) and "Lerp" not in code and "lerp" not in code:
-                sites.append(Site(path, line_number, "inline_lerp", "Math::Lerp (Mathematics/Interpolation.h)"))
+                sites.append(Site(path, line_number, "inline_lerp", "Math::Lerp (Mathematics/Interpolation.h) for a float, Mathematics::Lerp (Mathematics/Geometry.h) for a vector"))
             if kFloatHash.search(code):
                 sites.append(Site(path, line_number, "float_hash_constant", "Fnv1a64, Fnv1a64Value or HashCombine (Types/Fnv1a.h), or the Noise module's hash"))
         return sites

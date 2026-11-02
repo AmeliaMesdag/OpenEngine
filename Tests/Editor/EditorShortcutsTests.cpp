@@ -372,6 +372,16 @@ TEST(EditorShortcutsBindings, TheCreatePrefabKeyIsPrimaryShiftPAndBindsNothingEl
               Editor::FormatShortcutBinding(Input::kKeyCode_P, chord));
 }
 
+// The File menu's Save Scene and Save Scene As... items show these catalog entries' bindings.
+TEST(EditorShortcutsBindings, FileMenuSaveEntriesShowTheirDefaultBindings)
+{
+    ScopedCatalogDefaultBindings defaults;
+    const int primary = Platform::PrimaryShortcutModifierIsCommand() ? Input::kModSuper : Input::kModControl;
+    EXPECT_EQ(Editor::CatalogShortcutLabel("Global", "Save Scene"), Editor::FormatShortcutBinding(Input::kKeyCode_S, primary));
+    EXPECT_EQ(Editor::CatalogShortcutLabel("Global", "Save Scene As"),
+              Editor::FormatShortcutBinding(Input::kKeyCode_S, primary | Input::kModShift));
+}
+
 // The Hierarchy's key map, through the catalog's defaults: F2 renames the selected entity,
 // Delete deletes it and the primary modifier with D duplicates it, each as the command id its
 // context menu entry carries. macOS also renames on Return, as the Assets panel does.

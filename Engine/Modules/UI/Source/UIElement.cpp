@@ -20,12 +20,23 @@
 #include <atomic>
 #include <cassert>
 #include <cctype>
+#include <cstdint>
 #include <functional>
 #include <typeinfo>
 #include <unordered_set>
 
 using namespace GameEngine;
 
+// The element's exact size, pinned per standard library with 8-byte pointers (wasm32 is not pinned).
+// It may not grow; lower the pin when it shrinks. The MSVC STL sizes its containers by
+// _ITERATOR_DEBUG_LEVEL: 0 in DebugFast and Release, 2 in Debug (the ASan preset included).
+#if defined(_LIBCPP_VERSION) && UINTPTR_MAX == UINT64_MAX
+static_assert(sizeof(UIElement) == 1576, "sizeof(UIElement) changed (libc++): it may not grow; lower the pin when it shrinks");
+#elif defined(_MSC_VER) && defined(_WIN64) && _ITERATOR_DEBUG_LEVEL == 0
+static_assert(sizeof(UIElement) == 1664, "sizeof(UIElement) changed (MSVC STL): it may not grow; lower the pin when it shrinks");
+#elif defined(_MSC_VER) && defined(_WIN64) && _ITERATOR_DEBUG_LEVEL == 2
+static_assert(sizeof(UIElement) == 1832, "sizeof(UIElement) changed (MSVC STL, debug iterators): it may not grow; lower the pin when it shrinks");
+#endif
 
 // Stage 5 Block C: custom-state string-overload helpers. Mirror the
 // case-insensitive normalization used by CSSParser for :my-state names
@@ -94,7 +105,7 @@ bool UIElement::HasCustomState(std::string_view stateName) const
 UIElement::UIElement()
     : m_InstanceId(s_NextInstanceId.fetch_add(1, std::memory_order_relaxed))
 {
-    WireOverridesDirtyCallback();
+    WireStyleDirtyCallback();
 }
 
 UIElement::UIElement(const std::string& id)
@@ -102,7 +113,7 @@ UIElement::UIElement(const std::string& id)
       m_Id(id),
       m_IdHash(id.empty() ? StringId{0} : HashStringId(id))
 {
-    WireOverridesDirtyCallback();
+    WireStyleDirtyCallback();
 }
 
 namespace
@@ -170,6 +181,47 @@ bool UIElement::WindowToLayout(const Mathematics::Vector2& window, Mathematics::
         return false;
     out = toLayout.TransformPoint(window);
     return true;
+}
+
+namespace
+{
+const std::string kNoTooltipText;
+} // namespace
+
+void UIElement::SetTooltip(std::string text)
+{
+    if (text.empty() && (!m_TooltipData || m_TooltipData->Template.LayoutPath.empty()))
+    {
+        m_TooltipData.reset();
+        return;
+    }
+    if (!m_TooltipData)
+        m_TooltipData = std::make_unique<TooltipData>();
+    m_TooltipData->Text = std::move(text);
+}
+
+const std::string& UIElement::GetTooltip() const
+{
+    return m_TooltipData ? m_TooltipData->Text : kNoTooltipText;
+}
+
+void UIElement::SetTooltipTemplate(std::string layoutPath, TooltipBinder binder)
+{
+    if (layoutPath.empty() && (!m_TooltipData || m_TooltipData->Text.empty()))
+    {
+        m_TooltipData.reset();
+        return;
+    }
+    if (!m_TooltipData)
+        m_TooltipData = std::make_unique<TooltipData>();
+    if (layoutPath.empty())
+        binder = nullptr;
+    m_TooltipData->Template = {std::move(layoutPath), std::move(binder)};
+}
+
+const UIElement::TooltipTemplate* UIElement::GetTooltipTemplate() const
+{
+    return m_TooltipData && !m_TooltipData->Template.LayoutPath.empty() ? &m_TooltipData->Template : nullptr;
 }
 
 UIElement::~UIElement()
@@ -345,165 +397,6 @@ void UIElement::AddRequestedSubtreeStyleGuid(const GUID& guid)
     }
 }
 
-namespace
-{
-static void ClearLiveTexture(UIElement::LiveTextureRef& r)
-{
-    r.Handle = 0;
-    r.Getter = {};
-}
-} // namespace
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundResourceName(const std::string& name)
-{
-    if (!el)
-        return *this;
-    BackgroundImageSource src{};
-    src.Kind = BackgroundImageSource::SourceKind::ResourceName;
-    src.Value = name;
-    el->Overrides().Set(Style::BackgroundImage, std::move(src));
-    ClearLiveTexture(el->m_BackgroundImageTextureRef);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundImageNone()
-{
-    if (!el)
-        return *this;
-    BackgroundImageSource src{};
-    src.Kind = BackgroundImageSource::SourceKind::None;
-    el->Overrides().Set(Style::BackgroundImage, std::move(src));
-    ClearLiveTexture(el->m_BackgroundImageTextureRef);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::ResetBackgroundImage()
-{
-    if (!el)
-        return *this;
-    el->Overrides().Reset(Style::BackgroundImage);
-    ClearLiveTexture(el->m_BackgroundImageTextureRef);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundTint(uint32_t argb)
-{
-    if (!el)
-        return *this;
-    el->Overrides().Set(Style::BackgroundTint, argb);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::ResetBackgroundTint()
-{
-    if (!el)
-        return *this;
-    el->Overrides().Reset(Style::BackgroundTint);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundRepeat(BackgroundRepeat repeat)
-{
-    if (!el)
-        return *this;
-    el->Overrides().Set(Style::BackgroundRepeatProp, repeat);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::ResetBackgroundRepeat()
-{
-    if (!el)
-        return *this;
-    el->Overrides().Reset(Style::BackgroundRepeatProp);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundSizeAuto()
-{
-    if (!el)
-        return *this;
-    BackgroundSizeValue v{};
-    v.Mode = BackgroundSizeMode::Auto;
-    el->Overrides().Set(Style::BackgroundSize, v);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundSizeCover()
-{
-    if (!el)
-        return *this;
-    BackgroundSizeValue v{};
-    v.Mode = BackgroundSizeMode::Cover;
-    el->Overrides().Set(Style::BackgroundSize, v);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundSizeContain()
-{
-    if (!el)
-        return *this;
-    BackgroundSizeValue v{};
-    v.Mode = BackgroundSizeMode::Contain;
-    el->Overrides().Set(Style::BackgroundSize, v);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundSizeExplicit(float x, bool xIsPercent, float y, bool yIsPercent)
-{
-    if (!el)
-        return *this;
-    BackgroundSizeValue v{};
-    v.Mode = BackgroundSizeMode::Explicit;
-    v.SizeX = x;
-    v.SizeXIsPercent = xIsPercent;
-    v.SizeY = y;
-    v.SizeYIsPercent = yIsPercent;
-    el->Overrides().Set(Style::BackgroundSize, v);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::ResetBackgroundSize()
-{
-    if (!el)
-        return *this;
-    el->Overrides().Reset(Style::BackgroundSize);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundPosition(float x, bool xIsPercent, float y, bool yIsPercent)
-{
-    if (!el)
-        return *this;
-    BackgroundPositionValue v{};
-    v.X = x;
-    v.XIsPercent = xIsPercent;
-    v.Y = y;
-    v.YIsPercent = yIsPercent;
-    el->Overrides().Set(Style::BackgroundPosition, v);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::SetBackgroundPositionPercent(float xPercent, float yPercent)
-{
-    if (!el)
-        return *this;
-    BackgroundPositionValue v{};
-    v.X = xPercent;
-    v.XIsPercent = true;
-    v.Y = yPercent;
-    v.YIsPercent = true;
-    el->Overrides().Set(Style::BackgroundPosition, v);
-    return *this;
-}
-
-UIElement::StyleWriter& UIElement::StyleWriter::ResetBackgroundPosition()
-{
-    if (!el)
-        return *this;
-    el->Overrides().Reset(Style::BackgroundPosition);
-    return *this;
-}
-
 void UIElement::AddStylesheet(const StylesheetHandle& sheet)
 {
 	    if (!sheet)
@@ -633,6 +526,25 @@ void UIElement::RequestRelayout() const
     {
         m_OwnerManager->RequestRelayout();
         m_OwnerManager->NotifyRelayoutRequested(this);
+    }
+}
+
+void UIElement::MarkCustomPropertyReadersDirty()
+{
+    for (const auto& child : m_Children)
+    {
+        if (!child)
+            continue;
+        child->MarkDirty(StyleDirty);
+        child->MarkCustomPropertyReadersDirty();
+    }
+    if (Kind() == UIElementKind::Mount)
+    {
+        if (UIElement* target = static_cast<Mount*>(this)->GetTarget())
+        {
+            target->MarkDirty(StyleDirty);
+            target->MarkCustomPropertyReadersDirty();
+        }
     }
 }
 
@@ -1365,11 +1277,11 @@ void UIAttributeAccess::SetInlineStyleAttribute(UIElement& el, std::string_view 
     el.m_InlineStyleText = trimmed;
     if (el.m_InlineStyleText.empty())
     {
-        el.m_InlineOverrides.Clear();
+        el.m_InlineStyle.Clear();
         el.MarkDirtySubtree(UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
         return;
     }
 
-    UIParsing::CSSParser::ParseInlineStyleToOverrides(el.m_InlineStyleText, el.m_InlineOverrides);
+    UIParsing::CSSParser::ParseInlineStyleToOverrides(el.m_InlineStyleText, el.m_InlineStyle);
     el.MarkDirtySubtree(UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
 }

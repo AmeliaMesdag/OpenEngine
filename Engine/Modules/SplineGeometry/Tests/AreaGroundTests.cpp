@@ -60,6 +60,37 @@ float TriangleDoubledArea(const Vector3& a, const Vector3& b, const Vector3& c)
     return (b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z);
 }
 
+// A plaza `width` x `depth` below z = 0 with a road `roadWidth` wide running 20 m up from its top
+// edge, each corner where they meet rounded by a quarter arc of `radius`, a point every 10 degrees.
+AreaRing PlazaWithFilletedRoad(float width, float depth, float roadWidth, float radius)
+{
+    const float halfWidth = 0.5f * width;
+    const float halfRoad = 0.5f * roadWidth;
+    AreaRing ring{{-halfWidth, -depth}, {halfWidth, -depth}, {halfWidth, 0.0f}};
+    for (int step = 0; step <= 9; ++step)
+    {
+        const float radians = Mathematics::ToRadians(270.0f - 10.0f * static_cast<float>(step));
+        ring.emplace_back(halfRoad + radius + radius * std::cos(radians), radius + radius * std::sin(radians));
+    }
+    ring.emplace_back(halfRoad, 20.0f);
+    ring.emplace_back(-halfRoad, 20.0f);
+    for (int step = 0; step <= 9; ++step)
+    {
+        const float radians = Mathematics::ToRadians(360.0f - 10.0f * static_cast<float>(step));
+        ring.emplace_back(-halfRoad - radius + radius * std::cos(radians), radius + radius * std::sin(radians));
+    }
+    ring.emplace_back(-halfWidth, 0.0f);
+    return ring;
+}
+
+// The longest side squared over twice the area: the longest side over the height across it.
+float AspectRatio(const Vector3& a, const Vector3& b, const Vector3& c)
+{
+    const float longest = std::max({std::hypot(b.x - a.x, b.z - a.z), std::hypot(c.x - b.x, c.z - b.z),
+                                    std::hypot(a.x - c.x, a.z - c.z)});
+    return longest * longest / std::abs(TriangleDoubledArea(a, b, c));
+}
+
 } // namespace
 
 // Under the default settings the lid covers the area once (its triangles' area is the area's,
@@ -182,5 +213,37 @@ TEST(AreaGround, TheLidOverLensHolesBetweenArcsCoversTheAreaWithMeterEdges)
         EXPECT_NEAR(doubledArea, pieceDoubledArea, 0.5f);
         EXPECT_LE(longestEdge, settings.MaxLidEdgeMeters * 1.05f);
         EXPECT_LT(ground.LidTriangles.size() / 3, settings.MaxLidTriangles * 3 / 4);
+    }
+}
+
+// A road's rounded corners on a plaza put runs of close arc corners on the outline: the lid over
+// them has no sliver (no triangle with an aspect ratio over 50) and no edge over the limit on a
+// 20 x 20 m and a 60 x 30 m plaza, and covers the area once.
+TEST(AreaGround, TheLidOverARoadsRoundedCornersHasNoSliverTriangles)
+{
+    constexpr float kMaxAspectRatio = 50.0f;
+    for (const auto& [width, depth] : {std::pair{20.0f, 20.0f}, std::pair{60.0f, 30.0f}})
+    {
+        SCOPED_TRACE(::testing::Message() << width << " x " << depth << " m");
+        const std::vector<AreaRing> unions{PlazaWithFilletedRoad(width, depth, 4.0f, 1.5f)};
+        const std::vector<AreaPiece> pieces = CombineAreas(unions, {});
+        ASSERT_EQ(pieces.size(), 1u);
+        const AreaGround ground = BuildAreaGround(pieces, AreaGroundSettings{}, Slope);
+        std::size_t slivers = 0;
+        float longestEdge = 0.0f;
+        double doubledArea = 0.0;
+        for (std::size_t t = 0; t + 2 < ground.LidTriangles.size(); t += 3)
+        {
+            const Vector3& a = ground.LidPoints[ground.LidTriangles[t]];
+            const Vector3& b = ground.LidPoints[ground.LidTriangles[t + 1]];
+            const Vector3& c = ground.LidPoints[ground.LidTriangles[t + 2]];
+            doubledArea += TriangleDoubledArea(a, b, c);
+            slivers += AspectRatio(a, b, c) > kMaxAspectRatio ? 1u : 0u;
+            longestEdge = std::max({longestEdge, std::hypot(b.x - a.x, b.z - a.z), std::hypot(c.x - b.x, c.z - b.z),
+                                    std::hypot(a.x - c.x, a.z - c.z)});
+        }
+        EXPECT_EQ(slivers, 0u) << "of " << ground.LidTriangles.size() / 3 << " triangles";
+        EXPECT_LE(longestEdge, AreaGroundSettings{}.MaxLidEdgeMeters + 1.0e-4f);
+        EXPECT_NEAR(doubledArea, Mathematics::PolygonDoubledSignedArea(pieces[0].Outer), 0.05);
     }
 }

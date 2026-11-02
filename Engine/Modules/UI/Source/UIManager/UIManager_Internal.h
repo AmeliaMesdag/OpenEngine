@@ -3,7 +3,7 @@
 #include "UI/UIManager.h"
 #include "UI/UIElement.h"
 #include "UI/ResolvedStyle.h"
-#include "UI/StyleOverrides.h"
+#include "UI/StyleDeclaration.h"
 #include "UI/UIStyle.h"
 #include "Rendering/Text/TextLayout.h"
 
@@ -88,31 +88,9 @@ float BaselineTextFn(YGNodeConstRef node, float width, float height);
 void DetachYogaFromParent(YGNodeRef node);
 void RemoveAllYogaChildren(YGNodeRef node);
 
-// A WeightedPane's flex-grow is a runtime value (its splitter weight), not a
-// CSS property, so YogaAdapter::ApplyStyle can't set it. Every site that pushes
-// resolved style into a Yoga node must re-assert the weight afterwards or the
-// pane collapses to the CSS default. Used by the incremental restyle and the
-// transition re-solve; the BuildYogaRecursive push already has the pane in hand
-// and applies the same clamp inline.
-void ApplyWeightedPaneFlexGrowOverride(GameEngine::UIElement* el, YGNodeRef node);
-
-// A child of a block-flow container (display: block / inline, and the omitted
-// default) does not shrink to fit: CSS block layout has no shrink step, so the
-// child keeps its size and overflows. That is a PARENT fact, which
-// YogaAdapter::ApplyStyle — one ResolvedStyle onto one node — cannot decide, so
-// every site that pushes resolved style into a Yoga node re-asserts it here,
-// exactly as it re-asserts the WeightedPane weight above.
-//
-// An authored flex-shrink still wins. Chrome ignores the whole flex triple on a
-// block-flow child (measured: `flex-shrink: 1` and `flex: 1` both leave an 80px
-// child at 80px in a 100px block box), because there such a child is not a flex
-// item at all. This engine has no block formatting context and honours
-// flex-grow and flex-basis inside Block, so dropping only the declared shrink
-// would leave one authored `flex-grow: 1; flex-shrink: 1` pair half-obeyed.
-// Undeclared is where the divergence actually bites, and that is what moves.
-//
-// `parentStyle` is null for a root node, which has no container to inherit a
-// formatting context from and therefore keeps the flex-container answer.
+// A child of a block-flow container (display block or inline, the default) does not shrink unless
+// it declares flex-shrink. The parent decides this, so every site that pushes resolved style into
+// a Yoga node calls this after ApplyStyle. A null `parentStyle` (a root node) keeps flex shrink.
 void ApplyBlockFlowShrinkDefault(YGNodeRef node,
                                  const GameEngine::ResolvedStyle& style,
                                  const GameEngine::ResolvedStyle* parentStyle);
@@ -148,7 +126,7 @@ struct BuiltNode
     // build (RetainedYogaNode::PrevLayout.Order). Ordering is applied by the
     // parent's InsertChildrenSortedByOrder, not by Yoga, so the parent must
     // re-attach even when the child carries no StyleDirty — an
-    // Overrides().Set(Style::Order) raises only LayoutDirty.
+    // Style().Set(Style::Order) raises only LayoutDirty.
     bool orderChanged = false;
 };
 
@@ -313,6 +291,16 @@ struct UpdateContext
     bool& didSolveLayout;
     bool forceGlobalStyle = false;
     uint32_t viewportW = 0, viewportH = 0;
+    // The root's layout size in logical px: the basis of the CSS viewport units.
+    GameEngine::Mathematics::Vector2 ViewportBasis() const
+    {
+        return {static_cast<float>(viewportW), static_cast<float>(viewportH)};
+    }
+    // True when a push resolved a viewport unit against a basis other than this frame's.
+    bool ViewportBasisMoved(const GameEngine::Mathematics::Vector2& pushedBasis) const
+    {
+        return pushedBasis != GameEngine::Mathematics::Vector2{} && pushedBasis != ViewportBasis();
+    }
     // OS content scale (physical px per CSS logical px). Viewport dimensions
     // passed to Yoga are already divided by this; layout rects are multiplied
     // back to physical after CalculateLayout.
@@ -470,11 +458,6 @@ inline void MergeSheetsHandles(std::vector<GameEngine::StylesheetHandle>& outHan
             outHandles.push_back(sh);
         }
     }
-}
-
-inline std::string MakeInternalBgKey(uint64_t instanceId)
-{
-    return std::string("__ui_el_bg_") + std::to_string(instanceId);
 }
 
 // True when el's DFS-parent chain terminates at root — i.e. the element is

@@ -394,17 +394,17 @@ TEST(TextAreaIncrementalWrap, WidthAndFontMetricsInvalidateRetainedLines)
     (void)edited->GetVisualLineCount();
     for (const float width : {51.0f, 137.0f, 83.0f})
     {
-        edited->Overrides().Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(width));
-        reference->Overrides().Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(width));
+        edited->Style().Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(width));
+        reference->Style().Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(width));
         edited->MarkDirty(GameEngine::UIElement::StyleDirty | GameEngine::UIElement::LayoutDirty);
         reference->MarkDirty(GameEngine::UIElement::StyleDirty | GameEngine::UIElement::LayoutDirty);
         fixture.Settle();
         ExpectFullLayout(*edited, *reference);
     }
-    edited->Overrides().Set(GameEngine::Style::FontSize, GameEngine::StyleLength::Px(23.0f));
-    reference->Overrides().Set(GameEngine::Style::FontSize, GameEngine::StyleLength::Px(23.0f));
-    edited->Overrides().Set(GameEngine::Style::LetterSpacing, 1.0f);
-    reference->Overrides().Set(GameEngine::Style::LetterSpacing, 1.0f);
+    edited->Style().Set(GameEngine::Style::FontSize, GameEngine::StyleLength::Px(23.0f));
+    reference->Style().Set(GameEngine::Style::FontSize, GameEngine::StyleLength::Px(23.0f));
+    edited->Style().Set(GameEngine::Style::LetterSpacing, 1.0f);
+    reference->Style().Set(GameEngine::Style::LetterSpacing, 1.0f);
     edited->MarkDirty(GameEngine::UIElement::StyleDirty | GameEngine::UIElement::LayoutDirty);
     reference->MarkDirty(GameEngine::UIElement::StyleDirty | GameEngine::UIElement::LayoutDirty);
     fixture.Settle();

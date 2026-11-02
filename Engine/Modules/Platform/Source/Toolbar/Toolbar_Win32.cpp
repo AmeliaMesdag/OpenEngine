@@ -1,14 +1,19 @@
 #include "Platform/Toolbar.h"
+#include "Platform/ContextMenu.h"
 #include "Platform/Window.h"
-#include "MenuIconBitmap_Win32.h"
+#include "WindowFrame_Win32.h"
+#include "Types/FlatMap.h"
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <windowsx.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
-#include <unordered_map>
 #include <vector>
+#include <algorithm>
+#include <cmath>
+#include <cwctype>
 
 namespace GameEngine
 {
@@ -26,8 +31,11 @@ static std::wstring ToWide(const std::string& s)
 class Win32Toolbar : public INativeToolbar
 {
   public:
+    ~Win32Toolbar() override { Uninstall(); }
+
     bool Install(Platform::Window* window) override
     {
+        Uninstall();
         if (!window)
             return false;
         GLFWwindow* gw = window->GetGLFWHandle();
@@ -36,69 +44,53 @@ class Win32Toolbar : public INativeToolbar
         m_Hwnd = glfwGetWin32Window(gw);
         if (!m_Hwnd)
             return false;
+        m_Window = window;
 
-        // Create empty menu bar
+        // The menu bar owns the popup tree and never attaches to the window: a native
+        // menu row would change the client rect each time it appears or empties.
         m_MenuBar = CreateMenu();
-        SetMenu(m_Hwnd, m_MenuBar);
-        DrawMenuBar(m_Hwnd);
 
-        // Subclass window proc
         m_PrevProc = reinterpret_cast<WNDPROC>(GetWindowLongPtr(m_Hwnd, GWLP_WNDPROC));
-        s_Instances[m_Hwnd] = this;
+        s_Instances.InsertOrAssign(m_Hwnd, this);
         SetWindowLongPtr(m_Hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Win32Toolbar::WndProcThunk));
-
-        // Preserve client height (compensate for menu bar)
-        RECT rcWin{}, rcClientBefore{}, rcClientAfter{};
-        GetWindowRect(m_Hwnd, &rcWin);
-        GetClientRect(m_Hwnd, &rcClientBefore);
-        GetClientRect(m_Hwnd, &rcClientAfter);
-        int beforeH = rcClientBefore.bottom - rcClientBefore.top;
-        int afterH = rcClientAfter.bottom - rcClientAfter.top;
-        if (afterH < beforeH)
-        {
-            int delta = beforeH - afterH;
-            SetWindowPos(m_Hwnd, nullptr, rcWin.left, rcWin.top,
-                         (rcWin.right - rcWin.left), (rcWin.bottom - rcWin.top) + delta,
-                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-
         return true;
     }
 
     void Uninstall() override
     {
-        if (!m_Hwnd)
-            return;
-        if (m_PrevProc)
+        ClosePopup();
+        if (m_Hwnd && m_PrevProc)
         {
+            m_Frame.SetLayout(m_Hwnd, 0, {});
             SetWindowLongPtr(m_Hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(m_PrevProc));
         }
         if (m_MenuBar)
         {
-            SetMenu(m_Hwnd, nullptr);
             DestroyMenu(m_MenuBar);
             m_MenuBar = nullptr;
         }
-        DrawMenuBar(m_Hwnd);
-        s_Instances.erase(m_Hwnd);
+        if (m_Hwnd)
+            s_Instances.Erase(m_Hwnd);
         m_Hwnd = nullptr;
-        m_Menus.clear();
-        m_Items.clear();
-        ReleaseItemBitmaps();
+        m_Window = nullptr;
+        m_PrevProc = nullptr;
+        m_Menus.Clear();
+        m_TopMenus.clear();
+        m_Regions.clear();
+        m_SubMenuTitles.Clear();
+        m_ItemTexts.Clear();
+        m_CustomCaption = false;
+        m_Frame = {};
         m_NextMenuId = 1;
         m_Callback = nullptr;
+        ++m_MenuRevision;
     }
 
     void Clear() override
     {
         if (!m_Hwnd || !m_MenuBar)
             return;
-
-        // Clear menu contents in-place without ever detaching the menu bar
-        // from the window. Toggling the menu bar on/off with SetMenu(hwnd,
-        // nullptr) changes the client area height and causes framebuffer resize
-        // callbacks, which in turn trigger swapchain recreation. By mutating
-        // the existing HMENU instead, we keep the non-client metrics stable.
+        ClosePopup();
 
         // Destroy and remove all top-level menus and their submenus.
         int count = GetMenuItemCount(m_MenuBar);
@@ -114,15 +106,21 @@ class Win32Toolbar : public INativeToolbar
             }
         }
 
-        DrawMenuBar(m_Hwnd);
-
-        m_Menus.clear();
-        m_Items.clear();
-        ReleaseItemBitmaps();
+        m_Menus.Clear();
+        m_TopMenus.clear();
+        m_SubMenuTitles.Clear();
+        m_ItemTexts.Clear();
+        ++m_MenuRevision;
         m_NextMenuId = 1;
     }
 
     void SetCommandHandler(CommandCallback cb) override { m_Callback = std::move(cb); }
+
+    void SetMenuFactory(MenuFactory factory) override
+    {
+        ClosePopup();
+        m_Factory = std::move(factory);
+    }
 
     uint32_t AddMenu(const std::string& title) override
     {
@@ -130,9 +128,10 @@ class Win32Toolbar : public INativeToolbar
             return 0;
         HMENU hMenu = CreatePopupMenu();
         AppendMenuW(m_MenuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(hMenu), ToWide(title).c_str());
-        DrawMenuBar(m_Hwnd);
         uint32_t id = m_NextMenuId++;
-        m_Menus[id] = hMenu;
+        m_Menus.InsertOrAssign(id, hMenu);
+        m_TopMenus.push_back({id, title});
+        ++m_MenuRevision;
         return id;
     }
 
@@ -143,9 +142,9 @@ class Win32Toolbar : public INativeToolbar
             return 0;
         HMENU child = CreatePopupMenu();
         AppendMenuW(parent, MF_POPUP, reinterpret_cast<UINT_PTR>(child), ToWide(title).c_str());
-        DrawMenuBar(m_Hwnd);
         uint32_t id = m_NextMenuId++;
-        m_Menus[id] = child;
+        m_Menus.InsertOrAssign(id, child);
+        m_SubMenuTitles.InsertOrAssign(child, title);
         return id;
     }
 
@@ -154,101 +153,205 @@ class Win32Toolbar : public INativeToolbar
         HMENU parent = GetMenuById(parentMenuId);
         if (!parent)
             return;
-        // Append as the last item and remember its position so we can
-        // efficiently update the label in-place later without tearing down
-        // the entire menu bar.
-        int position = GetMenuItemCount(parent);
         AppendMenuW(parent, MF_STRING, commandId, ToWide(title).c_str());
-        m_Items[commandId] = {parent, static_cast<UINT>(position)};
-        DrawMenuBar(m_Hwnd);
+        m_ItemTexts.InsertOrAssign(commandId, ItemText{title, {}});
     }
 
+    void AddSeparator(uint32_t parentMenuId) override
+    {
+        HMENU parent = GetMenuById(parentMenuId);
+        if (!parent)
+            return;
+        AppendMenuW(parent, MF_SEPARATOR, 0, nullptr);
+    }
+
+    // The popup reads the title and the icon when it opens.
     void SetItemIcon(uint32_t commandId, const std::string& imagePath) override
     {
-        auto item = m_Items.find(commandId);
-        if (item == m_Items.end() || imagePath.empty())
+        if (imagePath.empty())
             return;
-
-        const int size = Platform::MenuIconPixelSize();
-        HBITMAP bitmap = Platform::CreateMenuIconBitmap(imagePath, size, size);
-        if (!bitmap)
-            return;
-
-        auto old = m_ItemBitmaps.find(commandId);
-        if (old != m_ItemBitmaps.end() && old->second)
-            DeleteObject(old->second);
-        m_ItemBitmaps[commandId] = bitmap;
-
-        MENUITEMINFOW info{};
-        info.cbSize = sizeof(info);
-        info.fMask = MIIM_BITMAP;
-        info.hbmpItem = bitmap;
-        SetMenuItemInfoW(item->second.parent, item->second.position, TRUE, &info);
-        DrawMenuBar(m_Hwnd);
+        if (ItemText* text = m_ItemTexts.Find(commandId))
+            text->Icon = imagePath;
     }
 
     void UpdateItemTitle(uint32_t commandId, const std::string& title) override
     {
-        if (!m_Hwnd || !m_MenuBar)
+        if (title.empty())
             return;
-        auto it = m_Items.find(commandId);
-        if (it == m_Items.end())
-            return;
-        HMENU parent = it->second.parent;
-        UINT position = it->second.position;
-        if (!parent)
-            return;
+        if (ItemText* text = m_ItemTexts.Find(commandId))
+            text->Title = title;
+    }
 
-        std::wstring w = ToWide(title);
-        if (w.empty())
-            return;
+    ToolbarPresentation GetPresentation() const override { return ToolbarPresentation::WindowTitleBar; }
+    std::vector<ToolbarMenu> GetMenus() const override { return m_TopMenus; }
+    uint64_t GetMenuRevision() const override { return m_MenuRevision; }
+    std::optional<uint32_t> GetOpenMenu() const override { return m_OpenMenu; }
 
-        MENUITEMINFOW info{};
-        info.cbSize = sizeof(MENUITEMINFOW);
-        info.fMask = MIIM_STRING;
-        info.dwTypeData = const_cast<LPWSTR>(w.c_str());
-        info.cch = static_cast<UINT>(w.size());
-        if (!SetMenuItemInfoW(parent, position, TRUE, &info))
+    TitleBarMetrics GetTitleBarMetrics() const override
+    {
+        return m_Hwnd ? m_Frame.GetMetrics(m_Hwnd) : TitleBarMetrics{};
+    }
+
+    void SetTitleBarLayout(int height, std::vector<TitleBarMenuRegion> regions) override
+    {
+        if (!m_Hwnd)
+            return;
+        // The Editor paints the caption contents and opens the menus from them.
+        m_CustomCaption = true;
+        if (height == 0)
+            ClosePopup();
+        m_Regions = regions;
+        m_Frame.SetLayout(m_Hwnd, height, std::move(regions));
+    }
+
+    void ShowTitleBarMenu(uint32_t menuId) override
+    {
+        if (!m_Hwnd || !m_Window || !m_Factory || m_TopMenus.empty())
+            return;
+        auto anchor = std::find_if(m_Regions.begin(), m_Regions.end(),
+                                   [menuId](const auto& region) { return region.Id == menuId; });
+        // A hidden heading opens through the overflow tree.
+        if (anchor == m_Regions.end())
         {
-            // Fallback for older systems: modify the item by position.
-            ModifyMenuW(parent, position, MF_BYPOSITION | MF_STRING, commandId, w.c_str());
+            menuId = 0;
+            anchor = std::find_if(m_Regions.begin(), m_Regions.end(), [](const auto& region) { return region.Id == 0; });
         }
-
-        DrawMenuBar(m_Hwnd);
+        ClosePopup();
+        m_Popup = m_Factory();
+        if (!m_Popup)
+            return;
+        if (menuId == 0)
+        {
+            for (const auto& menu : m_TopMenus)
+                PopulatePopup(GetMenuById(menu.Id), m_Popup->AddSubMenu(0, menu.Title));
+        }
+        else
+            PopulatePopup(GetMenuById(menuId), 0);
+        m_Popup->SetCommandHandler([this](uint32_t commandId) {
+            auto callback = m_Callback;
+            if (callback)
+                callback(commandId);
+        });
+        m_Popup->SetCloseHandler([this]() { m_OpenMenu.reset(); });
+        // Regions are in physical client pixels; the popup takes logical pixels.
+        const float scale = m_Window->GetUiContentScale() > 0.0f ? m_Window->GetUiContentScale() : 1.0f;
+        const int x = anchor == m_Regions.end() ? 0 : anchor->Bounds.X;
+        const int bottom = anchor == m_Regions.end() ? m_Frame.GetMetrics(m_Hwnd).Height : anchor->Bounds.Bottom();
+        m_OpenMenu = menuId;
+        m_Popup->Show(m_Window, static_cast<int>(std::lround(x / scale)), static_cast<int>(std::lround(bottom / scale)));
     }
 
   private:
-    struct ItemBinding
+    struct ItemText
     {
-        HMENU parent;
-        UINT position;
+        std::string Title;
+        std::string Icon;
     };
+
+    // Copies one native menu level into the popup. The titles, shortcuts and icons
+    // come from the UTF-8 maps.
+    void PopulatePopup(HMENU menu, uint32_t popupParent)
+    {
+        const int count = menu ? GetMenuItemCount(menu) : 0;
+        for (int index = 0; index < count; ++index)
+        {
+            MENUITEMINFOW info{};
+            info.cbSize = sizeof(info);
+            info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_SUBMENU;
+            if (!GetMenuItemInfoW(menu, static_cast<UINT>(index), TRUE, &info))
+                continue;
+            if (info.fType & MFT_SEPARATOR)
+            {
+                m_Popup->AddSeparator(popupParent);
+                continue;
+            }
+            if (info.hSubMenu)
+            {
+                const std::string* title = m_SubMenuTitles.Find(info.hSubMenu);
+                PopulatePopup(info.hSubMenu, m_Popup->AddSubMenu(popupParent, title ? *title : std::string()));
+                continue;
+            }
+            const ItemText* text = m_ItemTexts.Find(info.wID);
+            if (!text)
+                continue;
+            const auto tab = text->Title.find('\t');
+            m_Popup->AddItem(popupParent, text->Title.substr(0, tab), info.wID, MenuItemFlag_None);
+            if (tab != std::string::npos)
+                m_Popup->SetItemShortcut(info.wID, text->Title.substr(tab + 1));
+            if (!text->Icon.empty())
+                m_Popup->SetItemIcon(info.wID, text->Icon);
+        }
+    }
+
+    void ClosePopup()
+    {
+        m_OpenMenu.reset();
+        if (!m_Popup)
+            return;
+        m_Popup->SetCloseHandler({});
+        m_Popup->SetCommandHandler({});
+        m_Popup->Clear();
+        m_Popup.reset();
+    }
 
     HMENU GetMenuById(uint32_t id) const
     {
-        auto it = m_Menus.find(id);
-        return it == m_Menus.end() ? nullptr : it->second;
-    }
-
-    void ReleaseItemBitmaps()
-    {
-        for (const auto& [_, bitmap] : m_ItemBitmaps)
-            if (bitmap)
-                DeleteObject(bitmap);
-        m_ItemBitmaps.clear();
+        const HMENU* menu = m_Menus.Find(id);
+        return menu ? *menu : nullptr;
     }
 
     static LRESULT CALLBACK WndProcThunk(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
-        auto it = s_Instances.find(hWnd);
-        Win32Toolbar* self = (it != s_Instances.end()) ? it->second : nullptr;
-        if (self)
-            return self->WndProc(hWnd, msg, wParam, lParam);
+        if (Win32Toolbar* const* self = s_Instances.Find(hWnd))
+            return (*self)->WndProc(hWnd, msg, wParam, lParam);
         return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 
     LRESULT WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
+        if (msg == WM_NCDESTROY)
+        {
+            const WNDPROC previous = m_PrevProc;
+            s_Instances.Erase(hWnd);
+            m_Hwnd = nullptr;
+            m_PrevProc = nullptr;
+            return CallWindowProcW(previous, hWnd, msg, wParam, lParam);
+        }
+        if (m_CustomCaption && msg == WM_SYSCOMMAND && (wParam & 0xFFF0) == SC_KEYMENU)
+        {
+            // GLFW suppresses SC_KEYMENU by default. Alt+Space belongs to the
+            // system menu, independently of the Editor's application menus.
+            if (lParam == VK_SPACE)
+                return DefWindowProcW(hWnd, msg, wParam, lParam);
+            if (m_TopMenus.empty())
+                return 0;
+            uint32_t menuId = m_TopMenus.front().Id;
+            if (lParam != 0)
+            {
+                const wint_t mnemonic = towupper(static_cast<wint_t>(lParam));
+                for (const auto& menu : m_TopMenus)
+                {
+                    const auto title = ToWide(menu.Title);
+                    if (!title.empty() && towupper(title.front()) == mnemonic)
+                    {
+                        menuId = menu.Id;
+                        break;
+                    }
+                }
+            }
+            ShowTitleBarMenu(menuId);
+            return 0;
+        }
+        LRESULT frameResult = 0;
+        if (msg == WM_GETMINMAXINFO)
+        {
+            // Preserve GLFW's own size limits and monitor work-area handling.
+            frameResult = CallWindowProcW(m_PrevProc, hWnd, msg, wParam, lParam);
+            m_Frame.HandleMessage(hWnd, msg, wParam, lParam, frameResult);
+            return frameResult;
+        }
+        if (m_Frame.HandleMessage(hWnd, msg, wParam, lParam, frameResult))
+            return frameResult;
         if (msg == WM_COMMAND)
         {
             uint16_t cmd = LOWORD(wParam);
@@ -262,15 +365,24 @@ class Win32Toolbar : public INativeToolbar
     }
 
     HWND m_Hwnd = nullptr;
+    Platform::Window* m_Window = nullptr;
     HMENU m_MenuBar = nullptr;
     WNDPROC m_PrevProc = nullptr;
-    std::unordered_map<uint32_t, HMENU> m_Menus;
-    std::unordered_map<uint32_t, ItemBinding> m_Items;
-    std::unordered_map<uint32_t, HBITMAP> m_ItemBitmaps;
+    FlatMap<uint32_t, HMENU> m_Menus;
     uint32_t m_NextMenuId = 1;
     CommandCallback m_Callback;
+    MenuFactory m_Factory;
+    std::unique_ptr<INativeContextMenu> m_Popup;
+    FlatMap<HMENU, std::string> m_SubMenuTitles;
+    FlatMap<uint32_t, ItemText> m_ItemTexts;
+    Platform::WindowFrame m_Frame;
+    std::vector<ToolbarMenu> m_TopMenus;
+    std::vector<TitleBarMenuRegion> m_Regions;
+    uint64_t m_MenuRevision = 0;
+    bool m_CustomCaption = false;
+    std::optional<uint32_t> m_OpenMenu;
 
-    static inline std::unordered_map<HWND, Win32Toolbar*> s_Instances;
+    static inline FlatMap<HWND, Win32Toolbar*> s_Instances;
 };
 
 std::unique_ptr<INativeToolbar> CreateNativeToolbar()

@@ -96,7 +96,7 @@ public:
           m_Handle(handle),
           m_PointFields(std::move(pointFields))
     {
-        InlineOverrides().Set(Style::Display, DisplayMode::None);
+        InlineStyle().Set(Style::Display, DisplayMode::None);
         if (!m_Notifications || !m_World || !m_Entity.IsValid())
             return;
 
@@ -925,7 +925,7 @@ void RegisterSplineInspectors()
                                 // say so on the button rather than failing on click.
                                 const bool atFloor =
                                     data->Points.size() <= Spline::SplineData::kMinPointCount;
-                                deleteButton->SetDisabled(atFloor);
+                                deleteButton->SetEnabled(!atFloor);
                                 deleteButton->SetTooltip(
                                     atFloor ? "A spline keeps at least two points - delete the entity instead"
                                             : "Delete this control point");

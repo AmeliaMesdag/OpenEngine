@@ -20,7 +20,6 @@
     "send_text": "Lower-level text injection; no typed tool yet.",
     "get_sky_settings": "Diagnostic readback of the sky's per-frame SkySettings for comparing two runs or builds input by input; raw-only until a sky tool group exists.",
     "show_universal_search": "Opens the universal search overlay; no typed tool yet.",
-    "simulate_mouse_drag": "Press-move-release drag for UI flows; no typed tool yet. Its dragDropSession field says whether the gesture started a drag-and-drop session; perform_drop makes a drop without one.",
     "simulate_double_click_drag": "Double-click-then-drag variant; no typed tool yet.",
     "set_scroll": "Sets a ScrollView offset; no typed tool yet.",
     "undock_panel": "Floats a docked panel; no typed tool yet.",

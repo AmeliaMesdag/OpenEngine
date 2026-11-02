@@ -1,5 +1,9 @@
 #include "Rendering/Materials/MaterialBuildContext.h"
 
+#include "AssetCore/PathNormalization.h"
+#include "Types/PathUtils.h"
+
+#include <string>
 #include <string_view>
 
 namespace GameEngine::Rendering
@@ -14,11 +18,11 @@ std::filesystem::path MaterialSourceIdentity(const std::filesystem::path& materi
     for (const MaterialBuildContext::AssetSourceRoot& source : context.AssetSourceRoots)
     {
         const fs::path root = fs::absolute(source.Root).lexically_normal();
-        const fs::path relative = material.lexically_relative(root);
         const size_t rootLength = root.native().size();
-        if (relative.empty() || *relative.begin() == ".." || rootLength <= matchedRootLength)
+        std::string relative;
+        if (rootLength <= matchedRootLength || !AssetPaths::TryMakeCanonicalRelativePath(root, material, relative))
             continue;
-        identity = fs::path(source.Alias) / relative;
+        identity = fs::path(source.Alias) / PathFromUtf8(relative);
         matchedRootLength = rootLength;
     }
     return identity;

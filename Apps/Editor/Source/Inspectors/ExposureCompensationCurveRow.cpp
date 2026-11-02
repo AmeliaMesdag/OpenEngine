@@ -113,7 +113,7 @@ std::unique_ptr<CurveField> MakeCompensationGraph(const Components::Camera& came
     graph->SetKeys(CurveKeys(camera.AutoExposureCompensationCurve));
     graph->SetPlaybackIndicator(0.0f, 0.0f, false);
     graph->SetShadedSpans({{axis.Min, -1.0f, "Night"}, {10.0f, axis.Max, "Day"}});
-    graph->Overrides()
+    graph->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(160.0f));
     return graph;
@@ -192,11 +192,11 @@ CurveField* AddExposureCompensationCurveRow(const InspectorContext& ctx)
         return nullptr;
 
     UIElement* row = InspectorUI::AddRow(ctx.Parent);
-    row->Overrides().Set(Style::AlignItems, AlignItems::FlexStart);
+    row->Style().Set(Style::AlignItems, AlignItems::FlexStart);
     if (Label* label = InspectorUI::AddLabel(row, "Compensation Curve", kRowTooltip))
         label->AddClass("inspector-label-no-drag");
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Stretch)
         .Set(Style::Gap, StyleLength::Px(4.0f));

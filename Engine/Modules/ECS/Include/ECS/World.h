@@ -1,12 +1,13 @@
 #pragma once
 
-#include "ECS/ArchetypeTable.h"
+#include "ECS/Archetype/ArchetypeTable.h"
 #include "ECS/Component/ComponentConcepts.h"
 #include "ECS/Components.h"
 #include "ECS/ECS.h"
 #include "ECS/QueryPolicy.h"
 #include "JobSystem/WorkStealingThreadPool.h"
 #include "Logger/Logger.h"
+#include "Types/FlatSet.h"
 
 #include <optional>
 
@@ -203,20 +204,20 @@ class Archetype
 
     // Remove any graph edge that points to an archetype in the given set.
     // Called after PruneEmptyArchetypes to avoid dangling edge pointers.
-    void EraseEdgesTo(const std::unordered_set<Archetype*>& pruned)
+    void EraseEdgesTo(const FlatSet<Archetype*>& pruned)
     {
         for (auto it = m_AddEdges.begin(); it != m_AddEdges.end();)
-            it = pruned.count(it->second) ? m_AddEdges.erase(it) : std::next(it);
+            it = pruned.Contains(it->second) ? m_AddEdges.erase(it) : std::next(it);
         for (auto it = m_RemoveEdges.begin(); it != m_RemoveEdges.end();)
-            it = pruned.count(it->second) ? m_RemoveEdges.erase(it) : std::next(it);
-        if (m_DisableEdge && pruned.count(m_DisableEdge))
+            it = pruned.Contains(it->second) ? m_RemoveEdges.erase(it) : std::next(it);
+        if (m_DisableEdge && pruned.Contains(m_DisableEdge))
             m_DisableEdge = nullptr;
-        if (m_EnableEdge && pruned.count(m_EnableEdge))
+        if (m_EnableEdge && pruned.Contains(m_EnableEdge))
             m_EnableEdge = nullptr;
         // Move plans are keyed on target archetype pointers — drop any plan
         // whose target was pruned to avoid dangling keys.
         for (auto it = m_MovePlans.begin(); it != m_MovePlans.end();)
-            it = pruned.count(it->first) ? m_MovePlans.erase(it) : std::next(it);
+            it = pruned.Contains(it->first) ? m_MovePlans.erase(it) : std::next(it);
     }
 
   private:

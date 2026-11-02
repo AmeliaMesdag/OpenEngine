@@ -347,7 +347,7 @@ float32 EvaluateLocalWaterBodyWave(float32 worldX, float32 worldZ, float32 time,
 float32 EvaluateLocalWaterBodyWavePacket(
     float32 worldX, float32 worldZ, float32 time, uint32 waveCount, float32 amplitude,
     float32 wavelength, float32 dirX, float32 dirZ,
-    const float32 extraWaves[kMaxOceanWaveMaskLocalWaves - 1u][4],
+    const Mathematics::Vector4 extraWaves[kMaxOceanWaveMaskLocalWaves - 1u],
     float32& outSlopeX, float32& outSlopeZ)
 {
     outSlopeX = 0.0f;
@@ -364,7 +364,7 @@ float32 EvaluateLocalWaterBodyWavePacket(
     outSlopeZ += slopeZ;
     for (uint32 i = 1u; i < waveCount; ++i)
     {
-        const float32* w = extraWaves[i - 1u];
+        const Mathematics::Vector4& w = extraWaves[i - 1u];
         height += EvaluateLocalWaterBodyWave(
             worldX, worldZ, time, w[0], w[1], w[2], w[3], slopeX, slopeZ);
         outSlopeX += slopeX;
@@ -549,6 +549,16 @@ float32 RectInteriorWeight(float32 x, float32 z,
     if (feather <= 1e-3f)
         return 1.0f;
     return Math::SmoothStep(0.0f, feather, std::min(halfX - dx, halfZ - dz));
+}
+
+// True when the ocean time moves the surface: a non-zero FFT displacement bound, dynamic waves, or
+// the Gerstner fallback. The FFT path clamps every displacement term to the Max*Displacement bounds
+// (OceanShapeDisplacementFilteredAniso). The Gerstner fallback has no bound.
+bool SurfaceDisplacesOverTime(const OceanParamsGPU& params, bool dynamicWaves)
+{
+    if (dynamicWaves || params.FFTCascadeCount == 0u)
+        return true;
+    return params.MaxVerticalDisplacement > 0.0f || params.MaxHorizontalDisplacement > 0.0f;
 }
 
 } // anonymous namespace
@@ -1187,11 +1197,22 @@ OceanParamsGPU OceanRenderFeature::GetParams() const
 void OceanRenderFeature::PublishDepthClaim()
 {
     m_LatestDepthInputs.Params = GetParams();
+    if (!SurfaceDisplacesOverTime(m_LatestDepthInputs.Params, IsDynWavesEnabled()))
+        ClearOceanTimes(m_LatestDepthInputs);
     const bool inputsChanged =
         std::memcmp(&m_LatestDepthInputs, &m_ClaimedDepthInputs, sizeof(SurfaceDepthInputs)) != 0;
     m_ClaimedDepthInputs = m_LatestDepthInputs;
     const bool waterInView = m_WaterInViewSincePublish.exchange(false, std::memory_order_acq_rel);
+    m_SurfaceDepthInputsChanged.store(inputsChanged, std::memory_order_release);
     m_SurfaceDepthChanging.store(waterInView && inputsChanged, std::memory_order_release);
+}
+
+void OceanRenderFeature::ClearOceanTimes(SurfaceDepthInputs& inputs)
+{
+    inputs.Params.Time = 0.0f;
+    inputs.FFT.Time = 0.0f;
+    for (OceanFFTParamsGPU& local : inputs.LocalFFT)
+        local.Time = 0.0f;
 }
 
 void OceanRenderFeature::SetInputStats(const OceanInputFrameStats& stats)
@@ -1757,7 +1778,7 @@ bool OceanRenderFeature::IsSurfaceQueryAllowed(float x, float z) const
     return false;
 }
 
-bool OceanRenderFeature::IsWaterFootprintInView(const float* viewProj, float minY, float maxY,
+bool OceanRenderFeature::IsWaterFootprintInView(const Mathematics::Matrix4x4& viewProj, float minY, float maxY,
                                                  float horizontalMargin) const
 {
     std::lock_guard<std::mutex> lock(m_Mutex);

@@ -410,7 +410,7 @@ static void BuildMeshRendererMaterialInspectorUI(const InspectorContext& ctx)
         }
 
         UIElement* matFieldContainer = InspectorUI::AddFieldContainer(matRow);
-        matFieldContainer->Overrides().Set(Style::FlexGrow, 1.0f);
+        matFieldContainer->Style().Set(Style::FlexGrow, 1.0f);
 
         auto matField = std::make_unique<AssetField>();
         matField->AddClass("dropdown-asset-field");
@@ -562,7 +562,7 @@ void RegisterMeshRendererInspector()
             }
 
             UIElement* modelFieldContainer = InspectorUI::AddFieldContainer(modelRow);
-            modelFieldContainer->Overrides().Set(Style::FlexGrow, 1.0f);
+            modelFieldContainer->Style().Set(Style::FlexGrow, 1.0f);
 
             auto modelField = std::make_unique<AssetField>();
             modelField->AddClass("dropdown-asset-field");

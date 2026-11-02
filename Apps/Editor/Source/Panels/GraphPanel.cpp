@@ -45,7 +45,6 @@
 #include "UI/StyleProperties.h"
 #include "Panels/SettingsPanel.h"
 #include "UI/UIEvents.h"
-#include "Scheduler/Scheduler.h"
 #include "Logger/Logger.h"
 #include "Platform/Shell.h"
 #include <algorithm>
@@ -863,7 +862,7 @@ void StyleGraphVariableColorSwatch(UIElement* swatch, uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(20.0f))
         .Set(Style::Height, StyleLength::Px(20.0f))
         .Set(Style::MinWidth, StyleLength::Px(20.0f))
@@ -1247,7 +1246,7 @@ void GraphPanel::ApplyPanelScrollbarPreference()
     {
         if (!scroll)
             return;
-        scroll->Overrides()
+        scroll->Style()
             .Set(Style::OverflowXProp, Overflow::Hidden)
             .Set(Style::OverflowYProp, showScrollbars ? Overflow::Visible : Overflow::Hidden);
         scroll->MarkDirty(UIElement::LayoutDirty | UIElement::StyleDirty | UIElement::VisualDirty);
@@ -1315,7 +1314,7 @@ void GraphPanel::UpdatePanelOverflowIndicators()
 
         auto place = [&](UIElement* indicator, float top)
         {
-            indicator->Overrides()
+            indicator->Style()
                 .Set(Style::Position, PositionType::Absolute)
                 .Set(Style::PositionLeft, StyleLength::Px(localLeft))
                 .Set(Style::PositionTop, StyleLength::Px(std::round(top)))
@@ -1368,7 +1367,7 @@ void GraphPanel::ApplyNodePaletteBounds()
     {
         if (m_PaletteHeightOverrideApplied)
         {
-            m_Palette->Overrides()
+            m_Palette->Style()
                 .Set(Style::Height, StyleLength::Px(kNodePaletteCollapsedHeight))
                 .Set(Style::MaxHeight, StyleLength::Px(kNodePaletteCollapsedHeight));
             m_PaletteHeightOverrideApplied = false;
@@ -1426,7 +1425,7 @@ void GraphPanel::ApplyNodePaletteBounds()
     if (!heightChanged && !m_DraggingPalette)
         return;
 
-    m_Palette->Overrides()
+    m_Palette->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(std::round(left)))
         .Set(Style::PositionTop, StyleLength::Px(std::round(top)))
@@ -1477,7 +1476,7 @@ void GraphPanel::ApplyVariablesPanelBounds()
     {
         if (m_VariablesHeightOverrideApplied)
         {
-            m_VariablesPanel->Overrides()
+            m_VariablesPanel->Style()
                 .Set(Style::Height, StyleLength::Px(kVariablesPanelCollapsedHeight))
                 .Set(Style::MaxHeight, StyleLength::Px(kVariablesPanelCollapsedHeight));
             m_VariablesHeightOverrideApplied = false;
@@ -1514,7 +1513,7 @@ void GraphPanel::ApplyVariablesPanelBounds()
     if (!heightChanged && !m_DraggingVariablesPanel)
         return;
 
-    m_VariablesPanel->Overrides()
+    m_VariablesPanel->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(std::round(left)))
         .Set(Style::PositionTop, StyleLength::Px(std::round(top)))
@@ -1612,7 +1611,7 @@ void GraphPanel::RebuildPalette()
                 const uint32_t nodeColor = NodeColorSettings::GetNodeColorArgb(kind, meta.TypeId);
                 const uint32_t borderColor = WithAlpha(nodeColor, 0xFFu);
                 item->AddClass("node-graph-palette-node-button-colored");
-                item->Overrides()
+                item->Style()
                     .Set(Style::BackgroundColor, WithAlpha(nodeColor, 0xEEu))
                     .Set(Style::BorderWidth, Box4{1.f, 1.f, 1.f, 1.f})
                     .Set(Style::BorderColor, BorderColorsTRBL{borderColor, borderColor, borderColor, borderColor});
@@ -1621,7 +1620,7 @@ void GraphPanel::RebuildPalette()
             label->SetText(meta.DisplayName);
             label->AddClass("button-text");
             if (m_ColorPaletteNodes)
-                label->Overrides().Set(Style::Color, 0xFFFFFFFFu);
+                label->Style().Set(Style::Color, 0xFFFFFFFFu);
             auto icon = std::make_unique<UIElement>();
             icon->AddClass("graph-node-palette-icon");
             GraphNodeIcons::ApplyIconClass(*icon, meta.IconStem);
@@ -1690,30 +1689,22 @@ void GraphPanel::SchedulePaletteRebuild()
         return;
 
     m_PaletteRebuildScheduled = true;
-    Scheduler::IScheduler* sched = GetScheduler();
-    if (!sched)
-    {
-        m_PaletteRebuildScheduled = false;
-        if (m_NodePalettePanelVisible)
-        {
-            RebuildPalette();
-            ApplyNodePaletteBounds();
-        }
-        return;
-    }
+    // Unattached, no manager drains a post: rebuild now.
+    if (!PostAction([this] { RunScheduledPaletteRebuild(); }))
+        RunScheduledPaletteRebuild();
+}
 
-    sched->ScheduleNext([this]()
-    {
-        m_PaletteRebuildScheduled = false;
-        if (!m_NodePalettePanelVisible)
-            return;
-        RebuildPalette();
-        ApplyNodePaletteBounds();
-        if (m_PaletteScroll)
-            m_PaletteScroll->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-        this->UIElement::MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-        RequestRelayout();
-    });
+void GraphPanel::RunScheduledPaletteRebuild()
+{
+    m_PaletteRebuildScheduled = false;
+    if (!m_NodePalettePanelVisible)
+        return;
+    RebuildPalette();
+    ApplyNodePaletteBounds();
+    if (m_PaletteScroll)
+        m_PaletteScroll->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
+    this->UIElement::MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
+    RequestRelayout();
 }
 
 Graph::Variable* GraphPanel::FindGraphVariable(const std::string& name)
@@ -2382,7 +2373,7 @@ void GraphPanel::RebuildVariablesPanel()
     if (!m_VariablesPanel || !m_VariablesContent)
         return;
 
-    m_VariablesPanel->Overrides()
+    m_VariablesPanel->Style()
         .Set(Style::Display, m_VariablesPanelVisible ? DisplayMode::Flex : DisplayMode::None);
     if (!m_VariablesPanelVisible)
         return;
@@ -2680,27 +2671,19 @@ void GraphPanel::ScheduleVariablesPanelRebuild()
     if (m_VariablesRebuildScheduled)
         return;
     m_VariablesRebuildScheduled = true;
-    Scheduler::IScheduler* sched = GetScheduler();
-    if (!sched)
-    {
-        m_VariablesRebuildScheduled = false;
-        if (m_VariablesPanelVisible)
-        {
-            RebuildVariablesPanel();
-            ApplyVariablesPanelBounds();
-        }
+    // Unattached, no manager drains a post: rebuild now.
+    if (!PostAction([this] { RunScheduledVariablesPanelRebuild(); }))
+        RunScheduledVariablesPanelRebuild();
+}
+
+void GraphPanel::RunScheduledVariablesPanelRebuild()
+{
+    m_VariablesRebuildScheduled = false;
+    RebuildVariablesPanel();
+    if (!m_VariablesPanelVisible)
         return;
-    }
-    sched->ScheduleNext([this]()
-    {
-        m_VariablesRebuildScheduled = false;
-        RebuildVariablesPanel();
-        if (m_VariablesPanelVisible)
-        {
-            ApplyVariablesPanelBounds();
-            RequestRelayout();
-        }
-    });
+    ApplyVariablesPanelBounds();
+    RequestRelayout();
 }
 
 void GraphPanel::AddNodeFromPalette(const std::string& typeId)
@@ -2995,7 +2978,7 @@ void GraphPanel::ShowPaletteNodeDragGhost(const std::string& typeId, float scree
         auto ghost = std::make_unique<UIElement>();
         ghost->SetId("NodeGraphPaletteNodeDragGhost");
         ghost->AddClass("node-graph-palette-node-drag-ghost");
-        ghost->Overrides()
+        ghost->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::Display, DisplayMode::Flex)
@@ -3013,7 +2996,7 @@ void GraphPanel::ShowPaletteNodeDragGhost(const std::string& typeId, float scree
         auto label = std::make_unique<Label>();
         label->AddClass("node-graph-palette-node-drag-ghost-label");
         label->SetText(displayName);
-        label->Overrides()
+        label->Style()
             .Set(Style::FontSize, StyleLength::Px(13.f))
             .Set(Style::Color, 0xFFFFFFFFu)
             .Set(Style::FlexShrink, 1.f)
@@ -3024,7 +3007,7 @@ void GraphPanel::ShowPaletteNodeDragGhost(const std::string& typeId, float scree
         auto valueLabel = std::make_unique<Label>();
         valueLabel->AddClass("node-graph-palette-node-drag-ghost-value");
         valueLabel->SetText(valueSummary);
-        valueLabel->Overrides()
+        valueLabel->Style()
             .Set(Style::FontSize, StyleLength::Px(11.f))
             .Set(Style::Color, 0xFFCFCFCFu)
             .Set(Style::FlexShrink, 1.f)
@@ -3038,19 +3021,19 @@ void GraphPanel::ShowPaletteNodeDragGhost(const std::string& typeId, float scree
     }
     else
     {
-        m_PaletteNodeDragGhost->Overrides().Set(Style::Display, DisplayMode::Flex);
+        m_PaletteNodeDragGhost->Style().Set(Style::Display, DisplayMode::Flex);
         if (m_PaletteNodeDragGhostLabel)
             m_PaletteNodeDragGhostLabel->SetText(displayName);
         if (m_PaletteNodeDragGhostValueLabel)
         {
             m_PaletteNodeDragGhostValueLabel->SetText(valueSummary);
-            m_PaletteNodeDragGhostValueLabel->Overrides()
+            m_PaletteNodeDragGhostValueLabel->Style()
                 .Set(Style::Display, valueSummary.empty() ? DisplayMode::None : DisplayMode::Flex);
         }
     }
 
     const uint32_t nodeColor = NodeColorSettings::GetNodeColorArgb(m_Model.KindId, typeId);
-    m_PaletteNodeDragGhost->Overrides().Set(Style::BackgroundColor, WithAlpha(nodeColor, 0xDDu));
+    m_PaletteNodeDragGhost->Style().Set(Style::BackgroundColor, WithAlpha(nodeColor, 0xDDu));
     UpdatePaletteNodeDragGhost(screenX, screenY);
 }
 
@@ -3125,7 +3108,7 @@ void GraphPanel::UpdatePaletteNodeDragGhost(float screenX, float screenY)
     const float roundedTop = std::round(top);
     const float absoluteX = bodyX + roundedLeft;
     const float absoluteY = bodyY + roundedTop;
-    m_PaletteNodeDragGhost->Overrides()
+    m_PaletteNodeDragGhost->Style()
         .Set(Style::Width, StyleLength::Px(std::round(ghostW)))
         .Set(Style::Height, StyleLength::Px(std::round(ghostH)))
         .Set(Style::PositionLeft, StyleLength::Px(roundedLeft))
@@ -3134,7 +3117,7 @@ void GraphPanel::UpdatePaletteNodeDragGhost(float screenX, float screenY)
                                               std::round(ghostW), std::round(ghostH));
     if (m_PaletteNodeDragGhostLabel)
     {
-        m_PaletteNodeDragGhostLabel->Overrides()
+        m_PaletteNodeDragGhostLabel->Style()
             .Set(Style::FontSize, StyleLength::Px(fontSize))
             .Set(Style::Width, StyleLength::Px(std::round(ghostW)))
             .Set(Style::Height, StyleLength::Px(std::round(nameRowH)));
@@ -3143,7 +3126,7 @@ void GraphPanel::UpdatePaletteNodeDragGhost(float screenX, float screenY)
     }
     if (m_PaletteNodeDragGhostValueLabel)
     {
-        m_PaletteNodeDragGhostValueLabel->Overrides()
+        m_PaletteNodeDragGhostValueLabel->Style()
             .Set(Style::FontSize, StyleLength::Px(valueFontSize))
             .Set(Style::Width, StyleLength::Px(std::round(ghostW)))
             .Set(Style::Height, StyleLength::Px(std::round(valueRowH)));
@@ -3205,7 +3188,7 @@ void GraphPanel::ApplyNodePaletteDrag(float x, float y)
     const int leftPx = static_cast<int>(std::round(newLeft));
     const int topPx = static_cast<int>(std::round(newTop));
 
-    m_Palette->Overrides()
+    m_Palette->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(static_cast<float>(leftPx)))
         .Set(Style::PositionTop, StyleLength::Px(static_cast<float>(topPx)))
@@ -3283,7 +3266,7 @@ void GraphPanel::ApplyNodePaletteCollapsedState()
     if (m_PaletteCollapsed)
     {
         m_Palette->AddClass("node-graph-palette-collapsed");
-        m_Palette->Overrides()
+        m_Palette->Style()
             .Set(Style::Height, StyleLength::Px(kNodePaletteCollapsedHeight))
             .Set(Style::MaxHeight, StyleLength::Px(kNodePaletteCollapsedHeight));
         UILayoutAccess::SetLastLayoutRect(*m_Palette, m_Palette->GetLayoutX(), m_Palette->GetLayoutY(),
@@ -3342,7 +3325,7 @@ void GraphPanel::ApplyVariablesPanelDrag(float x, float y)
     newLeft = std::clamp(newLeft, kFloatingPanelMargin, maxLeft);
     newTop = std::clamp(newTop, kFloatingPanelMargin, maxTop);
 
-    m_VariablesPanel->Overrides()
+    m_VariablesPanel->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(std::round(newLeft)))
         .Set(Style::PositionTop, StyleLength::Px(std::round(newTop)))
@@ -3420,7 +3403,7 @@ void GraphPanel::ApplyVariablesPanelCollapsedState()
     if (m_VariablesCollapsed)
     {
         m_VariablesPanel->AddClass("node-graph-variables-collapsed");
-        m_VariablesPanel->Overrides()
+        m_VariablesPanel->Style()
             .Set(Style::Height, StyleLength::Px(kVariablesPanelCollapsedHeight))
             .Set(Style::MaxHeight, StyleLength::Px(kVariablesPanelCollapsedHeight));
         UILayoutAccess::SetLastLayoutRect(*m_VariablesPanel, m_VariablesPanel->GetLayoutX(), m_VariablesPanel->GetLayoutY(),
@@ -3460,13 +3443,9 @@ const GraphCanvas::NodeFactoryFn& GraphPanel::KindNodeFactory()
 
 void GraphPanel::ScheduleLoadTestGraph()
 {
-    Scheduler::IScheduler* sched = GetScheduler();
-    auto load = [this]() { LoadTestGraph(); };
-
-    if (sched)
-        sched->ScheduleNext(std::move(load));
-    else
-        load();
+    // Unattached (no manager to drain a post), load now.
+    if (!PostAction([this]() { LoadTestGraph(); }))
+        LoadTestGraph();
 }
 
 void GraphPanel::LoadTestGraph()
@@ -4406,9 +4385,8 @@ void GraphPanel::EnsureUnsavedChangesModal()
                 return;
             }
         };
-        if (Scheduler::IScheduler* sched = GetScheduler())
-            sched->ScheduleNext(std::move(run));
-        else
+        // Unattached (no manager to drain a post), run now.
+        if (!PostAction(run))
             run();
     });
 
@@ -4443,9 +4421,8 @@ void GraphPanel::EnsureUnsavedChangesModal()
                 return;
             }
         };
-        if (Scheduler::IScheduler* sched = GetScheduler())
-            sched->ScheduleNext(std::move(run));
-        else
+        // Unattached (no manager to drain a post), run now.
+        if (!PostAction(run))
             run();
     });
 
@@ -4459,9 +4436,8 @@ void GraphPanel::EnsureUnsavedChangesModal()
             m_PendingNewGraphPath.clear();
             m_PendingQuitCallback = nullptr;
         };
-        if (Scheduler::IScheduler* sched = GetScheduler())
-            sched->ScheduleNext(std::move(run));
-        else
+        // Unattached (no manager to drain a post), run now.
+        if (!PostAction(run))
             run();
     });
 }
@@ -5072,7 +5048,7 @@ void GraphPanel::UpdateNodePalettePanelToggleButton()
 {
     if (m_Palette)
     {
-        m_Palette->Overrides()
+        m_Palette->Style()
             .Set(Style::Display, m_NodePalettePanelVisible ? DisplayMode::Flex : DisplayMode::None);
         m_Palette->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
@@ -5115,7 +5091,7 @@ void GraphPanel::UpdateVariablesPanelToggleButton()
 {
     if (m_VariablesPanel)
     {
-        m_VariablesPanel->Overrides()
+        m_VariablesPanel->Style()
             .Set(Style::Display, m_VariablesPanelVisible ? DisplayMode::Flex : DisplayMode::None);
         m_VariablesPanel->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     }
@@ -5147,9 +5123,8 @@ void GraphPanel::TogglePaletteNodeColors()
         this->UIElement::MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
     };
 
-    if (Scheduler::IScheduler* sched = GetScheduler())
-        sched->ScheduleNext(std::move(apply));
-    else
+    // Unattached (no manager to drain a post), apply now.
+    if (!PostAction(apply))
         apply();
 }
 

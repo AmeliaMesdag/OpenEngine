@@ -1,4 +1,4 @@
-#include "ECS/ArchetypeTable.h"
+#include "ECS/Archetype/ArchetypeTable.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "ECS/World.h"

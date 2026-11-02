@@ -23,7 +23,7 @@ namespace GameEngine {
 
 using GltfExternalBufferStorage = std::unordered_map<std::filesystem::path, Vector<uint8>>;
 
-/// Frees the parsed document, then the external file bytes its buffers share.
+/// Frees the parsed document, then the external file bytes it read from the disk for its buffers.
 struct GltfDocumentRelease
 {
     std::unique_ptr<GltfExternalBufferStorage> ExternalBuffers;
@@ -60,6 +60,10 @@ using GltfDocument = std::unique_ptr<cgltf_data, GltfDocumentRelease>;
  * targets a node by its input's key count, and refuses a skin with fewer inverse
  * bind matrices than joints. A refused file logs one error that names `path` and
  * the reason.
+ *
+ * Inside an asset decode, a buffer views the external file bytes the decode was handed
+ * (Assets/AssetDecodeInputFiles.h) instead of copying them, so the document must not
+ * outlive the decode.
  *
  * @return The document, or an empty one when the file is refused.
  */

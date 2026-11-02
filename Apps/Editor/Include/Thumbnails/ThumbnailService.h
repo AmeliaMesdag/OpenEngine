@@ -85,15 +85,6 @@ class ThumbnailService : public IThumbnailProvider
     size_t GenerateFolderThumbnails(const std::filesystem::path& folder) override;
     void SetFolderBakeListener(std::function<void(const FolderBakeReport&)> listener) override;
 
-    std::string RequestLiveMaterialPreview(uint64_t windowId,
-                                           const GUID& materialGuid,
-                                           uint32_t widthPx,
-                                           uint32_t heightPx,
-                                           bool previewIblEnabled = true) override;
-
-    bool IsLiveMaterialPreviewReady(uint64_t windowId,
-                                    const std::string& engineName) const override;
-
     // Register ready (non-in-flight) thumbnails with UIManager so the UI pass
     // declares proper read dependencies (barrier generation).
     // Returns true when external texture bindings changed.

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include "ECS/ECSTemplates.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/SkyRenderFeature.h"
@@ -37,6 +38,8 @@ namespace
 constexpr float kPi = 3.14159265f;
 constexpr float kMinSkyTimeOfDayCycleSeconds = 0.25f;
 constexpr float kDefaultMoonAngularRadiusRad = 0.026f;
+// A sky direction of zero length gives the zenith.
+constexpr Mathematics::Vector3 kZenith(0.0f, 1.0f, 0.0f);
 
 // Physically anchor the sky's solar irradiance to the scene's directional sun. A light's
 // unitless intensity already equals its illuminance / kReferenceWhiteNits (the 203-nit anchor), so
@@ -132,19 +135,16 @@ Mathematics::Quaternion RotationFromTo(const Mathematics::Vector3& from,
 // A directional light's `directionWS` (the way it SHINES) = +Z column = +col2.
 // The sun sits the opposite way, so the sky's toward-sun direction =
 // -directionWS = -col2 of the WORLD matrix.
-void ReadLightSunDir(const Components::WorldTransform& xf, float out[3])
+void ReadLightSunDir(const Components::WorldTransform& xf, Mathematics::Vector3& out)
 {
-    out[0] = -xf.matrix[8];
-    out[1] = -xf.matrix[9];
-    out[2] = -xf.matrix[10];
-    ::GameEngine::Rendering::Normalize3(out);
+    out = Mathematics::Vector3(-xf.matrix[8], -xf.matrix[9], -xf.matrix[10]).NormalizeOr(kZenith);
 }
 
 // Orient the light so it shines from the sun toward the scene: directionWS =
 // -sunDir. Extraction reads directionWS = +col2 = q.Rotate(+Z). Writes LOCAL
 // Transform; SyncSunLight only drives unparented lights, so local == world
 // after the hierarchy propagates.
-void WriteLightSunDir(Components::Transform& xf, const float sunDir[3])
+void WriteLightSunDir(Components::Transform& xf, const Mathematics::Vector3& sunDir)
 {
     Mathematics::Vector3 shine(-sunDir[0], -sunDir[1], -sunDir[2]);
     const Mathematics::Quaternion q =
@@ -153,30 +153,28 @@ void WriteLightSunDir(Components::Transform& xf, const float sunDir[3])
 }
 
 // Writes the drive's color to the light and reports the color the light now holds.
-void WriteLinkedSunColor(ECS::World& world, ECS::EntityHandle lightEntity, const float targetColor[3],
-                         float writtenColor[3])
+void WriteLinkedSunColor(ECS::World& world, ECS::EntityHandle lightEntity, const ColorLinear& targetColor,
+                         ColorLinear& writtenColor)
 {
     const auto* light = world.GetComponent<Components::Light>(lightEntity);
 
     const ColorLinear tint =
         light->UseColorTemperature ? Components::KelvinToLinearRGB(light->ColorTemperature) : ColorLinear(1.0f, 1.0f, 1.0f);
 
-    const float newColor[3] = {targetColor[0] / std::max(tint.r, 1e-4f), targetColor[1] / std::max(tint.g, 1e-4f),
-                               targetColor[2] / std::max(tint.b, 1e-4f)};
-    for (int i = 0; i < 3; ++i)
-        writtenColor[i] = newColor[i];
+    writtenColor = ColorLinear(targetColor.r / std::max(tint.r, 1e-4f), targetColor.g / std::max(tint.g, 1e-4f),
+                               targetColor.b / std::max(tint.b, 1e-4f));
 
     // Value-gated write: this runs every frame while the sky drives the sun,
     // so only take the write grant when the color actually changes (idle
     // frames must not stamp — change-signaling IdleEditorStampCount gate).
-    if (newColor[0] == light->Color[0] && newColor[1] == light->Color[1] &&
-        newColor[2] == light->Color[2])
+    if (writtenColor.r == light->Color[0] && writtenColor.g == light->Color[1] && writtenColor.b == light->Color[2])
         return;
 
     if (auto* lightW = world.GetComponentForWrite<Components::Light>(lightEntity))
     {
-        for (int i = 0; i < 3; ++i)
-            lightW->Color[i] = newColor[i];
+        lightW->Color[0] = writtenColor.r;
+        lightW->Color[1] = writtenColor.g;
+        lightW->Color[2] = writtenColor.b;
     }
 }
 
@@ -191,43 +189,36 @@ void WriteLinkedSunIntensity(ECS::World& world, ECS::EntityHandle lightEntity, f
         lightW->Intensity = intensity;
 }
 
-// `color` at unit luminance. False, leaving `outHue` alone, when it is too dark to carry a hue.
-bool HueOf(const float color[3], float outHue[3])
+// `color` at unit luminance. Empty when it is too dark to carry a hue.
+std::optional<ColorLinear> HueOf(const ColorLinear& color)
 {
-    const float luminance = ColorUtils::LinearRec709Luminance({color[0], color[1], color[2]});
+    const float luminance = ColorUtils::LinearRec709Luminance(color);
     if (!(luminance > kMinimumHueLuminance))
-        return false;
-    for (int c = 0; c < 3; ++c)
-        outHue[c] = color[c] / luminance;
-    return true;
+        return std::nullopt;
+    return ColorLinear(color.r / luminance, color.g / luminance, color.b / luminance);
 }
 
 // The hue a curve-driven light takes: the hue of the energy blend of the two bodies,
 // (1 - w) x curveLux x sunHue + w x moonLux x moonHue, which is the sun's hue exactly by day. Where
 // the blend is dark it is the hue of the body the blend favours, then the other body's, then white.
-void CurveDrivenHue(const float sunHue[3], bool sunHasHue, const float moonHue[3], bool moonHasHue, float moonBlend,
-                    float curveLux, float moonLux, float outHue[3])
+ColorLinear CurveDrivenHue(const std::optional<ColorLinear>& sunHue, const std::optional<ColorLinear>& moonHue,
+                           float moonBlend, float curveLux, float moonLux)
 {
-    const float white[3] = {1.0f, 1.0f, 1.0f};
-    const float* favoured = (moonBlend < 0.5f) ? (sunHasHue ? sunHue : (moonHasHue ? moonHue : white))
-                                               : (moonHasHue ? moonHue : (sunHasHue ? sunHue : white));
-    if (moonBlend == 0.0f || !moonHasHue || !sunHasHue)
-    {
-        for (int c = 0; c < 3; ++c)
-            outHue[c] = favoured[c];
-        return;
-    }
-    float blend[3];
-    for (int c = 0; c < 3; ++c)
-        blend[c] = (1.0f - moonBlend) * curveLux * sunHue[c] + moonBlend * moonLux * moonHue[c];
-    if (HueOf(blend, outHue))
-        return;
-    for (int c = 0; c < 3; ++c)
-        outHue[c] = favoured[c];
+    const ColorLinear white(1.0f, 1.0f, 1.0f);
+    const ColorLinear favoured = (moonBlend < 0.5f) ? sunHue.value_or(moonHue.value_or(white))
+                                                    : moonHue.value_or(sunHue.value_or(white));
+    if (moonBlend == 0.0f || !moonHue || !sunHue)
+        return favoured;
+    const float sunWeight = (1.0f - moonBlend) * curveLux;
+    const float moonWeight = moonBlend * moonLux;
+    const ColorLinear blend(sunWeight * sunHue->r + moonWeight * moonHue->r,
+                            sunWeight * sunHue->g + moonWeight * moonHue->g,
+                            sunWeight * sunHue->b + moonWeight * moonHue->b);
+    return HueOf(blend).value_or(favoured);
 }
 
 // Turns `lightEntity`, which the drive has already checked is drivable, to shine from `targetDir`.
-void WriteLinkedSunDirection(ECS::World& world, ECS::EntityHandle lightEntity, const float targetDir[3])
+void WriteLinkedSunDirection(ECS::World& world, ECS::EntityHandle lightEntity, const Mathematics::Vector3& targetDir)
 {
     const auto* localXf = world.GetComponent<Components::Transform>(lightEntity);
 
@@ -260,12 +251,10 @@ void WriteLinkedSunDirection(ECS::World& world, ECS::EntityHandle lightEntity, c
     {
         // Toward-sun is -col2 (shine is +col2). Compare that to primarySunDir
         // so a settled write does not restamp every idle frame.
-        float curSun[3] = {-localXf->matrix[8], -localXf->matrix[9], -localXf->matrix[10]};
-        ::GameEngine::Rendering::Normalize3(curSun);
-        float tgtSun[3] = {targetDir[0], targetDir[1], targetDir[2]};
-        ::GameEngine::Rendering::Normalize3(tgtSun);
-        const float align =
-            curSun[0] * tgtSun[0] + curSun[1] * tgtSun[1] + curSun[2] * tgtSun[2];
+        const Mathematics::Vector3 currentSun =
+            Mathematics::Vector3(-localXf->matrix[8], -localXf->matrix[9], -localXf->matrix[10]).NormalizeOr(kZenith);
+        const Mathematics::Vector3 targetSun = targetDir.NormalizeOr(kZenith);
+        const float align = Mathematics::Vector3::Dot(currentSun, targetSun);
         constexpr float kSunDirHoldBand = 1e-7f;
         // Written as !(>=) so a NaN align (degenerate/zero-scale authored
         // matrix) fails OPEN into the write path — `align < band` would hold
@@ -454,20 +443,18 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
                                      Components::kSkyExposureTrimLimitEv);
 
     const float tod = comp.TimeOfDayHours;
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.GroundAlbedoKeys.Midnight,
-                               comp.GroundAlbedoKeys.Dawn,
-                               comp.GroundAlbedoKeys.Midday,
-                               comp.GroundAlbedoKeys.Sunset,
-                               settings.groundAlbedo);
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.GroundNightColorKeys.Midnight,
-                               comp.GroundNightColorKeys.Dawn,
-                               comp.GroundNightColorKeys.Midday,
-                               comp.GroundNightColorKeys.Sunset,
-                               settings.groundNightColor);
+    settings.groundAlbedo = SampleSkyColorKeyframeCurve(tod,
+                                                        dayKeyTimesHours,
+                                                        comp.GroundAlbedoKeys.Midnight,
+                                                        comp.GroundAlbedoKeys.Dawn,
+                                                        comp.GroundAlbedoKeys.Midday,
+                                                        comp.GroundAlbedoKeys.Sunset);
+    settings.groundNightColor = SampleSkyColorKeyframeCurve(tod,
+                                                            dayKeyTimesHours,
+                                                            comp.GroundNightColorKeys.Midnight,
+                                                            comp.GroundNightColorKeys.Dawn,
+                                                            comp.GroundNightColorKeys.Midday,
+                                                            comp.GroundNightColorKeys.Sunset);
     settings.groundBrightness = std::max(
         0.0f,
         Components::EvaluateSkyScalarDayCurve(
@@ -486,34 +473,30 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
             tod));
     settings.belowHorizonMode = static_cast<uint32_t>(comp.BelowHorizonMode);
     settings.groundHazeStrength = comp.GroundHazeStrength;
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.BelowHorizonDarkColorKeys.Midnight,
-                               comp.BelowHorizonDarkColorKeys.Dawn,
-                               comp.BelowHorizonDarkColorKeys.Midday,
-                               comp.BelowHorizonDarkColorKeys.Sunset,
-                               settings.belowHorizonDarkColor);
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.GroundHorizonColorKeys.Midnight,
-                               comp.GroundHorizonColorKeys.Dawn,
-                               comp.GroundHorizonColorKeys.Midday,
-                               comp.GroundHorizonColorKeys.Sunset,
-                               settings.groundHorizonColor);
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.GroundHorizonNightColorKeys.Midnight,
-                               comp.GroundHorizonNightColorKeys.Dawn,
-                               comp.GroundHorizonNightColorKeys.Midday,
-                               comp.GroundHorizonNightColorKeys.Sunset,
-                               settings.groundHorizonNightColor);
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.NightSkyHorizonColorKeys.Midnight,
-                               comp.NightSkyHorizonColorKeys.Dawn,
-                               comp.NightSkyHorizonColorKeys.Midday,
-                               comp.NightSkyHorizonColorKeys.Sunset,
-                               settings.nightSkyHorizonColor);
+    settings.belowHorizonDarkColor = SampleSkyColorKeyframeCurve(tod,
+                                                                 dayKeyTimesHours,
+                                                                 comp.BelowHorizonDarkColorKeys.Midnight,
+                                                                 comp.BelowHorizonDarkColorKeys.Dawn,
+                                                                 comp.BelowHorizonDarkColorKeys.Midday,
+                                                                 comp.BelowHorizonDarkColorKeys.Sunset);
+    settings.groundHorizonColor = SampleSkyColorKeyframeCurve(tod,
+                                                              dayKeyTimesHours,
+                                                              comp.GroundHorizonColorKeys.Midnight,
+                                                              comp.GroundHorizonColorKeys.Dawn,
+                                                              comp.GroundHorizonColorKeys.Midday,
+                                                              comp.GroundHorizonColorKeys.Sunset);
+    settings.groundHorizonNightColor = SampleSkyColorKeyframeCurve(tod,
+                                                                   dayKeyTimesHours,
+                                                                   comp.GroundHorizonNightColorKeys.Midnight,
+                                                                   comp.GroundHorizonNightColorKeys.Dawn,
+                                                                   comp.GroundHorizonNightColorKeys.Midday,
+                                                                   comp.GroundHorizonNightColorKeys.Sunset);
+    settings.nightSkyHorizonColor = SampleSkyColorKeyframeCurve(tod,
+                                                                dayKeyTimesHours,
+                                                                comp.NightSkyHorizonColorKeys.Midnight,
+                                                                comp.NightSkyHorizonColorKeys.Dawn,
+                                                                comp.NightSkyHorizonColorKeys.Midday,
+                                                                comp.NightSkyHorizonColorKeys.Sunset);
     settings.groundHorizonCosWidth = std::clamp(
         Components::EvaluateSkyScalarDayCurve(
             comp.GroundHorizonCosWidthKeys,
@@ -567,7 +550,10 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
     const Rendering::CameraData* mainCamera = rs->Views().FindMainCameraData(world.GetWorldId());
     const float planetRadius = ScatteringAtmosphere().planetRadius;
     const float cameraAltitude =
-        mainCamera ? Rendering::AltitudeAbovePlanetMeters(mainCamera->cameraPos, planetRadius) : 0.0f;
+        mainCamera ? Rendering::AltitudeAbovePlanetMeters(
+                         Mathematics::Vector3(mainCamera->cameraPos.x, mainCamera->cameraPos.y, mainCamera->cameraPos.z),
+                         planetRadius)
+                   : 0.0f;
 
     // Physically anchor the sky's solar irradiance to the scene's directional sun. Set BEFORE the
     // sun/moon blend, which reads primarySunIntensity as its daytime input
@@ -616,14 +602,12 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
     // that colour with no tint applied (sky_render.frag) — tinting the moon's light but not its
     // disc would hang an orange dome over a grey moon. So an evening key colours the evening and
     // lets go of the night, which is what "sun tint" should mean.
-    float sunTint[3] = {1.0f, 1.0f, 1.0f};
-    SampleSkyVec3KeyframeCurve(tod,
-                               dayKeyTimesHours,
-                               comp.SunTintKeys.Midnight,
-                               comp.SunTintKeys.Dawn,
-                               comp.SunTintKeys.Midday,
-                               comp.SunTintKeys.Sunset,
-                               sunTint);
+    const ColorLinear sunTint = SampleSkyColorKeyframeCurve(tod,
+                                                            dayKeyTimesHours,
+                                                            comp.SunTintKeys.Midnight,
+                                                            comp.SunTintKeys.Dawn,
+                                                            comp.SunTintKeys.Midday,
+                                                            comp.SunTintKeys.Sunset);
 
     if (comp.AutoSunMoon)
     {
@@ -659,19 +643,14 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
         settings.moonAngularRadius =
             kDefaultMoonAngularRadiusRad * std::clamp(comp.MoonSize, 0.1f, 6.0f);
 
-        float dir[3] = { comp.SunDirOverride[0], comp.SunDirOverride[1], comp.SunDirOverride[2] };
-        ::GameEngine::Rendering::Normalize3(dir);
+        const Mathematics::Vector3 dir =
+            Mathematics::Vector3(comp.SunDirOverride[0], comp.SunDirOverride[1], comp.SunDirOverride[2])
+                .NormalizeOr(kZenith);
 
-        settings.primarySunDir[0] = dir[0];
-        settings.primarySunDir[1] = dir[1];
-        settings.primarySunDir[2] = dir[2];
-        settings.scatteringSunDir[0] = dir[0];
-        settings.scatteringSunDir[1] = dir[1];
-        settings.scatteringSunDir[2] = dir[2];
+        settings.primarySunDir = dir;
+        settings.scatteringSunDir = dir;
 
-        state.sunDirWS[0] = dir[0];
-        state.sunDirWS[1] = dir[1];
-        state.sunDirWS[2] = dir[2];
+        state.sunDirWS = dir;
 
         // No automated moon when the sun direction is manually overridden:
         // place it antipodal to the override and disable the disk so it
@@ -686,11 +665,8 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
 
         // This branch never runs the sun/moon blend, so the source is the sun's alone and the tint
         // is the whole of it.
-        settings.primarySunColor[0] = sunTint[0];
-        settings.primarySunColor[1] = sunTint[1];
-        settings.primarySunColor[2] = sunTint[2];
-        for (int c = 0; c < 3; ++c)
-            settings.sunSourceColor[c] = sunTint[c];
+        settings.primarySunColor = sunTint;
+        settings.sunSourceColor = sunTint;
         settings.sunSourceIntensity = settings.primarySunIntensity;
     }
 
@@ -708,7 +684,7 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
     // flips to the moon's side of the sky mid-handoff.
     const Rendering::SkyBodyGroundColors bodies =
         Rendering::EvaluateBodyGroundColors(ScatteringAtmosphere(), config, state, sunTint);
-    Rendering::MixPrimaryGroundColor(bodies, settings.primarySunGroundColor);
+    settings.primarySunGroundColor = Rendering::MixPrimaryGroundColor(bodies);
 
     if (drivenLight.IsValid())
     {
@@ -733,15 +709,10 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
             {
                 // The sun's hue with its elevation held at the horizon once it sets, so a set sun keeps
                 // the deepest horizon red rather than a near-zero colour over a near-zero luminance.
-                float sunHueSource[3] = {bodies.Sun[0], bodies.Sun[1], bodies.Sun[2]};
-                if (sunState.SunElevation < 0.0f)
-                    Rendering::EvaluateGroundLevelSunColor(ScatteringAtmosphere(), sunTint, 0.0f, sunHueSource);
-                float sunHue[3];
-                float moonHue[3];
-                const bool sunHasHue = HueOf(sunHueSource, sunHue);
-                const bool moonHasHue = HueOf(bodies.Moon, moonHue);
-                float hue[3];
-                CurveDrivenHue(sunHue, sunHasHue, moonHue, moonHasHue, moonBlend, curveLux, moonLux, hue);
+                const ColorLinear sunHueSource = (sunState.SunElevation < 0.0f)
+                                                     ? Rendering::EvaluateGroundLevelSunColor(ScatteringAtmosphere(), sunTint, 0.0f)
+                                                     : bodies.Sun;
+                const ColorLinear hue = CurveDrivenHue(HueOf(sunHueSource), HueOf(bodies.Moon), moonBlend, curveLux, moonLux);
                 WriteLinkedSunColor(world, drivenLight, hue, m_DrivenLightColor);
             }
         }
@@ -767,39 +738,31 @@ void SkyEnvironmentSystem::Update(ECS::World& world, float32 deltaTime)
                                     sunState.MoonPhaseFraction * clearSunOverLight;
             if (drivenFields & Components::SkySunIlluminance::kDrivesColor)
             {
-                float linkedLightColor[3];
-                Rendering::MixLinkedLightGroundColor(bodies, moonScale, linkedLightColor);
-                WriteLinkedSunColor(world, drivenLight, linkedLightColor, m_DrivenLightColor);
+                WriteLinkedSunColor(world, drivenLight, Rendering::MixLinkedLightGroundColor(bodies, moonScale),
+                                    m_DrivenLightColor);
             }
         }
     }
 
     settings.iblIntensity = std::max(0.0f, comp.IblIntensity);
     settings.iblLowerHemisphereDarkness = Math::Clamp01(comp.IblLowerHemisphereDarkness);
-    settings.ambientTintSky[0]     = comp.AmbientTintSky.r;
-    settings.ambientTintSky[1]     = comp.AmbientTintSky.g;
-    settings.ambientTintSky[2]     = comp.AmbientTintSky.b;
-    settings.ambientTintEquator[0] = comp.AmbientTintEquator.r;
-    settings.ambientTintEquator[1] = comp.AmbientTintEquator.g;
-    settings.ambientTintEquator[2] = comp.AmbientTintEquator.b;
-    settings.ambientTintGround[0]  = comp.AmbientTintGround.r;
-    settings.ambientTintGround[1]  = comp.AmbientTintGround.g;
-    settings.ambientTintGround[2]  = comp.AmbientTintGround.b;
+    settings.ambientTintSky = ColorLinear(comp.AmbientTintSky.r, comp.AmbientTintSky.g, comp.AmbientTintSky.b);
+    settings.ambientTintEquator = ColorLinear(comp.AmbientTintEquator.r, comp.AmbientTintEquator.g, comp.AmbientTintEquator.b);
+    settings.ambientTintGround = ColorLinear(comp.AmbientTintGround.r, comp.AmbientTintGround.g, comp.AmbientTintGround.b);
 
     // Gradient sky: premultiply the authored 0..1 colors by the luminance (nits) on the shared
     // 203-nit reference-white anchor, so the gradient dome + its baked IBL sit on the SAME
     // scene-linear scale as the physical sky and the camera auto-exposure.
     settings.skyMode = static_cast<uint32_t>(comp.Mode);
     const float gradientScale = std::max(0.0f, comp.GradientSkyIntensity) / Components::kReferenceWhiteNits;
-    settings.gradientSkyTopColor[0]     = comp.GradientSkyTopColor.r * gradientScale;
-    settings.gradientSkyTopColor[1]     = comp.GradientSkyTopColor.g * gradientScale;
-    settings.gradientSkyTopColor[2]     = comp.GradientSkyTopColor.b * gradientScale;
-    settings.gradientSkyHorizonColor[0] = comp.GradientSkyHorizonColor.r * gradientScale;
-    settings.gradientSkyHorizonColor[1] = comp.GradientSkyHorizonColor.g * gradientScale;
-    settings.gradientSkyHorizonColor[2] = comp.GradientSkyHorizonColor.b * gradientScale;
-    settings.gradientSkyBottomColor[0]  = comp.GradientSkyBottomColor.r * gradientScale;
-    settings.gradientSkyBottomColor[1]  = comp.GradientSkyBottomColor.g * gradientScale;
-    settings.gradientSkyBottomColor[2]  = comp.GradientSkyBottomColor.b * gradientScale;
+    settings.gradientSkyTopColor = ColorLinear(comp.GradientSkyTopColor.r * gradientScale, comp.GradientSkyTopColor.g * gradientScale,
+                                               comp.GradientSkyTopColor.b * gradientScale);
+    settings.gradientSkyHorizonColor = ColorLinear(comp.GradientSkyHorizonColor.r * gradientScale,
+                                                   comp.GradientSkyHorizonColor.g * gradientScale,
+                                                   comp.GradientSkyHorizonColor.b * gradientScale);
+    settings.gradientSkyBottomColor = ColorLinear(comp.GradientSkyBottomColor.r * gradientScale,
+                                                  comp.GradientSkyBottomColor.g * gradientScale,
+                                                  comp.GradientSkyBottomColor.b * gradientScale);
 
     // nightSkyBlend must always be driven by the real sun elevation, not
     // primarySunDir (which can blend toward the moon near sunset).
@@ -857,8 +820,8 @@ void SkyEnvironmentSystem::ReleaseEndedFields(ECS::World& world, ECS::EntityHand
     using Components::SkySunIlluminance::kDrivesIntensity;
     const auto* current = world.IsValid(light) ? world.GetComponent<Components::Light>(light) : nullptr;
     const bool releasesIntensity = (endedFields & kDrivesIntensity) != 0;
-    if (current && (endedFields & kDrivesColor) && current->Color[0] == m_DrivenLightColor[0] &&
-        current->Color[1] == m_DrivenLightColor[1] && current->Color[2] == m_DrivenLightColor[2])
+    if (current && (endedFields & kDrivesColor) && current->Color[0] == m_DrivenLightColor.r &&
+        current->Color[1] == m_DrivenLightColor.g && current->Color[2] == m_DrivenLightColor.b)
         Components::SkySunIlluminance::ReleaseSunLightColor(world, light);
     if (current && releasesIntensity && current->Intensity == m_DrivenLightIntensity)
     {
@@ -941,7 +904,7 @@ void SkyEnvironmentSystem::SyncSunLight(ECS::World& world, Components::SkyEnviro
     if (!worldXf || (worldXf->Version == 0u && world.HasComponent<Components::Transform>(lightEntity)))
         return;
 
-    float lightSunDir[3];
+    Mathematics::Vector3 lightSunDir;
     ReadLightSunDir(*worldXf, lightSunDir);
 
     // Adopt the light's world direction as a manual sun override for this frame.

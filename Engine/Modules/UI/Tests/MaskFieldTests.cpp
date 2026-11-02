@@ -6,6 +6,7 @@
 #include "UI/Internal/MaskFieldAccess.h"
 #include "UI/Internal/LayoutAccess.h"
 #include "UI/Controls/ScrollView.h"
+#include "UI/Registration/ElementRegistration.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIEvents.h"
 #include "UI/UIManager.h"
@@ -119,6 +120,46 @@ TEST(MaskFieldTests, ARowClickRaisesOneEventWithThatOptionsBit)
     EXPECT_EQ(field.GetValue(), 0x08u);
 }
 
+// The rows come from the Checkbox registration: each row carries the registered tag and the registered defaults.
+TEST(MaskFieldTests, OptionRowsAreRegisteredCheckboxesWithTheOptionLabels)
+{
+    MaskField field;
+    const std::vector<MaskOption> options = SevenOptions();
+    field.SetOptions(options);
+    MaskFieldAccess::OpenPopup(field);
+
+    const std::vector<Checkbox*>& rows = MaskFieldAccess::OptionRows(field);
+    ASSERT_EQ(rows.size(), options.size());
+    const StringId checkboxTag = UIRegistration::ElementFactoryRegistry::Instance().GetTagId("checkbox");
+    for (size_t index = 0; index < rows.size(); ++index)
+    {
+        EXPECT_EQ(rows[index]->GetTagId(), checkboxTag);
+        EXPECT_EQ(rows[index]->GetText(), options[index].Label);
+        EXPECT_TRUE(rows[index]->HasClass("dropdown-item"));
+        EXPECT_TRUE(rows[index]->HasClass("mask-field-option"));
+        EXPECT_EQ(rows[index]->GetFocusProxy(), &field);
+    }
+}
+
+TEST(MaskFieldTests, OptionsThatShrinkWhileThePopupIsClosedGiveOneRowEachAtTheNextOpen)
+{
+    MaskField field;
+    const std::vector<MaskOption> options = SevenOptions();
+    field.SetOptions(options);
+    MaskFieldAccess::OpenPopup(field);
+    MaskFieldAccess::ClosePopup(field);
+
+    field.SetOptions(std::span<const MaskOption>(options.data(), 3));
+    field.SetValueWithoutNotify(0x08u);
+    MaskFieldAccess::OpenPopup(field);
+
+    const std::vector<Checkbox*>& rows = MaskFieldAccess::OptionRows(field);
+    ASSERT_EQ(rows.size(), 3u);
+    EXPECT_EQ(rows[0]->GetText(), "A");
+    EXPECT_EQ(rows[2]->GetText(), "C");
+    EXPECT_TRUE(rows[2]->GetValue());
+}
+
 TEST(MaskFieldTests, AMixedBitDrawsMixedAndAClickSetsIt)
 {
     MaskField field;
@@ -192,7 +233,7 @@ TEST(MaskFieldTests, APopupTallerThanTheWindowOpensUpwardAndScrolls)
     UILayoutAccess::SetLastLayoutRect(*field, 10.0f, 220.0f, 120.0f, 20.0f);
     MaskFieldAccess::OpenPopup(*field);
     EXPECT_TRUE(field->HasClass("open-upward")) << "220 px above, 60 px below";
-    const auto bound = MaskFieldAccess::OptionList(*field)->Overrides().Get(Style::MaxHeight);
+    const auto bound = MaskFieldAccess::OptionList(*field)->Style().Get(Style::MaxHeight);
     ASSERT_TRUE(bound.has_value()) << "the option list is bounded and scrolls";
     EXPECT_GT(bound->Value, 0.0f);
     EXPECT_LT(bound->Value, 220.0f);
@@ -204,7 +245,7 @@ TEST(MaskFieldTests, APopupTallerThanTheWindowOpensUpwardAndScrolls)
     UILayoutAccess::SetLastLayoutRect(*field, 10.0f, 10.0f, 120.0f, 20.0f);
     MaskFieldAccess::OpenPopup(*field);
     EXPECT_FALSE(field->HasClass("open-upward"));
-    EXPECT_FALSE(MaskFieldAccess::OptionList(*field)->Overrides().Get(Style::MaxHeight).has_value());
+    EXPECT_FALSE(MaskFieldAccess::OptionList(*field)->Style().Get(Style::MaxHeight).has_value());
 }
 
 // A fit-content popup anchored to a field in the right-hand column of a narrow panel is pulled back inside

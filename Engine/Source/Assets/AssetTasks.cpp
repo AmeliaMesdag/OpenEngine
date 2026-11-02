@@ -434,6 +434,13 @@ SharedPtr<Asset> DecodeAssetPayload(AssetManager& assetManager, const GUID& asse
     }
 }
 
+Function<AssetDecodeInputs(const Vector<uint8>&)> MakeDecodeInputResolver(AssetManager& assetManager,
+                                                                          const AssetMetadata& metadata)
+{
+    return [manager = &assetManager, metadata](const Vector<uint8>& bytes)
+    { return manager->GetParserRegistry().ResolveDecodeInputs(metadata, bytes, *manager); };
+}
+
 // ========================================
 // UNIFIED ASSET UNLOAD TASK
 // ========================================
@@ -527,6 +534,7 @@ void AssetBatchCoordinator::LoadAsset(const AssetMetadata& metadata, AssetLoadPr
     {
         return ExecuteAssetDecodeJob(*manager, assetGuid, metadata, std::move(data), cancelRequested);
     };
+    request.ResolveDecodeInputs = MakeDecodeInputResolver(m_AssetManager, metadata);
     request.OnSubmitted = [manager = &m_AssetManager, assetGuid,
                            onComplete = std::move(onComplete), onFailure](const JobSystem::TaskHandle& handle)
     {

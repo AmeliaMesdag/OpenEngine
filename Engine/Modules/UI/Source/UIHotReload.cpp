@@ -143,7 +143,7 @@ static std::unique_ptr<UIElement> CloneFromTemplate(const UITemplateNode& templ,
     std::string innerText;
     if (const std::string* t = templ.FindAttribute("text"))
         innerText = *t;
-    reg.ApplyAttributes(*out, templ.Attributes, innerText);
+    reg.ApplyAttributes(*out, templ.Attributes, innerText, templ.SourceFileName(), templ.SourceLine);
 
     // Recurse
     for (const auto& child : templ.Children)
@@ -447,7 +447,7 @@ static bool ReconcileElement(UIElement& existing, const UITemplateNode& templ, u
     std::string innerText;
     if (const std::string* t = templ.FindAttribute("text"))
         innerText = *t;
-    reg.ApplyAttributes(existing, attrsLower, innerText);
+    reg.ApplyAttributes(existing, attrsLower, innerText, templ.SourceFileName(), templ.SourceLine);
 
     // Reconcile children.
     ReconcileChildren(existing, templ, bindingId);

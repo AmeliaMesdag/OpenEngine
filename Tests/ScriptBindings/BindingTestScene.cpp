@@ -22,9 +22,11 @@
 #include "PhysicsECS/Components/PhysicsCollider.h"
 #include "PhysicsECS/Components/PlaneColliderShape.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -45,6 +47,9 @@ ECS::World* SceneWorld()
     EngineCore& engine = EngineCore::GetInstance();
     return engine.IsInitialized() ? engine.EnsurePrimaryWorld() : nullptr;
 }
+
+// The longest time a grid bake of the scene can take before the bake export reports a failure.
+constexpr std::chrono::seconds kBakeTimeout{10};
 
 } // namespace
 
@@ -180,7 +185,8 @@ GE_TEST_SCENE_EXPORT int GE_TestScene_TakeNavigationDirtyBoxes(std::uint32_t ent
 }
 
 /// Adds level ground at y = 0 and a grid NavigationSurface of 16 x 16 cells of 1 m from the origin over
-/// it, and bakes the surface. 0 on success, -1 when the bake did not complete.
+/// it, and bakes the surface. 0 on success, -1 when the bake fails, -2 when the bake does not end in
+/// kBakeTimeout.
 GE_TEST_SCENE_EXPORT int GE_TestScene_AddBakedNavigationGrid(std::uint32_t* outSurface)
 {
     ECS::World* world = SceneWorld();
@@ -206,12 +212,24 @@ GE_TEST_SCENE_EXPORT int GE_TestScene_AddBakedNavigationGrid(std::uint32_t* outS
     surface.Center = {8.0f, 0.0f, 8.0f};
     surface.Extent = {8.0f, 1.0f, 8.0f};
     world->AddComponentImmediate(entity, surface);
-    PathfindingECS::NavigationSurfaceSystem{}.Update(*world, 1.0f / 60.0f);
-    const auto* baked = world->GetComponent<Components::NavigationSurface>(entity);
-    if (baked == nullptr || baked->BakePhase != Components::NavigationBakePhase::Baked)
-        return -1;
-    *outSurface = entity.id;
-    return 0;
+    // The bake runs on the engine's job pool, and a later update of the same system publishes it. The
+    // destruction of the system cancels its bake, so one system updates until the bake ends.
+    PathfindingECS::NavigationSurfaceSystem surfaces;
+    const auto deadline = std::chrono::steady_clock::now() + kBakeTimeout;
+    do
+    {
+        surfaces.Update(*world, 1.0f / 60.0f);
+        const auto* baked = world->GetComponent<Components::NavigationSurface>(entity);
+        if (baked == nullptr || baked->BakePhase == Components::NavigationBakePhase::Failed)
+            return -1;
+        if (baked->BakePhase == Components::NavigationBakePhase::Baked)
+        {
+            *outSurface = entity.id;
+            return 0;
+        }
+        std::this_thread::yield();
+    } while (std::chrono::steady_clock::now() < deadline);
+    return -2;
 }
 
 /// Adds a NavigationAgent standing at (x, 0, z) that walks the surface on `surface`. 0 on success.

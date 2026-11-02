@@ -2,6 +2,7 @@
 
 #include "TerrainECS/TerrainService.h"
 #include "Terrain/Heightfield.h"
+#include "Mathematics/Matrix4x4.h"
 #include "Mathematics/Vector3.h"
 #include "JobSystem/TaskHandle.h"
 
@@ -58,9 +59,9 @@ struct TileStreamingPriority
 // LH MakeLookAtLH view matrix: row 2 is camera forward (same as
 // SkyRenderNode::ExtractCameraVectors and LensFlareRenderNode). Tile priority
 // uses XZ only. Identity view / look along +Z => (0, 0, 1).
-inline Mathematics::Vector3 TilePriorityViewDirectionXZ(const float view[16])
+inline Mathematics::Vector3 TilePriorityViewDirectionXZ(const Mathematics::Matrix4x4& view)
 {
-    return Mathematics::Vector3{view[2], 0.0f, view[10]};
+    return Mathematics::Vector3{view[0][2], 0.0f, view[2][2]};
 }
 
 // Tile is "in front" when camera-to-tile dots the XZ look. A zero look

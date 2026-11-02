@@ -82,6 +82,8 @@ HDR settings in `game.config` or the environment are ignored rather than refused
 
 The Player writes its log to `%APPDATA%\<gameName>\Logs\game-<process id>.log`, where `gameName` comes from `game.config`. Under a service account `%APPDATA%` is that account's profile, for example `C:\Windows\System32\config\systemprofile\AppData\Roaming` for LocalSystem.
 
+The file records Info and above. Set `GE_LOG_FILE_LEVEL` to `debug`, `info`, `warn` or `error` to change that level. With `GE_LOG_FILE_LEVEL=debug` and `GE_FRAME_TRACE=1`, the file also records the frame trace: one `[FrameTrace] frame=<n> phase=BeginFrame dt=<seconds>` line per frame, where `dt` is the time since the previous frame started, or the fixed step in a `--fixed-fps` run.
+
 | Exit code | Meaning |
 |---|---|
 | `0` | The run ended normally: `--quit-after` reached, or a script asked to quit without another exit code. |

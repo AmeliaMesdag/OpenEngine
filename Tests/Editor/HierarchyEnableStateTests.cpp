@@ -164,7 +164,7 @@ struct RowsInATree
         Tree = tree.get();
         Tree->SetDataProvider(Provider.get());
         Tree->SetOnRowBound([this](GameEngine::TreeId id, GameEngine::UIElement* row) { OnRowBound(id, *row); });
-        Tree->Overrides()
+        Tree->Style()
             .Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(320.0f))
             .Set(GameEngine::Style::Height, GameEngine::StyleLength::Px(900.0f));
         root->AddChild(std::move(tree));
@@ -211,7 +211,7 @@ struct RowsInATree
     // which runs when its provider's data changes, so the pass runs on every update here.
     std::size_t ShrinkUntilTrimmed()
     {
-        Tree->Overrides().Set(GameEngine::Style::Height, GameEngine::StyleLength::Px(60.0f));
+        Tree->Style().Set(GameEngine::Style::Height, GameEngine::StyleLength::Px(60.0f));
         for (int i = 0; i < 60; ++i)
         {
             Tree->EnqueuePumpWork(*Ui);
@@ -343,7 +343,7 @@ TEST(HierarchyEnableStateTests, ALeafWithNoMeshShowsNoEye)
         GameEngine::UIElement row;
         eye.AddTo(row);
         eye.Present(row, entity, hasChildren);
-        const auto display = row.GetChildren().front()->Overrides().Get(GameEngine::Style::Display);
+        const auto display = row.GetChildren().front()->Style().Get(GameEngine::Style::Display);
         return !(display.has_value() && *display == GameEngine::DisplayMode::None);
     };
     EXPECT_FALSE(eyeShown(light, false)) << "nothing to hide on a light";
@@ -451,7 +451,7 @@ TEST(HierarchyEnableStateTests, RowsFollowTheDerivedStateThroughTheTreeAfterItDe
     std::size_t childRows = 0;
     for (const GameEngine::UIElement* row : LiveRows(*rows.Tree))
     {
-        const std::optional<bool> visible = row->Overrides().Get(GameEngine::Style::Visibility);
+        const std::optional<bool> visible = row->Style().Get(GameEngine::Style::Visibility);
         const GameEngine::UIElement* title = RowTitle(*row);
         if ((visible.has_value() && !*visible) || !title || title->GetTextContent().rfind("Child", 0) != 0)
             continue;
@@ -591,7 +591,7 @@ TEST(HierarchyEnableStateTests, ALightEditInsideAnEventRetintsItsRowWithoutRebin
     rows.Tick(2);
 
     EXPECT_EQ(rows.EverBound.size(), 0u) << "a tint change rebound rows";
-    const std::optional<uint32_t> tint = IconOf(*row)->Overrides().Get(GameEngine::Style::BackgroundTint);
+    const std::optional<uint32_t> tint = IconOf(*row)->Style().Get(GameEngine::Style::BackgroundTint);
     ASSERT_TRUE(tint.has_value()) << "the Light's row was not tinted";
     EXPECT_EQ(*tint, 0xFFC80000u);
 }

@@ -30,8 +30,8 @@ std::vector<AreaPiece> CombineAreas(std::span<const AreaRing> unions, std::span<
 // them, a hole of their union narrower than `sliverMeters` on average (twice its area over its
 // perimeter: the lens left between two sampled curves that touch) is filled, and a strip of the
 // result narrower than `touchMeters` (between a cut and the area's edge, or between two cuts) is
-// removed. Elsewhere the boundary is the inputs' to a hundredth of a millimeter. Costs a union and
-// four offsets more than CombineAreas.
+// removed, and no two points of a ring lie closer than `touchMeters`. Elsewhere the boundary is the
+// inputs' to a hundredth of a millimeter. Costs a union and four offsets more than CombineAreas.
 std::vector<AreaPiece> CombineTouchingAreas(std::span<const AreaRing> unions, std::span<const AreaRing> cuts,
                                             float32 touchMeters, float32 sliverMeters);
 

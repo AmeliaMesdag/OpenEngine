@@ -270,7 +270,7 @@ struct PreExposureFixture
     BackdropFrame RunSkyless(float clear)
     {
         BackdropFrame out;
-        Rs->Views().SetViewTargets(View, 0, 0, 0, Rendering::ViewClearConfig(true, clear, clear, clear, 1.0f, true));
+        Rs->Views().SetViewTargets(View, 0, 0, 0, Rendering::ViewClearConfig(true, ColorLinear(clear, clear, clear, 1.0f), true));
         RenderPipelineInstance instance(*Rs, Registry);
         instance.SetBlueprint(SkylessBlueprint());
 

@@ -8,6 +8,7 @@
 #include "AssetCore/GUID.h"
 #include "ECS/ECS.h"
 #include "Engine/Rendering/ModelEntityFactory.h"
+#include "Engine/Rendering/StagingView.h"
 #include "Engine/Rendering/ViewReadbackUtils.h"
 #include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/Handle.h"
@@ -111,15 +112,6 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
     std::string GetOrRequestLensFlare(const std::filesystem::path& assetPath,
                                       int desiredSize,
                                       std::function<void(const std::string&)> onReady);
-
-    // Focused live material preview surface for UI panels such as the material
-    // graph preview. This bypasses asset thumbnail lookup/cache callbacks while
-    // reusing the same material-ball render pass.
-    std::string RequestLiveMaterialPreview(uint64_t windowId,
-                                           const GUID& materialGuid,
-                                           uint32_t widthPx,
-                                           uint32_t heightPx,
-                                           bool previewIblEnabled = true);
 
     // Returns true once the slot backing `engineName` has produced a rendered
     // texture and that texture is currently bound for UI sampling. Callers
@@ -309,9 +301,8 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
         float framingMin[3]{};
         float framingMax[3]{};
 
-        // Current pixel dimensions of this slot's cached textures. 0 means not yet allocated.
-        // Grid/list slots use square s_ThumbnailResolutionPx; the focused preview slot
-        // tracks s_PreviewWidthPx/s_PreviewHeightPx so the RT aspect matches the panel.
+        // Current pixel dimensions of this slot's cached textures (square s_ThumbnailResolutionPx).
+        // 0 means not yet allocated.
         uint32_t texWidth = 0;
         uint32_t texHeight = 0;
 
@@ -328,7 +319,11 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
     // slot render per frame; the render finalizes on the next tick.
     struct RenderLane
     {
-        std::unique_ptr<ECS::World> world;
+        // A queue lane owns its world and view. The preview lane renders into the
+        // Asset Preview's staging view: its world and view belong to the pool.
+        ECS::World* world = nullptr;
+        std::unique_ptr<ECS::World> ownedWorld;
+        bool isPreviewLane = false;
         Rendering::CameraId cameraId = 0;
         Rendering::ViewId viewId = 0;
 
@@ -374,11 +369,9 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
         uint64_t inFlightFrame = 0;
     };
 
-    // The preview lane renders only the focused Asset View preview, so an
-    // orbiting preview never takes the frame from the grid. The queue lanes
-    // drain the pending queue in parallel: each spawned model needs several
-    // frames to settle, and one lane per model would serialize a folder of
-    // them.
+    // The preview lane renders the focused asset into the Asset View's staging view; its grid tile
+    // renders on a queue lane. The queue lanes drain the pending queue in parallel, because a
+    // spawned model needs several frames to settle.
     static constexpr size_t kPreviewLane = 0;
     static constexpr size_t kFirstQueueLane = 1;
     static constexpr size_t kRenderLaneCount = 4;
@@ -442,7 +435,8 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
         {
             for (const RenderLane& lane : lanes)
             {
-                if (ThumbnailCachePolicy::IsSpawnSettling(guid, lane.spawnedModelGuid, lane.spawnedSettleFrames))
+                if (!lane.isPreviewLane &&
+                    ThumbnailCachePolicy::IsSpawnSettling(guid, lane.spawnedModelGuid, lane.spawnedSettleFrames))
                     return true;
             }
             return false;
@@ -457,6 +451,14 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
         // A window ticks on exactly one arm for its whole lifetime (the RenderGraph
         // frame exists per-window per-session, never per-frame).
         bool rg2Mode = false;
+
+        // The Asset Preview's staging view, which the preview lane renders into.
+        // Null or not alive: the preview lane idles. The panel's control owns the view.
+        Engine::Renderer::StagingView* previewView = nullptr;
+        // The slot whose asset the staging view shows; the preview lane renders it
+        // again only for an orbit, an animation, a settle or a request.
+        size_t previewShownSlot = kMaxResidentSlots;
+        GUID previewShownGuid{};
     };
 
     static constexpr size_t kMaxResidentSlots = 256;
@@ -490,11 +492,6 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
     static inline bool s_ClickPaused = false;
     static inline GUID s_OrbitFocusGuid{};
     static inline int s_ThumbnailResolutionPx = 1024;
-    // Pixel dimensions the focused Asset View preview panel wants its thumbnail RT to be.
-    // Zero until SetPreviewSize is called; the handler then allocates non-square targets
-    // for the focused slot so the rendered image matches the panel aspect without letterboxing.
-    static inline uint32_t s_PreviewWidthPx = 0;
-    static inline uint32_t s_PreviewHeightPx = 0;
     // Preview-only lighting controls for model thumbnails and asset 3D views.
     static inline float s_PreviewLightIntensity = 1.2f;
     static inline float s_PreviewAmbientIntensity = 0.15f;
@@ -602,6 +599,15 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
     // Teardown spawned model entities and their GPUScene instances before
     // clearing the lane's world. Must be called before world->Clear().
     void TeardownSpawnedModel(RenderLane& lane);
+    // Drops the lane's spawn, in-flight render and draw lists; the world stays.
+    void ResetLane(RenderLane& lane);
+    void BindPreviewStagingView(uint64_t windowId, Engine::Renderer::StagingView* view);
+    // The world pass of one slot render: the preview lane into its staging view,
+    // a queue lane into its own targets at the slot size.
+    Engine::Renderer::StagingWorldPassRG DeclareLaneWorldPass(const WindowState& ws, RenderLane& lane,
+                                                              const Slot& slot,
+                                                              Rendering::RenderGraph::RGFrame& frame,
+                                                              Rendering::MaterialKeyword keywords);
 
     // Teardown the spawned material primitive entity (GPU instance removal).
     // Must be called before world->Clear().
@@ -894,11 +900,10 @@ class ModelThumbnailHandler : public AssetThumbnailHandler
         s_OrbitFocusGuid = GUID{};
         ResetFocusedPreviewZoom();
     }
-    // Set the desired pixel size for the focused preview. Pass the Asset View panel's
-    // current image element dimensions; the handler will (re)allocate non-square RTs
-    // for the focused slot so the rendering matches the panel aspect.
-    // Pass (0, 0) to fall back to square s_ThumbnailResolutionPx for the focused slot.
-    static void SetPreviewSize(uint32_t widthPx, uint32_t heightPx);
+    // The window's focused preview renders into this staging view at the view's size. The preview lane
+    // owns the entities it spawns in the view's world until the next focus or the detach. A null view
+    // detaches the view; the owner detaches before it releases the view.
+    static void SetPreviewStagingView(uint64_t windowId, Engine::Renderer::StagingView* view);
     static void SetOrbitVelocity(float velY);
     static void EaseToOrbitVelocity(float velY);
     static void PauseClickRotation();

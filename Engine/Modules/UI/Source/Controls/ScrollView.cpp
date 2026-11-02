@@ -49,7 +49,7 @@ class ScrollRowElement final : public UIElement
 public:
     ScrollRowElement()
     {
-        Overrides()
+        Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::FlexGrow, 1.0f)
@@ -64,7 +64,7 @@ class ScrollClipViewportElement final : public UIElement
 public:
     ScrollClipViewportElement()
     {
-        Overrides()
+        Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::FlexGrow, 1.0f)
@@ -80,7 +80,7 @@ class ScrollContentElement final : public UIElement
 public:
     explicit ScrollContentElement(const ScrollView* owner) : m_Owner(owner)
     {
-        Overrides()
+        Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::FlexGrow, 0.0f)
@@ -149,7 +149,7 @@ ScrollView::ScrollView()
     // override outranks every rule. The rest is the scroller's own layout
     // structure -- a column that fills its parent and may shrink below its
     // content -- which no stylesheet is meant to restate.
-    Overrides()
+    Style()
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::FlexShrink, 1.0f)
@@ -442,26 +442,6 @@ void ScrollView::EnsureYVisible(float contentY, float viewTop, float viewHeight)
 	    UIElement::OnEvent(e);
 	}
 	
-	void ScrollView::OnScrollViewportLayout(UIElement* viewport, float W, float H)
-	{
-	    if (viewport != m_ClipViewport)
-	        return;
-	
-	    SetViewportSize(W, H);
-    // When content size is not driven explicitly, keep extents in sync with layout.
-    // Virtualized controls (GridView/ListView/TreeView) typically call SetContentSize(...)
-    // themselves; in that case, clobbering m_ContentW/H here causes scrollbar flicker
-    // during resize/layout convergence.
-    if (!m_HasExplicitContentSize && m_Viewport)
-    {
-        // NOTE: This will set m_HasExplicitContentSize=true via SetContentSize(),
-        // so prefer to update the cached fields directly in this path.
-        m_ContentW = std::max(0.0f, m_Viewport->GetLayoutWidth());
-        m_ContentH = std::max(0.0f, m_Viewport->GetLayoutHeight());
-    }
-    UpdateScrollbarVisibility();
-	}
-
     void ScrollView::OnPostLayout()
     {
         // The clip viewport is the visible region; the scroll-content root holds

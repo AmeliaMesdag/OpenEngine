@@ -114,7 +114,7 @@ static bool ShouldColorModelThumb(UIElement& titleEl)
 static void ApplyModelThumbSaturationOverride(UIElement& titleEl)
 {
     if (ShouldColorModelThumb(titleEl))
-        titleEl.Overrides().Set(Style::BackgroundImageSaturation, 1.0f);
+        titleEl.Style().Set(Style::BackgroundImageSaturation, 1.0f);
 }
 
 static bool IsMeasureEndpointEntity(ECS::World& world, ECS::EntityHandle handle)
@@ -295,7 +295,7 @@ std::filesystem::path TryResolveInspectorIconAssetPath(ECS::World* world,
 }
 
 GUID FindModelGuidForEntityOrChildren(ECS::World* world, ECS::EntityHandle handle,
-                                      EntityChildrenOf childrenOf)
+                                      std::optional<EntityChildrenOf> childrenOf)
 {
     if (!world || !handle.IsValid() || !world->IsValid(handle))
         return {};
@@ -321,7 +321,7 @@ GUID FindModelGuidForEntityOrChildren(ECS::World* world, ECS::EntityHandle handl
     std::vector<ECS::EntityHandle> frontier{handle};
     for (std::size_t next = 0; next < frontier.size(); ++next)
     {
-        for (const ECS::EntityHandle child : childrenOf(frontier[next]))
+        for (const ECS::EntityHandle child : (*childrenOf)(frontier[next]))
         {
             if (const GUID guid = ModelGuidDrawnBy(*world, child); !guid.IsNull())
                 return guid;
@@ -394,7 +394,7 @@ void ClearHierarchyEntityIconClasses(UIElement* row)
 }
 
 void ApplyHierarchyEntityIconClasses(ECS::World* world, UIElement* row, ECS::EntityHandle handle,
-                                     EntityChildrenOf childrenOf)
+                                     std::optional<EntityChildrenOf> childrenOf)
 {
     ClearHierarchyEntityIconClasses(row);
     if (!world || !row || !handle.IsValid() || !world->IsValid(handle))
@@ -606,7 +606,7 @@ void ApplyHierarchyEntityIconClasses(ECS::World* world, UIElement* row, ECS::Ent
 
 void ApplyHierarchyEntityIconClassesToIcon(ECS::World* world, UIElement* icon,
                                            ECS::EntityHandle handle,
-                                           EntityChildrenOf childrenOf)
+                                           std::optional<EntityChildrenOf> childrenOf)
 {
     ApplyHierarchyEntityIconClasses(world, icon, handle, childrenOf);
     if (!icon)
@@ -632,8 +632,7 @@ void ApplyTitleModelThumbnail(UIElement& titleEl, const std::string& relOrEngine
     constexpr size_t kEnginePrefixLen = 7;
     if (relOrEngine.rfind(kEnginePrefix, 0) == 0)
     {
-        source.Kind = BackgroundImageSource::SourceKind::ResourceName;
-        source.Value = relOrEngine.substr(kEnginePrefixLen);
+        source = BackgroundImageSource::Resource(relOrEngine.substr(kEnginePrefixLen));
     }
     else
     {
@@ -646,10 +645,10 @@ void ApplyTitleModelThumbnail(UIElement& titleEl, const std::string& relOrEngine
     size.SizeXIsPercent = false;
     size.SizeY = icon;
     size.SizeYIsPercent = false;
-    BackgroundPositionValue pos{0.0f, true, 50.0f, true};
+    BackgroundPositionValue pos = BackgroundPositionValue::Percent(0.0f, 50.0f);
 
     titleEl.AddClass("hierarchy-entity-model-thumb");
-    titleEl.Overrides()
+    titleEl.Style()
         .Set(Style::BackgroundImage, source)
         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
         .Set(Style::BackgroundSize, size)
@@ -709,9 +708,9 @@ void ApplyInspectorEntityIcon(ECS::World* world,
                 size.SizeXIsPercent = false;
                 size.SizeY = icon;
                 size.SizeYIsPercent = false;
-                BackgroundPositionValue pos{0.0f, true, 50.0f, true};
+                BackgroundPositionValue pos = BackgroundPositionValue::Percent(0.0f, 50.0f);
                 iconEl.AddClass("hierarchy-entity-model-thumb");
-                iconEl.Overrides()
+                iconEl.Style()
                     .Set(Style::BackgroundImage, source)
                     .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
                     .Set(Style::BackgroundSize, size)
@@ -754,9 +753,9 @@ void ApplyInspectorEntityIcon(ECS::World* world,
                     source.Value = pathStr;
                     BackgroundSizeValue size{};
                     size.Mode = BackgroundSizeMode::Contain;
-                    BackgroundPositionValue pos{50.0f, true, 50.0f, true};
+                    BackgroundPositionValue pos = BackgroundPositionValue::Percent(50.0f, 50.0f);
                     iconEl.AddClass("hierarchy-entity-model-thumb");
-                    iconEl.Overrides()
+                    iconEl.Style()
                         .Set(Style::BackgroundImage, source)
                         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
                         .Set(Style::BackgroundSize, size)

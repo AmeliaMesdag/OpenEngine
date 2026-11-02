@@ -115,9 +115,11 @@ struct TerrainFlattenEffect
     // On a PLANAR terrain: the TRUE world-space Y to flatten to. The terrain entity's own
     // translation is measured off during the bake, so the same value means the same altitude
     // wherever the terrain sits. When UseVolumeHeight is true this is instead an OFFSET from
-    // the volume's reference height — the spline's own Y at the closest point for spline
-    // volumes, so a sloped road flattens to its own profile, and the entity's Y for every
-    // other shape, global included. That reference is a world Y too, so the sum is one as well.
+    // the volume's reference height: the spline's own Y at the closest point for a path, so a
+    // sloped road flattens to its own profile; for a closed area, a smooth surface through the
+    // rim's heights that meets each road crossing the rim at the road's own grade; and the
+    // entity's Y for every other shape, global included. That reference is a world Y too, so
+    // the sum is one as well.
     //
     // On a SPHERICAL terrain there is no "up" to be a Y, and the same field reads RADIALLY:
     // a signed offset from the nominal planet surface, or from the volume's own distance from

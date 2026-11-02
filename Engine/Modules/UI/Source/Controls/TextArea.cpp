@@ -641,10 +641,10 @@ void TextArea::OnPostLayout() {
     float contentH = (int)vLines.size() * m.LineAdvance + padT + padB + borderT + borderB;
     if (contentH > curH)
     {
-        const auto existing = Overrides().Get(Style::Height);
+        const auto existing = Style().Get(Style::Height);
         if (!existing.has_value() || !existing->IsPx() || std::fabs(existing->Value - contentH) > 0.5f)
         {
-            Overrides().Set(Style::Height, StyleLength::Px(contentH));
+            Style().Set(Style::Height, StyleLength::Px(contentH));
             MarkDirty(StyleDirty | LayoutDirty);
         }
     }

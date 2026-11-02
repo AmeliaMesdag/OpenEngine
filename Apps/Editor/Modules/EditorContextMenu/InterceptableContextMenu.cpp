@@ -258,6 +258,13 @@ void InterceptableContextMenu::SetItemIcon(uint32_t commandId, const std::string
 void InterceptableContextMenu::SetItemShortcut(uint32_t commandId, const std::string& keyText)
 {
     m_Inner->SetItemShortcut(commandId, keyText);
+    if (commandId == 0)
+        return;
+    for (ShadowItem& item : m_Items)
+    {
+        if (item.CommandId == commandId)
+            item.Shortcut = keyText;
+    }
 }
 
 void InterceptableContextMenu::SetItemTooltip(uint32_t commandId, const std::string& text)
@@ -350,6 +357,7 @@ void InterceptableContextMenu::Show(Platform::Window* window, int x, int y)
             }
             item.Icon = shadow.IconPath;
             item.Color = shadow.ColorHex;
+            item.Shortcut = shadow.Shortcut;
             capture.Items.push_back(std::move(item));
         }
         capture.Invoke = m_CommandHandler;

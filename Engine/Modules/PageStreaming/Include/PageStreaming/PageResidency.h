@@ -5,6 +5,7 @@
 #include "PageStreaming/PageLoader.h"
 #include "PageStreaming/PageSampleRect.h"
 #include "Types/FlatMap.h"
+#include "Types/FlatSet.h"
 
 #include <atomic>
 #include <chrono>
@@ -64,8 +65,8 @@ struct PageResidencyBudget
 ///
 /// Each frame a stream's owner states the pages its level rule wants (Request). Update then:
 /// - drains the loads that finished (a failed read is logged once with its reason and retried with
-///   a backoff; a page absent from its source is fetched again only when its PageStoreAccess
-///   changes its Version);
+///   a backoff; a page absent from its source is fetched again only when a change of one of its
+///   planes' PageStoreAccess can have made it readable: a Commit over a rect it reads, or a whole store);
 /// - orders every stream's wanted pages in one order, pinned first, then nearest, then coarsest,
 ///   and keeps of each field only as many as its cache has slots (what it can place), so the
 ///   terrains of a field divide its slots by that order;
@@ -84,8 +85,9 @@ struct PageResidencyBudget
 ///   levels' pages coarsest first, load like the wanted pages with at most a quarter of the loads
 ///   in flight, so the CPU never holds most of the queue the drawn pages wait on.
 /// A page is fetched once for both sides: its bytes stay on the CPU past its upload, for the CPU
-/// readers (CpuPages) and for a later upload of the same page, until the trim drops them.
-/// Every count it reports is edge-triggered, and a parked camera allocates nothing.
+/// readers (CpuPages) and for a later upload of the same page, until the trim drops them; a stream
+/// over planes keeps them only until their upload. Every count it reports is edge-triggered, and a
+/// parked camera allocates nothing and, once its pages are resident and settled, walks no page.
 ///
 /// Main-thread only, except the load completions, which arrive on reader and job threads and are
 /// queued under a lock until the next Update.
@@ -103,9 +105,9 @@ public:
     /// renderer's frames in flight and the arrival fade window. Its streams keep their loaded pages.
     void ConfigureField(uint32 field, uint32 slotCount, uint32 framesInFlight, float32 fadeSeconds);
 
-    /// Starts (or restarts, dropping its pages) stream `stream` over `source`, its pages held in
-    /// field `field`'s cache (configured first). A restart cancels the old source's outstanding
-    /// loads; their samples never land.
+    /// Starts (or restarts, dropping its pages) stream `stream` over `source` (its planes on one
+    /// lattice), its pages held in field `field`'s cache (configured first). A restart cancels the
+    /// old source's outstanding loads; their samples never land.
     void Configure(uint32 stream, uint32 field, PageSource source);
 
     /// Ends stream `stream`, releases its pages from its field's cache and cancels its outstanding
@@ -117,7 +119,7 @@ public:
 
     /// Keeps level `firstPinnedLevel` and coarser for stream `stream`'s CPU readers until the next Configure,
     /// and `windowPages` (nearest first; a repeated page keeps its first place) until the next Update.
-    /// A stream over a PageStoreAccess has no CPU readers: the call asserts and does nothing.
+    /// A stream over planes has no CPU readers: the call asserts and does nothing.
     void RequestCpu(uint32 stream, uint32 firstPinnedLevel, std::span<const PageAddress> windowPages);
 
     /// Fetches page `address` of stream `stream` now, on the calling thread, when it is not on the
@@ -149,6 +151,8 @@ public:
     std::span<const PageAddress> CpuWindow(uint32 stream) const;
 
     uint32 LoadsStartedThisFrame() const { return m_LoadsStarted; }
+    /// Pages the last Update's passes walked, its field caches' included (get_terrain_stats).
+    uint32 PageVisitsThisFrame() const { return m_Visits; }
     uint64 CpuBytes() const { return m_CpuBytes; }
 
 private:
@@ -182,7 +186,8 @@ private:
         uint32 TopLevel = 0;
         uint32 PageBytes = 0; // every loaded page's bytes: the source's PayloadBytes
         uint64 Epoch = 0; // bumps on Configure, so a restarted stream ignores its old loads
-        uint64 SourceVersion = 0; // the PageStoreAccess Version at which its Absent pages were read
+        uint64 SourceVersion = 0; // the planes' Version sum at which its Absent pages were read
+        std::vector<uint64> PlaneVersions; // each plane's Version that its Absent pages caught up with
         std::shared_ptr<std::atomic<bool>> Cancel = std::make_shared<std::atomic<bool>>(false);
         std::vector<PageWant> Wanted;
         bool WantedChanged = true;
@@ -222,8 +227,12 @@ private:
         std::vector<Completion> Completions;
     };
 
-    // Clears the absent pages of each stream whose PageStoreAccess changed its Version.
+    // Clears the absent pages that a change of a plane's Version can have made readable
+    // (PageStoreAccess::ReadableSince).
     void RetryAbsentPages();
+    // Drops the bytes of the plane streams' pages the last Update uploaded; then lists this Update's.
+    void DropUploadedPlaneBytes();
+    void ListUploadedPlanePages();
     void DrainCompletions(uint64 frameIndex);
     void Land(Stream& stream, uint64 frameIndex, PageFetchOutcome& outcome);
     static CpuPageDirectory DirectoryOf(const Stream& stream);
@@ -234,9 +243,12 @@ private:
     void FetchNow(Stream& stream, uint64 frameIndex, const PageAddress& address);
     void FetchCpuNow(uint64 frameIndex, std::chrono::steady_clock::time_point start);
     void StartCpuLoads(uint64 frameIndex, bool pinned);
-    void RebuildCandidates();
+    void RebuildCandidates(uint64 lastFrame);
     void StartLoads(uint64 frameIndex);
     void StartLoad(uint32 streamId, Stream& stream, const PageAddress& address, bool cpu);
+    // True when field `field`'s placeable pages loaded or changed residency since its cache's last
+    // Update, or that Update left one without a slot: its cache then updates, else it ticks.
+    bool FieldChanged(uint32 field, const PageCache& cache) const;
     void AssignLoaded(uint64 frameIndex, float32 deltaSeconds, bool teleport);
     void RewriteRefreshed(uint32 field, PageCache& cache);
     void TrimCpuPages(uint64 frameIndex);
@@ -265,9 +277,15 @@ private:
     };
 
     std::vector<TrimCandidate> m_TrimOrder;                 // reused by the trim
+    std::vector<CachedPage> m_UploadedPlanePages;           // the plane streams' uploads of the last Update
+    std::vector<PageSampleRect> m_ReadableRects;            // reused by RetryAbsentPages
     std::vector<std::pair<uint64, uint32>> m_CpuOrder;      // reused by RequestCpu: (page key, place)
     std::vector<uint32> m_CpuFirst;                         // reused by RequestCpu: each page's first place
     bool m_CandidatesStale = false; // a stream was forgotten or restarted
+    bool m_LoadsChanged = true;     // the candidate pass of StartLoads can start a load
+    uint64 m_NextRetryFrame = ~0ull; // the first frame a failed candidate may load again
+    FlatSet<uint32> m_ChangedFields; // fields whose placeable pages loaded or changed
+    uint32 m_Visits = 0;
     uint64 m_CpuBytes = 0;
     uint64 m_FrameIndex = 0; // the last Update's frame
     uint32 m_InFlightCount = 0;

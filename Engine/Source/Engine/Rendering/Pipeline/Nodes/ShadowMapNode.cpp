@@ -432,7 +432,7 @@ void ShadowMapNode::DeclareForView(ViewDeclare& d)
         return;
     // Thumbnail cameras before their first update: inverting a zero viewProj
     // produces NaN that propagates everywhere.
-    if (camData->proj[0] == 0.0f && camData->proj[5] == 0.0f)
+    if (camData->proj[0][0] == 0.0f && camData->proj[1][1] == 0.0f)
         return;
 
     // This frame's fit: computed when the caster cull was scheduled, ahead of

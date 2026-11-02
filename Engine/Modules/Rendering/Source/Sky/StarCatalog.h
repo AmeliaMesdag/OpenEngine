@@ -2,9 +2,13 @@
 
 #include "Rendering/Sky/StarCatalog.h"
 
-#include <array>
 #include <cstdint>
 #include <vector>
+
+namespace GameEngine
+{
+struct ColorLinear;
+}
 
 namespace GameEngine::Rendering
 {
@@ -28,6 +32,6 @@ uint32_t StarFieldCountBrighterThan(float magnitude);
 /// The linear Rec.709 colour of a blackbody at the given temperature in kelvin, scaled to
 /// luminance 1: Planck's law integrated against the CIE 1931 2-degree observer (Wyman, Sloan and
 /// Shirley's 2013 fit), converted from XYZ, with out-of-gamut negatives clipped.
-std::array<float, 3> BlackbodyLinearRec709(float kelvin);
+ColorLinear BlackbodyLinearRec709(float kelvin);
 
 } // namespace GameEngine::Rendering

@@ -19,6 +19,7 @@ set(ASSET_TEST_SOURCES
     AssetIOServiceTests.cpp
     AssetDecodeGateTests.cpp
     AssetDecodeCancellationTests.cpp
+    AssetDecodeInputReadTests.cpp
     AsyncAssetReloadTests.cpp
     InlineReloadDeferralTests.cpp
     ParserRegistryExtensionDispatchTests.cpp
@@ -34,6 +35,7 @@ set(ASSET_TEST_SOURCES
     AssetRegistryConcurrencyTests.cpp
     RegistryScanFanoutTests.cpp
     AssetDbParallelLoadTests.cpp
+    AssetDbStoreLoadTests.cpp
     AssetRootSeparationTests.cpp
     FoldedPathIndexTests.cpp
     AssetDbLegacyPathNormalizationTests.cpp

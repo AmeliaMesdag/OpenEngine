@@ -1,4 +1,5 @@
 #include "ECS/World.h"
+#include "ECS/Archetype/ArchetypeMatchCache.h"
 #include "ECS/Component/ComponentFactory.h"
 #include "ECS/Component/ComponentRegistry.h"
 #include "ECS/Component/ComponentMigration.h"
@@ -217,7 +218,10 @@ World::World(JobSystem::WorkStealingThreadPool* js)
 }
 
 World::World(const WorldConfig& cfg, JobSystem::WorkStealingThreadPool* js)
-    : m_WorldId(g_nextWorldId.fetch_add(1u, std::memory_order_relaxed)), jobSystem(js), config(cfg)
+    : m_WorldId(g_nextWorldId.fetch_add(1u, std::memory_order_relaxed))
+    , m_ArchetypeMatches(std::make_unique<ArchetypeMatchCache>())
+    , jobSystem(js)
+    , config(cfg)
 {
     entityMetadata.reserve(config.ExpectedEntityCount);
 
@@ -825,9 +829,10 @@ Archetype* World::GetOrCreateArchetype(const ComponentSignature& signature)
     auto archetype = std::make_unique<Archetype>(signature, this);
     archetype->InitializeTable(componentSizes);
 
-    auto* ptr = archetype.get();
+    Archetype* created = archetype.get();
     archetypes[signature] = std::move(archetype);
-    return ptr;
+    m_ArchetypeMatches->AddArchetype(created);
+    return created;
 }
 
 Archetype* World::GetOrCreateArchetypeForAdd(Archetype* source, ComponentTypeId typeId)
@@ -1165,7 +1170,7 @@ bool World::SetComponentEnabledImmediate(EntityHandle entity, ComponentTypeId co
     if (disabledTag == 0 || !IsValid(entity))
         return false;
     // Idempotent, like Entity::SetEnabled<T>: a redundant call must not bump the
-    // structural version and invalidate every query cache in the world.
+    // structural version and invalidate every cache keyed on it.
     const bool disabled = HasComponent(entity, disabledTag);
     if (enabled != disabled)
         return false;
@@ -1975,8 +1980,9 @@ bool World::MigrateComponentLayout(const ComponentLayoutChange& change)
         }
     }
 
-    // Invalidate caches: baked move-plans hold stale column offsets; query caches key on the
-    // structural version (they re-collect archetypes + re-resolve column offsets on a bump).
+    // Invalidate caches: baked move-plans hold stale column offsets; CachedQuery keys on the
+    // structural version and re-resolves its column offsets on a bump. Query resolves them on
+    // every iteration, and the archetype set it matches is unchanged.
     for (auto& [sig, archPtr] : archetypes)
         if (archPtr)
             archPtr->m_MovePlans.clear();
@@ -2063,29 +2069,6 @@ std::vector<Archetype*> World::GetAllArchetypes() const
     return result;
 }
 
-namespace
-{
-// The enable-state half of the archetype match. The common shape — exclude by
-// default, nothing opted back in — is one Intersects against a signature the
-// query instantiation owns; the per-type opt-in walks the (tiny) exclude set
-// so an opted-in tag stops rejecting while entity activity still does.
-bool CarriesExcludedEnableStateTag(const ComponentSignature& signature,
-                                   const ArchetypeFilter& filter)
-{
-    if (filter.DisabledExclude == nullptr)
-        return false;
-    if (filter.DisabledInclude == nullptr)
-        return signature.Intersects(*filter.DisabledExclude);
-
-    for (ComponentTypeId id : filter.DisabledExclude->GetComponents())
-    {
-        if (signature.Contains(id) && !filter.DisabledInclude->Contains(id))
-            return true;
-    }
-    return false;
-}
-} // namespace
-
 void World::CollectMatchingArchetypes(const ArchetypeFilter& filter,
                                       std::vector<Archetype*>& out) const
 {
@@ -2095,17 +2078,23 @@ void World::CollectMatchingArchetypes(const ArchetypeFilter& filter,
 
     for (const auto& pair : archetypes)
     {
-        const ComponentSignature& signature = pair.second->GetSignature();
-        if (filter.Required != nullptr && !signature.ContainsAll(*filter.Required))
-            continue;
-        if (filter.Include != nullptr && !signature.ContainsAll(*filter.Include))
-            continue;
-        if (filter.Exclude != nullptr && signature.Intersects(*filter.Exclude))
-            continue;
-        if (CarriesExcludedEnableStateTag(signature, filter))
-            continue;
-        out.push_back(pair.second.get());
+        if (filter.Matches(pair.second->GetSignature()))
+            out.push_back(pair.second.get());
     }
+}
+
+World::MatchedArchetypes World::MatchArchetypes(const ArchetypeFilter& filter)
+{
+    {
+        std::shared_lock lock(worldMutex);
+        if (const ArchetypeMatchList* list = m_ArchetypeMatches->Find(filter))
+            return {list, list->GetArchetypes(), structuralChangeVersion.load(std::memory_order_relaxed)};
+    }
+    std::unique_lock lock(worldMutex);
+    const ArchetypeMatchList* list = m_ArchetypeMatches->Find(filter);
+    if (list == nullptr)
+        list = &m_ArchetypeMatches->Add(filter);
+    return {list, list->GetArchetypes(), structuralChangeVersion.load(std::memory_order_relaxed)};
 }
 
 uint64 World::GetColumnStampCount() const
@@ -2163,6 +2152,7 @@ void World::Clear()
     InvokeAllRemoveHooks();
 
     archetypes.clear();
+    m_ArchetypeMatches->Clear();
     entityMetadata.clear();
     freeIndices.clear();
     entityCount.store(0);
@@ -3468,29 +3458,30 @@ size_t World::PruneEmptyArchetypes()
     // Two-pass prune: first collect the set of archetypes to remove, then erase
     // all graph edges in surviving archetypes that point to them, THEN destroy.
     // This prevents dangling Archetype* pointers in m_AddEdges / m_RemoveEdges.
-    std::unordered_set<Archetype*> toPrune;
+    FlatSet<Archetype*> toPrune;
     for (auto& [sig, arch] : archetypes)
     {
         if (arch->GetEntityCount() == 0)
-            toPrune.insert(arch.get());
+            toPrune.Insert(arch.get());
     }
 
-    if (toPrune.empty())
+    if (toPrune.Empty())
         return 0;
 
     // Scrub edges in surviving archetypes.
     for (auto& [sig, arch] : archetypes)
     {
-        if (toPrune.count(arch.get()))
+        if (toPrune.Contains(arch.get()))
             continue;
         arch->EraseEdgesTo(toPrune);
     }
+    m_ArchetypeMatches->RemoveArchetypes(toPrune);
 
     // Now safe to destroy the archetypes themselves.
     size_t prunedCount = 0;
     for (auto it = archetypes.begin(); it != archetypes.end();)
     {
-        if (toPrune.count(it->second.get()))
+        if (toPrune.Contains(it->second.get()))
         {
             it = archetypes.erase(it);
             ++prunedCount;
@@ -3501,8 +3492,8 @@ size_t World::PruneEmptyArchetypes()
         }
     }
 
-    // Invalidate query caches (so Query::UpdateCache rebuilds m_CachedArchetypes)
-    // and CreateHandle caches (so thread_local cached Archetype* is discarded).
+    // Invalidate CachedQuery's archetype copies and the CreateHandle caches (so
+    // thread_local cached Archetype* is discarded).
     structuralChangeVersion.fetch_add(1, std::memory_order_relaxed);
     ++m_WorldGeneration;
 

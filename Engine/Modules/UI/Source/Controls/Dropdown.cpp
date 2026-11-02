@@ -112,19 +112,19 @@ static void ApplyOptionColorToItemLabel(Label* raw, const Dropdown::Option& opt,
 {
     if (isSelected)
     {
-        raw->Overrides().Reset(Style::Color);
+        raw->Style().Reset(Style::Color);
         return;
     }
     if (!opt.color.empty())
     {
         uint32_t argb = 0;
         if (TryParseHexColor(opt.color.c_str(), argb))
-            raw->Overrides().Set(Style::Color, argb);
+            raw->Style().Set(Style::Color, argb);
         else
-            raw->Overrides().Reset(Style::Color);
+            raw->Style().Reset(Style::Color);
     }
     else
-        raw->Overrides().Reset(Style::Color);
+        raw->Style().Reset(Style::Color);
 }
 
 } // namespace
@@ -652,17 +652,17 @@ void Dropdown::UpdateHeaderLabel()
         {
             uint32_t argb = 0;
             if (TryParseHexColor(opt.color.c_str(), argb))
-                m_HeaderLabel->Overrides().Set(Style::Color, argb);
+                m_HeaderLabel->Style().Set(Style::Color, argb);
             else
-                m_HeaderLabel->Overrides().Reset(Style::Color);
+                m_HeaderLabel->Style().Reset(Style::Color);
         }
         else
-            m_HeaderLabel->Overrides().Reset(Style::Color);
+            m_HeaderLabel->Style().Reset(Style::Color);
     }
     else
     {
         m_HeaderLabel->SetText(m_NoSelectionText);
-        m_HeaderLabel->Overrides().Reset(Style::Color);
+        m_HeaderLabel->Style().Reset(Style::Color);
     }
 }
 
@@ -712,7 +712,7 @@ void Dropdown::OpenMenuUi()
         if (m_ItemsContainer)
             m_ItemsContainer->AddClass("open");
         if (m_HeaderLabel)
-            m_HeaderLabel->Overrides().Reset(Style::Color);
+            m_HeaderLabel->Style().Reset(Style::Color);
     }
     // Opening/closing the popup changes style/layout (display:none <-> flex). We rely on the
     // dirty marks from AddClass/RemoveClass and UIManager's "late dirty" rebuild to reflect

@@ -204,6 +204,8 @@ bool ParseDocument(const std::filesystem::path& filePath, const std::string& tex
                    std::string* outError, int* outErrorLine = nullptr);
 bool ValidateDocument(const SceneDoc& doc, std::string* outError, int* outErrorLine = nullptr);
 bool ReadTextFile(const std::filesystem::path& p, std::string& out);
+// Writes `text` to a temporary file beside `p`, then puts it in place of `p`.
+bool WriteTextFileAtomic(const std::filesystem::path& p, const std::string& text);
 
 // The last scene IO error, which GetLastSceneIOError returns.
 void SetError(const std::filesystem::path& file, int line, const std::string& msg);

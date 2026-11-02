@@ -1,19 +1,17 @@
 #pragma once
 
-// ShaderPropertyTableCache: the one place a program's declared-property table is
-// built from disk. Registration (MaterialSystem) and composition (ShaderComposer,
-// on worker threads) both resolve through it, so the lanes the CPU cache writes
-// and the lanes the composed GLSL reads come from the same parse. Entries are
-// keyed by the three source files and drop when any of them changes on disk.
+// The one parse of a program's declared properties: registration and composition resolve
+// through it, so the CPU lanes and the composed GLSL agree. An entry lives until the next
+// announced shader source edit (NotifyShaderSourcesChanged).
 
 #include "Rendering/Materials/Shader/ShaderPropertyTable.h"
+#include "Types/Types.h"
 
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 
 namespace GameEngine::Rendering
 {
@@ -30,32 +28,23 @@ class ShaderPropertyTableCache
   public:
     static ShaderPropertyTableCache& Instance();
 
-    // The table for these files: parsed once per (path, mtime, size) triple and
-    // shared until one of the files changes. Thread-safe. An unreadable surface
-    // yields a table whose Errors name the file.
+    // The table for these files: parsed once from the bytes the shader source
+    // cache holds and shared until the next announced edit. A hit touches no
+    // file. Thread-safe. An unreadable surface yields a table whose Errors name the file.
     std::shared_ptr<const ShaderPropertyTable> Resolve(const ShaderPropertyTableInputs& inputs);
 
   private:
-    struct FileStamp
-    {
-        int64_t WriteTime = 0;
-        uint64_t Size = 0;
-        bool Exists = false;
-        bool operator==(const FileStamp&) const = default;
-    };
     struct Entry
     {
-        FileStamp Adapter;
-        FileStamp Surface;
-        FileStamp VertexModifier;
+        // The shader source cache generation the table was built under.
+        uint64_t SourceGeneration = 0;
         std::shared_ptr<const ShaderPropertyTable> Table;
     };
 
-    static FileStamp Stamp(const std::filesystem::path& path);
-    static std::shared_ptr<const ShaderPropertyTable> Build(const ShaderPropertyTableInputs& inputs);
+    static std::shared_ptr<const ShaderPropertyTable> Build(const ShaderPropertyTableInputs& inputs, bool& readFailed);
 
     std::mutex m_Mutex;
-    std::unordered_map<std::string, Entry> m_Entries;
+    FastHashMap<std::string, Entry> m_Entries;
 };
 
 } // namespace GameEngine::Rendering

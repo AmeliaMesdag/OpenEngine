@@ -69,15 +69,9 @@ struct AreaGroundSettings
 // when `closed`, a repeated closing point dropped.
 std::vector<Mathematics::Vector3> MergeGroundSamples(std::span<const Mathematics::Vector3> samples, bool closed);
 
-// The ground of `pieces` (CombineAreas): every ring sampled along the ground at the settings'
-// spacing, each sample at `groundAt`, and the lid over the pieces with their holes: the rings'
-// corners ear-clipped (the rightmost hole bridged first), then split until no edge is longer than
-// the settings allow, the rings' samples put back on its edges. A ring wound the other way (an
-// outer ring clockwise, a hole counter-clockwise) is turned first, so Outline keeps the winding it
-// documents. The lid's outline passes through every ring sample and stays within
-// kAreaLidInsetMeters of the rings: a corner leaves out the samples within it of the straight run
-// past them, and a split of that run stands on it. Interior lid points take `groundAt`. No pieces,
-// no rings.
+// The ground of `pieces` (CombineAreas): each ring turned to its documented winding and sampled at
+// `groundAt` at the settings' spacing, and the lid over the pieces: split to the edge limit,
+// flipped to Delaunay, through every ring sample and within kAreaLidInsetMeters of the rings.
 AreaGround BuildAreaGround(std::span<const AreaPiece> pieces, const AreaGroundSettings& settings,
                            const GroundSampler& groundAt);
 

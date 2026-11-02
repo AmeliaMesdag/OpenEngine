@@ -77,7 +77,7 @@ void ApplySpectrumValueFieldStyle(FloatField* field)
 {
     if (!field)
         return;
-    field->Overrides()
+    field->Style()
         .Set(Style::Width, StyleLength::Px(kSpectrumValueFieldWidthPx))
         .Set(Style::FlexShrink, 0.0f);
     // Display at most 3 decimals, trimming trailing zeros (1.000 -> "1",
@@ -107,9 +107,9 @@ void SetOctaveRowDimmed(Slider* slider, FloatField* valueField, bool disabled)
 {
     const float opacity = disabled ? kDisabledOctaveOpacity : kEnabledOctaveOpacity;
     if (slider)
-        slider->Overrides().Set(Style::Opacity, opacity);
+        slider->Style().Set(Style::Opacity, opacity);
     if (valueField)
-        valueField->Overrides().Set(Style::Opacity, opacity);
+        valueField->Style().Set(Style::Opacity, opacity);
 }
 
 void BuildOctaveRow(const InspectorContext& ctx, OceanWaveSpectrum& spec, std::size_t octave)
@@ -131,7 +131,7 @@ void BuildOctaveRow(const InspectorContext& ctx, OceanWaveSpectrum& spec, std::s
     // gets the rest of the row.
     UIElement* toggleCell = InspectorUI::AddFieldContainer(row);
     toggleCell->AddClass("inspector-field-toggle");
-    toggleCell->Overrides()
+    toggleCell->Style()
         .Set(Style::FlexGrow, 0.0f)
         .Set(Style::FlexShrink, 0.0f)
         .Set(Style::FlexBasis, StyleLength::Px(36.0f));
@@ -145,7 +145,7 @@ void BuildOctaveRow(const InspectorContext& ctx, OceanWaveSpectrum& spec, std::s
     {
         // Draggable (no inspector-label-no-drag) so SetupLabelDragSlider can scrub
         // the power and double-click can reset it.
-        label->Overrides()
+        label->Style()
             .Set(Style::Width, StyleLength::Px(56.0f))
             .Set(Style::FlexGrow, 0.0f)
             .Set(Style::FlexShrink, 0.0f);
@@ -153,7 +153,7 @@ void BuildOctaveRow(const InspectorContext& ctx, OceanWaveSpectrum& spec, std::s
 
     // Power slider fills the remaining row width (flex-grow on the field cell).
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides().Set(Style::FlexGrow, 1.0f);
+    fieldContainer->Style().Set(Style::FlexGrow, 1.0f);
 
     auto sliderOwned = std::make_unique<Slider>();
     Slider* slider = sliderOwned.get();

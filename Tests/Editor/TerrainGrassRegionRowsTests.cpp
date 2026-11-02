@@ -115,6 +115,13 @@ TEST_F(TerrainGrassRegionRowsTest, TheNoticeShowsOnlyWhenTheTerrainsAmountIsZero
     EXPECT_NE(FindLabelStartingWith(parent, "Darken Ground"), nullptr);
 }
 
+TEST_F(TerrainGrassRegionRowsTest, TheNoticeStaysQuietWhenTheRowKeepsNoneOfTheTerrainsAmount)
+{
+    Build(0.0f, 0.0f);
+    EXPECT_EQ(FindFirst<EditorUI::InspectorNotice>(parent), nullptr)
+        << "a row at 0% keeps the soil out whatever the terrain's amount, so it has its effect";
+}
+
 // The map recomposes once a drag ends, not at every step: the drag arms the interactive-edit signal
 // and the commit releases it.
 TEST_F(TerrainGrassRegionRowsTest, ADragHoldsTheInteractiveEditUntilItCommits)

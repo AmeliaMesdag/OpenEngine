@@ -158,7 +158,7 @@ TEST(CssTransformStyle, IsNotInherited)
 
 TEST(CssTransformStyle, OverridesApplyThroughTheTypedKeys)
 {
-    StyleOverrides ovr;
+    StyleDeclaration ovr;
     ovr.Set(Style::Transform,
             TransformValue{}.Rotate(45.0f).Translate(StyleLength::Percent(-50.0f), StyleLength::Percent(-50.0f)));
     ovr.Set(Style::TransformOrigin, TransformOriginValue{StyleLength::Px(0.0f), StyleLength::Percent(100.0f)});

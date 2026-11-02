@@ -100,7 +100,7 @@ protected:
 
     bool TitleHidden() const
     {
-        const auto display = m_Title->Overrides().Get(Style::Display);
+        const auto display = m_Title->Style().Get(Style::Display);
         return display.has_value() && *display == DisplayMode::None;
     }
 

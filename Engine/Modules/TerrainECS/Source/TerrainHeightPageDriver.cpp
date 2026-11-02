@@ -1,9 +1,11 @@
 #include "TerrainECS/TerrainHeightPageDriver.h"
 
 #include "TerrainECS/HeightPageStoreLoader.h"
-#include "TerrainECS/TerrainHeightPageFeature.h"
+#include "TerrainECS/TerrainPageFeature.h"
 #include "TerrainECS/PlanetPageRequester.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePageSource.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainHeightSource.h"
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "TerrainECS/TerrainService.h"
@@ -12,6 +14,7 @@
 #include "Components/Terrain/Terrain.h"
 #include "Components/Terrain/TerrainPlanetRelief.h"
 #include "PageStreaming/GeneratedHeightPageProvider.h"
+#include "PageStreaming/PageStore/PageStoreAccess.h"
 #include "PageStreaming/PageStore/PageStoreReader.h"
 #include "Rendering/Core/Device.h"
 #include "Types/Fnv1a.h"
@@ -64,6 +67,29 @@ uint64 PlanetIdentity(float64 radius, uint32 faceSamples, const Components::Terr
     return HashCombine(hash, relief.Octaves);
 }
 
+
+// The surface pages of the terrain of `height` over the wedges of `views`, one texel a pixel
+// (kSurfacePageTargetPixels). The surface stores lie on the tile lattice, which a cooked height store
+// on its own grid does not.
+void RequestSurfacePages(TerrainSurfacePages& pages, const PagedTerrainRequest& height,
+                         const TerrainSurfacePageSource& source, const TiledRenderExtent& extent,
+                         std::span<const PageRequestCamera> views, float32 focalScale)
+{
+    const PageStreaming::PageStoreLevel& level0 = source.Planes.front()->Levels().front();
+    SurfacePagedRequest request;
+    request.Terrain = height.Terrain;
+    request.TerrainGeneration = height.TerrainGeneration;
+    request.Name = height.Name;
+    request.Source = &source;
+    request.Shape = height.Shape;
+    request.Shape.SamplesX = level0.SamplesX;
+    request.Shape.SamplesZ = level0.SamplesZ;
+    request.Shape.Level0TexelX = extent.WorldSizeX / static_cast<float32>(level0.SamplesX - 1u);
+    request.Shape.Level0TexelZ = extent.WorldSizeZ / static_cast<float32>(level0.SamplesZ - 1u);
+    const PageLevelView view =
+        MakePageLevelView(kPageLevelReferenceRows, 2.0f * std::atan(1.0f / focalScale), kSurfacePageTargetPixels);
+    pages.Request(request, views, view);
+}
 } // namespace
 
 void RequestPlanetHeightPages(TerrainService& service, const Rendering::IDevice& device, uint32 planet,
@@ -73,7 +99,7 @@ void RequestPlanetHeightPages(TerrainService& service, const Rendering::IDevice&
 {
     if (focalScale <= 0.0f || cameras.empty())
         return;
-    TerrainHeightPages& pages = service.GetHeightPages();
+    TerrainPages& pages = service.GetTerrainPages();
     const float64 radius = terrain.PlanetRadius;
     const float32 texel = terrain.SamplesPerMeter > 0.0f ? 1.0f / terrain.SamplesPerMeter : 0.0f;
     const uint32 faceSamples = PlanetFaceSamples(radius, texel);
@@ -132,17 +158,16 @@ void RequestPlanetHeightPages(TerrainService& service, const Rendering::IDevice&
     pages.RequestPlanet(request, cameras, view);
 }
 
-void RequestTiledTerrainHeightPages(TerrainService& service, const Rendering::IDevice& device,
-                                    TiledTerrainData& tiled, const TiledRenderExtent& extent,
-                                    const TerrainHandle& renderTerrain, std::string_view name, float32 originY,
-                                    float32 heightScale,
-                                    float32 targetPixelError, std::span<const Mathematics::Vector3> cameras,
-                                    float32 focalScale)
+void RequestTiledTerrainPages(TerrainService& service, const Rendering::IDevice& device, TiledTerrainData& tiled,
+                              const TiledRenderExtent& extent, const TerrainHandle& renderTerrain,
+                              std::string_view name, float32 originY, float32 heightScale, float32 targetPixelError,
+                              std::span<const Mathematics::Vector3> cameras, std::span<const PageRequestCamera> views,
+                              float32 focalScale)
 {
     const bool gpuReadsPages = !CBTTerrain::CBTDeviceRunsNarrowArm(
         device.PreferredShaderSource() == Rendering::ShaderSourceKind::Wgsl,
         device.GetCapabilities().supportsShaderInt64);
-    TerrainHeightPages& pages = service.GetHeightPages();
+    TerrainPages& pages = service.GetTerrainPages();
     const TiledTerrainBase& base = tiled.Config.Base;
     const bool generated = base.Source != Components::TerrainBaseSource::HeightmapAsset;
 
@@ -243,12 +268,14 @@ void RequestTiledTerrainHeightPages(TerrainService& service, const Rendering::ID
                                                                     targetPixelError)
                                                 : PageLevelView{};
     pages.Request(request, cameras, view);
+    if (TerrainSurfaceIsPaged(inputs, tiled.SurfacePages) && focalScale > 0.0f && !views.empty())
+        RequestSurfacePages(pages.Surface(), request, tiled.SurfacePages, extent, views, focalScale);
 }
 
-void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature, TerrainHeightPageFeature& pages,
+void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature, TerrainPageFeature& pages,
                        uint64 frameIndex, float32 deltaSeconds, uint32 framesInFlight)
 {
-    TerrainHeightPages& heightPages = service.GetHeightPages();
+    TerrainPages& heightPages = service.GetTerrainPages();
     heightPages.Update(frameIndex, deltaSeconds, false, framesInFlight);
     heightPages.RestartOnDeviceEpoch(pages.DeviceEpoch());
     pages.Publish(heightPages);

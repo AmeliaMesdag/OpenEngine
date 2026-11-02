@@ -14,6 +14,7 @@
 #include "Memory/AllocationCountScope.h"
 
 #include "HeldWorkers.h"
+#include "LatencyBudget.h"
 #include "TestPlatform.h"
 
 #include <gtest/gtest.h>
@@ -322,6 +323,71 @@ TEST(JobCounterTest, ExitingThreadReturnsItsCachedQueueToThePool)
 
     std::printf("[JobCounterThreadExit] %llu operator-new calls on the second thread\n", secondThreadNews);
     EXPECT_EQ(secondThreadNews, 0u) << "the exiting thread's cached queue did not reach the shared pool";
+}
+
+namespace {
+
+// One job more than a queue block holds.
+constexpr int kBlockCrossingJobs = static_cast<int>(JobSystem::ConcurrentQueue<void*>::BLOCK_SIZE) + 1;
+
+// Takes every pooled queue and fills the slab cache, then holds every worker and
+// forks kBlockCrossingJobs jobs on a fresh queue, each adding 1 to ran; returns
+// the operator-new calls on this thread over every fork after the first.
+unsigned long long ForkAcrossABlockOnAFreshQueue(JobSystem::WorkStealingThreadPool& pool, std::atomic<int>& ran)
+{
+    // Each Run takes at most two slabs: its job and its visit.
+    constexpr int kSlabs = 2 * kBlockCrossingJobs;
+
+    std::array<JobSystem::JobCounter, kSharedTaggedJobsSlots> pooled;
+    for (JobSystem::JobCounter& counter : pooled)
+    {
+        pool.Run([] {}, counter);
+        pool.Wait(counter);
+    }
+    std::array<void*, kSlabs> slabs{};
+    for (void*& slab : slabs)
+    {
+        slab = JobSystem::Detail::AcquireTaskSlab();
+    }
+    for (void* slab : slabs)
+    {
+        JobSystem::Detail::ReleaseTaskSlab(slab);
+    }
+
+    HeldWorkers held(pool);
+    JobSystem::JobCounter counter;
+    const auto job = [&ran] { ran.fetch_add(1, std::memory_order_relaxed); };
+    pool.Run(job, counter);
+    unsigned long long crossingAllocations = 0;
+    {
+        const Memory::AllocationCountScope allocations(Memory::CountWindow::ThisThread);
+        for (int t = 1; t < kBlockCrossingJobs; ++t)
+        {
+            pool.Run(job, counter);
+        }
+        crossingAllocations = allocations.Count();
+    }
+    pool.Wait(counter);
+    held.Release();
+    return crossingAllocations;
+}
+
+} // namespace
+
+// With every worker held, a fork of BLOCK_SIZE + 1 jobs crosses a block boundary
+// of its queue before the block ahead drains. The thread first takes every pooled
+// queue, so the first Run builds a fresh queue for the counter, outside the window.
+TEST(JobCounterTest, AForkCrossingABlockBeforeAnyJobRunsAllocatesNothing)
+{
+    JobSystem::WorkStealingThreadPool pool(2);
+    std::atomic<int> ran{0};
+    unsigned long long crossingAllocations = 0;
+    std::thread([&pool, &ran, &crossingAllocations] { crossingAllocations = ForkAcrossABlockOnAFreshQueue(pool, ran); }).join();
+
+    std::printf("[JobCounterBlockCrossing] %llu allocations over a fork of %d unrun jobs\n",
+                crossingAllocations, kBlockCrossingJobs);
+    EXPECT_EQ(ran.load(), kBlockCrossingJobs);
+    EXPECT_EQ(crossingAllocations, 0u);
 }
 
 // With every worker held, the forking thread runs every job of its forks
@@ -1044,14 +1110,14 @@ TEST(JobCounterStressTest, LeftoverStubsCoexistWithFreshRuns)
               static_cast<uint64_t>(kIterations) * (kPhase1Fanout + kFreshRuns));
 }
 
-// Strand detector across the NEW consumption path (slice-1 pattern): with the
-// ~1ms backstop rescue raised to 500ms, a wake lost anywhere in the
-// Run/stub/participate/park pipeline pins a fork at backstop scale. No fork
-// sample may exceed 100ms.
+// Strand detector for the JobCounter path: the Wait caller runs its own queued jobs, so a fork
+// strands only when the caller leaves a queued job to the workers and the wake for it is lost.
+// With the ~1 ms backstop raised to kStressBackstopUs, the strand lasts until a sleeper's backstop fires.
 TEST(JobCounterStrandTest, NoBackstopRescueUnderStorm)
 {
     JobSystem::WorkStealingThreadPool pool(4);
-    pool.SetSleepBackstopForTest(500000);
+    pool.SetSleepBackstopForTest(kStressBackstopUs);
+    const LatencyBudget budget = ReadLatencyBudget();
 
     constexpr int kIterations = 30000;
     std::mt19937 rng(0x5EED5);
@@ -1078,9 +1144,11 @@ TEST(JobCounterStrandTest, NoBackstopRescueUnderStorm)
 
     std::printf("[JobCounterStrand] iters=%d worst=%.1fus over100ms=%d\n", kIterations, worstUs,
                 over100ms);
-    EXPECT_EQ(over100ms, 0)
-        << "a fork sample >100ms with the rescue disabled is a lost wakeup; worst = " << worstUs
-        << "us";
+    // A lost wakeup holds the fork until a sleeper's backstop fires. Scheduler tails on a
+    // loaded machine pass 100 ms but stay under kLostWakeupLineUs, so only the latency line reads the load.
+    EXPECT_LT(worstUs, kLostWakeupLineUs)
+        << "a fork sample at the backstop with the rescue disabled is a lost wakeup";
+    ExpectWithinBudget(worstUs, kStressLatencyLineUs, budget, "JobCounterStrand worst fork");
     EXPECT_EQ(sink.load(), static_cast<uint64_t>(kIterations) * 2);
 }
 

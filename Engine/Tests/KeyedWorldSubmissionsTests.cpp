@@ -84,3 +84,35 @@ TEST(KeyedWorldSubmissions, ClearForgetsEveryInstance)
     ASSERT_EQ(set.Size(), 1u);
     EXPECT_EQ(set.Records()[0].instanceIndex, 9u);
 }
+
+// The revision names the records as they are: it holds while nothing edits the set,
+// moves on every edit that changes a record, and no two sets share one.
+TEST(KeyedWorldSubmissions, RevisionMovesOnEveryEditAndOnlyThen)
+{
+    KeyedWorldSubmissions set;
+    set.Append(MakeRecord(3, 0));
+    const uint64 first = set.Revision();
+    EXPECT_NE(first, 0u);
+    EXPECT_EQ(set.Revision(), first) << "no edit, same revision";
+
+    const uint32 absent[] = {42u};
+    set.Erase(absent);
+    EXPECT_EQ(set.Revision(), first) << "an erase that removes nothing is not an edit";
+
+    set.Append(MakeRecord(5, 0));
+    const uint64 afterAppend = set.Revision();
+    EXPECT_NE(afterAppend, first);
+
+    const uint32 five[] = {5u};
+    set.Erase(five);
+    const uint64 afterErase = set.Revision();
+    EXPECT_NE(afterErase, afterAppend);
+    EXPECT_NE(afterErase, first) << "the same records after two edits still get a new revision";
+
+    set.Clear();
+    EXPECT_NE(set.Revision(), afterErase);
+
+    KeyedWorldSubmissions other;
+    other.Append(MakeRecord(3, 0));
+    EXPECT_NE(other.Revision(), set.Revision()) << "two sets never share a revision";
+}

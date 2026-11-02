@@ -36,7 +36,7 @@ FloatingPanel::FloatingPanel()
     AddClass("floating-panel");
     SetOverlayLayer(OverlayLayer::Modal);
     RequestSubtreeStyleAssetPath(kStyleAssetPath, "editor");
-    Overrides()
+    Style()
         .Set(Style::Display, DisplayMode::None)
         .Set(Style::ZIndex, kBaseZIndex);
 
@@ -176,7 +176,7 @@ void FloatingPanel::Show(std::string panelId, UIElement* panel, std::string titl
     m_Mount->SetTarget(panel);
 
     m_Open = true;
-    Overrides().Set(Style::Display, DisplayMode::Flex);
+    Style().Set(Style::Display, DisplayMode::Flex);
     ClampFullyInside(x, y, width, height);
     Place(x, y, width, height);
     Raise();
@@ -199,7 +199,7 @@ void FloatingPanel::Hide()
     m_Title.clear();
     m_IconClass.clear();
     ApplyChromeState();
-    Overrides().Set(Style::Display, DisplayMode::None);
+    Style().Set(Style::Display, DisplayMode::None);
 }
 
 UIElement* FloatingPanel::GetMountedPanel() const
@@ -224,7 +224,7 @@ void FloatingPanel::AssignChromeIds(const std::string& panelId)
 
 void FloatingPanel::Raise()
 {
-    Overrides().Set(Style::ZIndex, ++s_TopZIndex);
+    Style().Set(Style::ZIndex, ++s_TopZIndex);
     // Reparenting mid-drag changes tree generation; capture is restored by id
     // on the next Update. Stay put until the gesture ends.
     if (m_Dragging || m_Resizing)
@@ -248,7 +248,7 @@ void FloatingPanel::Raise()
 void FloatingPanel::Place(float x, float y, float width, float height)
 {
     ClampToParent(x, y, width, height);
-    Overrides()
+    Style()
         .Set(Style::PositionLeft, StyleLength::Px(x))
         .Set(Style::PositionTop, StyleLength::Px(y))
         .Set(Style::Width, StyleLength::Px(width))

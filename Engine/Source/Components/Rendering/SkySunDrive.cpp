@@ -126,11 +126,10 @@ int WorstSample(const Math::Curve& curve, const std::array<float, kSeedSamplesPe
     return worst;
 }
 
-float LuminanceOfGround(const float source[3], float upDot)
+float LuminanceOfGround(const ColorLinear& source, float upDot)
 {
-    float ground[3];
-    Rendering::EvaluateGroundLevelSunColor(Rendering::ScatteringAtmosphere(), source, upDot, ground);
-    return ColorUtils::LinearRec709Luminance({ground[0], ground[1], ground[2]});
+    return ColorUtils::LinearRec709Luminance(
+        Rendering::EvaluateGroundLevelSunColor(Rendering::ScatteringAtmosphere(), source, upDot));
 }
 
 // The default sky's physical curve for a 100 000 lx sun (PhysicalSeedCurve at the component's
@@ -321,8 +320,7 @@ float NoonReferenceLux(const SkyEnvironment& sky)
     const Rendering::SkySystemConfig config{};
     const float noonUpDot = std::max(static_cast<float>(std::sin(noonElevation * kDegreesToRadians)),
                                      Rendering::SunOnlyUpDot(config));
-    const float white[3] = {1.0f, 1.0f, 1.0f};
-    return CurveIlluminanceLux(sky.SunIlluminanceCurve, 12.0f) / LuminanceOfGround(white, noonUpDot);
+    return CurveIlluminanceLux(sky.SunIlluminanceCurve, 12.0f) / LuminanceOfGround(ColorLinear(1.0f, 1.0f, 1.0f), noonUpDot);
 }
 
 float MoonlightLux(const SkyEnvironment& sky, float moonUpDot)
@@ -330,19 +328,18 @@ float MoonlightLux(const SkyEnvironment& sky, float moonUpDot)
     if (!sky.ShowMoon)
         return 0.0f;
     const Rendering::SkySystemConfig config{};
-    const float moonColor[3] = {config.moonColor.r, config.moonColor.g, config.moonColor.b};
-    float moonGround[3];
-    Rendering::EvaluateGroundLevelSunColor(Rendering::ScatteringAtmosphere(), moonColor, moonUpDot, moonGround);
+    const ColorLinear moonGround =
+        Rendering::EvaluateGroundLevelSunColor(Rendering::ScatteringAtmosphere(), config.moonColor, moonUpDot);
     return MoonlightLuxFromGround(sky, Rendering::MoonPhaseIlluminanceFraction(sky.MoonArcPosition), moonGround);
 }
 
-float MoonlightLuxFromGround(const SkyEnvironment& sky, float moonPhaseFraction, const float moonGround[3])
+float MoonlightLuxFromGround(const SkyEnvironment& sky, float moonPhaseFraction, const ColorLinear& moonGround)
 {
     if (!sky.ShowMoon)
         return 0.0f;
     const Rendering::SkySystemConfig config{};
     return SanitisedMoonlightLux(sky.MoonlightIlluminance) * moonPhaseFraction *
-           ColorUtils::LinearRec709Luminance({moonGround[0], moonGround[1], moonGround[2]}) /
+           ColorUtils::LinearRec709Luminance(moonGround) /
            ColorUtils::LinearRec709Luminance(config.moonColor);
 }
 

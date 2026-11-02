@@ -60,7 +60,7 @@ TEST(DeformationMotionProducer, TheBlockCarriesThePreviousEndpointAndTheRasterIt
     previous.DeformationScrollSeconds = 7.25f;
     previous.DeformationOrigin = 128.0;
     for (int i = 0; i < 16; ++i)
-        previous.Camera.viewProj[i] = static_cast<float>(i) + 0.5f;
+        previous.Camera.viewProj[i / 4][i % 4] = static_cast<float>(i) + 0.5f;
 
     DeformationMotionEndpoint endpoint{};
     endpoint.Previous = &previous;

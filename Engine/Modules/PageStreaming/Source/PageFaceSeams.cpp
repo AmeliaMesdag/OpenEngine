@@ -1,6 +1,6 @@
 #include "PageFaceSeams.h"
 
-#include "HeightPageCodec.h"
+#include "Height/HeightPageCodec.h"
 
 #include "Mathematics/Matrix3x3.h"
 #include "Mathematics/Vector3.h"

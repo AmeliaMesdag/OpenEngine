@@ -36,13 +36,13 @@ class CBTTreeSeed
     // drawing; a retire forces a full VertexEval, so it draws the new heights.
     static constexpr uint32_t kRestartSettleFrames = 16u;
 
-    // The heap depth a restarted tree is refined to before its first draw (or the terrain's cap
-    // when lower): 2^14 = 16,384 planar leaves, about 1/90 of the terrain's width per facet, so
-    // a restart never draws the 4 or 24 root triangles that flatten every ridge and hill.
+    // The uniform heap depth a restarted tree is seeded to (or the terrain's cap when lower) before
+    // CBTRenderFeature::RefineRestartedTree refines it to the camera: 2^14 = 16,384 planar leaves, the
+    // start of that refine, which runs one synchronous update per level from here to the cap.
     static constexpr uint32_t kRestartSeedDepth = 14u;
     static_assert(kRestartSeedDepth >= 12u,
-                  "a restart seeded shallower than about 4,000 planar leaves draws facets too coarse "
-                  "for relief: the ridge-pose burst showed a 20 m wall vanish at 512 leaves");
+                  "a shallower seed leaves the restart frame's refine more levels to split, one "
+                  "synchronous update each");
     static_assert((1u << kRestartSeedDepth) <= CBTTerrain::kDefaultBisectorPoolSize / 32u,
                   "the restart seed must leave the pool to the screen-space refinement");
 

@@ -37,7 +37,7 @@
 #include "UI/Controls/Label.h"
 #include "UI/Controls/ScrollView.h"
 #include "UI/Registration/ElementRegistration.h"
-#include "UI/StyleOverrides.h"
+#include "UI/StyleDeclaration.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIElement.h"
 #include "UI/UIEvents.h"
@@ -183,9 +183,9 @@ extern "C"
 {
 
 // Drive a bar/fill element's width as a percentage (0..100). GE_Result_NotFound if the handle no
-// longer resolves. Routes through the element's style override bag, whose dirty callback schedules
-// the relayout. Note that override-bag writes survive a .uxml reconcile (a different bag from the
-// inline-style attribute), while authored `text` does not.
+// longer resolves. Writes the element's code style, Style(), whose dirty callback schedules the
+// relayout. A .uxml reconcile keeps Style() and re-applies the authored attributes (the `style`
+// attribute into InlineStyle()), so this write survives it while a write to `text` does not.
 GE_API GE_Result GE_CDECL GE_UIElement_SetWidthPercent(uint64_t instanceId, float pct)
 {
     try
@@ -193,7 +193,7 @@ GE_API GE_Result GE_CDECL GE_UIElement_SetWidthPercent(uint64_t instanceId, floa
         GameEngine::UIElement* el = ResolveElement(instanceId);
         if (!el)
             return GE_Result_NotFound;
-        el->Overrides().Set(GameEngine::Style::Width, GameEngine::StyleLength::Percent(pct));
+        el->Style().Set(GameEngine::Style::Width, GameEngine::StyleLength::Percent(pct));
         return GE_Result_Ok;
     }
     catch (...)
@@ -202,8 +202,8 @@ GE_API GE_Result GE_CDECL GE_UIElement_SetWidthPercent(uint64_t instanceId, floa
     }
 }
 
-// Writes left/top into the style override bag SetWidthPercent uses, which a .uxml reconcile keeps.
-// The bag is applied after the element's style attribute, so this call wins over an authored inline `left:`.
+// Writes left/top into the element's code style, Style(), as SetWidthPercent does; a .uxml reconcile keeps it.
+// Style() wins over the element's style attribute, so this call wins over an authored inline `left:`.
 GE_API GE_Result GE_CDECL GE_UIElement_SetOffset(uint64_t instanceId, float x, float y)
 {
     try
@@ -212,8 +212,8 @@ GE_API GE_Result GE_CDECL GE_UIElement_SetOffset(uint64_t instanceId, float x, f
         if (!el)
             return GE_Result_NotFound;
 
-        el->Overrides().Set(GameEngine::Style::PositionLeft, GameEngine::StyleLength::Px(x));
-        el->Overrides().Set(GameEngine::Style::PositionTop, GameEngine::StyleLength::Px(y));
+        el->Style().Set(GameEngine::Style::PositionLeft, GameEngine::StyleLength::Px(x));
+        el->Style().Set(GameEngine::Style::PositionTop, GameEngine::StyleLength::Px(y));
         return GE_Result_Ok;
     }
     catch (...)
@@ -486,7 +486,8 @@ GE_API GE_Result GE_CDECL GE_UIElement_UnregisterEvent(uint64_t instanceId, cons
     }
 }
 
-// The same override FloatingPanel::Raise writes; the next style pass re-sorts the parent's children.
+// Writes z-index into the element's code style, Style(), as FloatingPanel::Raise does; the next
+// style pass re-sorts the parent's children.
 GE_API GE_Result GE_CDECL GE_UIElement_SetZIndex(uint64_t instanceId, int32_t zIndex)
 {
     try
@@ -495,7 +496,7 @@ GE_API GE_Result GE_CDECL GE_UIElement_SetZIndex(uint64_t instanceId, int32_t zI
         if (!el)
             return GE_Result_NotFound;
 
-        el->Overrides().Set(GameEngine::Style::ZIndex, static_cast<int>(zIndex));
+        el->Style().Set(GameEngine::Style::ZIndex, static_cast<int>(zIndex));
         return GE_Result_Ok;
     }
     catch (...)

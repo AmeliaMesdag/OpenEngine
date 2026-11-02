@@ -84,7 +84,7 @@ void DockTabBar::ApplyScrollOffset()
     {
         if (!child || !child->HasClass("tab"))
             continue;
-        child->Overrides().Set(Style::PositionLeft, StyleLength::Px(-m_ScrollOffset));
+        child->Style().Set(Style::PositionLeft, StyleLength::Px(-m_ScrollOffset));
         child->MarkDirty(LayoutDirty | VisualDirty);
     }
 }

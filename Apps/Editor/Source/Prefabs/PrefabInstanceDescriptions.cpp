@@ -2,7 +2,9 @@
 
 #include "Prefabs/PrefabHierarchyRows.h"
 
+#include "ECS/Component/ComponentFieldRegistry.h"
 #include "ECS/Entity.h"
+#include "Types/StringUtils.h"
 
 #include <algorithm>
 #include <utility>
@@ -101,6 +103,21 @@ void PrefabInstanceDescriptions::OnWorldStructureChanged(
     // An entity moved into, out of or between instances.
     if (change.world && change.world->GetWorldId() == m_WorldId)
         m_Instances.Clear();
+}
+
+std::string_view ReflectedFieldForSceneKey(ECS::ComponentTypeId typeId, std::string_view key)
+{
+    std::string_view arrayField;
+    for (const ECS::FieldInfo& field : ECS::ComponentFieldRegistry::Get(typeId))
+    {
+        if (EqualsIgnoreCase(key, field.Name))
+            return field.Name;
+        const bool indexFollows = key.size() > field.Name.size() && StartsWithIgnoreCase(key, field.Name) &&
+                                  key[field.Name.size()] >= '0' && key[field.Name.size()] <= '9';
+        if (indexFollows && field.Name.size() > arrayField.size())
+            arrayField = field.Name;
+    }
+    return arrayField;
 }
 
 } // namespace GameEngine::Editor

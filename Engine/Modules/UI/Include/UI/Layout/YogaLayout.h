@@ -10,6 +10,11 @@
 
 namespace GameEngine
 {
+namespace Mathematics
+{
+struct Vector2;
+}
+
 namespace UILayout
 {
 
@@ -25,7 +30,10 @@ struct YogaAdapter
     static bool IsAvailable();
     static YGNodeRef CreateNode();
     static void DestroyNode(YGNodeRef node);
-    static void ApplyStyle(YGNodeRef node, const ResolvedStyle& style);
+    // `viewport` is the UI root's layout size in logical px: the basis of the CSS
+    // viewport units, which resolve to px here. Returns true when the style holds a
+    // viewport unit, so the push is stale when the root's size changes.
+    static bool ApplyStyle(YGNodeRef node, const ResolvedStyle& style, const Mathematics::Vector2& viewport);
     static void CalculateLayout(YGNodeRef root, float width, float height);
     static void MarkDirtyAndPropagate(YGNodeRef node);
 

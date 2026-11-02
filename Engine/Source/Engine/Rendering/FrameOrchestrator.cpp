@@ -955,13 +955,6 @@ void FrameOrchestrator::EnsureActiveRenderPipelineBlueprint(PipelineRefreshMode 
         m_ActiveRenderPipelineIsFallback = applyingFallback;
         m_ActiveBlueprintIsRequested = applyingRequested;
         m_ActiveBlueprintIsPartial = applyingRequested && m_WaitingForNativeModules;
-
-        // The active blueprint just swapped: drain in-flight PSO prewarm before
-        // the old nodes are destroyed by SetBlueprint/EnsureBuilt (workers hold
-        // PipelineDesc copies whose debugName pointers reference the old nodes'
-        // string storage) and drop stale per-material variant entries. Both are
-        // material-cache concerns, so they live behind the facade now (A1.3).
-        m_Services->Materials().OnActiveRenderPipelineChanged();
     }
 
     // A Startup failure publishes no report: nothing stands in, its caller reports the failure, and a
@@ -1198,14 +1191,9 @@ void FrameOrchestrator::BuildFrameGraph(Rendering::RenderGraph::RGFrame& frame,
         m_GlobalStagesEpoch = m_WorldFrameEpoch;
         m_GlobalStagesFrame = &frame;
 
-        // A2 STEP-0: zero this app frame's sort bracket up front. BuildWorldBatchKeys
-        // overwrites it when it actually runs, so a frame that skips the build
-        // correctly reports zero sort cost instead of ringing a stale value.
-        m_Services->m_RenderTimelineStats.SortMs = 0.0;
-        m_Services->m_RenderTimelineStats.SortViewCount = 0;
-
         // 0. CPU draw-list build + GPUScene upload — same guards as the old
         //    spine above, shared semantics.
+        GE_CPU_PROFILE_SCOPE("RenderServices.BuildFrameGraphRG.GlobalStages");
         if (params.BuildWorldDrawListsIfReady)
         {
             const uint64_t frameIdx = m_Services->GetGPUScene() ? static_cast<uint64_t>(m_Services->GetGPUScene()->GetFrameIndex()) : 0ull;
@@ -1224,13 +1212,22 @@ void FrameOrchestrator::BuildFrameGraph(Rendering::RenderGraph::RGFrame& frame,
         //      order gives edges their direction, and the bucketer must
         //      precede every DrawStreamOrdering reader or the edge derives
         //      WAR (frame N−1 slot buffers).
-        m_Services->ScheduleGpuSkinningAndRetarget(frame);
-        m_Services->ScheduleViewCullingDispatches(frame, params.DeltaTime);
+        {
+            GE_CPU_PROFILE_SCOPE("RenderServices.BuildFrameGraphRG.Skinning");
+            m_Services->ScheduleGpuSkinningAndRetarget(frame);
+        }
+        {
+            GE_CPU_PROFILE_SCOPE("RenderServices.BuildFrameGraphRG.Culling");
+            m_Services->ScheduleViewCullingDispatches(frame, params.DeltaTime);
+        }
         // A2 STEP-0 bucketer bracket: the call-site wrap captures every internal
         // early-return path in one steady_clock pair. Publish the render-timeline
         // window here — stage G is the once-per-app-frame owner boundary.
         const auto bucketerBegin = std::chrono::steady_clock::now();
-        m_Services->ScheduleWorldBucketerDispatches(frame);
+        {
+            GE_CPU_PROFILE_SCOPE("RenderServices.BuildFrameGraphRG.Bucketer");
+            m_Services->ScheduleWorldBucketerDispatches(frame);
+        }
         PublishRenderTimelineStats(
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bucketerBegin)
                 .count());
@@ -1343,6 +1340,7 @@ void FrameOrchestrator::BuildFrameGraph(Rendering::RenderGraph::RGFrame& frame,
                 slot->Instance->SetBlueprint(*m_ActiveBlueprint);
                 slot->AppliedBlueprintGen = m_ActiveBlueprintGen;
             }
+            GE_CPU_PROFILE_SCOPE("RenderServices.BuildFrameGraphRG.PipelineDeclare");
             const auto& views = m_Services->Views().GetViews();
             slot->Instance->Declare(frame, params.ViewTargets,
                                     std::span<const Rendering::ViewDesc>(views.data(), views.size()),
@@ -1359,6 +1357,7 @@ void FrameOrchestrator::BuildFrameGraph(Rendering::RenderGraph::RGFrame& frame,
     //      AFTER skinning's declared Read (the WAR pin).
     if (globalStagesThisCall && m_Services->GetGPUCullingPipeline() && m_Services->GetGPUScene())
     {
+        GE_CPU_PROFILE_SCOPE("RenderServices.BuildFrameGraphRG.VisibilityEpilogue");
         m_Services->GetGPUCullingPipeline()->ScheduleVisibilityUnion(frame, m_Services->GetGPUScene());
         m_Services->GetGPUCullingPipeline()->ScheduleRuntimeVisibilityAggregate(frame, m_Services->GetGPUScene());
     }

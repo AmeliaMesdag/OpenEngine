@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 
+#include "CBTTerrain/CBTLayout.h"
 #include "CBTTerrain/CBTUpdateRestGate.h"
 
 using namespace GameEngine::CBTTerrain;
@@ -97,4 +98,44 @@ TEST(CBTUpdateRestGateTest, InputsHoldOnlyWhileTheyRepeat)
     EXPECT_TRUE(gate.InputsHeld());
     gate.Reset();
     EXPECT_FALSE(gate.InputsHeld());
+}
+
+// A reading whose keep search has a step left to take is not rest, even when it split and merged nothing with
+// both steps unchanged: a probe without a measured tree, a moved update with a keep step to probe, and a keep
+// step above its floor. A found keep step, and a moved update with nothing to probe, are rest.
+TEST(CBTUpdateRestGateTest, AnOpenKeepSearchIsNotRest)
+{
+    CBTUpdateActivity probing{};
+    probing.OffFrustumKeepStep = 8;
+    probing.OffFrustumKeepFloor = kKeepFloorProbing;
+    CBTUpdateActivity arriving{};
+    arriving.OffFrustumKeepStep = 9;
+    arriving.OffFrustumKeepFloor = kKeepFloorArriving;
+    CBTUpdateActivity searching{};
+    searching.OffFrustumKeepStep = 7;
+    searching.OffFrustumKeepFloor = 0;
+    for (const CBTUpdateActivity& open : {probing, arriving, searching})
+    {
+        CBTUpdateRestGate gate;
+        EXPECT_FALSE(gate.CanSkip(kInputsA));
+        for (uint64_t i = 0; i < 3u; ++i)
+            gate.OnActivityRead(gate.OnUpdateRecorded(false), open);
+        EXPECT_FALSE(gate.CanSkip(kInputsA)) << "keep step " << open.OffFrustumKeepStep << ", floor "
+                                             << open.OffFrustumKeepFloor;
+    }
+
+    CBTUpdateActivity found{};
+    found.OffFrustumKeepStep = 9;
+    found.OffFrustumKeepFloor = 9;
+    CBTUpdateActivity movedUngated{};
+    movedUngated.OffFrustumKeepFloor = kKeepFloorArriving;
+    for (const CBTUpdateActivity& rest : {found, movedUngated})
+    {
+        CBTUpdateRestGate gate;
+        EXPECT_FALSE(gate.CanSkip(kInputsA));
+        for (uint64_t i = 0; i < 3u; ++i)
+            gate.OnActivityRead(gate.OnUpdateRecorded(false), rest);
+        EXPECT_TRUE(gate.CanSkip(kInputsA)) << "keep step " << rest.OffFrustumKeepStep << ", floor "
+                                            << rest.OffFrustumKeepFloor;
+    }
 }

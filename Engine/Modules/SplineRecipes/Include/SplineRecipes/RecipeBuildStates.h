@@ -31,6 +31,10 @@ inline constexpr std::string_view kNoFencePartMeshReason =
     "No Span or Post part of the fence has a mesh. Give one of them a mesh.";
 inline constexpr std::string_view kNoTileReason =
     "There is no tile to place. Add a mesh to Straight 1.";
+inline constexpr std::string_view kNothingToPaveReason =
+    "It meets no other road, so there is nothing to pave. Draw a road across or into it.";
+inline constexpr std::string_view kPavedByAnotherReason =
+    "Another Spline Paving builds the surface where they meet.";
 inline constexpr std::string_view kBuiltNothingReason =
     "It made no surface: the spline and these settings give nothing to build.";
 inline constexpr std::string_view kNoTerrainToFillReason =
@@ -62,8 +66,9 @@ public:
     // scene unsettled.
     [[nodiscard]] bool IsSceneSettled(ECS::World& world) const;
     [[nodiscard]] std::span<const RecipeStatus> Failures(ECS::World& world) const;
-    // IsSceneSettled as EndUpdate found it; false when no update of `world` ended since its reset.
-    [[nodiscard]] bool IsSceneSettledAtLastUpdate(const ECS::World& world) const;
+    // IsSceneSettled as EndUpdate found it. When no update of `world` ended since its reset, it is
+    // IsSceneSettled: false while `world` has a recipe, true when it has none.
+    [[nodiscard]] bool IsSceneSettledAtLastUpdate(ECS::World& world) const;
 
 private:
     struct Entry

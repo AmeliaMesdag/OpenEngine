@@ -189,9 +189,9 @@ TEST(SortedTransparentCull, DerivedCameraForwardPointsIntoTheView)
     const Math::Matrix4x4 viewProj = proj * view;
 
     Rndr::CameraData cam{};
-    std::memcpy(cam.view, view.Data(), sizeof(cam.view));
-    std::memcpy(cam.proj, proj.Data(), sizeof(cam.proj));
-    std::memcpy(cam.viewProj, viewProj.Data(), sizeof(cam.viewProj));
+    cam.view = view;
+    cam.proj = proj;
+    cam.viewProj = viewProj;
 
     const Rndr::CameraDerivedData derived = Rndr::DeriveCameraData(cam);
 

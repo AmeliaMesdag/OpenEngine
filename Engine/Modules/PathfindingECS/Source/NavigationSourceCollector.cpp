@@ -10,8 +10,11 @@
 #include "Core/Engine.h"
 #include "ECS/Query.h"
 #include "ECS/World.h"
+#include "Engine/Rendering/MeshGPURegistry.h"
 #include "Engine/Rendering/ModelRenderSetup.h"
 #include "Engine/Rendering/PrimitiveGenerator.h"
+#include "Engine/Rendering/RenderServices.h"
+#include "JobSystem/ParallelAlgorithms.h"
 #include "Components/Navigation/NavigationAgent.h"
 #include "Components/Navigation/NavigationSource.h"
 #include "Components/Navigation/NavigationSurface.h"
@@ -22,12 +25,15 @@
 #include "PhysicsECS/Components/PhysicsColliderOwner.h"
 #include "PhysicsECS/Components/PlaneColliderShape.h"
 #include "PhysicsECS/Components/SphereColliderShape.h"
+#include "Types/FlatMap.h"
 #include "Types/Fnv1a.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace GameEngine::PathfindingECS
 {
@@ -197,16 +203,21 @@ void AppendPlane(NavigationStaticGeometry& geometry, const float32 world[16], co
     writer.AddQuad(0, 1, 2, 3);
 }
 
-void AppendMesh(NavigationStaticGeometry& geometry, const float32 world[16], const BakeSource& source, const Mesh& mesh)
+// The mesh's positions and whole triangles in its own space; empty when it has no triangle.
+NavigationTriangles CopyMesh(const Mesh& mesh)
 {
+    NavigationTriangles copy;
     if (mesh.Vertices.empty() || mesh.Indices.size() < 3)
-        return;
-    ItemWriter writer(geometry, world, source);
+        return copy;
+    copy.Vertices.reserve(mesh.Vertices.size() * 3);
     for (const auto& vertex : mesh.Vertices)
-        writer.AddVertex(vertex.Position[0], vertex.Position[1], vertex.Position[2]);
-    for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3)
-        writer.AddTriangle(mesh.Indices[i], mesh.Indices[i + 1], mesh.Indices[i + 2]);
+        copy.Vertices.insert(copy.Vertices.end(), vertex.Position, vertex.Position + 3);
+    copy.Indices.assign(mesh.Indices.begin(), mesh.Indices.begin() + static_cast<std::ptrdiff_t>(mesh.Indices.size() / 3 * 3));
+    return copy;
 }
+
+// Instances one chunk of the build transforms at least.
+constexpr size_t kMinInstancesPerChunk = 64;
 
 // The body a collider entity belongs to: its owner's when it has one, else itself.
 ECS::EntityHandle BodyEntityOf(ECS::EntityHandle entity, const Components::PhysicsColliderOwner* owner)
@@ -232,7 +243,7 @@ BakeSource ColliderSource(ECS::EntityHandle entity)
     return {entity, BakeSourceKind::Collider, NavigationSourcePolicy::Auto};
 }
 
-void GatherColliders(ECS::World& world, NavigationStaticGeometry& geometry)
+void SnapshotColliders(ECS::World& world, NavigationStaticGeometry& geometry)
 {
     using Components::PhysicsCollider;
     using Components::PhysicsColliderOwner;
@@ -283,12 +294,10 @@ bool MovesOnItsOwn(const ECS::World& world, ECS::EntityHandle entity)
 // ancestor that has one, else Auto: prefab children and the submesh entities a model makes hang
 // under the entity that authored it. Exclude leaves the mesh out. Include admits it unless an
 // entity between the mesh and the Include's entity moves on its own. Auto admits it unless any
-// entity from the mesh to the root moves on its own.
-std::optional<NavigationSourcePolicy> MeshRendererAdmission(ECS::World& world, ECS::EntityHandle e,
-                                                            const Components::MeshRenderer& renderer)
+// entity from the mesh to the root moves on its own. A renderer with no model is baked only from
+// the CPU copy that its generated mesh keeps.
+std::optional<NavigationSourcePolicy> MeshRendererAdmission(ECS::World& world, ECS::EntityHandle e)
 {
-    if (renderer.modelAssetGuid.IsNull())
-        return std::nullopt;
     bool authored = false;
     ECS::EntityHandle current = e;
     for (size_t step = 0; step < Components::kMaxHierarchyDepth && current.IsValid(); ++step)
@@ -310,42 +319,178 @@ std::optional<NavigationSourcePolicy> MeshRendererAdmission(ECS::World& world, E
     return NavigationSourcePolicy::Auto;
 }
 
-// Each MeshRenderer entity contributes its own submesh once, at its WorldTransform, which already
-// places the submesh's node.
-void GatherMeshRenderers(ECS::World& world, NavigationStaticGeometry& geometry)
+// The kept CPU copies of the generated meshes that renderers with no model draw, by mesh handle.
+using GeneratedMeshes = FlatMap<uint64, std::shared_ptr<const Mesh>>;
+
+// A renderer with no model draws a mesh the engine generated. Only an entry that keeps its CPU copy
+// is a source (a spline chunk, or a primitive that a script creates): an HLOD proxy keeps none, and
+// it stands for member meshes that the bake reads already.
+bool IsGeneratedNavigationMesh(const Rendering::MeshGPUEntry* entry)
 {
-    AssetManager* assets = EngineCore::GetInstance().TryGetAssetManager();
-    // Primitives are generated meshes with no asset behind them; each is generated once per bake.
-    std::unordered_map<GUID, Mesh> primitives;
+    return entry && entry->cpuMesh;
+}
 
+// Another system of the wave can register or unregister a mesh during the gather. The TableScope
+// holds those writers off only while the lookups copy the owners, never across the ECS walk; the
+// copied owners keep each mesh alive after it. A retired chunk's handle finds no entry.
+GeneratedMeshes SnapshotGeneratedMeshes(ECS::World& world, const Rendering::MeshGPURegistry* registry)
+{
+    GeneratedMeshes meshes;
+    if (!registry)
+        return meshes;
+    std::vector<Components::MeshRenderer> generatedRenderers;
+    world.Query<ECS::Read<Components::MeshRenderer>>().Each([&](const Components::MeshRenderer& renderer) {
+        if (renderer.modelAssetGuid.IsNull() && renderer.meshGpuHandleId != 0u)
+            generatedRenderers.push_back(renderer);
+    });
+    const Rendering::MeshGPURegistry::TableScope scope(*registry);
+    for (const Components::MeshRenderer& renderer : generatedRenderers)
+    {
+        const Rendering::MeshGPUEntry* entry = Engine::Renderer::FindRendererMeshEntry(*registry, renderer);
+        if (IsGeneratedNavigationMesh(entry))
+            meshes.InsertOrAssign(renderer.meshGpuHandleId, entry->cpuMesh);
+    }
+    return meshes;
+}
+
+// Records each admitted mesh renderer as an instance of the mesh it shows, copying each mesh the first
+// time it is seen.
+class MeshInstanceWriter
+{
+  public:
+    MeshInstanceWriter(NavigationGeometrySources& sources, AssetManager* assets, const GeneratedMeshes& generated)
+        : m_Sources(sources), m_Assets(assets), m_Generated(generated)
+    {
+    }
+
+    // Records the submesh the renderer on `e` shows, at its WorldTransform, which already places the
+    // submesh's node; nothing when the renderer is not admitted or its model is not resident.
+    void AddRenderer(ECS::World& world, ECS::EntityHandle e, const Components::MeshRenderer& renderer,
+                     const Components::WorldTransform& wt)
+    {
+        const std::optional<NavigationSourcePolicy> admission = MeshRendererAdmission(world, e);
+        if (!admission)
+            return;
+        const BakeSource source{e, BakeSourceKind::Mesh, *admission};
+        // The component holds its matrix as 16 column-major floats.
+        const auto worldMatrix = Mathematics::Matrix4x4::FromColumnMajor(wt.matrix);
+
+        if (renderer.modelAssetGuid.IsNull())
+        {
+            if (const auto* mesh = m_Generated.Find(renderer.meshGpuHandleId))
+                Add(MeshIndexOf(**mesh), worldMatrix, source);
+            return;
+        }
+        const GUID guid = renderer.modelAssetGuid.ToGuid();
+        if (Engine::Renderer::PrimitiveGenerator::IsPrimitive(guid))
+        {
+            Add(PrimitiveIndexOf(guid), worldMatrix, source);
+            return;
+        }
+        if (!m_Assets)
+            return;
+        const auto asset = m_Assets->GetAsset(guid);
+        if (!asset || !asset->IsLoaded() || asset->GetType() != AssetType::Model)
+            return;
+        const auto& model = static_cast<const ModelAsset&>(*asset);
+        if (model.GetMeshCount() == 0)
+            return;
+        const uint32 submesh = Engine::Renderer::ResolveSubmeshIndex(guid, model, renderer);
+        if (submesh < model.GetMeshCount())
+            Add(MeshIndexOf(model.GetMesh(submesh)), worldMatrix, source);
+    }
+
+  private:
+    // The index of `mesh` in the snapshot's mesh list, copied the first time its address is seen. A
+    // model's submesh and a generated mesh stay at one address while the snapshot runs.
+    uint32 MeshIndexOf(const Mesh& mesh)
+    {
+        if (const uint32* known = m_MeshIndices.Find(&mesh))
+            return *known;
+        const uint32 meshIndex = AppendCopy(mesh);
+        m_MeshIndices.InsertOrAssign(&mesh, meshIndex);
+        return meshIndex;
+    }
+
+    // Primitives have no asset behind them: each is generated and copied once per snapshot.
+    uint32 PrimitiveIndexOf(const GUID& guid)
+    {
+        if (const uint32* known = m_PrimitiveIndices.Find(guid))
+            return *known;
+        const uint32 meshIndex = AppendCopy(Engine::Renderer::PrimitiveGenerator::GenerateByGuid(guid));
+        m_PrimitiveIndices.InsertOrAssign(guid, meshIndex);
+        return meshIndex;
+    }
+
+    uint32 AppendCopy(const Mesh& mesh)
+    {
+        m_Sources.Meshes.push_back(CopyMesh(mesh));
+        return static_cast<uint32>(m_Sources.Meshes.size() - 1);
+    }
+
+    void Add(uint32 meshIndex, const Mathematics::Matrix4x4& world, const BakeSource& source)
+    {
+        if (m_Sources.Meshes[meshIndex].Indices.empty())
+            return;
+        NavigationGeometrySources::MeshInstance instance;
+        instance.Mesh = meshIndex;
+        instance.World = world;
+        instance.Source = source;
+        m_Sources.Instances.push_back(instance);
+    }
+
+    NavigationGeometrySources& m_Sources;
+    AssetManager* m_Assets;
+    const GeneratedMeshes& m_Generated;
+    // Each distinct model submesh or generated mesh, by address, to its index in the snapshot's mesh list.
+    FlatMap<const void*, uint32> m_MeshIndices;
+    // Each primitive, by GUID, to its index in the snapshot's mesh list.
+    FlatMap<GUID, uint32> m_PrimitiveIndices;
+};
+
+// Each MeshRenderer entity contributes its own submesh once.
+void SnapshotMeshRenderers(ECS::World& world, const Rendering::MeshGPURegistry* registry,
+                           NavigationGeometrySources& sources)
+{
+    const GeneratedMeshes generated = SnapshotGeneratedMeshes(world, registry);
+    MeshInstanceWriter writer(sources, EngineCore::GetInstance().TryGetAssetManager(), generated);
     world.Query<ECS::Read<Components::MeshRenderer>, ECS::Read<Components::WorldTransform>>().Each(
-        [&](ECS::EntityHandle e, const Components::MeshRenderer& renderer, const Components::WorldTransform& wt) {
-            const std::optional<NavigationSourcePolicy> admission = MeshRendererAdmission(world, e, renderer);
-            if (!admission)
-                return;
-            const BakeSource source{e, BakeSourceKind::Mesh, *admission};
+        [&world, &writer](ECS::EntityHandle e, const Components::MeshRenderer& renderer,
+                          const Components::WorldTransform& wt) { writer.AddRenderer(world, e, renderer, wt); });
+}
 
-            const GUID guid = renderer.modelAssetGuid.ToGuid();
-            if (Engine::Renderer::PrimitiveGenerator::IsPrimitive(guid))
-            {
-                auto [it, inserted] = primitives.try_emplace(guid);
-                if (inserted)
-                    it->second = Engine::Renderer::PrimitiveGenerator::GenerateByGuid(guid);
-                AppendMesh(geometry, wt.matrix, source, it->second);
-                return;
-            }
-            if (!assets)
-                return;
-            const auto asset = assets->GetAsset(guid);
-            if (!asset || !asset->IsLoaded() || asset->GetType() != AssetType::Model)
-                return;
-            const auto& model = static_cast<const ModelAsset&>(*asset);
-            if (model.GetMeshCount() == 0)
-                return;
-            const uint32 submesh = Engine::Renderer::ResolveSubmeshIndex(guid, model, renderer);
-            if (submesh < model.GetMeshCount())
-                AppendMesh(geometry, wt.matrix, source, model.GetMesh(submesh));
-        });
+// Where BuildNavigationStaticGeometry writes each mesh instance: its first vertex float and first index
+// in the geometry's arrays, as appending the instances one by one would place them.
+struct InstancePlacement
+{
+    std::vector<size_t> FirstVertex;
+    std::vector<size_t> FirstIndex;
+};
+
+// Writes the instances [begin, end) of `sources` into `geometry` at `placement`, transformed to world
+// space, and each one's world bounds into `bounds`.
+void TransformInstances(const NavigationGeometrySources& sources, const InstancePlacement& placement, size_t begin,
+                        size_t end, NavigationStaticGeometry& geometry, std::vector<NavigationBounds>& bounds)
+{
+    for (size_t i = begin; i < end; ++i)
+    {
+        const auto& instance = sources.Instances[i];
+        const NavigationTriangles& mesh = sources.Meshes[instance.Mesh];
+        float32* out = &geometry.Triangles.Vertices[placement.FirstVertex[i]];
+        for (size_t v = 0; v < mesh.Vertices.size(); v += 3, out += 3)
+        {
+            const Mathematics::Vector3 point =
+                instance.World.TransformPoint({mesh.Vertices[v], mesh.Vertices[v + 1], mesh.Vertices[v + 2]});
+            out[0] = point.x;
+            out[1] = point.y;
+            out[2] = point.z;
+            bounds[i].Include(out);
+        }
+        const uint32 baseVertex = static_cast<uint32>(placement.FirstVertex[i] / 3);
+        uint32* index = &geometry.Triangles.Indices[placement.FirstIndex[i]];
+        for (const uint32 local : mesh.Indices)
+            *index++ = baseVertex + local;
+    }
 }
 
 } // namespace
@@ -421,12 +566,66 @@ uint64 NavigationStaticGeometry::HashOverlapping(float32 minX, float32 minZ, flo
     return Hashing::Fnv1a64(itemHashes.data(), itemHashes.size() * sizeof(uint64));
 }
 
-NavigationStaticGeometry GatherNavigationStaticGeometry(ECS::World& world)
+NavigationGeometrySources SnapshotNavigationGeometrySources(ECS::World& world, const Rendering::MeshGPURegistry* meshes)
 {
-    NavigationStaticGeometry geometry;
-    GatherColliders(world, geometry);
-    GatherMeshRenderers(world, geometry);
+    NavigationGeometrySources sources;
+    SnapshotColliders(world, sources.Shapes);
+    SnapshotMeshRenderers(world, meshes, sources);
+    return sources;
+}
+
+NavigationStaticGeometry BuildNavigationStaticGeometry(NavigationGeometrySources sources,
+                                                       JobSystem::WorkStealingThreadPool* pool,
+                                                       const std::atomic<bool>* cancelled)
+{
+    NavigationStaticGeometry geometry = std::move(sources.Shapes);
+    const size_t instanceCount = sources.Instances.size();
+    InstancePlacement placement{std::vector<size_t>(instanceCount), std::vector<size_t>(instanceCount)};
+    size_t vertexFloats = geometry.Triangles.Vertices.size(), indices = geometry.Triangles.Indices.size();
+    for (size_t i = 0; i < instanceCount; ++i)
+    {
+        const NavigationTriangles& mesh = sources.Meshes[sources.Instances[i].Mesh];
+        placement.FirstVertex[i] = vertexFloats;
+        placement.FirstIndex[i] = indices;
+        vertexFloats += mesh.Vertices.size();
+        indices += mesh.Indices.size();
+    }
+    geometry.Triangles.Vertices.resize(vertexFloats);
+    geometry.Triangles.Indices.resize(indices);
+
+    std::vector<NavigationBounds> bounds(instanceCount);
+    JobSystem::ParallelFor(
+        pool, instanceCount,
+        [&sources, &placement, &geometry, &bounds, cancelled](size_t begin, size_t end) {
+            if (cancelled && cancelled->load(std::memory_order_relaxed))
+                return false;
+            TransformInstances(sources, placement, begin, end, geometry, bounds);
+            return true;
+        },
+        kMinInstancesPerChunk);
+
+    for (size_t i = 0; i < instanceCount; ++i)
+    {
+        NavigationStaticGeometry::Item item;
+        item.FirstIndex = static_cast<uint32>(placement.FirstIndex[i]);
+        item.IndexCount = static_cast<uint32>(sources.Meshes[sources.Instances[i].Mesh].Indices.size());
+        item.Bounds = bounds[i];
+        item.Source = sources.Instances[i].Source;
+        geometry.Items.push_back(item);
+        geometry.Bounds.Include(bounds[i]);
+    }
     return geometry;
+}
+
+NavigationStaticGeometry GatherNavigationStaticGeometry(ECS::World& world, const Rendering::MeshGPURegistry* meshes)
+{
+    return BuildNavigationStaticGeometry(SnapshotNavigationGeometrySources(world, meshes), nullptr, nullptr);
+}
+
+const Rendering::MeshGPURegistry* FindEngineMeshRegistry()
+{
+    const auto* renderServices = EngineCore::GetInstance().GetRenderServices();
+    return renderServices ? &renderServices->GetMeshGPURegistry() : nullptr;
 }
 
 std::vector<GUID> FindUnloadedNavigationModels(ECS::World& world)
@@ -437,7 +636,8 @@ std::vector<GUID> FindUnloadedNavigationModels(ECS::World& world)
         return models;
     world.Query<ECS::Read<Components::MeshRenderer>, ECS::Read<Components::WorldTransform>>().Each(
         [&](ECS::EntityHandle e, const Components::MeshRenderer& renderer, const Components::WorldTransform&) {
-            if (!MeshRendererAdmission(world, e, renderer))
+            // A generated mesh has no asset to wait for.
+            if (renderer.modelAssetGuid.IsNull() || !MeshRendererAdmission(world, e))
                 return;
             const GUID guid = renderer.modelAssetGuid.ToGuid();
             if (Engine::Renderer::PrimitiveGenerator::IsPrimitive(guid) || assets->IsAssetLoaded(guid))

@@ -36,7 +36,15 @@ The picker's home screen has a **New project** card, an **Open project** card, a
 - **From a running editor:** the **Open Project Folder** button in the top toolbar, or the **Open Project** command in the search (**Cmd+K** on macOS, **Ctrl+K** on Windows and Linux), shows the picker. The editor switches projects without restarting.
 - **From the command line:** pass `--project <folder>`. The editor skips the picker and opens that folder, creating it if it does not exist.
 
-Opening a project from the picker, or the last project at startup, opens the project's startup scene: the first scene in the build's scene list, else the scene named by `project.startupScene` in `.Editor/ProjectSettings.json`, else the scene you last opened in that project, else a new empty scene. Creating a project from a template or a community project sets `project.startupScene` to the scene its `game.config` names, or to its only scene. When the open scene has unsaved changes, the editor asks to save them before it switches projects; **Cancel** keeps the current project. With `--project` the editor opens no scene.
+Opening a project from the picker, with `--project`, or the last project at startup opens the project's startup scene: the first scene in the build's scene list, else the scene named by `project.startupScene` in `.Editor/ProjectSettings.json`, else the scene you last opened in that project, else a new empty scene. Creating a project from a template or a community project sets `project.startupScene` to the scene its `game.config` names, or to its only scene. When the open scene has unsaved changes, the editor asks to save them before it switches projects; **Cancel** keeps the current project.
+
+`project.startupScene` is one top-level key, and its value is the scene path relative to `Assets/`. The editor does not read a nested `"project": { "startupScene": ... }` object: it logs a warning that names the file and the key to use, then opens the scene you last opened in that project, else a new empty scene.
+
+```json title=".Editor/ProjectSettings.json"
+{
+  "project.startupScene": "Scenes/Main.scene"
+}
+```
 
 ```text title="Open a project from the command line"
 # macOS
@@ -65,13 +73,13 @@ A line in a `.scene` file that names a field its component does not have, such a
 
 ## Export your game
 
-The editor exports a game for the platform it runs on: the macOS editor builds macOS games, the Windows editor Windows games. A native export from the Linux editor does not work yet: it looks only for `Player.exe`. For Linux, build a Steam Deck runtime with `build_deck.py`, as [Steam Deck iteration](../publishing/game-publishing.mdx#steam-deck-iteration) describes. Publishing to Steam is in [Game builds and Steam publishing](../publishing/game-publishing.mdx).
+The editor exports a game for the platform it runs on: the macOS editor builds macOS games, the Windows editor Windows games, and the Linux editor Linux games. Publishing to Steam is in [Game builds and Steam publishing](../publishing/game-publishing.mdx).
 
 :::steps
 
 1. Open the Build panel with the **Build** button in the top toolbar (the game-controller icon), or **Window > Build**.
 2. Choose **Settings** in the panel. Under **Global scene list**, drop the scenes to ship from the asset browser onto the list. The first one opens when the game starts. With an empty list, the game ships the scene the project opens with. A project with no scene at all stops with `No scene to build`. **Game name** sets the name of the exported game. Without it the game takes the project folder's name.
-3. In the platform table, turn **On** your platform only: **Mac** or **Windows**. Windows is on by default. The panel builds one platform at a time, the first one turned on in the table's order.
+3. In the platform table, turn **On** your platform only: **Mac**, **Windows** or **Linux**. Windows is on by default. The panel builds one platform at a time, the first one turned on in the table's order.
 4. Choose **Build**. The **Progress** and **Done** columns follow the build. The button becomes **Cancel** while it runs.
 
 :::
@@ -82,5 +90,6 @@ The game goes to `Build Folder/<Platform>` inside the project, for example `Buil
 |---|---|---|
 | macOS | `<Game name>.app`, with the game's content inside the bundle | Open the `.app` from Finder, or `open "Build Folder/Mac/<Game name>.app"` |
 | Windows | `<Game name>.exe`, `game.config`, and the game's content | Run the `.exe` |
+| Linux | `<Game name>`, the engine's `.so` libraries, `game.config`, and the game's content | Run `./<Game name>` in `Build Folder/Linux` |
 
 A build replaces the previous output folder only when it has succeeded. Until then the previous output is kept. When the folder cannot be replaced, for example because the previous game is still running, the build stops with an error that names the folder. [Game builds and Steam publishing](../publishing/game-publishing.mdx) explains how the output is replaced, and how to prepare, verify, and upload a release.

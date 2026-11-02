@@ -39,6 +39,8 @@ const char* KindName(Memory::StatsKind kind)
         return "Arena";
     case Memory::StatsKind::Scratch:
         return "Scratch";
+    case Memory::StatsKind::FrameMemory:
+        return "FrameMemory";
     case Memory::StatsKind::ObjectPool:
         return "ObjectPool";
     case Memory::StatsKind::RangeAllocator:
@@ -109,6 +111,12 @@ json HandleMemoryStats(const Application& app)
             scratchOutOfOrder += entry.OutOfOrder;
             scratchShrinks += entry.Shrinks;
         }
+        if (entry.Kind == Memory::StatsKind::FrameMemory)
+        {
+            item["threadId"] = entry.ThreadId;
+            item["threadName"] = Platform::GetThreadName(entry.ThreadId);
+            item["shrinks"] = entry.Shrinks;
+        }
         list.push_back(std::move(item));
     }
 
@@ -135,12 +143,15 @@ void RegisterMemoryDebugHandlers(EditorDebugServer& server, const Application& a
     // No parameters. Reply:
     //   frame: the editor's frame count when read.
     //   entries[]: {name, kind, residency, bytes} per registered record, newest first; kind is
-    //     "TrackedBytes" (bytes: what its owner reported), "Arena", "Scratch" or "ObjectPool"
+    //     "TrackedBytes" (bytes: what its owner reported), "Arena", "Scratch", "FrameMemory", "ObjectPool"
+    //     or "RangeAllocator"
     //     (bytes in use, plus reservedBytes, highWaterBytes, blocks; an "ObjectPool" counts slot
     //     bytes as of its last block acquisition); a "Scratch" entry is one thread's
     //     ScratchScope arena and adds threadId (the OS id), threadName (empty when the thread
     //     has none), outOfOrder (allocations through a scope that was not the innermost,
-    //     served from the heap) and shrinks (retained blocks released by the hysteresis).
+    //     served from the heap) and shrinks (retained blocks released by the hysteresis); a
+    //     "FrameMemory" entry is one of a thread's two FrameMemory arenas and adds threadId,
+    //     threadName and shrinks, written at each rewind of that arena.
     //   scratch: {threads, bytes, reservedBytes, outOfOrder, shrinks} summed over the scratch
     //     entries. A thread writes its scratch counts when it acquires a block and at every
     //     64th outermost close, so bytes lags what is open now.

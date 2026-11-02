@@ -59,8 +59,9 @@ bool ListBakeSources(ECS::World& world, ECS::EntityHandle surface, std::vector<B
 /// change.
 std::string FormatAgentStatus(const AgentStatus& status);
 
-/// The surface's bake state as one line of text, for example "Baking: 212 of 1,024 tiles" or
-/// "Baked: 1,024 tiles, 1,948 polygons, 0.5 MiB, version 12". A failure names what to change.
+/// The surface's bake state as one line of text, for example "Baking: 212 of 1,024 tiles",
+/// "Baking: 65,536 cells" or "Baked: 1,024 tiles, 1,948 polygons, 0.5 MiB, version 12". A failure
+/// names what to change.
 std::string FormatBakeStatus(const Components::NavigationSurface& surface);
 
 /// The box, in world metres, the NavigationSurface on `surface` covers: its explicit bounds around

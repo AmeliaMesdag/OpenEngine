@@ -65,7 +65,7 @@ void StyleTintSwatch(UIElement* swatch, uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kSwatchSize))
         .Set(Style::Height, StyleLength::Px(kSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kSwatchSize))
@@ -91,7 +91,7 @@ void AddHalationTintRow(const InspectorContext& ctx, UIElement* parent, const Fi
     if (tintLabel)
         tintLabel->AddClass("inspector-label-no-drag");
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -108,7 +108,7 @@ void AddHalationTintRow(const InspectorContext& ctx, UIElement* parent, const Fi
     auto valueLabel = std::make_unique<Label>();
     valueLabel->AddClass("inspector-text");
     valueLabel->SetText(FormatTint(effect->HalationTint));
-    valueLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    valueLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
     Label* valueLabelRaw = valueLabel.get();
     fieldContainer->AddChild(std::move(valueLabel));
 
@@ -300,7 +300,7 @@ UIElement* AddFilmSection(const InspectorContext& ctx,
 
     if (UIElement* header = foldout->GetHeader())
     {
-        header->Overrides()
+        header->Style()
             .Set(Style::PaddingTop, StyleLength::Px(2.0f))
             .Set(Style::PaddingRight, StyleLength::Px(6.0f))
             .Set(Style::PaddingBottom, StyleLength::Px(2.0f))
@@ -429,7 +429,7 @@ void RegisterFilmSimulationEffectInspector()
         const bool filmicMode = c->GrainMode == Components::FilmGrainMode::Filmic;
         auto filmicShapeControls = std::make_unique<UIElement>();
         UIElement* filmicShapeControlsRaw = filmicShapeControls.get();
-        filmicShapeControlsRaw->Overrides()
+        filmicShapeControlsRaw->Style()
             .Set(Style::Display, filmicMode ? DisplayMode::Flex : DisplayMode::None)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::AlignItems, AlignItems::Stretch);
@@ -475,7 +475,7 @@ void RegisterFilmSimulationEffectInspector()
 
         auto filmicColorControls = std::make_unique<UIElement>();
         UIElement* filmicColorControlsRaw = filmicColorControls.get();
-        filmicColorControlsRaw->Overrides()
+        filmicColorControlsRaw->Style()
             .Set(Style::Display, filmicMode ? DisplayMode::Flex : DisplayMode::None)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::AlignItems, AlignItems::Stretch);
@@ -496,9 +496,9 @@ void RegisterFilmSimulationEffectInspector()
                 mode = std::clamp(mode, 0, static_cast<int>(Film::kGrainModeLast));
                 const bool showFilmicControls =
                     mode == static_cast<int>(Components::FilmGrainMode::Filmic);
-                filmicShapeControlsRaw->Overrides().Set(
+                filmicShapeControlsRaw->Style().Set(
                     Style::Display, showFilmicControls ? DisplayMode::Flex : DisplayMode::None);
-                filmicColorControlsRaw->Overrides().Set(
+                filmicColorControlsRaw->Style().Set(
                     Style::Display, showFilmicControls ? DisplayMode::Flex : DisplayMode::None);
                 CommitComponentWithUndo<Film>(
                     w, e, n, undo, "Change Film Grain Mode",

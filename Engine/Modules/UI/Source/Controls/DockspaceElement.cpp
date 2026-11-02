@@ -10,6 +10,7 @@
 #include "UI/Controls/DockTab.h"
 #include "UI/Controls/DockPanel.h"
 #include "UI/UIStyle.h"
+#include "UI/UIManager.h"
 #include "UI/StyleProperties.h"
 
 #include "UI/Controls/DockOverlay.h"
@@ -595,6 +596,40 @@ bool DockspaceElement::RequestTabAddition(const std::string& leafPath, const std
     return true;
 }
 
+DockspaceElement::~DockspaceElement()
+{
+    CancelQueuedRebuild();
+}
+
+void DockspaceElement::RequestRebuildFromModel()
+{
+    m_NeedsRebuild = true;
+    MarkDirty(VisualDirty | ChildrenDirty | LayoutDirty);
+    QueueRebuildWith(GetOwnerManager());
+}
+
+void DockspaceElement::OnOwnerManagerChanged(UIManager* owner)
+{
+    CancelQueuedRebuild();
+    if (m_NeedsRebuild)
+        QueueRebuildWith(owner);
+}
+
+void DockspaceElement::QueueRebuildWith(UIManager* owner)
+{
+    if (!owner)
+        return;
+    owner->RequestDockspaceRebuild(this);
+    m_RebuildQueuedWith = UIManagerRef(owner);
+}
+
+void DockspaceElement::CancelQueuedRebuild()
+{
+    if (UIManager* queuedWith = m_RebuildQueuedWith.Get())
+        queuedWith->CancelDockspaceRebuild(this);
+    m_RebuildQueuedWith = UIManagerRef();
+}
+
 void DockspaceElement::RebuildFromModel() {
     ++m_Instrumentation.fullRebuilds;
 
@@ -960,7 +995,7 @@ void DockspaceElement::ShowDockDragGhost(const std::string& title, float mouseX,
         // Only the tab and body have visible surfaces so the area beside the tab is see-through.
         auto ghost = std::make_unique<UIElement>();
         ghost->SetId("dock-drag-ghost");
-        ghost->Overrides()
+        ghost->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::ZIndex, 9400)
@@ -973,7 +1008,7 @@ void DockspaceElement::ShowDockDragGhost(const std::string& title, float mouseX,
 
         // Tab element — flush with the left edge of the ghost, matching source tab size
         auto tab = std::make_unique<UIElement>();
-        tab->Overrides()
+        tab->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionLeft, StyleLength::Px(0.f))
             .Set(Style::PositionTop, StyleLength::Px(0.f))
@@ -991,7 +1026,7 @@ void DockspaceElement::ShowDockDragGhost(const std::string& title, float mouseX,
 
         auto lbl = std::make_unique<Label>();
         lbl->SetText(title);
-        lbl->Overrides()
+        lbl->Style()
             .Set(Style::FontSize, StyleLength::Px(11.f))
             .Set(Style::Color, 0xFFFFFFFFu);
         UILayoutAccess::SetLastLayoutRect(*lbl, 0, 0, actualTabW, actualTabH);
@@ -1001,7 +1036,7 @@ void DockspaceElement::ShowDockDragGhost(const std::string& title, float mouseX,
 
         // Body area — below the tab, with border on all sides including top
         auto body = std::make_unique<UIElement>();
-        body->Overrides()
+        body->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionLeft, StyleLength::Px(0.f))
             .Set(Style::PositionTop, StyleLength::Px(actualTabH))
@@ -1020,7 +1055,7 @@ void DockspaceElement::ShowDockDragGhost(const std::string& title, float mouseX,
         // "Undock" label centered in the body, hidden by default
         auto undockLbl = std::make_unique<Label>();
         undockLbl->SetText("Undock");
-        undockLbl->Overrides()
+        undockLbl->Style()
             .Set(Style::FontSize, StyleLength::Px(16.f))
             .Set(Style::Color, 0xFFFFFFFFu)
             .Set(Style::Display, DisplayMode::None);
@@ -1061,7 +1096,7 @@ void DockspaceElement::UpdateDockDragGhostPosition(float mouseX, float mouseY)
     float x = mouseX + 12.0f;
     float y = mouseY + 8.0f;
 
-    m_DragGhost->Overrides()
+    m_DragGhost->Style()
         .Set(Style::PositionLeft, StyleLength::Px(x))
         .Set(Style::PositionTop, StyleLength::Px(y));
 
@@ -1085,16 +1120,16 @@ void DockspaceElement::SetDockDragGhostUndockMode(bool undocking)
 
     constexpr uint32_t kTransparent = 0x00000000u;
 
-    m_DragGhost->Overrides()
+    m_DragGhost->Style()
         .Set(Style::Opacity, undocking ? 1.0f : 0.8f);
     if (m_DragGhostTab)
-        m_DragGhostTab->Overrides()
+        m_DragGhostTab->Style()
             .Set(Style::BorderColor, BorderColorsTRBL{borderColor, borderColor, kTransparent, borderColor});
     if (m_DragGhostBody)
-        m_DragGhostBody->Overrides()
+        m_DragGhostBody->Style()
             .Set(Style::BorderColor, BorderColorsTRBL{borderColor, borderColor, borderColor, borderColor});
     if (m_DragGhostUndockLabel)
-        m_DragGhostUndockLabel->Overrides()
+        m_DragGhostUndockLabel->Style()
             .Set(Style::Display, undocking ? DisplayMode::Flex : DisplayMode::None);
 }
 

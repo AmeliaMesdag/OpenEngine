@@ -252,7 +252,7 @@ void BuildPanel::BuildUI()
     {
         auto outputRow = std::make_unique<UIElement>();
         outputRow->AddClass("build-panel-output-row");
-        outputRow->Overrides()
+        outputRow->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::FlexWrap, false)
@@ -266,7 +266,7 @@ void BuildPanel::BuildUI()
         auto outputLabel = std::make_unique<Label>();
         outputLabel->SetText("Build path:");
         outputLabel->AddClass("build-panel-output-label");
-        outputLabel->Overrides()
+        outputLabel->Style()
             .Set(Style::MinWidth, StyleLength::Px(52.0f))
             .Set(Style::Height, StyleLength::Px(kBuildPanelOutputControlHeightPx))
             .Set(Style::MinHeight, StyleLength::Px(kBuildPanelOutputControlHeightPx))
@@ -300,7 +300,7 @@ void BuildPanel::BuildUI()
         outputField->SetValue(currentOutputDir);
         outputField->SetTooltip("Output folder used for generated build artifacts.");
         outputField->AddClass("build-panel-output-field");
-        outputField->Overrides()
+        outputField->Style()
             .Set(Style::FlexGrow, 1.0f)
             .Set(Style::MinWidth, StyleLength::Px(0.0f))
             .Set(Style::Height, StyleLength::Px(kBuildPanelOutputControlHeightPx))
@@ -315,7 +315,7 @@ void BuildPanel::BuildUI()
         browseButton->SetText("Browse");
         browseButton->SetTooltip("Choose build output folder");
         browseButton->AddClass("build-panel-output-browse-button");
-        browseButton->Overrides()
+        browseButton->Style()
             .Set(Style::Width, StyleLength::Px(68.0f))
             .Set(Style::MinWidth, StyleLength::Px(68.0f))
             .Set(Style::MaxWidth, StyleLength::Px(68.0f))
@@ -338,14 +338,14 @@ void BuildPanel::BuildUI()
     // Build status label
     {
         auto statusRow = std::make_unique<UIElement>();
-        statusRow->Overrides()
+        statusRow->Style()
             .Set(Style::PaddingLeft, StyleLength::Px(12.0f))
             .Set(Style::PaddingRight, StyleLength::Px(12.0f))
             .Set(Style::PaddingBottom, StyleLength::Px(4.0f));
 
         auto statusLabel = std::make_unique<Label>();
         statusLabel->AddClass("build-panel-status-label");
-        statusLabel->Overrides()
+        statusLabel->Style()
             .Set(Style::FontSize, StyleLength::Px(11.0f))
             .Set(Style::Opacity, 0.6f);
         m_StatusLabel = statusLabel.get();
@@ -467,7 +467,7 @@ void BuildPanel::RebuildHeader()
         auto sortIcon = std::make_unique<UIElement>();
         sortIcon->AddClass("header-sort-icon");
         {
-            sortIcon->Overrides().Set(Style::Display, DisplayMode::None);
+            sortIcon->Style().Set(Style::Display, DisplayMode::None);
         }
         m_HeaderSortIcons.push_back(sortIcon.get());
         cell->AddChild(std::move(sortIcon));
@@ -552,7 +552,7 @@ void BuildPanel::RebuildRows()
         if (Editor::BuildExporterRegistry::Get().TryFindForPlatform(entry.Name, exporter))
             row->AddClass("build-panel-row-selected");
 
-        row->Overrides()
+        row->Style()
             .Set(Style::MinHeight, StyleLength::Px(24.0f))
             .Set(Style::Height, StyleLength::Px(24.0f));
 
@@ -629,7 +629,7 @@ void BuildPanel::RebuildRows()
                 track->AddClass("build-panel-progress-track");
                 auto fill = std::make_unique<UIElement>();
                 fill->AddClass("build-panel-progress-fill");
-                fill->Overrides()
+                fill->Style()
                     .Set(Style::Width, StyleLength::Percent(entry.Progress * 100.0f))
                     .Set(Style::FlexGrow, 0.0f)
                     .Set(Style::FlexShrink, 0.0f);
@@ -738,7 +738,7 @@ void BuildPanel::UpdateBuildHeaderSortIndicators()
             continue;
         if (logicalCol == m_SortColumn)
         {
-            icon->Overrides().Set(Style::Display, DisplayMode::Block);
+            icon->Style().Set(Style::Display, DisplayMode::Block);
             cell->AddClass("sorted");
             if (m_SortAscending)
             {
@@ -753,7 +753,7 @@ void BuildPanel::UpdateBuildHeaderSortIndicators()
         }
         else
         {
-            icon->Overrides().Set(Style::Display, DisplayMode::None);
+            icon->Style().Set(Style::Display, DisplayMode::None);
             cell->RemoveClass("sorted");
             icon->RemoveClass("ascending");
             icon->RemoveClass("descending");
@@ -766,7 +766,7 @@ void BuildPanel::ApplyColumnWidths()
     auto apply = [](UIElement* el, float width) {
         if (!el || width <= 0.0f)
             return;
-        el->Overrides()
+        el->Style()
             .Set(Style::FlexGrow, 0.0f)
             .Set(Style::FlexShrink, 0.0f)
             .Set(Style::FlexBasis, StyleLength::Px(width))
@@ -831,7 +831,15 @@ static std::string DescribeMissingBuildScene(const std::string& platformName)
                                       ? std::string("the Global scene list")
                                       : "the " + BuildPlatformDisplayName(platformName) + " scene list";
     std::string message = "No scene to build. In Settings > Build, drop a scene on " + sceneList + ".";
-    const std::string startupScene = Editor::LoadBuildStringSetting(Editor::kProjectStartupSceneKey);
+    const auto& root = EngineCore::GetInstance().GetWorkspaceRoot();
+    Editor::SettingsStore prefs = root.empty() ? Editor::OpenEditorPreferences() : Editor::OpenProjectSettings(root);
+    std::string err;
+    prefs.Load(&err);
+    // LoadEffectiveBuildScenes logs the nested-key instruction on the same click, so this path puts it in the message only.
+    const std::string nestedFix = Editor::DescribeNestedProjectStartupScene(prefs);
+    if (!nestedFix.empty())
+        return message + " " + nestedFix + ".";
+    const std::string startupScene = Editor::ReadProjectStartupScene(prefs);
     if (!startupScene.empty())
         message += " The project's startup scene '" + startupScene +
                    "' is not a scene file in the Assets folder: correct " + Editor::kProjectStartupSceneKey +
@@ -1345,37 +1353,30 @@ void BuildPanel::ScheduleBuildTimerTick()
     if (m_BuildTimerTickScheduled || !m_BuildRunning.load())
         return;
 
-    auto tick = [this]() {
-        m_BuildTimerTickScheduled = false;
-        UpdateRunningBuildDurations();
-        RebuildRows();
-        if (m_BuildRunning.load())
-            ScheduleBuildTimerTick();
-    };
-
-    if (Scheduler::IScheduler* scheduler = GetScheduler())
+    UIManager* owner = GetOwnerManager();
+    if (Scheduler::IScheduler* scheduler = owner ? owner->GetScheduler() : nullptr)
     {
         m_BuildTimerTickScheduled = true;
-        UIManager* owner = GetOwnerManager();
-        const uint64_t instanceId = GetInstanceId();
-        scheduler->ScheduleAfter(std::chrono::seconds(1), [owner, instanceId]() {
-            if (!owner)
-                return;
-            UIElement* element = owner->FindElementByInstanceId(instanceId);
-            auto* panel = dynamic_cast<BuildPanel*>(element);
-            if (!panel)
-                return;
-            panel->m_BuildTimerTickScheduled = false;
-            panel->UpdateRunningBuildDurations();
-            panel->RebuildRows();
-            if (panel->m_BuildRunning.load())
-                panel->ScheduleBuildTimerTick();
+        // The task lives in the manager's scheduler, so it cannot outlive the manager; the
+        // weak reference covers the panel being destroyed first.
+        scheduler->ScheduleAfter(std::chrono::seconds(1), [panel = MakeWeakRef(this)]() {
+            if (BuildPanel* live = panel.Get())
+                live->RunBuildTimerTick();
         });
         return;
     }
 
     m_BuildTimerTickScheduled = true;
-    PostSafeAction(std::move(tick));
+    PostSafeAction([this]() { RunBuildTimerTick(); });
+}
+
+void BuildPanel::RunBuildTimerTick()
+{
+    m_BuildTimerTickScheduled = false;
+    UpdateRunningBuildDurations();
+    RebuildRows();
+    if (m_BuildRunning.load())
+        ScheduleBuildTimerTick();
 }
 
 void BuildPanel::TriggerBuild()

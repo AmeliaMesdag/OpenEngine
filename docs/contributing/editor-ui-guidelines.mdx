@@ -46,6 +46,7 @@ When a value is shared across panels, add or reuse a token. When a value is loca
 
 ## Layout rules
 
+- Declare a control or a static layout in XML. Use the [typed C++ builder](../ui/ui-api-guide.mdx#declaring-layout-in-c) only for a tree built at run time from data. Keep layout and appearance in CSS.
 - Every flexible panel root should use `min-width: 0` and `min-height: 0` so children can shrink and scroll correctly.
 - Scrollable content needs a constrained parent. Do not rely on content height to create scroll ranges.
 - Virtualized grids must keep `.grid` as a single-column flex container. The internal virtual content owns cell placement.
@@ -59,7 +60,7 @@ When a value is shared across panels, add or reuse a token. When a value is loca
 ## Styling rules
 
 - Prefer classes and theme tokens over inline style overrides.
-- Use `StyleOverrides` from C++ for dynamic values, measured sizes, live textures, or state that cannot be expressed cleanly in CSS.
+- Use `UIElement::Style()` from C++ for dynamic values, measured sizes, live textures, or state that cannot be expressed cleanly in CSS.
 - Use `RequestSubtreeStyleAssetPath("UI/controls/<Control>.css")` when a native control owns reusable child structure and local styling.
 - Put reusable control styles in `Apps/Editor/Assets/UI/controls`.
 - Put global theme-wide editor styles in `Apps/Editor/Assets/UI/theme`.

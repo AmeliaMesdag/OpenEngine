@@ -141,30 +141,5 @@ std::string ResolvePropertyKeyForUniform(const MaterialDocument& doc, std::strin
     // 4) Suggested new key
     return SuggestPropertyKeyForUniform(uniformName);
 }
-
-bool TryGetFloat4(const MaterialDocument& doc, std::string_view uniformName, float out4[4])
-{
-    if (!out4)
-        return false;
-    const std::string key = ResolvePropertyKeyForUniform(doc, uniformName);
-    if (key.empty())
-        return false;
-
-    auto it = doc.properties.find(key);
-    if (it == doc.properties.end())
-        return false;
-
-    if (auto* arr = std::get_if<std::vector<float>>(&it->second))
-    {
-        if (arr->size() < 4)
-            return false;
-        out4[0] = (*arr)[0];
-        out4[1] = (*arr)[1];
-        out4[2] = (*arr)[2];
-        out4[3] = (*arr)[3];
-        return true;
-    }
-    return false;
-}
 } // namespace GameEngine::Rendering::MaterialPropertyBinding
 

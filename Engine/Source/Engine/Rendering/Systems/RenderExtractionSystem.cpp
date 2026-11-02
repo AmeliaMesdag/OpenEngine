@@ -3,6 +3,7 @@
 #include "ECS/Entity.h"
 #include "ECS/OrderedHandleSet.h"
 #include "Mathematics/Interpolation.h"
+#include "Mathematics/Vector3.h"
 #include "Types/ColorUtils.h"
 
 #include "ECS/ECSTemplates.h"
@@ -45,6 +46,7 @@
 #include "Rendering/Core/GPUScene.h"
 #include "Rendering/Core/GPUInstanceWorldKey.h"
 #include "Types/Fnv1a.h"
+#include "Types/FunctionRef.h"
 #include "Types/StringUtils.h"
 
 #include <algorithm>
@@ -55,7 +57,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -135,20 +136,15 @@ inline bool IsExtractionFeedEnabled()
 // Bulk motion has no ceiling: the patch lane runs in parallel at any count.
 constexpr uint32_t kMaxAlwaysRefreshDefault = 4096u;
 
-inline void Normalize3(float& x, float& y, float& z)
+// A light basis axis of zero length gives +Y.
+constexpr GameEngine::Mathematics::Vector3 kFallbackLightAxis(0.0f, 1.0f, 0.0f);
+
+void StoreLightAxis(const GameEngine::Mathematics::Vector3& axis, float (&out)[3])
 {
-    const float len2 = x * x + y * y + z * z;
-    if (len2 <= 1e-12f)
-    {
-        x = 0.0f;
-        y = 1.0f;
-        z = 0.0f;
-        return;
-    }
-    const float invLen = 1.0f / std::sqrt(len2);
-    x *= invLen;
-    y *= invLen;
-    z *= invLen;
+    const GameEngine::Mathematics::Vector3 unit = axis.NormalizeOr(kFallbackLightAxis);
+    out[0] = unit.x;
+    out[1] = unit.y;
+    out[2] = unit.z;
 }
 
 inline void ReleaseMeshGpuInstance(GameEngine::Rendering::GPUScene& scene,
@@ -884,7 +880,7 @@ ChunkPlan PlanChunks(JobSystem::WorkStealingThreadPool* js, std::size_t count)
 // Runs body(begin, end) over [0, count) as fork-join chunks on `js` when the
 // plan has more than one chunk, inline otherwise; legal from a pool worker.
 void ForkJoinRanges(JobSystem::WorkStealingThreadPool* js, std::size_t count,
-                    const std::function<void(std::size_t begin, std::size_t end)>& body)
+                    FunctionRef<void(std::size_t begin, std::size_t end)> body)
 {
     if (count == 0)
         return;
@@ -1610,9 +1606,9 @@ void RenderExtractionSystem::ExtractPostProcessVolumes(ECS::World& world, uint64
         float worldCameraPos[3] = {0.0f, 0.0f, 0.0f};
         if (worldCamData)
         {
-            worldCameraPos[0] = worldCamData->cameraPos[0];
-            worldCameraPos[1] = worldCamData->cameraPos[1];
-            worldCameraPos[2] = worldCamData->cameraPos[2];
+            worldCameraPos[0] = worldCamData->cameraPos.x;
+            worldCameraPos[1] = worldCamData->cameraPos.y;
+            worldCameraPos[2] = worldCamData->cameraPos.z;
         }
 
         ResolvedVolumeStack worldStack =
@@ -1653,9 +1649,9 @@ void RenderExtractionSystem::ExtractPostProcessVolumes(ECS::World& world, uint64
             float viewCameraPos[3] = {0.0f, 0.0f, 0.0f};
             if (cam)
             {
-                viewCameraPos[0] = cam->cameraPos[0];
-                viewCameraPos[1] = cam->cameraPos[1];
-                viewCameraPos[2] = cam->cameraPos[2];
+                viewCameraPos[0] = cam->cameraPos.x;
+                viewCameraPos[1] = cam->cameraPos.y;
+                viewCameraPos[2] = cam->cameraPos.z;
             }
 
             ResolvedVolumeStack viewStack =
@@ -2022,8 +2018,7 @@ uint32 RenderExtractionSystem::PatchDirtyInstances(ECS::World& world, GPUScene& 
                    { BuildPatchedInstances(reads, scene, writes, isMover, moverRecords, begin, end); });
     for (std::size_t i = 0; i < writeCount && !m_ChangedCasterOverflow; ++i)
         TrackChangedCasterSphere(scene.GetInstances()[writes[i].InstanceIndex], writes[i].Instance);
-    scene.UpdateInstances(writes, [js](std::size_t count,
-                                       const std::function<void(std::size_t, std::size_t)>& body)
+    scene.UpdateInstances(writes, [js](std::size_t count, FunctionRef<void(std::size_t, std::size_t)> body)
                           { ForkJoinRanges(js, count, body); });
 
     auto& movers = m_ParallelState->patchMovers;
@@ -2592,18 +2587,9 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                       out.positionWS[2] = xf.matrix[14];
 
                       // Shine along entity forward (+Z column). Matches cameras and Unity.
-                      out.directionWS[0] = xf.matrix[8];
-                      out.directionWS[1] = xf.matrix[9];
-                      out.directionWS[2] = xf.matrix[10];
-                      Normalize3(out.directionWS[0], out.directionWS[1], out.directionWS[2]);
-                      out.rightWS[0] = xf.matrix[0];
-                      out.rightWS[1] = xf.matrix[1];
-                      out.rightWS[2] = xf.matrix[2];
-                      Normalize3(out.rightWS[0], out.rightWS[1], out.rightWS[2]);
-                      out.upWS[0] = xf.matrix[4];
-                      out.upWS[1] = xf.matrix[5];
-                      out.upWS[2] = xf.matrix[6];
-                      Normalize3(out.upWS[0], out.upWS[1], out.upWS[2]);
+                      StoreLightAxis(Mathematics::Vector3(xf.matrix[8], xf.matrix[9], xf.matrix[10]), out.directionWS);
+                      StoreLightAxis(Mathematics::Vector3(xf.matrix[0], xf.matrix[1], xf.matrix[2]), out.rightWS);
+                      StoreLightAxis(Mathematics::Vector3(xf.matrix[4], xf.matrix[5], xf.matrix[6]), out.upWS);
 
                       rs->SubmitLight(worldId, out);
                       ++lightCount; });
@@ -2735,7 +2721,7 @@ void RenderExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                 if (m_Submissions.Size() != 0)
                 {
                     const auto submitStart = ExtractionClock::now();
-                    rs->SubmitWorldSubmissions(m_Submissions.Records());
+                    rs->SubmitWorldSubmissions(m_Submissions.Records(), m_Submissions.Revision());
                     submitMs = elapsedMs(submitStart, ExtractionClock::now());
                 }
 

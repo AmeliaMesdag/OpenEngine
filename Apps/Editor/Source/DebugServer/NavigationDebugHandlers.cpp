@@ -3,7 +3,9 @@
 #include "DebugServer/DebugServerReply.h"
 #include "DebugServer/EditorDebugServer.h"
 
+#include "Components/Hierarchy.h"
 #include "Components/Name.h"
+#include "Components/Rendering/MeshRenderer.h"
 #include "Core/Engine.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Systems.h"
@@ -235,6 +237,23 @@ const char* SourcePolicyName(Components::NavigationSourcePolicy policy)
     return "Auto";
 }
 
+// The name a source lists under. A mesh with no model is one a recipe or a script generated: when its
+// parent has a name, the parent's name comes first ("Harbor Road / Section 0"), because many chunks
+// share one name.
+std::optional<std::string> SourceDisplayName(ECS::World& world, const Navigation::BakeSource& source)
+{
+    const auto* name = world.GetComponent<Components::Name>(source.Entity);
+    if (!name)
+        return std::nullopt;
+    const auto* renderer = world.GetComponent<Components::MeshRenderer>(source.Entity);
+    const auto* parent = world.GetComponent<Components::Parent>(source.Entity);
+    const auto* parentName = parent ? world.GetComponent<Components::Name>(parent->Entity) : nullptr;
+    if (source.Kind != Navigation::BakeSourceKind::Mesh || !renderer || !renderer->modelAssetGuid.IsNull() ||
+        !parentName)
+        return std::string(name->View());
+    return std::string(parentName->View()) + " / " + std::string(name->View());
+}
+
 json HandleNavigationSources(const EditorDebugServer::RequestContext& ctx)
 {
     auto* world = EngineCore::GetInstance().GetPrimaryWorld();
@@ -253,8 +272,8 @@ json HandleNavigationSources(const EditorDebugServer::RequestContext& ctx)
         json entry{{"entityId", source.Entity.id}, {"kind", BakeSourceKindName(source.Kind)}};
         if (source.Kind == Navigation::BakeSourceKind::Mesh)
             entry["policy"] = SourcePolicyName(source.Policy);
-        if (const auto* name = world->GetComponent<Components::Name>(source.Entity))
-            entry["name"] = std::string(name->View());
+        if (const std::optional<std::string> name = SourceDisplayName(*world, source))
+            entry["name"] = *name;
         list.push_back(std::move(entry));
     }
     return json{{"surfaceEntityId", surface->id}, {"count", list.size()}, {"sources", std::move(list)}};
@@ -330,7 +349,8 @@ void RegisterNavigationDebugHandlers(EditorDebugServer& server)
     // get_navigation_sources — every collider and mesh a bake of a NavigationSurface reads inside its
     // bounds (Navigation::ListBakeSources), gathered on the main thread between frames. Params:
     // entityId names the surface (optional when the scene has one). Reply: surfaceEntityId, count and
-    // sources, each with entityId, name (when the entity has one), kind (Collider or Mesh) and, for a
+    // sources, each with entityId, name (when the entity has one; a generated mesh's name follows its
+    // parent's, "Harbor Road / Section 0"), kind (Collider or Mesh) and, for a
     // mesh, policy (the NavigationSource policy that admitted it: Auto or Include); colliders carry
     // no policy. Refused, with the reason, when the surface is missing or ambiguous.
     server.RegisterHandler("get_navigation_sources", HandleNavigationSources);

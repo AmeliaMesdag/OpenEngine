@@ -7,6 +7,7 @@
 #include "UndoRedo/Spline/SplineUndoHelpers.h"
 #include "Scene/WorldSnapshotCommand.h"
 #include "Components/Rendering/MeshRenderer.h"
+#include "Components/RuntimeOnlyEntity.h"
 #include "Components/Transform.h"
 #include "ECS/Components.h"
 #include "ECS/ECS.h"
@@ -25,6 +26,7 @@
 #include "Spline/SplineUtility.h"
 #include "SplineECS/SplineService.h"
 #include "Types/ColorUtils.h"
+#include "Editor/Entities/EntityDisplayName.h"
 #include "Core/Engine.h"
 #include "Input/KeyCodes.h"
 #include "SceneView/SplineTool/SplineOwnerQuery.h"
@@ -54,6 +56,13 @@ constexpr float kSplineScreenScaleRefAxisLength = 1.5f;
 constexpr float kSplineScreenScaleBase            = 0.1875f;
 constexpr float kAutoBezierTangentScale         = 1.0f / 6.0f;
 constexpr float kBezierHandlePickRadiusScale    = 1.35f;
+// The snap reach as a multiple of the knot's pick radius: an end aimed within one knot width of
+// another spline's end, an area's outline or a road's band joins it.
+constexpr float32 kSplineSnapReachScale = 2.0f;
+// A stroke arms its loop close when a sample is farther from its start than this many snap reaches.
+constexpr float32 kCloseLoopArmReachScale = 2.0f;
+// The smallest pick radius of a knot or a handle, before the screen scale, in world meters.
+constexpr float32 kSplineControlPickMinimumSize = 0.15f;
 
 // Constant-screen-size scale for a gizmo `dist` world units from the camera
 // (clamped to 1e-4), shared by drawing and picking so the two stay the same size.
@@ -85,6 +94,7 @@ void SplineInteractionState::Refresh()
         m_Generation = generation;
         m_Selection = {};
         m_Hover = {};
+        m_SnapPreview = {};
     }
 }
 
@@ -98,6 +108,12 @@ SplineHover& SplineInteractionState::Hover()
 {
     Refresh();
     return m_Hover;
+}
+
+SplineSnapPreview& SplineInteractionState::SnapPreview()
+{
+    Refresh();
+    return m_SnapPreview;
 }
 
 std::shared_ptr<SplineInteractionState> AcquireSplineInteractionState(ECS::World& world)
@@ -482,10 +498,13 @@ bool SplineTool::RaycastScene(const GizmoRay& ray, Vector3& outHit, uint32* hitE
         outHit = pick.Best.WorldPosition;
         if (hitEntityId)
         {
+            // Generator output (paving, a road band) is rebuilt from its spline: a stroke on it
+            // belongs to the ground under it, so the stroke does not stick to it.
             const bool canStickToHit =
-                pick.Best.Kind == Scene::PickableKind::Mesh ||
-                pick.Best.Kind == Scene::PickableKind::Primitive;
-            *hitEntityId = (canStickToHit && pick.Best.Entity.IsValid()) ? pick.Best.Entity.id : 0u;
+                (pick.Best.Kind == Scene::PickableKind::Mesh || pick.Best.Kind == Scene::PickableKind::Primitive) &&
+                pick.Best.Entity.IsValid() &&
+                !world->HasComponent<Components::RuntimeOnlyEntity>(pick.Best.Entity);
+            *hitEntityId = canStickToHit ? pick.Best.Entity.id : 0u;
         }
         return true;
     }
@@ -617,12 +636,12 @@ void SplineTool::OnPointerEvent(const ScenePointerEvent& event)
         m_IsDrawingBrush = true;
         m_DragMoved = false;
         m_StrokeCloseLoopLatched = false;
+        m_StrokeCloseLoopArmed = false;
         m_RawStrokePoints.clear();
         m_RawStrokePoints.push_back(hitPos);
         m_HasStroke = true;
-        // Latch onto whatever entity the first sample hit so the rest of the
-        // stroke prefers that surface. hitEntity is 0 for terrain / plane
-        // fallback hits, in which case there's nothing to stick to.
+        // The rest of the stroke raycasts only the entity the first sample hit. hitEntity is 0
+        // for terrain, the plane and generator output: then the stroke sticks to nothing.
         m_StickyEntityId = hitEntity;
 
         // Show existing points + the new start point.
@@ -647,22 +666,25 @@ void SplineTool::OnPointerEvent(const ScenePointerEvent& event)
                 m_Gizmo.SetPoints(preview);
             }
 
-            // Live close-loop preview: mirror the finalize-time tolerance so
-            // the visual hint and the actual snap behavior stay in sync. The
-            // latch is sticky — once a sample enters the close-loop zone the
-            // stroke is committed to closing even if the user releases a
-            // fraction of a unit outside the ring.
-            const float32 closeLoopTol =
-                Editor::SplineEditorSettings::Get().GetCloseLoopTolerance();
+            // Live close-loop preview within the snap reach of the stroke's start. The latch
+            // arms only after a sample was twice the reach away, so the stroke must travel away
+            // first. It is sticky: the stroke closes even when the release lands outside it.
             bool willClose = false;
-            if (closeLoopTol > 0.0f && m_RawStrokePoints.size() >= 3)
+            if (Editor::SplineEditorSettings::Get().GetAutoCloseLoop())
             {
-                const Vector3 d = hitPos - m_RawStrokePoints.front();
-                willClose = d.LengthSquared() <= closeLoopTol * closeLoopTol;
+                const Vector3 start = m_RawStrokePoints.front();
+                const float32 reach = SplineSnapReach(event.ray, start);
+                const float32 armDistance = kCloseLoopArmReachScale * reach;
+                const float32 distanceSquared = (hitPos - start).LengthSquared();
+                m_StrokeCloseLoopArmed = m_StrokeCloseLoopArmed || distanceSquared > armDistance * armDistance;
+                willClose = distanceSquared <= reach * reach && m_StrokeCloseLoopArmed && m_RawStrokePoints.size() >= 3;
                 if (willClose)
                     m_StrokeCloseLoopLatched = true;
             }
             m_Gizmo.SetCloseLoopHint(willClose || m_StrokeCloseLoopLatched);
+            // Where the stroke's last point lands on a rim or a band when it is released here.
+            ShowNetworkSnap(willClose || m_StrokeCloseLoopLatched ? std::nullopt
+                                                                  : FindNetworkSnap(hitPos, event.ray, {}));
         }
     }
     else if (event.phase == PointerPhase::Up && m_IsDrawingBrush)
@@ -697,8 +719,9 @@ void SplineTool::OnPointerEvent(const ScenePointerEvent& event)
             if (s.GetConformToSurface())
                 SnapPointsToSurface(m_SimplifiedPoints);
             m_ClickPoints = m_SimplifiedPoints;
-            FinalizeSpline();
+            FinalizeSpline(event.ray);
         }
+        ShowNetworkSnap(std::nullopt);
 
         // Clear for the next stroke (next drag = new entity).
         m_Gizmo.SetBrushMode(false);
@@ -707,6 +730,7 @@ void SplineTool::OnPointerEvent(const ScenePointerEvent& event)
         m_ClickPoints.clear();
         m_RawStrokePoints.clear();
         m_StrokeCloseLoopLatched = false;
+        m_StrokeCloseLoopArmed = false;
         m_StickyEntityId = 0;
     }
 }
@@ -899,13 +923,13 @@ void SplineTool::BeginSelectedControlTransformEdit(const char* editName)
             dc.WorldMatrix = Mathematics::Matrix4x4::FromColumnMajor(xf->matrix);
             dc.InverseWorldMatrix = Mathematics::Inverse(dc.WorldMatrix);
         }
-        dc.StartWorldPosition = dc.HasTransform ? dc.WorldMatrix.TransformPoint(point.Position) : point.Position;
+        dc.StartWorldPosition = dc.ToWorld(point.Position);
         Vector3 localHandle = point.Position;
         if (c.Kind == 2)
             localHandle = point.Position + point.TangentIn;
         else if (c.Kind == 3)
             localHandle = point.Position + point.TangentOut;
-        dc.StartWorldHandle = dc.HasTransform ? dc.WorldMatrix.TransformPoint(localHandle) : localHandle;
+        dc.StartWorldHandle = dc.ToWorld(localHandle);
         if (c.Entity == active.Entity && c.Kind == active.Kind && c.PointIndex == active.PointIndex)
             m_EditDragAnchorWorld = c.Kind == 1 ? dc.StartWorldPosition : dc.StartWorldHandle;
 
@@ -960,14 +984,13 @@ void SplineTool::ApplySelectedControlTransformDelta(const Vector3& deltaWorld)
             if (dc.Kind == 1)
             {
                 const Vector3 worldPos = dc.StartWorldPosition + delta;
-                const Vector3 localPos = dc.HasTransform ? dc.InverseWorldMatrix.TransformPoint(worldPos) : worldPos;
+                const Vector3 localPos = dc.ToLocal(worldPos);
                 data->SetPointPosition(i, localPos);
             }
             else
             {
                 const Vector3 worldHandle = dc.StartWorldHandle + delta;
-                const Vector3 localHandle =
-                    dc.HasTransform ? dc.InverseWorldMatrix.TransformPoint(worldHandle) : worldHandle;
+                const Vector3 localHandle = dc.ToLocal(worldHandle);
                 const Vector3 offset = localHandle - data->Points[i].Position;
                 Vector3 tangentIn = data->Points[i].TangentIn;
                 Vector3 tangentOut = data->Points[i].TangentOut;
@@ -1034,7 +1057,7 @@ void SplineTool::ClearSelectedControlTransformEdit()
     m_EditDragAwaitingMotion = false;
 }
 
-void SplineTool::FinalizeSpline()
+void SplineTool::FinalizeSpline(const GizmoRay& releaseRay)
 {
     const auto& points = m_ClickPoints;
     auto* world = &m_State->World();
@@ -1066,12 +1089,7 @@ void SplineTool::FinalizeSpline()
     // Auto-connect to an existing spline if the stroke starts or ends near an
     // existing spline endpoint. "AutoConnect" setting gates this behavior so
     // users can turn it off when they want isolated strokes.
-    const auto& splineSettings = Editor::SplineEditorSettings::Get();
-    const bool autoConnect = splineSettings.GetAutoConnect();
-    const float32 connectTol = splineSettings.GetAutoConnectTolerance();
-    const float32 connectTolSq = connectTol * connectTol;
-    const float32 closeLoopTol = splineSettings.GetCloseLoopTolerance();
-    const float32 closeLoopTolSq = closeLoopTol * closeLoopTol;
+    const bool autoConnect = Editor::SplineEditorSettings::Get().GetAutoConnect();
 
     // Detect closed-loop authoring first: use the latched preview flag so
     // the actual closure matches exactly what the live indicator showed
@@ -1085,6 +1103,8 @@ void SplineTool::FinalizeSpline()
     if (m_StrokeCloseLoopLatched && pointsCopy.size() >= 3)
     {
         const Vector3 first = pointsCopy.front();
+        const float32 closeLoopReach = SplineSnapReach(releaseRay, first);
+        const float32 closeLoopTolSq = closeLoopReach * closeLoopReach;
         int32 trimTo = static_cast<int32>(pointsCopy.size());
         for (int32 i = static_cast<int32>(pointsCopy.size()) - 1; i >= 2; --i)
         {
@@ -1098,10 +1118,16 @@ void SplineTool::FinalizeSpline()
         closed = true;
     }
 
-    if (!closed && autoConnect && TryExtendExistingSpline(points, connectTolSq))
+    if (!closed && autoConnect && TryExtendExistingSpline(points, releaseRay))
     {
         CancelStroke();
         return;
+    }
+    // A new open spline's last point lands on the rim or the band within the reach.
+    if (!closed)
+    {
+        if (const auto snap = FindNetworkSnap(pointsCopy.back(), releaseRay, {}))
+            pointsCopy.back() = snap->Point;
     }
 
     const bool undoNewSplineEntity = static_cast<bool>(m_UndoRedo) && world;
@@ -1206,11 +1232,13 @@ void SplineTool::CancelStroke()
     m_IsDrawingBrush = false;
     m_HasStroke = false;
     m_StrokeCloseLoopLatched = false;
+    m_StrokeCloseLoopArmed = false;
     m_StickyEntityId = 0;
     m_SelectedPointIndex = -1;
     m_Gizmo.SetPoints({});
     m_Gizmo.SetSelectedIndex(-1);
     m_Gizmo.SetCloseLoopHint(false);
+    ShowNetworkSnap(std::nullopt);
 }
 
 void SplineTool::SimplifyPolyline(const std::vector<Vector3>& input,
@@ -1229,6 +1257,50 @@ float32 PickScreenScale(const GizmoRay& ray,
         return 1.0f;
 
     return ScreenScaleAtDistance((ray.origin - worldPosition).Length(), smartDistanceScalingEnabled);
+}
+
+float32 SplineKnotPickBase()
+{
+    return std::max(Editor::SplineEditorSettings::Get().GetKnotSize(), kSplineControlPickMinimumSize);
+}
+
+float32 SplineSnapReach(const GizmoRay& ray, const Vector3& worldPosition)
+{
+    const auto& settings = Editor::SplineEditorSettings::Get();
+    return kSplineSnapReachScale * SplineKnotPickBase() *
+           PickScreenScale(ray, worldPosition, settings.GetConstantScreenSize(), settings.GetSmartDistanceScaling());
+}
+
+std::optional<SplineECS::SplineSnapTarget> SplineTool::FindNetworkSnap(const Vector3& point,
+                                                                       const GizmoRay& ray,
+                                                                       ECS::EntityHandle exclude) const
+{
+    SplineECS::SplineNetwork* network = SplineECS::SplineNetwork::TryGet();
+    if (!network || !Editor::SplineEditorSettings::Get().GetAutoConnect())
+        return std::nullopt;
+    return network->FindSnapTarget(m_State->World(), point, SplineSnapReach(ray, point), exclude);
+}
+
+void SplineTool::ShowNetworkSnap(const std::optional<SplineECS::SplineSnapTarget>& snap)
+{
+    SplineSnapPreview& preview = m_State->SnapPreview();
+    preview = snap ? SplineSnapPreview{snap->Member, snap->Point} : SplineSnapPreview{};
+    m_HoverText.clear();
+    if (!snap)
+        return;
+    m_HoverText = "Snap to " + EntityDisplayName(m_State->World(), snap->Member);
+}
+
+bool SplineTool::IsDraggingOneEndKnot() const
+{
+    if (m_EditDragKind != 1 || m_EditDragControls.size() != 1u)
+        return false;
+    const EditDragControl& control = m_EditDragControls.front();
+    const auto* splineService = SplineECS::SplineService::TryGet();
+    const auto* data = splineService ? splineService->GetSplineData(control.Handle) : nullptr;
+    if (!data || data->Closed || data->Points.size() < 2u)
+        return false;
+    return control.PointIndex == 0 || control.PointIndex == static_cast<int32>(data->Points.size() - 1u);
 }
 
 namespace
@@ -1719,8 +1791,8 @@ void SplineTool::UpdateHover(const ScenePointerEvent& event)
     if (selectedEntities.empty())
         return;
 
-    const float32 knotBase   = std::max(settings.GetKnotSize(),   0.15f);
-    const float32 handleBase = std::max(settings.GetHandleSize(), 0.15f);
+    const float32 knotBase   = SplineKnotPickBase();
+    const float32 handleBase = std::max(settings.GetHandleSize(), kSplineControlPickMinimumSize);
     const bool constScreen = settings.GetConstantScreenSize();
     const bool smartDist = settings.GetSmartDistanceScaling();
 
@@ -1767,8 +1839,8 @@ bool SplineTool::TryBeginEditDrag(const ScenePointerEvent& event,
         return false;
     }
 
-    const float32 knotBase   = std::max(settings.GetKnotSize(),   0.15f);
-    const float32 handleBase = std::max(settings.GetHandleSize(), 0.15f);
+    const float32 knotBase   = SplineKnotPickBase();
+    const float32 handleBase = std::max(settings.GetHandleSize(), kSplineControlPickMinimumSize);
     const bool constScreen = settings.GetConstantScreenSize();
     const bool smartDist = settings.GetSmartDistanceScaling();
 
@@ -1892,13 +1964,13 @@ bool SplineTool::TryBeginEditDrag(const ScenePointerEvent& event,
             dc.WorldMatrix = Mathematics::Matrix4x4::FromColumnMajor(xf->matrix);
             dc.InverseWorldMatrix = Mathematics::Inverse(dc.WorldMatrix);
         }
-        dc.StartWorldPosition = dc.HasTransform ? dc.WorldMatrix.TransformPoint(point.Position) : point.Position;
+        dc.StartWorldPosition = dc.ToWorld(point.Position);
         Vector3 localHandle = point.Position;
         if (c.Kind == 2)
             localHandle = point.Position + point.TangentIn;
         else if (c.Kind == 3)
             localHandle = point.Position + point.TangentOut;
-        dc.StartWorldHandle = dc.HasTransform ? dc.WorldMatrix.TransformPoint(localHandle) : localHandle;
+        dc.StartWorldHandle = dc.ToWorld(localHandle);
         if (SameControl(c, best.Entity, best.Kind, best.PointIndex))
             m_EditDragAnchorWorld = c.Kind == 1 ? dc.StartWorldPosition : dc.StartWorldHandle;
 
@@ -2038,7 +2110,15 @@ bool SplineTool::UpdateEditDrag(const ScenePointerEvent& event,
             m_EditDragAwaitingMotion = false;
         }
 
-        const Vector3 deltaWorld = currentAnchor - m_EditDragAnchorWorld;
+        Vector3 deltaWorld = currentAnchor - m_EditDragAnchorWorld;
+        if (IsDraggingOneEndKnot())
+        {
+            const EditDragControl& end = m_EditDragControls.front();
+            const auto snap = FindNetworkSnap(end.StartWorldPosition + deltaWorld, event.ray, end.Entity);
+            if (snap)
+                deltaWorld = snap->Point - end.StartWorldPosition;
+            ShowNetworkSnap(snap);
+        }
         std::vector<SplineECS::SplineHandle> rebuilt;
         for (const auto& dc : m_EditDragControls)
         {
@@ -2053,14 +2133,13 @@ bool SplineTool::UpdateEditDrag(const ScenePointerEvent& event,
             if (dc.Kind == 1)
             {
                 const Vector3 worldPos = dc.StartWorldPosition + deltaWorld;
-                const Vector3 localPos = dc.HasTransform ? dc.InverseWorldMatrix.TransformPoint(worldPos) : worldPos;
+                const Vector3 localPos = dc.ToLocal(worldPos);
                 data->SetPointPosition(i, localPos);
             }
             else
             {
                 const Vector3 worldHandle = dc.StartWorldHandle + deltaWorld;
-                const Vector3 localHandle =
-                    dc.HasTransform ? dc.InverseWorldMatrix.TransformPoint(worldHandle) : worldHandle;
+                const Vector3 localHandle = dc.ToLocal(worldHandle);
                 const Vector3 offset = localHandle - data->Points[i].Position;
                 Vector3 tangentIn = data->Points[i].TangentIn;
                 Vector3 tangentOut = data->Points[i].TangentOut;
@@ -2114,12 +2193,12 @@ bool SplineTool::UpdateEditDrag(const ScenePointerEvent& event,
                 const uint32 dragged = static_cast<uint32>(dc.PointIndex);
                 const uint32 last = static_cast<uint32>(data->Points.size() - 1);
                 const bool isEndpoint = (dragged == 0 || dragged == last);
-                if (isEndpoint)
+                if (isEndpoint && Editor::SplineEditorSettings::Get().GetAutoCloseLoop())
                 {
                     const uint32 other = (dragged == 0) ? last : 0;
-                    const Vector3 diff = data->Points[dragged].Position - data->Points[other].Position;
-                    const float32 tol = Editor::SplineEditorSettings::Get().GetCloseLoopTolerance();
-                    if (tol > 0.0f && diff.LengthSquared() <= tol * tol)
+                    const Vector3 otherWorld = dc.ToWorld(data->Points[other].Position);
+                    const float32 reach = SplineSnapReach(event.ray, otherWorld);
+                    if ((dc.ToWorld(data->Points[dragged].Position) - otherWorld).LengthSquared() <= reach * reach)
                     {
                         const uint32 countBefore = static_cast<uint32>(data->Points.size());
                         data->RemovePoint(dragged);
@@ -2135,6 +2214,7 @@ bool SplineTool::UpdateEditDrag(const ScenePointerEvent& event,
             }
         }
 
+        ShowNetworkSnap(std::nullopt);
         if (closedLoop && m_UndoRedo)
             m_UndoRedo->BeginCompound("Close Spline Loop");
         if (m_SplineDragUndo)
@@ -2169,7 +2249,7 @@ bool SplineTool::UpdateEditDrag(const ScenePointerEvent& event,
     return true;
 }
 
-bool SplineTool::TryExtendExistingSpline(const std::vector<Vector3>& stroke, float32 toleranceSq)
+bool SplineTool::TryExtendExistingSpline(std::vector<Vector3> stroke, const GizmoRay& ray)
 {
     if (stroke.size() < 2)
         return false;
@@ -2181,6 +2261,8 @@ bool SplineTool::TryExtendExistingSpline(const std::vector<Vector3>& stroke, flo
 
     const Vector3 strokeStart = stroke.front();
     const Vector3 strokeEnd   = stroke.back();
+    const float32 reachStart = SplineSnapReach(ray, strokeStart);
+    const float32 reachEnd = SplineSnapReach(ray, strokeEnd);
 
     struct Match
     {
@@ -2229,7 +2311,8 @@ bool SplineTool::TryExtendExistingSpline(const std::vector<Vector3>& stroke, flo
                 {
                     Vector3 d = sp - targetPos;
                     float32 dsq = d.LengthSquared();
-                    if (dsq <= toleranceSq && dsq < best.distSq)
+                    const float32 reach = strokeSide == 0 ? reachStart : reachEnd;
+                    if (dsq <= reach * reach && dsq < best.distSq)
                     {
                         best.entity = e;
                         best.handle = h;
@@ -2253,6 +2336,14 @@ bool SplineTool::TryExtendExistingSpline(const std::vector<Vector3>& stroke, flo
 
     if (!splineService->GetSplineData(best.handle))
         return false;
+
+    // A stroke that extends a spline at its start places its end: that end snaps to a rim or
+    // a band as a new spline's last point does.
+    if (best.strokeSide == 0)
+    {
+        if (const auto snap = FindNetworkSnap(stroke.back(), ray, best.entity))
+            stroke.back() = snap->Point;
+    }
 
     // Assemble the ordered list of points to append. If the matching stroke
     // side is the END, we reverse the stroke so the appended sequence starts
@@ -2596,6 +2687,16 @@ void SplineTool::CancelMarquee()
     m_MarqueeLassoPoints.clear();
     m_Gizmo.SetMarquee(false, 0, m_MarqueeStart, m_MarqueeCurrent,
                        m_MarqueeLassoPoints, m_MarqueePlaneU, m_MarqueePlaneV);
+}
+
+Vector3 SplineTool::EditDragControl::ToWorld(const Vector3& local) const
+{
+    return HasTransform ? WorldMatrix.TransformPoint(local) : local;
+}
+
+Vector3 SplineTool::EditDragControl::ToLocal(const Vector3& world) const
+{
+    return HasTransform ? InverseWorldMatrix.TransformPoint(world) : world;
 }
 
 } // namespace GameEngine::Editor::SceneTools

@@ -10,6 +10,7 @@
 #include "JobSystem/TaskTypes.h"
 #include "JobSystem/Types.h"
 #include "Logger/Logger.h"
+#include "Memory/FrameJoinedScope.h"
 #include "Types/FalseSharing.h"
 #include <algorithm>
 #include <atomic>
@@ -64,6 +65,10 @@ class WorkStealingThreadPool;
  * Stopping: a body that returns false, a body that throws, options.Stop
  * returning true or throwing, or an admission hook throwing stops the run:
  * no further unit starts on any thread, units in flight finish.
+ *
+ * Frame memory: under GE_DEBUG_INSTRUMENTATION every unit runs with the
+ * frame-joined bit (Memory::Detail::IsFrameJoined) of the calling thread, on
+ * a helper as on the caller.
  *
  * @param pool The pool helpers publish to; null runs every unit on the
  *        caller, in order, with the same stop rules.
@@ -362,6 +367,15 @@ class WorkStealingThreadPool
      * of the pool body running on this thread (Background inside a
      * Background body, Normal everywhere else), so a Background body's fork
      * never publishes Normal work.
+     *
+     * Frame memory: under GE_DEBUG_INSTRUMENTATION `fn` runs with the
+     * frame-joined bit (Memory::Detail::IsFrameJoined) of the thread that
+     * called Run, on whichever thread runs it. `fn` is joined by the frame
+     * only when that thread waits `counter` before its frame ends, as
+     * Query::Parallel and the ECS system waves do; frame-joined code
+     * publishes work that it polls across frames through Submit or
+     * EnqueueWork instead. A Submit, EnqueueWork, EnqueueWorkBatch or channel
+     * job body runs with the bit clear.
      */
     template <typename F, typename = std::enable_if_t<std::is_invocable_v<F&>>>
     void Run(F&& fn, JobCounter& counter);
@@ -580,9 +594,9 @@ class WorkStealingThreadPool
      * EnqueueWork or Submit envelope, each element of an EnqueueWorkBatch, a
      * graph task) adds one to `sink`. Jobs published by other threads are not
      * counted, so a body another thread runs adds nothing. A body this
-     * thread's own Wait runs inline (a participating Wait: any worker of this
-     * pool, or a host thread that cannot block) publishes on this thread, so
-     * its publishes count as this thread's.
+     * thread's own Wait runs inline (every Wait participates: it runs the jobs
+     * tagged with its counter) publishes on this thread, so its publishes
+     * count as this thread's.
      *
      * Scopes nest: the innermost one counts, and the enclosing one counts
      * again once it ends. `sink` is a plain integer written only by the
@@ -690,6 +704,12 @@ class WorkStealingThreadPool
      * @return The index, or SIZE_MAX on a thread that is no pool's worker
      */
     size_t GetCurrentWorkerId() const;
+
+    /**
+     * @brief True on a compute worker thread of @p pool; false on every other
+     * thread, a worker of another pool included.
+     */
+    static bool IsComputeWorkerOf(const WorkStealingThreadPool* pool);
 
     /**
      * @brief Destroys the result and callbacks of every Completed or Failed task that only the
@@ -1066,10 +1086,6 @@ class WorkStealingThreadPool
     static thread_local uint32* s_PublishSink;
     // Adds `count` published jobs to the calling thread's sink, if it has one.
     static void CountPublishedOnThisThread(size_t count);
-    // True on a compute worker thread of `pool`; false on every other thread,
-    // a worker of another pool included. Read by TaskHandle::Wait's Debug
-    // assert.
-    static bool IsComputeWorkerOf(const WorkStealingThreadPool* pool);
 
     // The blocking threads and their FIFO; null in inline mode.
     UniquePtr<Detail::BlockingThreads> m_BlockingThreads;
@@ -1546,6 +1562,12 @@ void WorkStealingThreadPool::Run(F&& fn, JobCounter& counter)
     }
 
     counter.Add(1); // before the publish, and immediately before its critical section
+#if GE_DEBUG_INSTRUMENTATION
+    // Counted until the envelope runs: the frame advance asserts that the
+    // frame waited every Run it published.
+    if (job->FrameJoined)
+        GameEngine::Memory::Detail::AddOutstandingJoinedRun();
+#endif
 
     JobCounter::TaggedJobsRef jobs;
     bool enqueued;
@@ -1630,6 +1652,10 @@ bool ParallelFor(WorkStealingThreadPool* pool, size_t count, Body&& body, const 
 template <typename F>
 void WorkStealingThreadPool::RunBareInline(F& func, JobPriority priority)
 {
+#if GE_DEBUG_INSTRUMENTATION
+    // A queued body runs without the frame-joined bit (ExecuteTaskOptimized).
+    const GameEngine::Memory::Detail::FrameJoinedScope notFrameJoined(false);
+#endif
     try
     {
         JobBodyScope body(ComputeContext(priority));

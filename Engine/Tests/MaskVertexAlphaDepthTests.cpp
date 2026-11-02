@@ -248,19 +248,16 @@ void DrawTheCardOverTheFloor(IDevice* device, const MaterialDocument& cardDocume
 
     const CameraId cameraId = rs.Views().AllocateCamera("MaskVertexAlpha.Camera");
     CameraData camera{};
-    for (int i = 0; i < 16; i += 5)
-    {
-        camera.view[i] = 1.0f;
-        camera.proj[i] = 1.0f;
-        camera.viewProj[i] = 1.0f;
-    }
+    camera.view = Mathematics::Matrix4x4::Identity();
+    camera.proj = Mathematics::Matrix4x4::Identity();
+    camera.viewProj = Mathematics::Matrix4x4::Identity();
     rs.Views().SetCameraData(cameraId, camera);
     const ViewId viewId = rs.Views().AllocateView("MaskVertexAlpha.View", cameraId);
     rs.Views().SetViewRenderLayerMask(viewId, GameEngine::Rendering::RenderLayerMask::Default());
     rs.Views().SetViewWorldId(viewId, kWorldId);
     ViewClearConfig clear{};
     clear.clearColor = true;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue.a = 1.0f;
     clear.clearDepth = true;
     clear.clearDepthValue = 0.0f;
     rs.Views().SetViewTargets(viewId, 0, 0, 0, clear);

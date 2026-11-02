@@ -57,8 +57,10 @@ enum class NavigationBakeFailure : uint8
     SphericalTerrain = 2,
     // The bounds cut into more tiles (mesh) or cells (grid) than a surface holds.
     TooLarge = 3,
-    // Recast or Detour refused one tile; FailedTileX/Z name it and the log says why.
+    // Recast or Detour refused one tile; BlockingTileX/Z name it and the log says why.
     TileBuild = 4,
+    // The grid bake threw; the log says why.
+    GridBuild = 5,
 };
 
 // A walkable surface for navigation agents, baked from the terrain, static collider shapes and
@@ -157,7 +159,7 @@ struct NavigationSurface
     // @ge-hidden
     // [DoNotSerialize]
     NavigationSurfaceMode BakedMode = NavigationSurfaceMode::Mesh;
-    // Mesh: tiles built and the layout's tile count. Grid: cells.
+    // Mesh: tiles built and the layout's tile count. Grid: cells (BakeDone is 0 while the grid bakes).
     // @ge-hidden
     // [DoNotSerialize]
     uint32 BakeDone = 0;
@@ -172,7 +174,8 @@ struct NavigationSurface
     // [DoNotSerialize]
     uint64 BakedBytes = 0;
     // Mesh: counts the tiles put into the map (by a bake, a load from BakedData or a rebake), so it
-    // changes whenever a tile changes. Grid: counts completed bakes.
+    // changes whenever a tile changes. Grid: counts the published bakes. Both count across every map
+    // the surface has been bound to.
     // @ge-hidden
     // [DoNotSerialize]
     uint64 BakeVersion = 0;

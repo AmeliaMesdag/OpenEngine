@@ -18,7 +18,10 @@
 #include "InspectorLayoutFixture.h"
 #include "UI/Controls/CollapsibleInfoCard.h"
 #include "UI/Controls/Label.h"
+#include "UI/Parsers/XMLParser.h"
+#include "UI/ResolvedStyle.h"
 #include "UI/UIElement.h"
+#include "UI/UIStyle.h"
 
 using GameEngine::Label;
 using GameEngine::UIElement;
@@ -88,6 +91,18 @@ TEST(CollapsibleInfoCard, SetTextReplacesTheCopyInTheTree)
     EXPECT_FALSE(HoldsText(card, "The first thing it said."));
 }
 
+// A layout file declares a card by its tag, and the text attribute is the copy.
+TEST(CollapsibleInfoCard, ALayoutDeclaresACardByItsTagAndText)
+{
+    std::unique_ptr<UIElement> root;
+    ASSERT_TRUE(GameEngine::UIParsing::XMLParser::ParseLayoutFromString(
+        R"(<CollapsibleInfoCard text="Bake &amp; save. Then reload." />)", root));
+
+    const auto* card = dynamic_cast<const CollapsibleInfoCard*>(root.get());
+    ASSERT_NE(card, nullptr) << "the layout tag does not make a CollapsibleInfoCard";
+    EXPECT_EQ(card->GetFullText(), "Bake & save. Then reload.");
+}
+
 // Cards read expanded, and one that was never laid out was never measured — so it has made no
 // fold decision and offers no action to undo one.
 TEST(CollapsibleInfoCard, AnUnmeasuredCardIsExpandedAndNotFoldable)
@@ -127,7 +142,7 @@ TEST(CollapsibleInfoCardFold, NewCopyKeepsTheChevronUntilItIsMeasured)
 
     cardRaw->SetText(otherTwoRows);
     EXPECT_TRUE(cardRaw->IsFoldable()) << "new copy dropped the fold state before it was measured";
-    EXPECT_FALSE(chevron->HasClass("hidden")) << "new copy hid the chevron before it was measured";
+    EXPECT_FALSE(chevron->HasClass("blank")) << "new copy blanked the chevron before it was measured";
 
     for (int frame = 0; frame < 3; ++frame)
         fixture.Ui->Update(1.0f / 60.0f, /*interactive=*/true);
@@ -137,5 +152,74 @@ TEST(CollapsibleInfoCardFold, NewCopyKeepsTheChevronUntilItIsMeasured)
     for (int frame = 0; frame < 3; ++frame)
         fixture.Ui->Update(1.0f / 60.0f, /*interactive=*/true);
     EXPECT_FALSE(cardRaw->IsFoldable()) << "the measurement of one row still ends the fold";
-    EXPECT_TRUE(chevron->HasClass("hidden"));
+    EXPECT_TRUE(chevron->HasClass("blank"));
+}
+
+// A card that fits one row shows no chevron glyph but keeps the chevron's box, so its copy starts
+// at the same x as the copy of a card that wraps and folds.
+TEST(CollapsibleInfoCardFold, OneRowAndWrappedCardsStartTheirCopyAtOneX)
+{
+    auto root = std::make_unique<UIElement>();
+    auto oneRow = std::make_unique<CollapsibleInfoCard>("Short.");
+    auto wrapped = std::make_unique<CollapsibleInfoCard>(
+        "A long explanation that has to wrap onto a second row at this width, so the card folds and "
+        "shows its chevron beside the copy.");
+    CollapsibleInfoCard* oneRowRaw = oneRow.get();
+    CollapsibleInfoCard* wrappedRaw = wrapped.get();
+    root->AddChild(std::move(oneRow));
+    root->AddChild(std::move(wrapped));
+
+    InspectorLayoutFixture fixture;
+    fixture.ViewportW = 360;
+    fixture.ExtraSheets = {"Assets/UI/theme/core.css", "Assets/UI/controls/CollapsibleInfoCard/CollapsibleInfoCard.css"};
+    if (!fixture.Build(std::move(root)))
+        GTEST_SKIP() << fixture.Diagnostic;
+    ASSERT_FALSE(oneRowRaw->IsFoldable()) << "the short copy wrapped, so the fixture cannot show a one-row card";
+    ASSERT_TRUE(wrappedRaw->IsFoldable()) << "the long copy did not wrap, so the fixture cannot show a fold";
+
+    const UIElement* oneRowCopy = FindByClass(oneRowRaw, "editor-info-card-copy");
+    const UIElement* wrappedCopy = FindByClass(wrappedRaw, "editor-info-card-copy");
+    ASSERT_NE(oneRowCopy, nullptr);
+    ASSERT_NE(wrappedCopy, nullptr);
+    EXPECT_FLOAT_EQ(oneRowCopy->GetLayoutX(), wrappedCopy->GetLayoutX())
+        << "the one-row card's copy does not start where the wrapped card's copy starts";
+}
+
+// A folded card cuts its one line with an ellipsis, never mid-word with no mark, and its "show more"
+// starts at least 24 px after the cut copy, wider than a word space, so the two do not read as one line.
+TEST(CollapsibleInfoCardFold, AFoldedLineEndsInAnEllipsisClearOfShowMore)
+{
+    constexpr float kMinShowMoreGap = 24.0f;
+    auto root = std::make_unique<UIElement>();
+    auto card = std::make_unique<CollapsibleInfoCard>(
+        "A first sentence long enough that a folded card cannot hold it on one line at this width, so the "
+        "line is cut before the action. A second sentence.");
+    CollapsibleInfoCard* cardRaw = card.get();
+    root->AddChild(std::move(card));
+
+    InspectorLayoutFixture fixture;
+    fixture.ViewportW = 360;
+    fixture.ExtraSheets = {"Assets/UI/theme/core.css", "Assets/UI/controls/CollapsibleInfoCard/CollapsibleInfoCard.css"};
+    if (!fixture.Build(std::move(root)))
+        GTEST_SKIP() << fixture.Diagnostic;
+    ASSERT_TRUE(cardRaw->IsFoldable()) << "the long copy did not wrap, so the fixture cannot show a fold";
+    cardRaw->SetExpanded(false);
+    for (int frame = 0; frame < 3; ++frame)
+        fixture.Ui->Update(1.0f / 60.0f, /*interactive=*/true);
+
+    const UIElement* copy = FindByClass(cardRaw, "editor-info-card-copy");
+    const UIElement* showMore = FindByClass(cardRaw, "editor-info-card-toggle");
+    ASSERT_NE(copy, nullptr);
+    ASSERT_NE(showMore, nullptr);
+    ASSERT_TRUE(copy->HasClass("clamped"));
+    ASSERT_FALSE(showMore->HasClass("hidden"));
+    const GameEngine::ResolvedStyle& copyStyle = copy->GetResolvedStyle();
+    EXPECT_EQ(copyStyle.Visual.WhiteSpace, GameEngine::WhiteSpace::NoWrap);
+    EXPECT_EQ(copyStyle.Layout.Overflow, GameEngine::Overflow::Hidden);
+    EXPECT_EQ(copyStyle.Visual.TextOverflow, GameEngine::TextOverflowMode::Ellipsis)
+        << "the folded line is cut with no ellipsis";
+
+    const float copyRight = copy->GetLayoutX() + copy->GetLayoutWidth();
+    const float showMoreTextLeft = showMore->GetLayoutX() + showMore->GetResolvedStyle().Layout.Padding.Left;
+    EXPECT_GE(showMoreTextLeft - copyRight, kMinShowMoreGap) << "\"show more\" sits too close to the cut copy";
 }

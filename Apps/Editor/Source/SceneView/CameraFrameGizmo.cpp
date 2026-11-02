@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 #include "Engine/Rendering/CameraAspectRatio.h"
 #include "Mathematics/Angle.h"
@@ -50,14 +49,11 @@ float ResolveFrameAspect(const GameEngine::Components::Camera& params)
 
 void CameraFrameGizmo::SetCamera(bool hasCamera,
                                  const GameEngine::Components::Camera& params,
-                                 const float worldTransform[16])
+                                 const Mathematics::Matrix4x4& worldTransform)
 {
-    m_HasCamera = hasCamera;
-    m_Params    = params;
-    if (worldTransform)
-    {
-        std::memcpy(m_WorldTransform, worldTransform, sizeof(m_WorldTransform));
-    }
+    m_HasCamera      = hasCamera;
+    m_Params         = params;
+    m_WorldTransform = worldTransform;
 }
 
 void CameraFrameGizmo::Render(GizmoRenderContext& context)
@@ -67,13 +63,12 @@ void CameraFrameGizmo::Render(GizmoRenderContext& context)
         return;
     }
 
-    const float* m = m_WorldTransform;
-
-    // Column-major world transform: translation, right, up, forward axes.
-    const Vector3 center(m[12], m[13], m[14]);
-    const Vector3 right(m[0], m[1], m[2]);
-    const Vector3 up(m[4], m[5], m[6]);
-    const Vector3 forward(m[8], m[9], m[10]);
+    // The world transform columns are the right, up and forward axes and the translation.
+    const Mathematics::Matrix4x4& world = m_WorldTransform;
+    const Vector3 right(world[0].x, world[0].y, world[0].z);
+    const Vector3 up(world[1].x, world[1].y, world[1].z);
+    const Vector3 forward(world[2].x, world[2].y, world[2].z);
+    const Vector3 center(world[3].x, world[3].y, world[3].z);
 
     const float aspect = ResolveFrameAspect(m_Params);
 

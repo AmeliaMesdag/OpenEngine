@@ -8,7 +8,6 @@
 #include "Rendering/Common/Math.h"
 
 #include <algorithm>
-#include <glm/gtc/type_ptr.hpp>
 
 namespace GameEngine::Engine::Renderer { using namespace ::GameEngine::Rendering; }
 
@@ -52,22 +51,16 @@ Rendering::CameraData Camera::ToCameraData(float aspectRatio,
     const Mathematics::Matrix4x4 viewProjM = projM * viewM;
 
     Rendering::CameraData data{};
-    const float* viewSrc = viewM.Data();
-    const float* projSrc = projM.Data();
-    const float* viewProjSrc = viewProjM.Data();
-    for (int i = 0; i < 16; ++i)
-    {
-        data.view[i] = viewSrc[i];
-        data.proj[i] = projSrc[i];
-        data.viewProj[i] = viewProjSrc[i];
-    }
+    data.view = viewM;
+    data.proj = projM;
+    data.viewProj = viewProjM;
 
     // Extract camera world position from the worldTransform translation column.
     const float* wt = worldTransform.Data();
-    data.cameraPos[0] = wt[12];
-    data.cameraPos[1] = wt[13];
-    data.cameraPos[2] = wt[14];
-    data.cameraPos[3] = 0.0f;
+    data.cameraPos.x = wt[12];
+    data.cameraPos.y = wt[13];
+    data.cameraPos.z = wt[14];
+    data.cameraPos.w = 0.0f;
 
     return data;
 }
@@ -84,30 +77,19 @@ std::optional<Camera> FindActiveCamera(ECS::World& world)
             return;
 
         // Extract world transform (prefer WorldTransform, fallback to Transform).
-        float matrix[16] = {
-            1, 0, 0, 0,
-            0, 1, 0, 0,
-            0, 0, 1, 0,
-            0, 0, 0, 1
-        };
-
         // A WorldTransform the hierarchy has not resolved yet (Version 0 beside
         // a Transform) holds no pose; the camera's own Transform does.
         const auto* worldXf = world.GetComponent<Components::WorldTransform>(e);
         const bool hasLocal = world.HasComponent<Components::Transform>(e);
         if (worldXf && (worldXf->Version != 0u || !hasLocal))
         {
-            for (int i = 0; i < 16; ++i)
-                matrix[i] = worldXf->matrix[i];
+            result.worldTransform = Mathematics::Matrix4x4::FromColumnMajor(worldXf->matrix);
         }
         else if (hasLocal)
         {
             if (auto* xf = world.GetComponent<Components::Transform>(e))
-                for (int i = 0; i < 16; ++i)
-                    matrix[i] = xf->matrix[i];
+                result.worldTransform = Mathematics::Matrix4x4::FromColumnMajor(xf->matrix);
         }
-
-        result.worldTransform = Mathematics::Matrix4x4(glm::make_mat4(matrix));
         result.params = cam;
         result.entity = e;
         found = true;

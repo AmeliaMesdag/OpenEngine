@@ -3,6 +3,7 @@
 #include "AssetCore/Asset.h"
 #include "AssetCore/AssetTypes.h"
 #include "AssetCore/GUID.h"
+#include "Assets/AssetDecodeInputFiles.h"
 #include "JobSystem/Task.h"
 #include "Types/Types.h"
 #include <atomic>
@@ -113,6 +114,14 @@ class AssetBatchCoordinator
 SharedPtr<Asset> DecodeAssetPayload(AssetManager& assetManager, const GUID& assetGuid,
                                     const AssetMetadata& metadata, const Vector<uint8>& data,
                                     const std::shared_ptr<std::atomic<bool>>& cancelRequested = {});
+
+/**
+ * @brief The AssetIOService::ReadRequest::ResolveDecodeInputs of a load or reload of `metadata`:
+ * the files its parser names for the read bytes, with the plan that names them
+ * (AssetParser::ResolveDecodeInputs).
+ */
+Function<AssetDecodeInputs(const Vector<uint8>&)> MakeDecodeInputResolver(AssetManager& assetManager,
+                                                                          const AssetMetadata& metadata);
 
 /**
  * @brief Asset task performance monitor for optimization and debugging

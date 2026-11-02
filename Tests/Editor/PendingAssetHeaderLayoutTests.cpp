@@ -49,7 +49,7 @@ bool LayOut(uint32_t rowWidth, HeaderLayout& out)
     Label* name = labels.Name.get();
     Label* suffix = labels.Suffix.get();
     auto history = std::make_unique<UIElement>();
-    history->Overrides()
+    history->Style()
         .Set(GameEngine::Style::Width, GameEngine::StyleLength::Px(kHistoryWidth))
         .Set(GameEngine::Style::FlexShrink, 0.0f);
     UIElement* historyRaw = history.get();

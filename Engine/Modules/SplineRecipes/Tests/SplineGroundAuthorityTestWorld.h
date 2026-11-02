@@ -6,6 +6,8 @@
 // editor's undo cases, which drive the same controller through the journal.
 
 #include "Components/Spline/SplineComponent.h"
+#include "Components/Spline/SplineNetworkMember.h"
+#include "Components/Spline/SplinePaving.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
 #include "ECS/World.h"
@@ -13,6 +15,7 @@
 #include "TerrainECS/TerrainModifierSystem.h"
 #include "TerrainECS/TerrainService.h"
 
+#include <utility>
 #include <vector>
 
 namespace GameEngine::SplineGroundAuthorityTestWorld
@@ -28,6 +31,8 @@ constexpr float32 kHeightScale = 100.0f;
 constexpr float32 kSampleSpacing = kWorldSize / static_cast<float32>(kHeightmapDim - 1);
 constexpr float32 kRunHalfWidth = 4.0f;
 constexpr float32 kRunGrade = 12.0f;
+constexpr float32 kAreaHalfSize = 16.0f;
+constexpr float32 kAreaRimHalfWidth = 0.5f;
 
 struct ScopedTerrainService
 {
@@ -122,6 +127,29 @@ inline ECS::EntityHandle CreateRun(ECS::World& world, SplineECS::SplineService& 
     comp.SplineDataGeneration = handle.Generation();
     world.AddComponentImmediate<Components::SplineComponent>(e, comp);
     world.AddComponentImmediate<Components::WorldTransform>(e, IdentityAt(0.0f, 0.0f, 0.0f));
+    return e;
+}
+
+// A level square of side 2 * kAreaHalfSize at kRunGrade, centred on the origin: an Area network
+// member that carries `paving`.
+inline ECS::EntityHandle CreatePavedArea(ECS::World& world, SplineECS::SplineService& svc,
+                                         const Components::SplinePaving& paving)
+{
+    const SplineECS::SplineHandle handle = svc.CreateSpline(Spline::SplineType::Linear, true);
+    auto* data = svc.GetSplineData(handle);
+    for (const auto& [x, z] : {std::pair{-kAreaHalfSize, -kAreaHalfSize}, std::pair{kAreaHalfSize, -kAreaHalfSize},
+                               std::pair{kAreaHalfSize, kAreaHalfSize}, std::pair{-kAreaHalfSize, kAreaHalfSize}})
+        data->AddPoint({x, kRunGrade, z}, kAreaRimHalfWidth);
+    svc.RebuildCache(handle);
+
+    auto e = world.CreateEntity();
+    Components::SplineComponent comp{};
+    comp.SplineDataIndex = handle.Index();
+    comp.SplineDataGeneration = handle.Generation();
+    world.AddComponentImmediate<Components::SplineComponent>(e, comp);
+    world.AddComponentImmediate<Components::WorldTransform>(e, IdentityAt(0.0f, 0.0f, 0.0f));
+    world.AddComponentImmediate(e, Components::SplineNetworkMember{Components::SplineNetworkMemberKind::Area});
+    world.AddComponentImmediate(e, paving);
     return e;
 }
 

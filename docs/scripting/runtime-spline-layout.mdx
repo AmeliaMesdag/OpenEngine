@@ -26,8 +26,9 @@ including deterministic variation and caller-supplied station distances.
 `PieceBasis`, `PieceEntity`, and `SeamShear` provide shared pose-composition helpers.
 The `PieceEntity` helpers write transforms and names. They do not create entities.
 
-Surface-query policy belongs to the caller. A runtime game can probe composed
-terrain directly. The editor can use its picking service. A probe callback must
+Surface-query policy belongs to the caller. The engine's scene raycast answers a
+probe in every process: the editor, the Player, and a game. It hits the terrain and
+the resident models. The editor's picking service is built on it. A probe callback must
 respect the threading requirements of the surface implementation it calls.
 `HoldSurfaceAcrossGaps` uses the nearest measured height
 for missing surface samples. A game that forbids construction over holes should
@@ -40,9 +41,10 @@ ordinals describe one evaluation. They are not persistent gameplay IDs. Callers
 must preserve health, selection, ownership, and navigation identities across
 re-layout, and stage a complete valid result before replacing existing entities.
 
-The editor's `Placement/` headers forward to the runtime API. Controllers own editor surface picking, rebuild scheduling,
-and generated-entity lifetime. Junction topology is a separate feature. This API
-does not implement it.
+The editor's `Placement/` headers forward to the runtime API. The recipe systems own
+surface picking, rebuild scheduling, and generated-entity lifetime in every process.
+Junction topology belongs to the spline network. A layout consumer takes a junction's
+pose from the network's node.
 
 ## Verification
 
@@ -190,7 +192,7 @@ ordinals follow the spans before them. A gate reserves its span of the crest
 row, so battlements stop at a gate on the pitch grid and on a row registered to
 the walls alike. Only the walls decide registration, so a gate longer than the
 walls leaves them registered. Where no post covers a gate's end at a bend, the
-gate is mitred like a wall. With no Gate part a gate is an opening: the
+gate is mitered like a wall. With no Gate part a gate is an opening: the
 room of the wall it replaced with nothing in it, which is how to leave a gap in
 a hedge. An opening places no piece, so it cannot be selected in the scene view
 again. Change it back in the fence's Span Overrides.

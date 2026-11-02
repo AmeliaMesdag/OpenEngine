@@ -25,6 +25,7 @@
 #include "ECSModules/Rendering/Systems/RenderExtractionSystem.h"
 #include "ECSModules/Rendering/Systems/SkinningUploadSystem.h"
 #include "ECSModules/Rendering/Systems/TransformHierarchySystem.h"
+#include "Engine/Rendering/Camera.h"
 #include "Engine/Rendering/Exposure.h"
 #include "Engine/Rendering/LensFlareRenderFeature.h"
 #include "Engine/Rendering/MaterialRegistry.h"
@@ -36,6 +37,7 @@
 #include "Engine/Rendering/ShaderGraphMaterial.h"
 #include "Engine/Rendering/Systems/LensFlareExtractionSystem.h"
 #include "Logger/Logger.h"
+#include "Mathematics/Angle.h"
 #include "Mathematics/MatrixOps.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/GPUScene.h"
@@ -73,6 +75,14 @@ std::string MakeSizedTargetName(const char* base, uint32_t width, uint32_t heigh
 // deliberately independent of Components::kDefaultManualExposureEv: this is a
 // fixed preview light box, not a camera anyone authors.
 constexpr float kThumbnailPreviewEv100 = 14.15f;
+
+// The preview camera: left-handed, looking from the eye at the origin, reverse-Z.
+constexpr float kCameraFovDegrees = 45.0f;
+constexpr float kCameraFovRadians = Mathematics::ToRadians(kCameraFovDegrees);
+constexpr float kCameraNearZ = 0.1f;
+constexpr float kCameraFarZ = 10.0f;
+const Mathematics::Vector3 kCameraEye(0.9f, 0.9f, 1.8f);
+
 } // namespace
 
 std::unique_ptr<ECS::World> ModelThumbnailShared::MakeThumbnailWorld()
@@ -146,7 +156,8 @@ void ModelThumbnailHandler::SpawnOrUpdateModel(RenderLane& lane, Slot& slot, con
 {
     if (!lane.world)
     {
-        lane.world = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.ownedWorld = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.world = lane.ownedWorld.get();
     }
     ECS::World& thumbWorld = *lane.world;
 
@@ -466,6 +477,9 @@ void ModelThumbnailHandler::UpdatePreviewLights(RenderLane& lane, float orbitYaw
 
 void ModelThumbnailHandler::EnsureViewAndCamera(RenderLane& lane)
 {
+    // The staging view keeps the camera the pool bound at Acquire.
+    if (lane.isPreviewLane)
+        return;
     if (lane.cameraId == 0)
         lane.cameraId = m_RenderServices->Views().AllocateCamera("Editor Model Thumbnail Camera");
 
@@ -513,35 +527,27 @@ void ModelThumbnailHandler::SetupCameraMatrices(const RenderLane& lane, uint32_t
     using GameEngine::Mathematics::Matrix4x4;
     using GameEngine::Mathematics::Vector3;
 
-    constexpr float kFovRad = 45.0f * 3.1415926535f / 180.0f;
-    const Vector3 eye(0.9f, 0.9f, 1.8f);
+    const Vector3 eye = kCameraEye;
     const Vector3 target(0.0f, 0.0f, 0.0f);
     const Vector3 up(0.0f, 1.0f, 0.0f);
 
     const float aspect = (attachmentH > 0)
         ? static_cast<float>(attachmentW) / static_cast<float>(attachmentH)
         : 1.0f;
-    constexpr float kNearZ = 0.1f;
-    constexpr float kFarZ = 10.0f;
 
     Matrix4x4 viewM = GameEngine::Mathematics::MakeLookAtLH(eye, target, up);
-    Matrix4x4 projM = GameEngine::Mathematics::MakePerspectiveLH_ZO_ReverseZ(kFovRad, aspect, kNearZ, kFarZ);
+    Matrix4x4 projM =
+        GameEngine::Mathematics::MakePerspectiveLH_ZO_ReverseZ(kCameraFovRadians, aspect, kCameraNearZ, kCameraFarZ);
     Matrix4x4 viewProjM = projM * viewM;
 
     Rendering::CameraData cam{};
-    const float* viewSrc = viewM.Data();
-    const float* projSrc = projM.Data();
-    const float* viewProjSrc = viewProjM.Data();
-    for (int i = 0; i < 16; ++i)
-    {
-        cam.view[i] = viewSrc[i];
-        cam.proj[i] = projSrc[i];
-        cam.viewProj[i] = viewProjSrc[i];
-    }
-    cam.cameraPos[0] = eye.x;
-    cam.cameraPos[1] = eye.y;
-    cam.cameraPos[2] = eye.z;
-    cam.cameraPos[3] = 0.0f;
+    cam.view = viewM;
+    cam.proj = projM;
+    cam.viewProj = viewProjM;
+    cam.cameraPos.x = eye.x;
+    cam.cameraPos.y = eye.y;
+    cam.cameraPos.z = eye.z;
+    cam.cameraPos.w = 0.0f;
     m_RenderServices->Views().SetCameraData(lane.cameraId, cam);
 }
 
@@ -613,7 +619,7 @@ void ModelThumbnailHandler::SubmitThumbnailRenderRG(WindowState& ws, RenderLane&
 {
     namespace RenderGraph = Rendering::RenderGraph;
 
-    if (lane.viewId == 0 || !slot.deviceTex.IsValid())
+    if (lane.viewId == 0 || (!lane.isPreviewLane && !slot.deviceTex.IsValid()))
         return;
 
     // The in-flight COMMIT happens at the very end, after every declination
@@ -621,12 +627,15 @@ void ModelThumbnailHandler::SubmitThumbnailRenderRG(WindowState& ws, RenderLane&
     // request stays retryable (a committed-then-declined render would finalize
     // ready on a never-written texture).
 
-    // Re-enqueue on abort: pendingSet dedups, and the focused-orbit path
-    // re-dispatches on its own (needsOrbitRerender survives an abort).
+    // Re-enqueue on abort: pendingSet dedups. The preview lane re-dispatches
+    // on its own (needsOrbitRerender survives an abort).
     const auto deferAndRetry = [&]
     {
-        EnqueuePending(ws, slot.guid, slot.listStaticThumb, slot.isMaterial,
-                       slot.previewIblEnabled, slot.isLensFlare);
+        if (lane.isPreviewLane)
+            slot.needsOrbitRerender = true;
+        else
+            EnqueuePending(ws, slot.guid, slot.listStaticThumb, slot.isMaterial,
+                           slot.previewIblEnabled, slot.isLensFlare);
     };
 
     // Model readiness: the spawn is in the thumbnail world, but its GPU scene
@@ -712,109 +721,15 @@ void ModelThumbnailHandler::SubmitThumbnailRenderRG(WindowState& ws, RenderLane&
     }
 
     // Drive the LOD shown by the inspector's preview slider. Scoped to the
-    // focused model preview slot: grid/list thumbnails and material previews
-    // keep auto-selection so an inspector LOD pick can't leak into them.
+    // preview lane's model: grid/list thumbnails and material previews keep
+    // auto-selection so an inspector LOD pick can't leak into them.
     {
-        const bool focusedModelPreview =
-            !slot.isMaterial && !slot.isLensFlare && !slot.listStaticThumb &&
-            slot.guid == s_OrbitFocusGuid;
+        const bool focusedModelPreview = lane.isPreviewLane && !slot.isMaterial && !slot.isLensFlare;
         m_RenderServices->Views().SetViewForcedLOD(
             lane.viewId,
-            focusedModelPreview ? s_PreviewForcedLOD : 0xFFFFFFFFu);
+            focusedModelPreview ? s_PreviewForcedLOD : Engine::Renderer::ViewRegistry::kAutomaticLod);
     }
 
-    m_RenderServices->WriteViewLightBuffer(lane.viewId);
-    m_RenderServices->BuildWorldBatchKeysForView(lane.viewId);
-
-    // Bucketer twin BEFORE the world pass: recording order gives the
-    // DrawStreamOrdering edge its direction (Read-before-Write derives WAR —
-    // the draws would consume frame N−1's slot buffers). A refusal means the
-    // draw streams could not be scheduled this frame (no spine on this frame
-    // incarnation) — defer rather than bake a blank slot.
-    if (!m_RenderServices->ScheduleBucketerDispatchesForView(frame, lane.viewId))
-    {
-        deferAndRetry();
-        return;
-    }
-
-    // Clear config on the ViewDesc — AddWorldPassForView reads it at
-    // declaration (transparent background; reverse-Z far depth clear).
-    {
-        Rendering::ViewClearConfig clear{};
-        clear.clearColor = true;
-        clear.clearColorValue[0] = 0.0f;
-        clear.clearColorValue[1] = 0.0f;
-        clear.clearColorValue[2] = 0.0f;
-        clear.clearColorValue[3] = 0.0f;
-        clear.clearDepth = true;
-        clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
-        m_RenderServices->Views().SetViewClearConfig(lane.viewId, clear);
-    }
-
-    // Per-dispatch intermediates sized to the slot. The WORLD-pass targets
-    // are POOL imports, never transients: BuildPassResourcesRG resolves
-    // PhysicalTexture(depth) for ge_sceneDepth at declaration, which asserts
-    // on a transient (its documented constraint). They're re-imported every
-    // dispatch frame, so pool aging never bites; idle sizes age out.
-    const uint32_t w = slot.texWidth > 0 ? slot.texWidth
-                                         : static_cast<uint32_t>(s_ThumbnailResolutionPx);
-    const uint32_t h = slot.texHeight > 0 ? slot.texHeight
-                                          : static_cast<uint32_t>(s_ThumbnailResolutionPx);
-    const uint32_t samples = m_RenderServices->GetDefaultMSAASampleCount();
-    const bool msaa = samples > 1u;
-
-    Rendering::TextureDesc td{};
-    td.width = w;
-    td.height = h;
-    td.depth = 1;
-    td.mipLevels = 1;
-    td.arrayLayers = 1;
-
-    RenderGraph::RGTexture msaaColor{};
-    if (msaa)
-    {
-        const std::string msaaName = MakeSizedTargetName("Editor.ModelThumb.RG.ColorMSAA", w, h);
-        td.sampleCount = samples;
-        // Matches the HDR resolve format below: the world pass resolves only
-        // into a target of the color's format, and samples this one to do it.
-        td.format = static_cast<uint32_t>(Rendering::TextureFormat::R16G16B16A16_FLOAT);
-        td.usage = static_cast<uint32_t>(Rendering::TextureUsage::RenderTarget) |
-                   static_cast<uint32_t>(Rendering::TextureUsage::ShaderResource);
-        td.debugName = msaaName.c_str();
-        msaaColor = frame.ImportPersistentTexture(msaaName.c_str(), td);
-    }
-
-    const std::string depthName = MakeSizedTargetName("Editor.ModelThumb.RG.Depth", w, h);
-    td.sampleCount = msaa ? samples : 1u;
-    td.format = static_cast<uint32_t>(m_RenderServices->GetDepthFormat());
-    td.usage = static_cast<uint32_t>(Rendering::TextureUsage::DepthStencil) |
-               static_cast<uint32_t>(Rendering::TextureUsage::ShaderResource);
-    td.debugName = depthName.c_str();
-    const RenderGraph::RGTexture depth = frame.ImportPersistentTexture(depthName.c_str(), td);
-
-    const std::string hdrName = MakeSizedTargetName("Editor.ModelThumb.RG.HDRColor", w, h);
-    td.sampleCount = 1;
-    td.format = static_cast<uint32_t>(Rendering::TextureFormat::R16G16B16A16_FLOAT);
-    td.usage = static_cast<uint32_t>(Rendering::TextureUsage::RenderTarget) |
-               static_cast<uint32_t>(Rendering::TextureUsage::ShaderResource);
-    td.debugName = hdrName.c_str();
-    const RenderGraph::RGTexture hdrResolve = frame.ImportPersistentTexture(hdrName.c_str(), td);
-
-    if (!depth.IsValid() || !hdrResolve.IsValid() || (msaa && !msaaColor.IsValid()))
-    {
-        deferAndRetry();
-        return;
-    }
-
-    // Camera UBO content is read at world-pass declaration (AllocUpload by
-    // value) — write it first.
-    SetupCameraMatrices(lane, w, h);
-
-    Engine::Renderer::RenderServices::WorldPassTargetsRG targets{};
-    targets.Color = msaa ? msaaColor : hdrResolve;
-    targets.Depth = depth;
-    if (msaa)
-        targets.Resolve = hdrResolve;
     // Instanced, optionally IBL, but never Shadows or ForwardPlus. IBL gives the preview
     // the shared environment (the lit "material ball" look — diffuse irradiance +
     // prefiltered specular reflections; the feature seeds an always-valid fallback cube,
@@ -858,18 +773,17 @@ void ModelThumbnailHandler::SubmitThumbnailRenderRG(WindowState& ws, RenderLane&
     }
     if (usePhotographicIbl)
         previewKeywords = previewKeywords | Rendering::MaterialKeyword::IBL;
-    const auto world = m_RenderServices->AddWorldPassForView(
-        frame, lane.viewId, targets, previewKeywords);
-    if (!world.Pass.IsValid())
+    const Engine::Renderer::StagingWorldPassRG world =
+        DeclareLaneWorldPass(ws, lane, slot, frame, previewKeywords);
+    if (!world.IsValid())
     {
         deferAndRetry();
         return;
     }
-
-    // The texture the world pass ACTUALLY wrote (resolve collapse aside) —
-    // the explicit replacement for GetEffectiveWorldColorResolveRef.
-    const RenderGraph::RGTexture encodeSrc =
-        world.EffectiveColor.IsValid() ? world.EffectiveColor : hdrResolve;
+    const RenderGraph::RGTexture encodeSrc = world.Color;
+    const RenderGraph::RGTexture depth = world.Depth;
+    const uint32_t w = world.Width;
+    const uint32_t h = world.Height;
 
     // Append the runtime lens-flare pass to the thumbnail view before
     // tonemapping. LensFlareExtractionSystem writes a shared render feature,
@@ -939,6 +853,20 @@ void ModelThumbnailHandler::SubmitThumbnailRenderRG(WindowState& ws, RenderLane&
             ? Rendering::EvToLinearExposure(kThumbnailPreviewEv100)
             : 1.0f);
 
+    if (lane.isPreviewLane)
+    {
+        if (!ws.previewView->DeclareOutput(frame, encodeSrc, tmParams))
+        {
+            deferAndRetry();
+            return;
+        }
+        // COMMIT: the staging view shows this render once it finalizes.
+        slot.needsOrbitRerender = false;
+        lane.inFlightSlot = slotIdx;
+        lane.inFlightFrame = ws.frameCounter;
+        return;
+    }
+
     // Tonemap straight into the slot's visible texture.
     const std::string importName = std::string("Editor.ModelThumb.Slot") + std::to_string(slotIdx);
     const RenderGraph::RGTexture slotTex = frame.ImportExternalTexture(
@@ -967,12 +895,118 @@ void ModelThumbnailHandler::SubmitThumbnailRenderRG(WindowState& ws, RenderLane&
 
     // COMMIT — every declination point is behind us; the finalize debounce
     // keeps ready false until the encode has executed on a submitted frame.
-    slot.needsOrbitRerender = false;
+    // The focused slot's re-render flag belongs to the preview lane.
+    if (slotIdx != FindFocusedSlot(ws))
+        slot.needsOrbitRerender = false;
     if (slot.isMaterial)
         slot.materialRenderSettled = materialSettled;
     slot.inFlight = true;
     lane.inFlightSlot = slotIdx;
     lane.inFlightFrame = ws.frameCounter;
+}
+
+Engine::Renderer::StagingWorldPassRG ModelThumbnailHandler::DeclareLaneWorldPass(
+    const WindowState& ws, RenderLane& lane, const Slot& slot, Rendering::RenderGraph::RGFrame& frame,
+    Rendering::MaterialKeyword keywords)
+{
+    namespace RenderGraph = Rendering::RenderGraph;
+    if (lane.isPreviewLane)
+    {
+        // The pool writes the light buffer, the batch keys, the bucketer twin and its own targets.
+        Engine::Renderer::Camera camera{};
+        const Mathematics::Vector3 target(0.0f, 0.0f, 0.0f);
+        const Mathematics::Vector3 up(0.0f, 1.0f, 0.0f);
+        camera.worldTransform = Mathematics::Inverse(Mathematics::MakeLookAtLH(kCameraEye, target, up));
+        camera.params.FovY = kCameraFovDegrees;
+        camera.params.NearZ = kCameraNearZ;
+        camera.params.FarZ = kCameraFarZ;
+        ws.previewView->SetCamera(camera);
+        return ws.previewView->DeclareWorldPass(frame, keywords);
+    }
+
+    m_RenderServices->WriteViewLightBuffer(lane.viewId);
+    m_RenderServices->BuildWorldBatchKeysForView(lane.viewId);
+
+    // The bucketer twin records before the world pass, so the draws read this frame's buffers.
+    // A refusal means no draw-stream spine this frame: defer, do not bake a blank slot.
+    if (!m_RenderServices->ScheduleBucketerDispatchesForView(frame, lane.viewId))
+        return {};
+
+    // Clear config on the ViewDesc — AddWorldPassForView reads it at
+    // declaration (transparent background; reverse-Z far depth clear).
+    m_RenderServices->Views().SetViewClearConfig(
+        lane.viewId, Rendering::ViewClearConfig(/*clearColorIn=*/true, ColorLinear(0.0f, 0.0f, 0.0f, 0.0f),
+                                                /*clearDepthIn=*/true, Rendering::ReverseZ::kClearFar));
+
+    // World targets at the slot size are pool imports, not transients: the world pass resolves
+    // the physical depth for ge_sceneDepth at declaration. Idle sizes age out.
+    const uint32_t w = slot.texWidth > 0 ? slot.texWidth
+                                         : static_cast<uint32_t>(s_ThumbnailResolutionPx);
+    const uint32_t h = slot.texHeight > 0 ? slot.texHeight
+                                          : static_cast<uint32_t>(s_ThumbnailResolutionPx);
+    const uint32_t samples = m_RenderServices->GetDefaultMSAASampleCount();
+    const bool msaa = samples > 1u;
+
+    Rendering::TextureDesc td{};
+    td.width = w;
+    td.height = h;
+    td.depth = 1;
+    td.mipLevels = 1;
+    td.arrayLayers = 1;
+
+    RenderGraph::RGTexture msaaColor{};
+    if (msaa)
+    {
+        const std::string msaaName = MakeSizedTargetName("Editor.ModelThumb.RG.ColorMSAA", w, h);
+        td.sampleCount = samples;
+        // Matches the HDR resolve format below: the world pass resolves only
+        // into a target of the color's format, and samples this one to do it.
+        td.format = static_cast<uint32_t>(Rendering::TextureFormat::R16G16B16A16_FLOAT);
+        td.usage = static_cast<uint32_t>(Rendering::TextureUsage::RenderTarget) |
+                   static_cast<uint32_t>(Rendering::TextureUsage::ShaderResource);
+        td.debugName = msaaName.c_str();
+        msaaColor = frame.ImportPersistentTexture(msaaName.c_str(), td);
+    }
+
+    const std::string depthName = MakeSizedTargetName("Editor.ModelThumb.RG.Depth", w, h);
+    td.sampleCount = msaa ? samples : 1u;
+    td.format = static_cast<uint32_t>(m_RenderServices->GetDepthFormat());
+    td.usage = static_cast<uint32_t>(Rendering::TextureUsage::DepthStencil) |
+               static_cast<uint32_t>(Rendering::TextureUsage::ShaderResource);
+    td.debugName = depthName.c_str();
+    const RenderGraph::RGTexture depth = frame.ImportPersistentTexture(depthName.c_str(), td);
+
+    const std::string hdrName = MakeSizedTargetName("Editor.ModelThumb.RG.HDRColor", w, h);
+    td.sampleCount = 1;
+    td.format = static_cast<uint32_t>(Rendering::TextureFormat::R16G16B16A16_FLOAT);
+    td.usage = static_cast<uint32_t>(Rendering::TextureUsage::RenderTarget) |
+               static_cast<uint32_t>(Rendering::TextureUsage::ShaderResource);
+    td.debugName = hdrName.c_str();
+    const RenderGraph::RGTexture hdrResolve = frame.ImportPersistentTexture(hdrName.c_str(), td);
+
+    if (!depth.IsValid() || !hdrResolve.IsValid() || (msaa && !msaaColor.IsValid()))
+        return {};
+
+    // Camera UBO content is read at world-pass declaration (AllocUpload by
+    // value) — write it first.
+    SetupCameraMatrices(lane, w, h);
+
+    Engine::Renderer::RenderServices::WorldPassTargetsRG targets{};
+    targets.Color = msaa ? msaaColor : hdrResolve;
+    targets.Depth = depth;
+    if (msaa)
+        targets.Resolve = hdrResolve;
+    const auto world = m_RenderServices->AddWorldPassForView(frame, lane.viewId, targets, keywords);
+    if (!world.Pass.IsValid())
+        return {};
+
+    // The texture the world pass ACTUALLY wrote (resolve collapse aside).
+    Engine::Renderer::StagingWorldPassRG result{};
+    result.Color = world.EffectiveColor.IsValid() ? world.EffectiveColor : hdrResolve;
+    result.Depth = depth;
+    result.Width = w;
+    result.Height = h;
+    return result;
 }
 
 void ModelThumbnailHandler::TeardownSpawnedModel(RenderLane& lane)
@@ -1044,7 +1078,8 @@ void ModelThumbnailHandler::SpawnOrUpdateLensFlareEntity(RenderLane& lane,
 {
     if (!lane.world)
     {
-        lane.world = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.ownedWorld = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.world = lane.ownedWorld.get();
     }
 
     ECS::World& thumbWorld = *lane.world;
@@ -1117,7 +1152,8 @@ void ModelThumbnailHandler::SpawnOrUpdateMaterialEntity(RenderLane& lane,
 {
     if (!lane.world)
     {
-        lane.world = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.ownedWorld = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.world = lane.ownedWorld.get();
     }
     ECS::World& thumbWorld = *lane.world;
 

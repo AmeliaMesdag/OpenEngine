@@ -315,7 +315,7 @@ TEST_F(CBTBringUpTest, RefreshTerrainSourcesPerformsNoDeviceDrain)
     m_Device->DestroyTexture(retired);
 }
 
-TEST_F(CBTBringUpTest, PageTableGrowthWaitsForPendingGraphicsWithoutDeviceDrain)
+TEST_F(CBTBringUpTest, PageTableRebindWaitsForPendingGraphicsWithoutDeviceDrain)
 {
     CBTInstance instance;
     ASSERT_TRUE(instance.Initialize(*m_Device, m_KernelSet));
@@ -327,11 +327,20 @@ TEST_F(CBTBringUpTest, PageTableGrowthWaitsForPendingGraphicsWithoutDeviceDrain)
 
     const uint64_t before = m_Device->GetIdleDrainCount();
     ASSERT_EQ(pending.Status(), IDevice::GpuSyncStatus::Pending);
-    ASSERT_TRUE(instance.GetResources().ProvisionPageTableWords(kCBTPageTableMinRingWords + 1u));
+    BufferDesc desc{};
+    desc.size = kCBTPageHeaderWords * sizeof(uint32_t);
+    desc.usage = static_cast<uint32_t>(BufferUsage::Storage);
+    desc.memoryUsage = BufferMemoryUsage::Upload;
+    desc.debugName = "CBTBringUpTest.PageRing";
+    const BufferHandle ring = m_Device->CreateBuffer(desc);
+    ASSERT_TRUE(ring.IsValid());
+    instance.SetPageTable(ring, 0u);
     EXPECT_EQ(pending.Status(), IDevice::GpuSyncStatus::Complete)
-        << "page-table growth returned while its prior graphics user was pending";
+        << "a new page-table ring was bound while its prior graphics user was pending";
     EXPECT_EQ(m_Device->GetIdleDrainCount(), before)
-        << "page-table growth drained the device; wait the graphics timeline instead";
+        << "a page-table rebind drained the device; wait the graphics timeline instead";
+    instance.SetPageTable({}, 0u);
+    m_Device->DestroyBuffer(ring);
 }
 
 // Far-field bulk free. No production caller today (FarFieldReseedDetector is unwired), but it is a

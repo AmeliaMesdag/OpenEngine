@@ -5,6 +5,7 @@
 #include "ECS/ModuleRegistration.h"      // per-load registration stamp (C12)
 #include "JobSystem/JobChannel.h" // async build dispatch
 #include "Logger/Logger.h"
+#include "Memory/FrameJoinedScope.h"
 #include "NativeScripting/BuildCacheRecord.h"
 #include "NativeScripting/CMakeInvoker.h"
 #include "NativeScripting/EngineBuildIdentity.h"
@@ -1488,6 +1489,10 @@ void NativeScriptManager::QueueMainThreadTask(std::function<void()> task)
 
 void NativeScriptManager::ProcessMainThreadTasks()
 {
+#if GE_DEBUG_INSTRUMENTATION
+    // Build workers post these tasks from work that can outlive the frame, so they never get frame memory.
+    const Memory::Detail::FrameJoinedScope notFrameJoined(false);
+#endif
     for (;;)
     {
         std::function<void()> task;

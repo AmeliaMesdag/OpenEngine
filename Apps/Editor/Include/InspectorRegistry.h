@@ -174,6 +174,30 @@ struct ComponentOverrides
 using ComponentOverridesFn =
     std::function<ComponentOverrides(ECS::World& world, ECS::EntityHandle entity, ECS::ComponentTypeId typeId)>;
 
+// One entry that a registered answerer adds to the context menu of a field row or a component header.
+struct OverrideMenuEntry
+{
+    std::string Label;
+    // The row icon: an EditorIcons path.
+    std::string IconPath;
+    // Does the entry's edit as one undo step. The Inspector shows the entity again after it runs.
+    std::function<void()> Run;
+};
+
+// The field row or the component header that an override menu opens on.
+struct OverrideMenuTarget
+{
+    ECS::World* World = nullptr;
+    ECS::EntityHandle Entity{};
+    ECS::ComponentTypeId Component = 0;
+    // The reflected name of the field; empty for the component's header.
+    std::string Field;
+    Editor::UndoRedoService* Undo = nullptr;
+    Editor::EditorChangeNotifications* Notifications = nullptr;
+};
+
+using OverrideMenuFn = std::function<std::vector<OverrideMenuEntry>(const OverrideMenuTarget& target)>;
+
 // Simple registry for custom inspectors.
 class InspectorRegistry {
 public:
@@ -278,6 +302,23 @@ public:
         }
         return answerer ? answerer(world, entity, typeId) : ComponentOverrides{};
     }
+    // Set the one answerer that the field rows and the component headers ask for the entries that apply
+    // or revert their difference from the entity's source; a second call replaces the first.
+    void SetOverrideMenuAnswerer(OverrideMenuFn fn)
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_OverrideMenu = std::move(fn);
+    }
+    // The override entries for `target`; empty when no answerer is set or the target has no difference.
+    std::vector<OverrideMenuEntry> QueryOverrideMenu(const OverrideMenuTarget& target) const
+    {
+        OverrideMenuFn answerer;
+        {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+            answerer = m_OverrideMenu;
+        }
+        return answerer ? answerer(target) : std::vector<OverrideMenuEntry>{};
+    }
     // Register an inspector for an asset type (Material, Shader, etc.)
     void RegisterAssetInspector(AssetType type, InspectorFn fn)
     {
@@ -336,6 +377,7 @@ private:
     };
     std::vector<EntityBanner> m_EntityBanners;
     ComponentOverridesFn m_ComponentOverrides;
+    OverrideMenuFn m_OverrideMenu;
     std::unordered_map<int, AssetLoadingSuffixFn> m_AssetLoadingSuffixes;
     // Module stamp per component-inspector registration (C12 attribution;
     // registry bookkeeping — see ECS/ModuleRegistration.h).

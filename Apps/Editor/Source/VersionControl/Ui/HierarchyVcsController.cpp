@@ -394,7 +394,7 @@ void HierarchyVcsController::DecorateRow(ECS::EntityHandle entity, UIElement& ro
         row.RemoveClass("has-vcs-diff");
         if (diffDot)
         {
-            diffDot->Overrides().Set(Style::Display, DisplayMode::None);
+            diffDot->Style().Set(Style::Display, DisplayMode::None);
             diffDot->SetTooltip("");
         }
         return;
@@ -441,7 +441,7 @@ void HierarchyVcsController::DecorateRow(ECS::EntityHandle entity, UIElement& ro
     if (!hasDiff && !hasDescendantDiff)
     {
         row.RemoveClass("has-vcs-diff");
-        diffDot->Overrides().Set(Style::Display, DisplayMode::None);
+        diffDot->Style().Set(Style::Display, DisplayMode::None);
         diffDot->SetTooltip("");
         return;
     }
@@ -458,7 +458,7 @@ void HierarchyVcsController::DecorateRow(ECS::EntityHandle entity, UIElement& ro
         diffDot->AddClass(cssClass);
     if (!hasDiff)
         diffDot->AddClass("hierarchy-vcs-diff-descendant");
-    diffDot->Overrides()
+    diffDot->Style()
         .Set(Style::BackgroundTint,
              hasDiff ? SceneDiffStateColorArgb(state) : kDescendantOnlyDotColor)
         .Set(Style::Display, DisplayMode::Flex);
@@ -1039,7 +1039,7 @@ void HierarchyVcsController::DecorateGhostRow(TreeId id, UIElement& row)
     dot->RemoveClass("hierarchy-vcs-diff-modified");
     dot->RemoveClass("hierarchy-vcs-diff-descendant");
     dot->AddClass("hierarchy-vcs-diff-removed");
-    dot->Overrides()
+    dot->Style()
         .Set(Style::BackgroundTint, SceneDiffStateColorArgb(SceneDiffState::Removed))
         .Set(Style::Display, DisplayMode::Flex);
 

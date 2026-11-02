@@ -111,6 +111,61 @@ TEST_F(UITextureRegistryFixture, SlotRecycleIsImmediate)
     DestroyTextures(device.get(), more);
 }
 
+// A released reservation can still be held by a render pass declared before
+// the release. Its write and its second release must not reach the texture
+// that registered into the recycled slot.
+TEST_F(UITextureRegistryFixture, ReleasedReservationNeverWritesTheSlotsNextOwner)
+{
+    UI::UITextureRegistry registry(device.get());
+
+    auto textures = CreatePixelTextures(device.get(), 2);
+    ASSERT_EQ(textures.size(), 2u);
+
+    const ::GenerationalVector::Handle reservation = registry.ReserveSlot();
+    ASSERT_TRUE(reservation.IsValid());
+    registry.ReleaseSlot(reservation);
+    const uint32_t registered = registry.Register(textures[0]);
+    ASSERT_EQ(registered, reservation.Index());
+
+    registry.UpdateSlot(reservation, textures[1]);
+    registry.ReleaseSlot(reservation);
+
+    const std::vector<TextureHandle> bound = registry.GetTextureHandlesForSlots({registered});
+    ASSERT_EQ(bound.size(), 1u);
+    EXPECT_EQ(bound[0].id, textures[0].id);
+    EXPECT_NE(registry.ReserveSlot().Index(), registered) << "the stale release freed a registered slot";
+
+    registry.Shutdown();
+    DestroyTextures(device.get(), textures);
+}
+
+// Unregister frees a slot through the other free path. The reservation that
+// held the slot ends with it, so it cannot write the texture registered next.
+TEST_F(UITextureRegistryFixture, UnregisteredReservationNeverWritesTheSlotsNextOwner)
+{
+    UI::UITextureRegistry registry(device.get());
+
+    auto textures = CreatePixelTextures(device.get(), 2);
+    ASSERT_EQ(textures.size(), 2u);
+
+    const ::GenerationalVector::Handle reservation = registry.ReserveSlot();
+    ASSERT_TRUE(reservation.IsValid());
+    registry.Unregister(reservation.Index());
+    const uint32_t registered = registry.Register(textures[0]);
+    ASSERT_EQ(registered, reservation.Index());
+
+    registry.UpdateSlot(reservation, textures[1]);
+    registry.ReleaseSlot(reservation);
+
+    const std::vector<TextureHandle> bound = registry.GetTextureHandlesForSlots({registered});
+    ASSERT_EQ(bound.size(), 1u);
+    EXPECT_EQ(bound[0].id, textures[0].id);
+    EXPECT_NE(registry.ReserveSlot().Index(), registered) << "the stale release freed a registered slot";
+
+    registry.Shutdown();
+    DestroyTextures(device.get(), textures);
+}
+
 // The white-scene-view regression class (cddaf12f2): UnregisterByHandle's
 // reverse lookup compared a truncated map key against the FULL 64-bit
 // generational id and silently never matched, so the slot was never freed.
@@ -239,10 +294,11 @@ TEST_F(UITextureRegistryFixture, ThreadedRegisterUnregisterStress)
                         registry.Unregister(ownedSlots[idx]);
                         ownedSlots.erase(ownedSlots.begin() + idx);
                     }
-                    else if (op == 2 && !ownedSlots.empty())
+                    else if (op == 2)
                     {
-                        size_t idx = rng() % ownedSlots.size();
-                        registry.UpdateSlot(ownedSlots[idx], textures[texDist(rng)]);
+                        const ::GenerationalVector::Handle reservation = registry.ReserveSlot();
+                        registry.UpdateSlot(reservation, textures[texDist(rng)]);
+                        registry.ReleaseSlot(reservation);
                     }
                 }
                 catch (...)
@@ -331,10 +387,11 @@ TEST_F(UITextureRegistryFixture, ThreadedStressRepeated)
                             registry.Unregister(ownedSlots[idx]);
                             ownedSlots.erase(ownedSlots.begin() + idx);
                         }
-                        else if (op == 2 && !ownedSlots.empty())
+                        else if (op == 2)
                         {
-                            size_t idx = rng() % ownedSlots.size();
-                            registry.UpdateSlot(ownedSlots[idx], textures[texDist(rng)]);
+                            const ::GenerationalVector::Handle reservation = registry.ReserveSlot();
+                            registry.UpdateSlot(reservation, textures[texDist(rng)]);
+                            registry.ReleaseSlot(reservation);
                         }
                     }
                     catch (...)

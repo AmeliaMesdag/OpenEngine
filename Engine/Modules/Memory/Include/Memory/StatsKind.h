@@ -16,6 +16,9 @@ enum class StatsKind : std::uint8_t
     /// One thread's `ScratchScope` arena: the arena counts, plus the thread's OS id, its
     /// out-of-order allocations and its shrinks.
     Scratch,
+    /// One of a thread's two `FrameMemory` arenas: the arena counts, written at each of its
+    /// rewinds, plus the thread's OS id and its shrinks.
+    FrameMemory,
     /// An `ObjectPool<T>`, in slot bytes: `Bytes` the live objects' slots and `HighWaterBytes`
     /// the most slots ever live, both as of the last block acquisition (the pool acquires a
     /// block only when every slot is live, so the two are equal); `ReservedBytes` its block

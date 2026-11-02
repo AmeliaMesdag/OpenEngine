@@ -44,7 +44,7 @@ void Click(Button& button)
 
 bool IsHidden(const UIElement* element)
 {
-    const auto display = element ? element->Overrides().Get(Style::Display) : std::nullopt;
+    const auto display = element ? element->Style().Get(Style::Display) : std::nullopt;
     return display.has_value() && display.value() == DisplayMode::None;
 }
 
@@ -293,7 +293,7 @@ TEST(SceneViewToolStrip, TheSplineEntryMenuListsTheSplineSettingsInOrder)
     const std::vector<std::string> expected = {
         "Curve Type", "Selection Shape", "Control Render Shape", "Knot Size", "Knot Outline Thickness",
         "Spline Thickness", "Default Radius", "Simplify Tolerance", "Smoothing Passes", "Mesh Acceleration",
-        "Auto-Connect to Nearby Spline", "Snap to Scene Meshes", "Pivot From Spline Center", "Spline Color...",
+        "Snap Ends to Nearby Splines", "Snap to Scene Meshes", "Pivot From Spline Center", "Spline Color...",
         "Brush Stroke Color...", "Reset to Defaults"};
     std::size_t next = 0;
     for (const ContextMenuManipulator::Item& item : items)

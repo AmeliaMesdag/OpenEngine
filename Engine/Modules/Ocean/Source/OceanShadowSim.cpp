@@ -20,14 +20,14 @@ namespace
 {
 struct alignas(16) ShadowInputGPU
 {
-    float Rect[4]{};
-    float Values[4]{};
+    Mathematics::Vector4 Rect;
+    Mathematics::Vector4 Values;
 };
 struct alignas(16) ShadowParamsGPU
 {
     OceanCascadeLayoutGPU Current{}, Previous{};
-    float Simulation[4]{}; // sea level, previous weight, soft jitter diameter, hard jitter diameter
-    float Frame[4]{};      // history valid, seed, input count, pad
+    Mathematics::Vector4 Simulation; // sea level, previous weight, soft jitter diameter, hard jitter diameter
+    Mathematics::Vector4 Frame;      // history valid, seed, input count, pad
     ShadowInputGPU Inputs[64]{};
 };
 static_assert(sizeof(ShadowParamsGPU) == 2336);
@@ -144,7 +144,7 @@ bool OceanShadowSim::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare &d, 
     const bool history =
         h.Valid && elapsed >= 0 && elapsed < 1.0f && sunChange < 0.02f && h.Declared.PrecedesFrame(frame);
     const uint32 write = h.Index ^ 1u;
-    h.Fields[write].SnapToCamera(camera->cameraPos[0], camera->cameraPos[2]);
+    h.Fields[write].SnapToCamera(camera->cameraPos.x, camera->cameraPos.z);
     const auto upload = d.Frame.AllocUpload<ShadowParamsGPU>();
     if (!upload.Valid())
         return false;
@@ -218,7 +218,7 @@ bool OceanShadowSim::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare &d, 
     h.Declared.Frame = frame;
     h.Time = params.Time;
     h.Valid = true;
-    std::copy_n(params.SunDirection, 3, h.Sun);
+    std::copy_n(params.SunDirection.v, 3, h.Sun);
     return true;
 }
 bool OceanShadowSim::FillSampling(ViewId view, uint64 frame, OceanShadowSamplingGPU &out) const

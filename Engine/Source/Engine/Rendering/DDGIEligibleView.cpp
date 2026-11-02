@@ -41,7 +41,7 @@ bool DDGIFollowCameraTracker::Update(const ViewRegistry& views, uint64 worldId,
         if (cam == nullptr)
             continue;
 
-        const Mathematics::Vector3 pos(cam->cameraPos[0], cam->cameraPos[1], cam->cameraPos[2]);
+        const Mathematics::Vector3 pos(cam->cameraPos.x, cam->cameraPos.y, cam->cameraPos.z);
         const bool isGame = view.purpose == Rendering::ViewPurpose::Game;
         if (!found || (isGame && !foundIsGame))
         {

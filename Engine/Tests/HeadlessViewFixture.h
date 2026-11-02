@@ -101,6 +101,7 @@
 #include "Rendering/Core/RenderGraph/RGTransientPool.h"
 #include "Rendering/Core/RenderGraph/RGUploadRing.h"
 #include "Rendering/Passes/FinalizeContract.h"
+#include "Types/Color.h"
 #include "UI/UITargetSpace.h"
 #include "UI/UITextureSpace.h"
 
@@ -257,8 +258,8 @@ struct HeadlessViewDesc
     uint32_t Width = 128;
     uint32_t Height = 128;
 
-    /// Colour the spine's world pass clears the view to, in linear light.
-    float ClearLinear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    /// Color the spine's world pass clears the view to, in linear light.
+    ColorLinear ClearLinear{0.0f, 0.0f, 0.0f, 1.0f};
 
     /// Authored linear RGBA (4 floats per pixel, row-major, Width*Height
     /// entries) copied over the view's colour AFTER the spine's world pass and

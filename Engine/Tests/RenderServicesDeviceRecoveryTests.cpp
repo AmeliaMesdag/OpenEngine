@@ -16,6 +16,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/DrawCommandProducer.h"
 #include "Engine/Rendering/SceneAccelerationStructureService.h"
+#include "Engine/Rendering/StagingViewPool.h"
 #include "Rendering/Core/AccelerationStructure.h"
 #include "Engine/Rendering/Material.h"
 #include "Engine/Rendering/MaterialRegistry.h"
@@ -27,6 +28,7 @@
 
 #include "Engine/Rendering/ViewReadbackUtils.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
+#include "Rendering/Passes/TonemapPass.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -616,6 +618,73 @@ TEST(RenderServicesDeviceRecovery, AccelerationStructuresAreReleasedWithTheLostD
     device->DestroyBuffer(instances);
 
     sceneAS->ReleaseTlasChannel(channel);
+    rs.Shutdown();
+    device->Shutdown();
+    UnsetEnvVar("GE_VK_FORCE_DEVICE_LOST");
+}
+
+namespace
+{
+// Declares one staging output into a frame that never executes: DeclareOutput creates the output
+// texture before it adds the tonemap pass.
+void DeclareStagingOutput(IDevice& device, StagingView& view)
+{
+    RenderGraph::RGResourcePool persistent(&device);
+    RenderGraph::RGTransientPool transient(&device);
+    RenderGraph::RGUploadRing uploadRing(&device, 2, 4096);
+    RenderGraph::RGFrame frame(&device, &persistent, &transient, &uploadRing);
+    frame.BeginFrame(0);
+    TextureDesc desc{};
+    desc.width = view.RenderWidth();
+    desc.height = view.RenderHeight();
+    desc.format = static_cast<uint32_t>(TextureFormat::R16G16B16A16_FLOAT);
+    desc.usage = static_cast<uint32_t>(TextureUsage::ShaderResource | TextureUsage::RenderTarget);
+    const RenderGraph::RGTexture source = frame.CreateTexture("StagingRebuild.Source", desc);
+    view.DeclareOutput(frame, source, Passes::TonemapParams{});
+}
+} // namespace
+
+// A staging view's output across an in-place rebuild. The rebuild destroys the output texture, and
+// the old handle still reports IsValid(): the pool must forget it, report no output, and create a
+// new one on the next declared frame.
+TEST(RenderServicesDeviceRecovery, StagingViewOutputIsForgottenAndRecreatedAfterRebuild)
+{
+    SetEnvVar("GE_VK_FORCE_DEVICE_LOST", "2");
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+    {
+        UnsetEnvVar("GE_VK_FORCE_DEVICE_LOST");
+        GTEST_SKIP() << "No Vulkan device available";
+    }
+
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+    {
+        constexpr uint32_t kSize = 16;
+        StagingViewPool& pool = rs.EnsureFeature<StagingViewPool>(rs);
+        StagingView view = pool.Acquire(StagingViewDesc{kSize, kSize, "StagingRebuild"});
+        DeclareStagingOutput(*device, view);
+        ASSERT_TRUE(view.OutputTexture().IsValid())
+            << "the fixture must have created the output, or the test proves nothing";
+
+        bool rebuilt = false;
+        for (int i = 0; i < 16 && !rebuilt; ++i)
+        {
+            RunDeviceFrame(*device);
+            rebuilt = (device->GetDeviceRebuildGeneration() != 0u);
+        }
+        ASSERT_TRUE(rebuilt) << "the injected loss should rebuild the device in place";
+        ASSERT_EQ(device->GetDeviceHealth(), DeviceHealth::Healthy);
+
+        EXPECT_FALSE(view.OutputTexture().IsValid()) << "a UI must not import the destroyed output";
+        EXPECT_EQ(view.OutputWidth(), 0u) << "the owner sees no output at the view size, so it renders again";
+
+        // Inside an acquired frame, as production declares it.
+        ASSERT_TRUE(device->BeginFrame());
+        DeclareStagingOutput(*device, view);
+        EXPECT_TRUE(view.OutputTexture().IsValid()) << "the next declared frame creates the output on the live device";
+        EXPECT_EQ(view.OutputWidth(), kSize);
+    }
     rs.Shutdown();
     device->Shutdown();
     UnsetEnvVar("GE_VK_FORCE_DEVICE_LOST");

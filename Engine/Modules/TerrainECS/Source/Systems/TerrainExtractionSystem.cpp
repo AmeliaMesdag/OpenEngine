@@ -4,8 +4,8 @@
 #include "TerrainECS/TerrainService.h"
 #include "TerrainFieldUploader.h"
 #include "TerrainSkyline.h"
-#include "TerrainECS/TerrainGrassAlpha.h"
-#include "TerrainECS/TerrainGrassAuthoredBits.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassAlpha.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassAuthoredBits.h"
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "TerrainECS/TerrainRenderPublication.h"
 #include "TerrainECS/TileStreamingManager.h"
@@ -14,7 +14,8 @@
 #include "TerrainECS/TerrainSizingPlan.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "TerrainECS/TerrainHeightPageDriver.h"
-#include "TerrainECS/TerrainHeightPageFeature.h"
+#include "TerrainECS/TerrainPageFeature.h"
+#include "TerrainECS/PageLevelRule.h"
 #include "CBTTerrain/CBTLayout.h" // kAtlasMaxTiles (F2 cap warn)
 #include "AssetCore/GUID.h"
 #include "Assets/TerrainMaterialLibraryAsset.h"
@@ -565,7 +566,7 @@ void TerrainExtractionSystem::PublishSunGlareSkyline(ECS::World& world)
         float32 tangent = Engine::Renderer::SunGlareRenderFeature::kNoSkyline;
         const Rendering::CameraData* camera = m_RenderServices->Views().FindCameraData(view.cameraId);
         const Mathematics::Vector3 eye =
-            camera ? Mathematics::Vector3(camera->cameraPos[0], camera->cameraPos[1], camera->cameraPos[2])
+            camera ? Mathematics::Vector3(camera->cameraPos.x, camera->cameraPos.y, camera->cameraPos.z)
                    : Mathematics::Vector3{};
         // The terrain under the eye, resolved every frame rather than cached: the query is a view of
         // the height pages, valid until their next Update. The skyline takes coarse answers
@@ -708,6 +709,8 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
     // The largest 1 / tan(vfov / 2) of the views: the height pages' level rule (PageLevelRule.h)
     // serves the narrowest field of view, the one that asks for the finest level at a distance.
     float32 pageFocalScale = 0.0f;
+    // Each view's position, forward and horizontal half field: the surface pages' wedges.
+    std::vector<PageRequestCamera> pageViews;
     // Render-origin sector for the material table's world-anchoring UV phase. The table is shared
     // by every view, so it takes the FIRST camera's sector — the same "first camera wins" rule the
     // direction above uses. Two views far enough apart to sit in different sectors would anchor the
@@ -721,7 +724,11 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
             if (camData)
             {
                 viewCameraPositions.push_back(ExtractCameraPosition(*camData));
-                pageFocalScale = std::max(pageFocalScale, std::abs(camData->proj[5]));
+                pageFocalScale = std::max(pageFocalScale, std::abs(camData->proj[1][1]));
+                // LH view: row 2 is forward; proj[0][0] is 1 / tan(horizontal half field).
+                const Mathematics::Vector3 forward{camData->view[0][2], camData->view[1][2], camData->view[2][2]};
+                pageViews.push_back(PageRequestCamera{viewCameraPositions.back(), forward,
+                                                      std::atan(1.0f / std::abs(camData->proj[0][0])), true});
                 // First camera XZ look for tile in-front priority. LH view row 2
                 // is forward (MakeLookAtLH); do not negate — that was the RH
                 // "looks along -Z in view space" fork and contradicted the
@@ -738,11 +745,11 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
 
                 // Extract far clip from perspective projection (LH, ZO):
                 // GLM perspectiveLH_ZO:
-                //   proj[10] = zFar / (zFar - zNear)
-                //   proj[14] = -(zNear * zFar) / (zFar - zNear)
-                // => zFar = -proj[14] / (proj[10] - 1)
-                const float32 p10 = camData->proj[10];
-                const float32 p14 = camData->proj[14];
+                //   proj[2][2] = zFar / (zFar - zNear)
+                //   proj[3][2] = -(zNear * zFar) / (zFar - zNear)
+                // => zFar = -proj[3][2] / (proj[2][2] - 1)
+                const float32 p10 = camData->proj[2][2];
+                const float32 p14 = camData->proj[3][2];
                 if (std::abs(p10 - 1.0f) > 1e-6f)
                 {
                     const float32 farClip = -p14 / (p10 - 1.0f);
@@ -757,7 +764,7 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
     terrainService->AssertNoModifierAccess();
 
     // The dynamic bodies' CPU height windows, before the terrains' page requests read them.
-    terrainService->GetHeightPages().GatherBodyWindows(world);
+    terrainService->GetTerrainPages().GatherBodyWindows(world);
 
     std::vector<TerrainInstanceInfo> activeInfos;
     std::vector<ECS::EntityHandle> activeEntities; // the entity of each activeInfos row
@@ -1059,10 +1066,10 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                 {
                     GE_CPU_PROFILE_SCOPE("Terrain.HeightPages");
                     const auto* name = world.GetComponent<Components::Name>(entity);
-                    RequestTiledTerrainHeightPages(*terrainService, *device, *tiled, extent, globalGpuHandle,
-                                                   name ? name->View() : std::string_view{}, worldXf.matrix[13],
-                                                   terrain.HeightScale, terrain.TargetPixelError, streamCenters,
-                                                   pageFocalScale);
+                    RequestTiledTerrainPages(*terrainService, *device, *tiled, extent, globalGpuHandle,
+                                             name ? name->View() : std::string_view{}, worldXf.matrix[13],
+                                             terrain.HeightScale, terrain.TargetPixelError, streamCenters, pageViews,
+                                             pageFocalScale);
                 }
 
                 globalData->Config.WorldSizeX = terrain.SizeX;
@@ -2075,13 +2082,9 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
                            ? Terrain::kTerrainFlagHasSplatmap : 0u);
 
                 // Atlas-backed terrains have no unified heightmap (HeightmapBindless == 0). The grass
-                // placement compute reads the kTerrainFlagAtlasBacked bit (set above) and routes its
-                // height/normal/mask sampling through the resident-window atlas resolve instead — the
-                // atlas geometry + bindless height/normal/splat indices + indirection rows ride to the
-                // grass feature via TerrainRenderFeature::TryGetAtlasGrassSource. Near-camera blades sit
-                // on resident tiles by construction, so they snap at full precision; the coarse fields
-                // keep any out-of-window blade height-continuous (never a floater into garbage). Grass
-                // is therefore left ENABLED on atlas terrains.
+                // placement reads such a terrain's ground from its surface pages (TerrainPageFeature)
+                // and places no blade where no page answers (the kTerrainFlagAtlasBacked bit, set
+                // above).
                 bool grassControlsActive = false;
                 bool grassControlsSuppressed = false;
                 if (grass)
@@ -2603,7 +2606,7 @@ void TerrainExtractionSystem::Update(ECS::World& world, float32 deltaTime)
     m_ColorMapUploader->ForgetRetired(*terrainService);
     {
         GE_CPU_PROFILE_SCOPE("Terrain.HeightPages");
-        UpdateHeightPages(*terrainService, *feature, m_RenderServices->EnsureFeature<TerrainHeightPageFeature>(),
+        UpdateHeightPages(*terrainService, *feature, m_RenderServices->EnsureFeature<TerrainPageFeature>(),
                           atlasFrame, deltaTime, std::max(2u, device->GetFramesInFlight()));
     }
     feature->SetActiveTerrains(std::move(activeInfos));

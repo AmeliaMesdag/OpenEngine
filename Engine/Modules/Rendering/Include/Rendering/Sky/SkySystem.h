@@ -1,33 +1,24 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
 #include "Mathematics/Interpolation.h"
+#include "Mathematics/Vector3.h"
 #include "Rendering/Sky/SkySettings.h"
 #include "Rendering/Sky/SkySystemConfig.h"
 #include "Rendering/Sky/SolarPath.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace GameEngine {
 namespace Rendering {
 
 struct SkySystemState
 {
-    float sunDirWS[3] = { 0.0f, 1.0f, 0.0f };
-    float moonDirWS[3] = { 0.0f, -1.0f, 0.0f };
+    Mathematics::Vector3 sunDirWS = { 0.0f, 1.0f, 0.0f };
+    Mathematics::Vector3 moonDirWS = { 0.0f, -1.0f, 0.0f };
     /// 0 = full sun primary lighting, 1 = full moon; smoothly ramped near sunset.
     float primaryMoonBlend = 0.0f;
 };
-
-inline void Normalize3(float v[3])
-{
-    float len2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
-    if (len2 <= 0.0f) {
-        v[0] = 0.0f; v[1] = 1.0f; v[2] = 0.0f;
-        return;
-    }
-    float invLen = 1.0f / std::sqrt(len2);
-    v[0] *= invLen; v[1] *= invLen; v[2] *= invLen;
-}
 
 inline float Smoothstep01(float edge0, float edge1, float x)
 {
@@ -115,29 +106,27 @@ inline float SampleSkyScalarKeyframeCurve(float timeOfDayHours,
     return lerp(values[3], values[0], u);
 }
 
-inline void SampleSkyVec3KeyframeCurve(float timeOfDayHours,
-                                       const float (&km)[3],
-                                       const float (&kd)[3],
-                                       const float (&kn)[3],
-                                       const float (&ks)[3],
-                                       float out[3])
+inline ColorLinear SampleSkyColorKeyframeCurve(float timeOfDayHours,
+                                               const float (&km)[3],
+                                               const float (&kd)[3],
+                                               const float (&kn)[3],
+                                               const float (&ks)[3])
 {
-    out[0] = SampleSkyScalarKeyframeCurve(timeOfDayHours, km[0], kd[0], kn[0], ks[0]);
-    out[1] = SampleSkyScalarKeyframeCurve(timeOfDayHours, km[1], kd[1], kn[1], ks[1]);
-    out[2] = SampleSkyScalarKeyframeCurve(timeOfDayHours, km[2], kd[2], kn[2], ks[2]);
+    return ColorLinear(SampleSkyScalarKeyframeCurve(timeOfDayHours, km[0], kd[0], kn[0], ks[0]),
+                       SampleSkyScalarKeyframeCurve(timeOfDayHours, km[1], kd[1], kn[1], ks[1]),
+                       SampleSkyScalarKeyframeCurve(timeOfDayHours, km[2], kd[2], kn[2], ks[2]));
 }
 
-inline void SampleSkyVec3KeyframeCurve(float timeOfDayHours,
-                                       const float (&keyTimesHours)[4],
-                                       const float (&km)[3],
-                                       const float (&kd)[3],
-                                       const float (&kn)[3],
-                                       const float (&ks)[3],
-                                       float out[3])
+inline ColorLinear SampleSkyColorKeyframeCurve(float timeOfDayHours,
+                                               const float (&keyTimesHours)[4],
+                                               const float (&km)[3],
+                                               const float (&kd)[3],
+                                               const float (&kn)[3],
+                                               const float (&ks)[3])
 {
-    out[0] = SampleSkyScalarKeyframeCurve(timeOfDayHours, keyTimesHours, km[0], kd[0], kn[0], ks[0]);
-    out[1] = SampleSkyScalarKeyframeCurve(timeOfDayHours, keyTimesHours, km[1], kd[1], kn[1], ks[1]);
-    out[2] = SampleSkyScalarKeyframeCurve(timeOfDayHours, keyTimesHours, km[2], kd[2], kn[2], ks[2]);
+    return ColorLinear(SampleSkyScalarKeyframeCurve(timeOfDayHours, keyTimesHours, km[0], kd[0], kn[0], ks[0]),
+                       SampleSkyScalarKeyframeCurve(timeOfDayHours, keyTimesHours, km[1], kd[1], kn[1], ks[1]),
+                       SampleSkyScalarKeyframeCurve(timeOfDayHours, keyTimesHours, km[2], kd[2], kn[2], ks[2]));
 }
 
 /// Places the sun and the moon for the hour in `settings.timeOfDayHours`.
@@ -208,12 +197,12 @@ inline void ComputeSimpleSunMoon(const SkySettings& settings,
     t = t - std::floor(t);
 
     float theta = (t - 0.25f) * kTwoPi;
-    SolarDirection(solarFrame, std::cos(theta), std::sin(theta), outState.sunDirWS);
+    outState.sunDirWS = SolarDirection(solarFrame, std::cos(theta), std::sin(theta));
 
     float cycle = settings.moonArcPosition;
     cycle = cycle - std::floor(cycle);
     const float moonTheta = theta - cycle * kTwoPi;
-    SolarDirection(solarFrame, std::cos(moonTheta), std::sin(moonTheta), outState.moonDirWS);
+    outState.moonDirWS = SolarDirection(solarFrame, std::cos(moonTheta), std::sin(moonTheta));
 
     outState.primaryMoonBlend = PrimaryMoonBlend(config, outState.sunDirWS[1]);
 }
@@ -236,7 +225,7 @@ inline void ComputeSimpleSunMoon(const SkySettings& settings,
 // below is what the presentation and the linked directional light take.
 inline void ApplySimpleLightingToSkySettings(const SkySystemState& state,
                                              const SkySystemConfig& config,
-                                             const float sunTint[3],
+                                             const ColorLinear& sunTint,
                                              float moonSourceIntensity,
                                              SkySettings& ioSky)
 {
@@ -244,38 +233,31 @@ inline void ApplySimpleLightingToSkySettings(const SkySystemState& state,
 
     const float w = config.useMoonWhenSunBelowHorizon ? state.primaryMoonBlend : 0.0f;
 
-    float blendedDir[3] = {
+    Mathematics::Vector3 blendedDir = {
         state.sunDirWS[0] * (1.0f - w) + state.moonDirWS[0] * w,
         state.sunDirWS[1] * (1.0f - w) + state.moonDirWS[1] * w,
         state.sunDirWS[2] * (1.0f - w) + state.moonDirWS[2] * w,
     };
     // A moon opposite the sun — the default arc position — makes the midpoint of this lerp the
-    // zero vector, and Normalize3's fallback would aim the primary light straight down from the
-    // zenith for those frames. Snap to whichever body the blend already favours instead.
+    // zero vector, and the zenith fallback would aim the primary light straight down from the
+    // zenith for those frames. Snap to whichever body the blend already favors instead.
     constexpr float kDegenerateBlendLengthSq = 1e-4f;
     const float blendedLengthSq = blendedDir[0] * blendedDir[0] + blendedDir[1] * blendedDir[1] +
                                   blendedDir[2] * blendedDir[2];
     if (blendedLengthSq < kDegenerateBlendLengthSq)
     {
-        const float* dominant = (w < 0.5f) ? state.sunDirWS : state.moonDirWS;
-        blendedDir[0] = dominant[0];
-        blendedDir[1] = dominant[1];
-        blendedDir[2] = dominant[2];
+        blendedDir = (w < 0.5f) ? state.sunDirWS : state.moonDirWS;
     }
-    Normalize3(blendedDir);
-    ioSky.primarySunDir[0] = blendedDir[0];
-    ioSky.primarySunDir[1] = blendedDir[1];
-    ioSky.primarySunDir[2] = blendedDir[2];
+    ioSky.primarySunDir = blendedDir.NormalizeOr(Mathematics::Vector3(0.0f, 1.0f, 0.0f));
 
     ioSky.sunSourceIntensity = kSunIntensity;
-    for (int c = 0; c < 3; ++c)
-        ioSky.sunSourceColor[c] = sunTint[c];
+    ioSky.sunSourceColor = sunTint;
     ioSky.moonIntensity = moonSourceIntensity;
     ioSky.primarySunIntensity = kSunIntensity * (1.0f - w) + moonSourceIntensity * w;
 
-    ioSky.primarySunColor[0] = (1.0f - w) * sunTint[0] + w * config.moonColor.r;
-    ioSky.primarySunColor[1] = (1.0f - w) * sunTint[1] + w * config.moonColor.g;
-    ioSky.primarySunColor[2] = (1.0f - w) * sunTint[2] + w * config.moonColor.b;
+    ioSky.primarySunColor = ColorLinear((1.0f - w) * sunTint.r + w * config.moonColor.r,
+                                        (1.0f - w) * sunTint.g + w * config.moonColor.g,
+                                        (1.0f - w) * sunTint.b + w * config.moonColor.b);
 }
 
 } // namespace Rendering

@@ -177,6 +177,12 @@ PipelineHandle ScreenSpaceReflectionsNode::BeginProgram(RenderGraph::RGContext& 
     return pipeline;
 }
 
+uint32_t ScreenSpaceReflectionsNode::TraceFrameIndex(Rendering::ViewId view) const
+{
+    const ViewHistory* history = m_ViewHistory.Find(static_cast<uint32_t>(view));
+    return history != nullptr ? history->TraceFrame : 0u;
+}
+
 Mathematics::Rect ScreenSpaceReflectionsNode::ComputeViewportRect(const ViewLetterbox& letterbox,
                                                                   uint32_t targetWidth,
                                                                   uint32_t targetHeight)
@@ -200,7 +206,7 @@ void ScreenSpaceReflectionsNode::DeclareForView(ViewDeclare& d)
     // chain (SSSR inactive, an input missing) advances that P without writing the histories, so the
     // history state is dropped: the next frame that declares the chain starts it from scratch.
     if (!DeclareChain(d))
-        m_ViewHistory.erase(static_cast<uint32_t>(d.View.id));
+        m_ViewHistory.Erase(static_cast<uint32_t>(d.View.id));
 }
 
 bool ScreenSpaceReflectionsNode::DeclareChain(ViewDeclare& d)
@@ -322,16 +328,16 @@ bool ScreenSpaceReflectionsNode::DeclareChain(ViewDeclare& d)
                                            d.Services.GetScrollAnimationTimeSeconds(), clock.Origin};
     // A declare path: the rotation takes the frame stream's submitted-frame
     // count so a declared-and-abandoned frame never becomes a later previous.
+    bool previousValid = false;
     const auto* previousSample = d.Services.TemporalHistory().Advance(
-        d.View.id, d.Frame.FrameIndex(), currentSample, d.Frame.SubmittedFrameCount());
-    Matrix4x4 previousVP;
-    std::memcpy(previousVP.Data(), previousSample->Camera.viewProj,
-                sizeof(previousSample->Camera.viewProj));
+        d.View.id, d.Frame.FrameIndex(), currentSample, d.Frame.SubmittedFrameCount(),
+        &previousValid);
+    Matrix4x4 previousVP = previousSample->Camera.viewProj;
     const auto previousInvVP = GameEngine::Mathematics::Inverse(previousVP);
     std::memcpy(reprojectionParams.Ptr->PrevInvViewProj, previousInvVP.Data(), sizeof(float) * 16);
 
     const uint64_t frameIndex64 = d.Frame.FrameIndex();
-    ViewHistory& vh = m_ViewHistory[static_cast<uint32_t>(d.View.id)];
+    ViewHistory& vh = m_ViewHistory.GetOrInsert(static_cast<uint32_t>(d.View.id));
     // History is per-view and always holds THIS view's previous render, so its
     // validity does not depend on the frame index being exactly +1. The graph
     // frame index is a per-window stream counter, and an OnDemand view that
@@ -348,6 +354,16 @@ bool ScreenSpaceReflectionsNode::DeclareChain(ViewDeclare& d)
     // below and folded into historyValid there.
     const bool historyRendered = vh.HistoryFrame > 0ull && vh.LastWrittenFrame != frameIndex64 &&
                                  vh.Width == width && vh.Height == height;
+    const auto* viewDesc = d.Services.Views().FindViewDesc(d.View.id);
+    const ViewContentStamp content =
+        ViewContentStamp::Capture(d.Services, viewDesc != nullptr ? viewDesc->worldId : 0u);
+    const bool viewStill = historyRendered && previousValid &&
+                           ViewContentStamp::ViewIsStill(
+                               vh.Content, content, previousSample->Camera, currentSample.Camera,
+                               ViewMotionVectors::ViewHasMovers(d.Services, d.View.id, content.WorldId));
+    if (!viewStill)
+        ++vh.NoiseFrame;
+    vh.Content = content;
     const uint32_t parity = static_cast<uint32_t>(vh.HistoryFrame++ & 1ull);
     vh.LastWrittenFrame = frameIndex64;
     vh.Width = width;
@@ -511,7 +527,8 @@ bool ScreenSpaceReflectionsNode::DeclareChain(ViewDeclare& d)
                  static_cast<uint32_t>(d.View.id), width, height, settings.SSSRIntensity);
     }
 
-    const uint32_t frameIndex = SssrFramePin().value_or(static_cast<uint32_t>(frameIndex64));
+    vh.TraceFrame = SssrFramePin().value_or(vh.NoiseFrame);
+    const uint32_t frameIndex = vh.TraceFrame;
 
     // Reset the append counter/dispatch args and sentinel-fill the rounded
     // tail of the ray list before classification writes compact records.

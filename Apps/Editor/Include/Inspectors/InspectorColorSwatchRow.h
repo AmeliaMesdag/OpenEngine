@@ -28,7 +28,7 @@ inline void StyleColorSwatch(UIElement* swatch, std::uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kColorSwatchSizePx))
         .Set(Style::Height, StyleLength::Px(kColorSwatchSizePx))
         .Set(Style::MinWidth, StyleLength::Px(kColorSwatchSizePx))
@@ -104,7 +104,7 @@ inline ColorSwatchRow AddColorSwatchRow(UIElement* parent, const std::string& la
     UIElement* field = InspectorUI::AddFieldContainer(rowElement);
     if (!field)
         return row;
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(kColorSwatchGapPx));
@@ -118,7 +118,7 @@ inline ColorSwatchRow AddColorSwatchRow(UIElement* parent, const std::string& la
     row.Value = value.get();
     row.Value->AddClass("inspector-text");
     row.Value->SetText(valueText);
-    row.Value->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    row.Value->Style().Set(Style::Cursor, CursorStyle::Pointer);
     field->AddChild(std::move(value));
 
     return row;

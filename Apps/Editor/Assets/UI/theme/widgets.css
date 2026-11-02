@@ -110,13 +110,6 @@
 	box-shadow: var(--popup-shadow, 0 -1px 24px rgba(0, 0, 0, 0.25));
 }
 
-/* Fill color for the PopoverArrow triangle; carried via border-color (not
-   background-color, which would make the base painter draw a rect behind the
-   triangle). */
-.popover-arrow {
-	border-color: var(--ui_color_bg_panel);
-}
-
 .popover-section-header {
 	font-size: var(--ui_font_size_small);
 	color: var(--ui_color_text_dim);
@@ -1908,6 +1901,9 @@ button.large,
 	align-items: center;
 	justify-content: center;
 	background-color: rgba(18, 18, 18, 0.97);
+	/* The arrow takes this fill and border (TooltipOverlay). */
+	border-width: 1px;
+	border-color: var(--ui_color_border_subtle);
 	border-radius: var(--ui_radius_md);
 	padding: 6px 10px;
 	box-shadow: none;
@@ -1930,35 +1926,6 @@ button.large,
 	   resolves against the pre-clamp available width and lets the label
 	   escape the bubble instead of wrapping. */
 	overflow: hidden;
-}
-
-.tooltip-arrow {
-	width: 10px;
-	height: 10px;
-	margin: 0;
-	padding: 0;
-	background-size: contain;
-	background-repeat: no-repeat;
-	background-position: center;
-	background-color: transparent;
-	background-image-tint: rgba(255, 80, 80, 0.95);
-	align-self: center;
-}
-
-.tooltip-arrow-up {
-	background-image: url("editor:Icons/fold-up.svg");
-}
-
-.tooltip-arrow-down {
-	background-image: url("editor:Icons/fold-down.svg");
-}
-
-.tooltip-arrow-left {
-	background-image: url("editor:Icons/fold-left.svg");
-}
-
-.tooltip-arrow-right {
-	background-image: url("editor:Icons/fold-right.svg");
 }
 
 /* Drag/drop ghost (payload display label) */

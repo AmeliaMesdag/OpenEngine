@@ -78,6 +78,15 @@ ShaderSourceCache::EntryPtr ShaderSourceCache::Read(const std::filesystem::path&
     return m_Entries.try_emplace(normalizedKey, std::move(entry)).first->second;
 }
 
+bool ShaderSourceCache::ReadText(const std::filesystem::path& path, std::string& out)
+{
+    const EntryPtr entry = Read(path, NormalizedKey(path));
+    if (!entry)
+        return false;
+    out = entry->Bytes;
+    return true;
+}
+
 ShaderSourceCache::ResolutionPtr ShaderSourceCache::Resolve(const std::filesystem::path& requestingDir,
                                                             const std::vector<std::filesystem::path>& roots,
                                                             const std::string& rootsSignature,

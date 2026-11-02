@@ -310,7 +310,8 @@ bool PlayerApplication::Initialize()
                 // here too — dev runs have no editor build-cache record for it.
                 if (module.Lang == PackageModuleRecord::ModuleLang::Cpp)
                 {
-                    if (module.UsesManagedNativeCache && !RetainPackageNativeCache(module.CacheDir))
+                    if (module.UsesManagedNativeCache &&
+                        !RetainPackageNativeCache(module.CacheDir, EngineCore::GetInstance().GetStartupChannel()))
                     {
                         Logger::Log::Error("Player: cannot lease native cache '{}' for package '{}'; module skipped",
                                            module.CacheDir.string(), module.PackageName);

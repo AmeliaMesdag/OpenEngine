@@ -1,5 +1,10 @@
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <system_error>
 #include <gtest/gtest.h>
 #include <iterator>
 #include <limits>
@@ -8,23 +13,36 @@
 #include "Core/Application.h"
 #include "Core/Engine.h"
 
+#include "Components/Name.h"
+#include "Components/Rendering/LocalBounds.h"
+#include "Components/Rendering/MeshRenderer.h"
+#include "Components/RuntimeOnlyEntity.h"
 #include "Components/Spline/SplineComponent.h"
+#include "Components/Spline/SplineNetworkMember.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
+#include "Editor/Settings/SettingsStore.h"
 #include "Editor/Settings/SplineEditorSettings.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
+#include "ECSModules/Rendering/Systems/RenderExtractionSystem.h"
+#include "Engine/Rendering/PrimitiveGenerator.h"
 #include "Input/KeyCodes.h"
 #include "Terrain/TerrainTypes.h"
 #include "Mathematics/Quaternion.h"
 #include "Mathematics/Vector3.h"
+#include "Memory/AllocationCountScope.h"
 #include "SceneView/SplineTool/SplineOwnerQuery.h"
 #include "SceneView/SplineTool/SplineSceneGizmo.h"
 #include "SceneView/SplineTool/SplineTool.h"
 #include "SceneView/SplineTool/SplineToolStripEntry.h"
+#include "Scene/SceneTlas.h"
 #include "Scripting/ScriptsConfig.h"
 #include "Spline/SplineData.h"
+#include "SplineECS/SplineNetwork.h"
 #include "SplineECS/SplineService.h"
+#include "TestEnvVar.h"
+#include "TestTempDir.h"
 #include "TerrainECS/TerrainService.h"
 #include "Types/ColorUtils.h"
 #include "UndoRedo/UndoRedoService.h"
@@ -118,6 +136,59 @@ class ScopedSplineStickToMeshSetting
 
   private:
     bool m_Previous = false;
+};
+
+// The snap's settings at their defaults, saved under a scratch user-data root, restored after.
+class ScopedSplineSnapSettings
+{
+  public:
+    explicit ScopedSplineSnapSettings(const char* name)
+        : m_Root(GameEngine::TestUtils::MakeUniqueTempDirectory(name))
+    {
+        GameEngine::Testing::SetEnvVar("GE_EDITOR_USER_DATA_ROOT", m_Root.string().c_str());
+        GameEngine::Editor::SplineEditorSettings& settings = GameEngine::Editor::SplineEditorSettings::Get();
+        m_KnotSize = settings.GetKnotSize();
+        m_ConstantScreenSize = settings.GetConstantScreenSize();
+        m_SmartDistance = settings.GetSmartDistanceScaling();
+        m_AutoConnect = settings.GetAutoConnect();
+        m_AutoCloseLoop = settings.GetAutoCloseLoop();
+        m_Smoothing = settings.GetSmoothingIterations();
+        m_Conform = settings.GetConformToSurface();
+        settings.SetKnotSize(0.3f);
+        settings.SetConstantScreenSize(true);
+        settings.SetSmartDistanceScaling(false);
+        settings.SetAutoConnect(true);
+        settings.SetAutoCloseLoop(true);
+        settings.SetSmoothingIterations(0);
+        settings.SetConformToSurface(false);
+    }
+
+    ~ScopedSplineSnapSettings()
+    {
+        GameEngine::Editor::SplineEditorSettings& settings = GameEngine::Editor::SplineEditorSettings::Get();
+        settings.SetKnotSize(m_KnotSize);
+        settings.SetConstantScreenSize(m_ConstantScreenSize);
+        settings.SetSmartDistanceScaling(m_SmartDistance);
+        settings.SetAutoConnect(m_AutoConnect);
+        settings.SetAutoCloseLoop(m_AutoCloseLoop);
+        settings.SetSmoothingIterations(m_Smoothing);
+        settings.SetConformToSurface(m_Conform);
+        GameEngine::Testing::SetEnvVar("GE_EDITOR_USER_DATA_ROOT", "");
+        std::error_code ec;
+        std::filesystem::remove_all(m_Root, ec);
+    }
+
+    const std::filesystem::path& Root() const { return m_Root; }
+
+  private:
+    std::filesystem::path m_Root;
+    float m_KnotSize = 0.0f;
+    bool m_ConstantScreenSize = true;
+    bool m_SmartDistance = false;
+    bool m_AutoConnect = true;
+    bool m_AutoCloseLoop = true;
+    int m_Smoothing = 0;
+    bool m_Conform = false;
 };
 
 Vector3 Normalized(Vector3 v)
@@ -757,6 +828,20 @@ TEST_F(SplineToolTests, AClaimedSplineOffersItsKnotsOnlyWhileSelectedAndShown)
     settings.SetShowAllControls(showAllBefore);
 }
 
+// A generated spline (a paving's approach piece) is its generator's: claimed and hidden with no owner query.
+TEST_F(SplineToolTests, AGeneratedSplineIsClaimedAndHidden)
+{
+    World* world = GetWorld();
+    const SplineFixture authored = MakeSplineEntity(world, 2);
+    const SplineFixture generated = MakeSplineEntity(world, 2);
+    world->AddComponentImmediate(generated.SplineEntity, GameEngine::Components::RuntimeOnlyEntity{});
+
+    EXPECT_FALSE(GameEngine::Editor::QuerySplineOwner(*world, authored.SplineEntity).Claimed);
+    const GameEngine::Editor::SplineOwnerClaim claim = GameEngine::Editor::QuerySplineOwner(*world, generated.SplineEntity);
+    EXPECT_TRUE(claim.Claimed);
+    EXPECT_TRUE(claim.Hidden);
+}
+
 // The spline gizmo draws knots by the same rule: while a region is selected, "show all controls"
 // draws no road's knots (the vertices drawn match the setting off), while a selected road's edit
 // draws the other road's (the positive control: the count sees knots).
@@ -846,9 +931,8 @@ TEST_F(SplineToolTests, AStrokeEndingOnARegionsKnotNeverJoinsIt)
     terrainEntity.Set(WorldTransform{});
     world->ProcessCommands();
 
-    auto& settings = GameEngine::Editor::SplineEditorSettings::Get();
-    const bool autoConnectBefore = settings.GetAutoConnect();
-    settings.SetAutoConnect(true);
+    // The defaults put the snap reach 0.75 m around an end seen from 10 m.
+    ScopedSplineSnapSettings snapSettings("SplineStrokeRegionKnot");
     // Knots on the ground (y = 0): the region's first at x = 0, the road's last at x = 4 + 10.
     const SplineFixture region = MakeSplineEntity(world, 3, /*closed=*/true);
     const SplineFixture road = MakeSplineEntity(world, 2);
@@ -896,7 +980,6 @@ TEST_F(SplineToolTests, AStrokeEndingOnARegionsKnotNeverJoinsIt)
     EXPECT_EQ(splineCount(), 3);
 
     GameEngine::Editor::SetSplineOwnerQuery({});
-    settings.SetAutoConnect(autoConnectBefore);
 }
 
 // Picking sizes a knot's hit radius with PickScreenScale and drawing sizes the
@@ -1083,6 +1166,102 @@ TEST_F(SplineToolTests, TwoDimensionalViewDrawsTheSplineWithoutTheGroundDrape)
     settings.SetShowWidthEnvelope(envelopeBefore);
 }
 
+// One Scene View frame of the spline gizmo: the view's gizmo groups reset, then one Render.
+void RenderSplineGizmoFrame(GameEngine::Editor::SceneTools::SplineSceneGizmo& gizmo, World* world, ViewId view)
+{
+    GameEngine::Editor::SceneTools::ResetGizmoLineGroups(view);
+    GameEngine::Editor::SceneTools::ResetGizmoTriangleGroups(view);
+    const Vector3 camera(4.0f, 20.0f, -30.0f);
+    GameEngine::Editor::SceneTools::GizmoRenderContext context(view, view, &camera, nullptr, world);
+    gizmo.Render(context);
+}
+
+// The xyz streams of every line group, then every triangle group, in the order the view draws them.
+std::vector<float> DrawnGizmoStreams(ViewId view)
+{
+    std::vector<float> streams;
+    if (const auto* lines = GameEngine::Editor::SceneTools::GetGizmoLineGroups(view))
+        for (const auto& group : *lines)
+            streams.insert(streams.end(), group.vertices.begin(), group.vertices.end());
+    if (const auto* triangles = GameEngine::Editor::SceneTools::GetGizmoTriangleGroups(view))
+        for (const auto& group : *triangles)
+            streams.insert(streams.end(), group.vertices.begin(), group.vertices.end());
+    return streams;
+}
+
+// A Scene View that shows the same splines again allocates nothing: the gizmo's batches and the
+// view's vertex streams keep their capacity from the frame before. The test covers each knot shape,
+// the draped passive lines, the selected spline's width band and its Bezier handles.
+TEST_F(SplineToolTests, ASteadySplineGizmoFrameAllocatesNothingAfterWarmup)
+{
+    World* world = GetWorld();
+    CreateFlatTerrain(world, 40.0f);
+    auto& settings = GameEngine::Editor::SplineEditorSettings::Get();
+    const bool drapeBefore = settings.GetDrapeToSurface();
+    const bool envelopeBefore = settings.GetShowWidthEnvelope();
+    const bool showAllBefore = settings.GetShowAllControls();
+    const GameEngine::Editor::SplineControlRenderShape shapeBefore = settings.GetControlRenderShape();
+    settings.SetDrapeToSurface(true);
+    settings.SetShowWidthEnvelope(true);
+    const SplineFixture selected = MakeSplineEntity(world, 4);
+    const SplineFixture bezier = MakeSplineEntity(world, 3);
+    const SplineFixture linear = MakeSplineEntity(world, 3);
+    // Creating a spline can move the service's spline storage: write through the handles.
+    auto* splines = GameEngine::SplineECS::SplineService::TryGet();
+    struct Placement
+    {
+        SplineFixture Fixture;
+        float Z = 0.0f;
+        GameEngine::Spline::SplineType Type = GameEngine::Spline::SplineType::Linear;
+    };
+    const Placement placements[] = {{selected, 0.0f, GameEngine::Spline::SplineType::CubicBezier},
+                                    {bezier, 3.0f, GameEngine::Spline::SplineType::CubicBezier},
+                                    {linear, 6.0f, GameEngine::Spline::SplineType::Linear}};
+    for (const Placement& placement : placements)
+    {
+        GameEngine::Spline::SplineData* data = splines->GetSplineData(placement.Fixture.Handle);
+        data->Type = placement.Type;
+        for (auto& point : data->Points)
+            point.Position.z += placement.Z;
+        splines->RebuildCache(placement.Fixture.Handle);
+        world->AddComponentImmediate(placement.Fixture.SplineEntity, WorldTransform{});
+    }
+
+    constexpr ViewId kView = 9083;
+    GameEngine::Editor::SceneTools::SplineSceneGizmo gizmo(*world);
+    gizmo.SetSelectionQuery([&selected] { return selected.SplineEntity; });
+    using GameEngine::Editor::SplineControlRenderShape;
+    for (const bool showAll : {false, true})
+    {
+        for (const SplineControlRenderShape shape :
+             {SplineControlRenderShape::Ring, SplineControlRenderShape::Sphere, SplineControlRenderShape::Cube})
+        {
+            settings.SetShowAllControls(showAll);
+            settings.SetControlRenderShape(shape);
+            // Two warmup frames: the second frame of a new world still builds state once.
+            RenderSplineGizmoFrame(gizmo, world, kView);
+            RenderSplineGizmoFrame(gizmo, world, kView);
+            const std::vector<float> warmup = DrawnGizmoStreams(kView);
+            std::uint64_t allocations = 0;
+            {
+                GameEngine::Memory::AllocationCountScope scope(GameEngine::Memory::CountWindow::ThisThread);
+                RenderSplineGizmoFrame(gizmo, world, kView);
+                allocations = scope.Count();
+            }
+            EXPECT_EQ(allocations, 0u) << "show all " << showAll << ", shape " << static_cast<int>(shape);
+            EXPECT_FALSE(warmup.empty()) << "positive control: the gizmo drew the splines";
+            EXPECT_EQ(DrawnGizmoStreams(kView), warmup) << "the second frame drew other geometry";
+        }
+    }
+
+    GameEngine::Editor::SceneTools::ResetGizmoLineGroups(kView);
+    GameEngine::Editor::SceneTools::ResetGizmoTriangleGroups(kView);
+    settings.SetShowAllControls(showAllBefore);
+    settings.SetControlRenderShape(shapeBefore);
+    settings.SetDrapeToSurface(drapeBefore);
+    settings.SetShowWidthEnvelope(envelopeBefore);
+}
+
 TEST(SplineInteractionStateTests, IndexDoesNotOwnTheStateAfterItsConsumersClose)
 {
     World world;
@@ -1094,4 +1273,402 @@ TEST(SplineInteractionStateTests, IndexDoesNotOwnTheStateAfterItsConsumersClose)
     }
     EXPECT_TRUE(weak.expired());
     EXPECT_EQ(AcquireSplineInteractionState(world)->Selection().PointIndex, -1);
+}
+
+namespace
+{
+
+using GameEngine::Components::Name;
+using GameEngine::Components::SplineNetworkMember;
+using GameEngine::Components::SplineNetworkMemberKind;
+using GameEngine::Editor::SplineEditorSettings;
+using GameEngine::SplineECS::SplineNetwork;
+
+// The reach at the defaults (knot size 0.3, Constant Screen Size on, smart distance off) for an
+// end `height` meters below the eye: twice the knot's pick radius, 0.3 times PickScreenScale.
+float ReachAtHeight(float height)
+{
+    return 2.0f * 0.3f * (height * 0.1875f / 1.5f);
+}
+
+// A pointer straight down from `height` above `ground`, the camera looking down.
+ScenePointerEvent PointerAbove(PointerPhase phase, const Vector3& ground, float height, float viewX)
+{
+    ScenePointerEvent event =
+        MakePointer(phase, viewX, 100.0f, ground + Vector3(0.0f, height, 0.0f), Vector3(0.0f, -1.0f, 0.0f));
+    event.cameraForward = Vector3(0.0f, -1.0f, 0.0f);
+    event.cameraUp = Vector3(0.0f, 0.0f, 1.0f);
+    return event;
+}
+
+// A Linear spline with world points on an identity transform, a network member when `kind` is set.
+GameEngine::ECS::EntityHandle MakeNamedSpline(World* world, const char* name, const std::vector<Vector3>& points,
+                                              bool closed, std::optional<SplineNetworkMemberKind> kind)
+{
+    auto* splineService = GameEngine::SplineECS::SplineService::TryGet();
+    const auto handle = splineService->CreateSpline(GameEngine::Spline::SplineType::Linear, closed);
+    auto* data = splineService->GetSplineData(handle);
+    for (const Vector3& point : points)
+        data->AddPoint(point, 1.0f);
+    splineService->RebuildCache(handle);
+    Entity entity = world->Create();
+    entity.Set(Transform::FromTRS(Vector3(0.0f, 0.0f, 0.0f), Quaternion(1.0f, 0.0f, 0.0f, 0.0f),
+                                  Vector3(1.0f, 1.0f, 1.0f)));
+    entity.Set(WorldTransform{});
+    SplineComponent spline{};
+    spline.SplineDataIndex = handle.Index();
+    spline.SplineDataGeneration = handle.Generation();
+    entity.Set(spline);
+    Name entityName{};
+    std::strncpy(entityName.value, name, sizeof(entityName.value) - 1);
+    entity.Set(entityName);
+    if (kind)
+        entity.Set(SplineNetworkMember{*kind});
+    world->ProcessCommands();
+    return entity.GetHandle();
+}
+
+GameEngine::Spline::SplineData* DataOf(World* world, GameEngine::ECS::EntityHandle entity)
+{
+    const auto* spline = world->GetComponent<SplineComponent>(entity);
+    return GameEngine::SplineECS::SplineService::TryGet()->GetSplineData(
+        GameEngine::SplineECS::SplineHandle(spline->SplineDataIndex, spline->SplineDataGeneration));
+}
+
+void DeriveNetwork(World* world)
+{
+    if (!SplineNetwork::IsInitialized())
+        SplineNetwork::Initialize();
+    SplineNetwork::Get().Update(*world);
+}
+
+// Drags the knot at `from` to `to` with the eye `height` above each, and releases it there.
+void DragKnot(SplineTool& tool, const Vector3& from, const Vector3& to, float height)
+{
+    tool.OnPointerEvent(PointerAbove(PointerPhase::Down, from, height, 100.0f));
+    tool.OnPointerEvent(PointerAbove(PointerPhase::Move, to, height, 140.0f));
+    tool.OnPointerEvent(PointerAbove(PointerPhase::Up, to, height, 140.0f));
+}
+
+// A brush stroke through `points` on the ground, the eye `height` above each sample.
+void Stroke(SplineTool& tool, const std::vector<Vector3>& points, float height)
+{
+    tool.OnPointerEvent(PointerAbove(PointerPhase::Down, points.front(), height, 100.0f));
+    for (size_t i = 1; i + 1 < points.size(); ++i)
+        tool.OnPointerEvent(PointerAbove(PointerPhase::Move, points[i], height, 100.0f + 10.0f * static_cast<float>(i)));
+    tool.OnPointerEvent(PointerAbove(PointerPhase::Move, points.back(), height, 300.0f));
+    tool.OnPointerEvent(PointerAbove(PointerPhase::Up, points.back(), height, 300.0f));
+}
+
+std::vector<GameEngine::ECS::EntityHandle> Splines(World* world)
+{
+    std::vector<GameEngine::ECS::EntityHandle> entities;
+    world->Query<GameEngine::ECS::Read<SplineComponent>>().Each(
+        [&entities](GameEngine::ECS::EntityHandle entity, const SplineComponent&) { entities.push_back(entity); });
+    return entities;
+}
+
+// Market Square, a 20 m closed area member on the ground, its north edge at z = 20.
+GameEngine::ECS::EntityHandle MakeSquare(World* world)
+{
+    return MakeNamedSpline(world, "Market Square",
+                           {{0.0f, 0.0f, 0.0f}, {20.0f, 0.0f, 0.0f}, {20.0f, 0.0f, 20.0f}, {0.0f, 0.0f, 20.0f}},
+                           true, SplineNetworkMemberKind::Area);
+}
+
+// One camera case of the snap: the eye height and whether the knot keeps a constant screen size.
+struct SnapCase
+{
+    float Height = 10.0f;
+    bool ConstantScreenSize = true;
+    float Reach = 0.0f;
+};
+
+std::vector<SnapCase> SnapCases()
+{
+    // Ten times farther, the reach grows ten times; with Constant Screen Size off it is twice the
+    // knot size, 0.6 m, at any distance.
+    return {{10.0f, true, ReachAtHeight(10.0f)}, {100.0f, true, ReachAtHeight(100.0f)}, {100.0f, false, 0.6f}};
+}
+
+std::string Describe(const SnapCase& snapCase)
+{
+    return "height " + std::to_string(snapCase.Height) +
+           (snapCase.ConstantScreenSize ? ", constant screen size" : ", world size");
+}
+
+// A paved slab as a generator makes it: the unit cube scaled to `halfExtents` around `center`, tagged
+// RuntimeOnlyEntity, and in the scene TLAS so the spline tool's ray hits it.
+void MakeGeneratedSlab(World* world, const Vector3& center, const Vector3& halfExtents)
+{
+    using GameEngine::Engine::Renderer::RenderExtractionSystem;
+    Entity slab = world->Create();
+    GameEngine::Components::MeshRenderer renderer{};
+    renderer.modelAssetGuid.Set(GameEngine::Engine::Renderer::PrimitiveGenerator::CubeGuid());
+    slab.Set(renderer);
+    GameEngine::Components::LocalBounds bounds{};
+    bounds.Box.halfExtents = {0.5f, 0.5f, 0.5f};
+    slab.Set(bounds);
+    WorldTransform transform{};
+    transform.matrix[0] = 2.0f * halfExtents.x;
+    transform.matrix[5] = 2.0f * halfExtents.y;
+    transform.matrix[10] = 2.0f * halfExtents.z;
+    transform.matrix[12] = center.x;
+    transform.matrix[13] = center.y;
+    transform.matrix[14] = center.z;
+    slab.Set(transform);
+    slab.Set(GameEngine::Components::RuntimeOnlyEntity{});
+    world->ProcessCommands();
+
+    RenderExtractionSystem::WorldRenderableRecord record{};
+    record.entity = slab.GetHandle();
+    record.worldTransform = transform;
+    record.worldTransform.Version = 1u;
+    record.hasBounds = true;
+    record.bounds.Box.center = center;
+    record.bounds.Box.halfExtents = halfExtents;
+    std::vector<RenderExtractionSystem::WorldRenderableRecord> records{record};
+    GameEngine::Scene::GetSceneTlas(*world).SyncFromRecords(records);
+}
+
+} // namespace
+
+// A dragged end released within the reach of a rim lands on it and the network records the
+// junction; one released beyond the reach stays where it is dropped and no junction forms.
+TEST_F(SplineToolTests, ADraggedEndWithinTheReachOfARimLandsOnItAndOneBeyondItStays)
+{
+    ScopedSplineSnapSettings scope("SplineSnapDrag");
+    World* world = GetWorld();
+    for (const SnapCase& snapCase : SnapCases())
+    {
+        for (const float fraction : {0.5f, 1.5f})
+        {
+            world->Clear();
+            SplineEditorSettings::Get().SetConstantScreenSize(snapCase.ConstantScreenSize);
+            const auto square = MakeSquare(world);
+            const auto road = MakeNamedSpline(world, "Church Walk", {{10.0f, 0.0f, 40.0f}, {10.0f, 0.0f, 25.0f}},
+                                              false, SplineNetworkMemberKind::Road);
+            DeriveNetwork(world);
+            SplineTool tool(*world);
+            tool.SetSelectionListQuery([road] { return std::vector<GameEngine::ECS::EntityHandle>{road}; });
+
+            const float dropZ = 20.0f + snapCase.Reach * fraction;
+            DragKnot(tool, {10.0f, 0.0f, 25.0f}, {10.0f, 0.0f, dropZ}, snapCase.Height);
+            DeriveNetwork(world);
+            const Vector3 end = DataOf(world, road)->Points.back().Position;
+            const auto nodes = SplineNetwork::Get().GetNodes(*world);
+            const std::string what = Describe(snapCase) + ", dropped " + std::to_string(fraction) + " reach out";
+            if (fraction < 1.0f)
+            {
+                EXPECT_NEAR(end.z, 20.0f, 1.0e-3f) << what;
+                ASSERT_EQ(nodes.size(), 1u) << what;
+                EXPECT_EQ(nodes[0].Members[1], square) << what;
+            }
+            else
+            {
+                EXPECT_NEAR(end.z, dropZ, 1.0e-3f) << what;
+                EXPECT_TRUE(nodes.empty()) << what;
+            }
+        }
+    }
+}
+
+// A stroke whose last point is placed within the reach of a rim ends on the rim.
+TEST_F(SplineToolTests, AStrokeWhoseLastPointIsWithinTheReachOfARimEndsOnIt)
+{
+    ScopedSplineSnapSettings scope("SplineSnapStroke");
+    World* world = GetWorld();
+    for (const SnapCase& snapCase : SnapCases())
+    {
+        for (const float fraction : {0.5f, 1.5f})
+        {
+            world->Clear();
+            CreateFlatTerrain(world, 400.0f);
+            SplineEditorSettings::Get().SetConstantScreenSize(snapCase.ConstantScreenSize);
+            const auto square = MakeSquare(world);
+            DeriveNetwork(world);
+            SplineTool tool(*world);
+            const float endZ = 20.0f + snapCase.Reach * fraction;
+            Stroke(tool, {{10.0f, 0.0f, 60.0f}, {10.0f, 0.0f, 40.0f}, {10.0f, 0.0f, endZ}}, snapCase.Height);
+
+            const auto splines = Splines(world);
+            ASSERT_EQ(splines.size(), 2u) << Describe(snapCase);
+            const auto drawn = splines[0] == square ? splines[1] : splines[0];
+            const auto* origin = world->GetComponent<Transform>(drawn);
+            ASSERT_NE(origin, nullptr);
+            const float lastZ = DataOf(world, drawn)->Points.back().Position.z + origin->matrix[14];
+            EXPECT_NEAR(lastZ, fraction < 1.0f ? 20.0f : endZ, 1.0e-3f)
+                << Describe(snapCase) << ", ended " << fraction << " reach out";
+        }
+    }
+}
+
+// The tool menu's Snap Ends to Nearby Splines toggle turns the snap off: the end stays where it is dropped.
+TEST_F(SplineToolTests, WithAutoConnectOffADraggedEndNeverSnaps)
+{
+    ScopedSplineSnapSettings scope("SplineSnapOff");
+    SplineEditorSettings::Get().SetAutoConnect(false);
+    World* world = GetWorld();
+    MakeSquare(world);
+    const auto road = MakeNamedSpline(world, "Church Walk", {{10.0f, 0.0f, 40.0f}, {10.0f, 0.0f, 25.0f}}, false,
+                                      SplineNetworkMemberKind::Road);
+    DeriveNetwork(world);
+    SplineTool tool(*world);
+    tool.SetSelectionListQuery([road] { return std::vector<GameEngine::ECS::EntityHandle>{road}; });
+    const float dropZ = 20.0f + 0.25f * ReachAtHeight(10.0f);
+    DragKnot(tool, {10.0f, 0.0f, 25.0f}, {10.0f, 0.0f, dropZ}, 10.0f);
+    DeriveNetwork(world);
+    EXPECT_NEAR(DataOf(world, road)->Points.back().Position.z, dropZ, 1.0e-3f);
+    EXPECT_TRUE(SplineNetwork::Get().GetNodes(*world).empty());
+}
+
+// A stroke ending within the reach of another spline's end joins it, at two camera distances and
+// with Constant Screen Size off; beyond the reach it makes a spline of its own.
+TEST_F(SplineToolTests, AStrokeEndingWithinTheReachOfASplinesEndJoinsIt)
+{
+    ScopedSplineSnapSettings scope("SplineStrokeMerge");
+    World* world = GetWorld();
+    for (const SnapCase& snapCase : SnapCases())
+    {
+        for (const float fraction : {0.9f, 1.1f})
+        {
+            world->Clear();
+            CreateFlatTerrain(world, 400.0f);
+            SplineEditorSettings::Get().SetConstantScreenSize(snapCase.ConstantScreenSize);
+            const auto lane = MakeNamedSpline(world, "Mill Lane", {{-40.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}}, false,
+                                              std::nullopt);
+            SplineTool tool(*world);
+            const float endX = snapCase.Reach * fraction;
+            Stroke(tool, {{40.0f, 0.0f, 0.0f}, {20.0f, 0.0f, 0.0f}, {endX, 0.0f, 0.0f}}, snapCase.Height);
+            const std::string what = Describe(snapCase) + ", ended " + std::to_string(fraction) + " reach out";
+            if (fraction < 1.0f)
+            {
+                EXPECT_EQ(Splines(world).size(), 1u) << what;
+                EXPECT_GT(DataOf(world, lane)->Points.size(), 2u) << what;
+            }
+            else
+            {
+                EXPECT_EQ(Splines(world).size(), 2u) << what;
+            }
+        }
+    }
+}
+
+// The stroke's loop close and the end drag's loop close reach as far as the stroke merge; with
+// Auto-Close Loop off no loop closes.
+TEST_F(SplineToolTests, TheLoopCloseReachesAsFarAsTheMergeAndAutoCloseLoopOffClosesNone)
+{
+    ScopedSplineSnapSettings scope("SplineLoopClose");
+    World* world = GetWorld();
+    const float height = 100.0f;
+    const float reach = ReachAtHeight(height);
+    struct LoopCase
+    {
+        float Fraction;
+        bool AutoCloseLoop;
+        bool Closes;
+    };
+    for (const LoopCase loop : {LoopCase{0.9f, true, true}, LoopCase{1.1f, true, false}, LoopCase{0.5f, false, false}})
+    {
+        const std::string what = std::to_string(loop.Fraction) + " reach out, Auto-Close Loop " +
+                                 (loop.AutoCloseLoop ? "on" : "off");
+        SplineEditorSettings::Get().SetAutoCloseLoop(loop.AutoCloseLoop);
+
+        // A stroke around a 40 m square that ends short of its start.
+        world->Clear();
+        CreateFlatTerrain(world, 400.0f);
+        {
+            SplineTool tool(*world);
+            Stroke(tool,
+                   {{0.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 40.0f}, {0.0f, 0.0f, 40.0f},
+                    {0.0f, 0.0f, reach * loop.Fraction}},
+                   height);
+        }
+        const auto strokes = Splines(world);
+        ASSERT_EQ(strokes.size(), 1u) << what;
+        EXPECT_EQ(DataOf(world, strokes[0])->Closed, loop.Closes) << "stroke, " << what;
+
+        // An open U whose last end is dragged to the same distance from its first.
+        world->Clear();
+        const auto u = MakeNamedSpline(world, "Loop",
+                                       {{0.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 40.0f}, {0.0f, 0.0f, 40.0f}},
+                                       false, std::nullopt);
+        {
+            SplineTool tool(*world);
+            tool.SetSelectionListQuery([u] { return std::vector<GameEngine::ECS::EntityHandle>{u}; });
+            DragKnot(tool, {0.0f, 0.0f, 40.0f}, {0.0f, 0.0f, reach * loop.Fraction}, height);
+        }
+        EXPECT_EQ(DataOf(world, u)->Closed, loop.Closes) << "drag, " << what;
+    }
+}
+
+// A stroke that starts on generator output (a paved slab) and runs onto open ground saves an open spline
+// that ends on the ground: the stroke does not stick to the slab, and its first samples, all within the
+// loop-close reach of its start, do not latch the close.
+TEST_F(SplineToolTests, AStrokeFromAGeneratedMeshOntoTheGroundStaysOpen)
+{
+    ScopedSplineSnapSettings scope("SplineStrokeFromGenerated");
+    ScopedSplineStickToMeshSetting stickToMesh(true);
+    World* world = GetWorld();
+    world->Clear();
+    CreateFlatTerrain(world, 400.0f);
+    MakeGeneratedSlab(world, Vector3(0.0f, 0.0f, 0.0f), Vector3(5.0f, 0.5f, 5.0f));
+
+    // One sample a meter from the slab's center to 20 m out; the reach at 100 m is 7.5 m.
+    std::vector<Vector3> points;
+    for (int i = 0; i <= 20; ++i)
+        points.push_back(Vector3(static_cast<float>(i), 0.0f, 0.0f));
+    {
+        SplineTool tool(*world);
+        Stroke(tool, points, 100.0f);
+    }
+
+    const auto strokes = Splines(world);
+    ASSERT_EQ(strokes.size(), 1u);
+    const auto* data = DataOf(world, strokes[0]);
+    EXPECT_FALSE(data->Closed);
+    const auto* origin = world->GetComponent<Transform>(strokes[0]);
+    ASSERT_NE(origin, nullptr);
+    EXPECT_NEAR(data->Points.back().Position.x + origin->matrix[12], 20.0f, 1.0e-3f);
+    EXPECT_NEAR(data->Points.back().Position.y + origin->matrix[13], 0.0f, 1.0e-3f);
+}
+
+// A stroke that crosses the loop-close reach, steps back inside it, then turns and runs 20 m away saves an
+// open spline: the close arms only after a sample is twice the reach from the start.
+TEST_F(SplineToolTests, AStrokeThatStepsBackAtTheLoopCloseReachStaysOpen)
+{
+    ScopedSplineSnapSettings scope("SplineStrokeStepBack");
+    World* world = GetWorld();
+    world->Clear();
+    CreateFlatTerrain(world, 400.0f);
+    const float reach = ReachAtHeight(100.0f);
+
+    // One sample a meter out to 8 m, one back at 7.4 m (the reach at 100 m is 7.5 m), then 20 m north.
+    std::vector<Vector3> points;
+    for (int i = 0; i <= 8; ++i)
+        points.push_back(Vector3(static_cast<float>(i), 0.0f, 0.0f));
+    points.push_back(Vector3(reach - 0.1f, 0.0f, 0.0f));
+    for (int i = 1; i <= 20; ++i)
+        points.push_back(Vector3(9.0f, 0.0f, static_cast<float>(i)));
+    {
+        SplineTool tool(*world);
+        Stroke(tool, points, 100.0f);
+    }
+
+    const auto strokes = Splines(world);
+    ASSERT_EQ(strokes.size(), 1u);
+    EXPECT_FALSE(DataOf(world, strokes[0])->Closed);
+}
+
+// The stored reach settings are gone: a save writes neither key.
+TEST_F(SplineToolTests, TheSplineSettingsSaveWritesNoStoredReach)
+{
+    ScopedSplineSnapSettings scope("SplineSettingsKeys");
+    SplineEditorSettings::Get().SetAutoConnect(true);
+    auto prefs = GameEngine::Editor::OpenEditorPreferences();
+    std::string error;
+    ASSERT_TRUE(prefs.Load(&error)) << error;
+    EXPECT_TRUE(prefs.Contains("spline.autoConnect"));
+    EXPECT_FALSE(prefs.Contains("spline.autoConnectTolerance"));
+    EXPECT_FALSE(prefs.Contains("spline.closeLoopTolerance"));
 }

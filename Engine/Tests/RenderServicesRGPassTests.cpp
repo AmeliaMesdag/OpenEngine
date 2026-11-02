@@ -89,18 +89,15 @@ struct RsFixture
             return false;
         const CameraId camId = Rs.Views().AllocateCamera("RGPassTestCam");
         CameraData cd{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cd.view[i] = 1.0f;
-            cd.proj[i] = 1.0f;
-            cd.viewProj[i] = 1.0f;
-        }
+        cd.view = Mathematics::Matrix4x4::Identity();
+        cd.proj = Mathematics::Matrix4x4::Identity();
+        cd.viewProj = Mathematics::Matrix4x4::Identity();
         Rs.Views().SetCameraData(camId, cd);
         View = Rs.Views().AllocateView("RGPassTestView", camId);
         Rs.Views().SetViewRenderLayerMask(View, GameEngine::Rendering::RenderLayerMask::Default());
         Rendering::ViewClearConfig clear{};
         clear.clearColor = true;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue.a = 1.0f;
         clear.clearDepth = true;
         clear.clearDepthValue = 0.0f;
         // Targets stay 0 — the RenderGraph arms take frame-local values; the view
@@ -1946,6 +1943,10 @@ TEST(RenderServicesRGPassTests, MaterialParamsRepackWritesOnlyTheChangedRow)
                 const uint8_t* row = base + packed.Offset + mat->GetGpuSceneMaterialIndex() * stride;
                 EXPECT_EQ(std::memcmp(row, mat->GetCacheData(), bytes), 0)
                     << mat->GetName() << " row differs from its material " << when;
+                uint32_t varianceIndex = 0;
+                std::memcpy(&varianceIndex, row + kNormalVarianceIndexOffset, sizeof(varianceIndex));
+                EXPECT_EQ(varianceIndex, mat->GetNormalVarianceIndex())
+                    << mat->GetName() << " row's normal-variance lane differs from its material " << when;
             }
             f.Device->UnmapBuffer(packed.Buffer);
         };

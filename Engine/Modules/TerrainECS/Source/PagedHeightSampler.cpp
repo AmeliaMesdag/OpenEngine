@@ -27,6 +27,15 @@ PageCacheGeometry MakePageCacheGeometry(uint32 slotCount)
     return geometry;
 }
 
+void PageAxisUV(uint32 page, uint32 level, uint32 samples, float32& outMin, float32& outMax)
+{
+    const float32 span = static_cast<float32>(kPageOwnedSamples << level);
+    const float32 margin = static_cast<float32>(1u << level);
+    const float32 inv = samples > 1u ? 1.0f / static_cast<float32>(samples - 1u) : 0.0f;
+    outMin = std::max(0.0f, (static_cast<float32>(page) * span - margin) * inv);
+    outMax = std::min(1.0f, (static_cast<float32>(page + 1u) * span + margin) * inv);
+}
+
 uint32 UpdatePageTable(const PageStreaming::PageCache& cache, uint32 stream, PageTable& table)
 {
     uint32 writes = 0;
@@ -51,6 +60,46 @@ uint32 UpdatePageTable(const PageStreaming::PageCache& cache, uint32 stream, Pag
         ++writes;
     }
     return writes;
+}
+
+namespace
+{
+
+void AppendFootprint(uint32 terrain, const PageStreaming::PageStoreLevel& level0, const PageStreaming::PageAddress& page,
+                     std::vector<PageChangeRect>& out)
+{
+    float32 minU = 0.0f;
+    float32 maxU = 0.0f;
+    float32 minV = 0.0f;
+    float32 maxV = 0.0f;
+    PageAxisUV(page.X, page.Level, level0.SamplesX, minU, maxU);
+    PageAxisUV(page.Z, page.Level, level0.SamplesZ, minV, maxV);
+    out.push_back(PageChangeRect{terrain, Mathematics::Rect::FromEdges(minU, minV, maxU, maxV)});
+}
+
+} // namespace
+
+void AppendPageChangeRects(uint32 terrain, uint32 stream, std::span<const PageStreaming::PageStoreLevel> levels,
+                           const PageStreaming::PageCache& cache,
+                           std::span<const PageStreaming::PageAddress> lateEntries, std::vector<PageChangeRect>& out)
+{
+    if (levels.empty())
+        return;
+    const PageStreaming::PageStoreLevel& level0 = levels.front();
+    for (const PageStreaming::CachedPage& page : cache.Transitions())
+        if (page.Stream == stream)
+            AppendFootprint(terrain, level0, page.Address, out);
+    for (const PageStreaming::CachedPage& page : cache.FadeChanges())
+        if (page.Stream == stream)
+            AppendFootprint(terrain, level0, page.Address, out);
+    for (const PageStreaming::PageRewrite& rewrite : cache.Rewrites())
+        if (rewrite.Page.Stream == stream)
+            AppendFootprint(terrain, level0, rewrite.Page.Address, out);
+    for (const PageStreaming::PageUploadRequest& upload : cache.Uploads())
+        if (upload.Page.Stream == stream)
+            AppendFootprint(terrain, level0, upload.Page.Address, out);
+    for (const PageStreaming::PageAddress& page : lateEntries)
+        AppendFootprint(terrain, level0, page, out);
 }
 
 namespace

@@ -5,6 +5,12 @@
 namespace GameEngine
 {
 class UIElement;
+struct InspectorContext;
+}
+
+namespace GameEngine::TerrainECS
+{
+enum class GpuHeightBakeRefusalReason : uint8;
 }
 
 namespace GameEngine::ECS
@@ -48,5 +54,10 @@ void AddGlobalVolumeScopeNotice(UIElement* parent, ECS::World& world, ECS::Entit
 // looking: under the volume's own shape rows, and on the Stamp section's header,
 // which at a real inspector width is several hundred pixels further down.
 void AddStampInGlobalVolumeNotice(UIElement* parent, ECS::World& world, ECS::EntityHandle entity);
+
+// The slow-edit notice of one effect row, under `ctx.Parent`. `rowCause` is the refusal the row holds
+// (PooledBlend, Stamp, Erosion) or None. The notice shows only while the last bake of a terrain that
+// passes its own checks names `ctx.Entity` with that reason, and follows each new bake decision.
+void AddCpuHeightBakeNotice(const InspectorContext& ctx, TerrainECS::GpuHeightBakeRefusalReason rowCause);
 
 } // namespace GameEngine::Editor

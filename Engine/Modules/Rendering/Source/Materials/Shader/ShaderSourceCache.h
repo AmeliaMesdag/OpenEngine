@@ -37,9 +37,10 @@ namespace GameEngine { namespace Rendering {
 // process with no watcher (a cook, a player) reads each file once for its
 // lifetime. A test that rewrites a shader source announces the edit.
 //
-// Where a directive resolves is cached on the same terms: the first file that
-// exists along the search order is remembered, and a file appearing or
-// disappearing earlier in that order is seen after the next announcement.
+// Where a directive or a surface reference (ShaderComposer::ResolveShaderReference)
+// resolves is cached on the same terms: the first file that exists along the
+// search order is remembered, and a file appearing or disappearing earlier in
+// that order is seen after the next announcement.
 //
 // Nothing is evicted between announcements. Entries are bounded by the distinct
 // files the process reads (each held once, whatever number of programs reach
@@ -85,6 +86,10 @@ public:
     // The held entry for `normalizedKey`, reading `path` on the first request.
     // Null when the file cannot be read; a failed read is not remembered.
     EntryPtr Read(const std::filesystem::path& path, const std::string& normalizedKey);
+
+    // Copies the held bytes of `path` into `out`, keyed by NormalizedKey(path).
+    // False when the file cannot be read.
+    bool ReadText(const std::filesystem::path& path, std::string& out);
 
     // The first `requestingDir / operand` (skipped when the directory is empty),
     // then `root / operand` for each of `roots` in order, that exists: the

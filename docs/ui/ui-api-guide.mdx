@@ -1,6 +1,6 @@
 ---
 title: UI API guide
-description: Building UI with XML, CSS, and C++, registering controls, and changing styles and properties at runtime.
+description: Declare UI with XML or typed C++, style it with CSS, register controls, and update properties at runtime.
 sidebar:
   order: 1
 ---
@@ -34,13 +34,14 @@ The three-argument overload clears the target. To composite a HUD over existing
 scene content, pass `Rendering::RenderGraph::RGLoadOp::Load` as the fourth argument.
 The host executes the completed graph after declaration. Do not retain frame texture IDs.
 
-Manual root setup:
+Code-declared root:
 
-```cpp title="Set up the root by hand"
-auto root = std::make_unique<GameEngine::UIElement>("UIElement");
-root->SetId("Root");
-root->AddClass("root");
-ui.SetRoot(std::move(root));
+```cpp title="Declare a root in C++"
+#include "UI/ElementBuilder.h"
+
+auto root = GameEngine::UI::Element<GameEngine::UIElement>().Id("Root").Class("root").Build();
+if (root)
+    ui.SetRoot(std::move(root));
 ```
 
 ## Loading layouts and styles
@@ -56,7 +57,7 @@ Tag names map to registered controls (see `UI/Controls` and `UI/Registration`).
 Common attributes:
 - `id` (or `name`) -> `UIElement::SetId`
 - `class` -> `AddClass` for each token
-- `style` -> parsed once into inline `StyleOverrides` (inline CSS declarations)
+- `style` -> parsed into the element's authored style, replaced when the layout reloads; where it and `Style()` declare the same property, `Style()` wins (see [Element style](#element-style-code))
 
 Example:
 
@@ -114,56 +115,135 @@ constexpr StringId kPad = "--pad"_sid;
 float pad = style->GetCustomNumber(kPad, 0.0f);
 ```
 
-## Programmatic UI construction
+## Declaring layout in C++
 
-```cpp title="Build UI in code"
-auto root = std::make_unique<UIElement>("UIElement");
-auto label = std::make_unique<Label>();
-label->SetText("Hello");
-label->AddClass("title");
-root->AddChild(std::move(label));
+Declare a control or a static layout in a `.uxml` file. Use the typed C++ builder
+for a tree that is built at run time from data: the rows of a list, the widgets of
+an inspector field, a tree built from a scene. If the tree is the same every time,
+it belongs in a `.uxml` file. Both paths create the same retained controls, with the
+same CSS cascade, layout, input, and rendering. Put layout, sizes, spacing, colors,
+and fonts in CSS and select them with classes.
 
-ui.SetRoot(std::move(root));
+```cpp title="Build one row per item"
+#include "UI/ElementBuilder.h"
+#include "UI/Controls/Button.h"
+#include "UI/Controls/Label.h"
+#include "UI/UIEvents.h"
+
+using namespace GameEngine;
+
+auto list = UI::Element<UIElement>().Class("item-list");
+for (const Item& item : items)
+{
+    UIElement::WeakRef<Label> status;
+    auto caption = UI::Element<Label>().Class("item-name")
+        .Set(&Label::SetText, item.Name).Capture(status);
+    list.Children(UI::Element<UIElement>().Class("item-row").Children(
+        std::move(caption),
+        UI::Element<Button>().Set(&Button::SetText, "Run")
+            .On(kEventButtonClick, [status](UIEvent&)
+            {
+                if (Label* label = status.Get())
+                    label->SetText("Running");
+            })));
+}
+
+if (auto root = std::move(list).Build())
+    host->AddChild(std::move(root));
 ```
 
-If you add children after the root is attached to a `UIManager`, ownership
-propagates automatically.
+Capture a control before you create a handler that copies its reference. C++ does
+not set the evaluation order of sibling arguments to `Children`.
 
-## Style overrides (code)
+`Element<T>()` creates `T` through its registered factory, which also covers controls
+whose constructors take arguments. The UI module registers the built-in controls.
+Register a custom control through the registration API. When one C++ type has
+several canonical tags, name one with `Element<T>("tag")`. A registered alias gives
+the canonical tag's CSS identity.
 
-Use `StyleOverrides` for programmatic overrides. An override wins over the
-stylesheet and over the element's own `style` attribute. Typed property keys provide
-compile-time safety. Dirty flags are tracked automatically via the
-`StyleProp<T, StyleImpact>` template.
+| Operation | Behavior |
+|---|---|
+| `Id(value)` | Sets the element ID. |
+| `Class(name, ...)` | Adds one or more CSS classes in argument order. A class that is already present is not added again. |
+| `Set(setter, arguments...)` | Calls a void member setter now. The compiler checks the setter and its arguments. Inherited setters work. |
+| `Children(children...)` | Takes builders or `unique_ptr` subtrees and appends them in argument order. |
+| `On(eventId, handler)` | Registers a handler that lives as long as the element. |
+| `Capture(reference)` | Sets a `UIElement::WeakRef<T>` now. The builder keeps no reference to the variable. |
+| `Build()` | Ends an rvalue builder and returns its `unique_ptr<T>`. |
 
-```cpp title="Override styles from code"
-el.Overrides()
+IDs and classes are case-sensitive, and an empty ID has hash zero.
+
+Builders are move-only. Compose fragments with ordinary C++ functions, loops, and
+conditions. A named builder takes repeated `Children` calls; end it with
+`std::move(builder).Build()`. A subtree parsed from XML, or a control you already
+made, can go to `Children` as an owned child. `MaskField` builds its option rows
+this way, one `Checkbox` per option.
+
+Build and update the tree on the UI thread; post work from other threads through
+the UI dispatcher. A weak reference expires when its control is destroyed and does
+not keep the control alive.
+
+Registered defaults apply before your setters. `Set` changes control state and does
+not add XML attributes, so style with classes and pseudo states, not attribute
+selectors.
+
+A missing or ambiguous registration, a factory of the wrong type, or a null child
+fails the whole declaration. The log names the registration fix. The builder still
+takes every child, destroys the incomplete tree, and `Build` returns null, also on a
+second call. Check the result before you replace a root. References captured from a
+failed tree expire.
+
+Build the tree once and update live controls through their setters. `On` returns
+no token; for a handler you remove on its own, call `RegisterEventHandler` after
+`Build`. A change to the C++ structure needs a rebuild; CSS hot reload works as it
+does for XML.
+
+## Element style (code)
+
+`UIElement::Style()` is the element's own style: typed declarations your code sets on top of
+the stylesheets and the element's `style` attribute, returned as a `StyleDeclaration`.
+Property keys live in the `Style` namespace (`UI/StyleProperties.h`) and carry their value
+type, so a wrong value type does not compile. Each write marks the element for exactly what
+the property affects (layout, paint, or a restyle of its subtree); setting the value a property
+already holds marks nothing.
+
+```cpp title="Set an element's style from code"
+el.Style()
   .Set(Style::Width, StyleLength::Px(200.0f))
   .Set(Style::Height, StyleLength::Px(40.0f))
   .Set(Style::BackgroundColor, 0xFF202020u);
-el.Overrides().SetCustomNumber("--pad"_sid, 4.0f);
+el.Style().SetCustomNumber("--pad"_sid, 4.0f);
 ```
 
-Reading back an override:
+Keep static presentation in CSS.
 
-```cpp title="Read back an override"
-if (auto bg = el.Overrides().Get(Style::BackgroundColor))
+Reading a value back:
+
+```cpp title="Read back a declared value"
+if (auto bg = el.Style().Get(Style::BackgroundColor))
     LOG_INFO("Background color: 0x{:08X}", *bg);
 ```
 
-Reset a property to inherit from CSS:
+`Reset` removes the declaration, and the property returns to what the element's `style`
+attribute or the stylesheets give it:
 
-```cpp title="Reset an override"
-el.Overrides().Reset(Style::BackgroundColor);
+```cpp title="Return a property to its authored value"
+el.Style().Reset(Style::BackgroundColor);
 ```
 
-A live texture is bound by name: register it with `UIManager::SetExternalTexture` (or `SetExternalTextureRG`), then name it in `Styles()`:
+The `style="..."` attribute in a layout is kept apart from `Style()`: a reload of the layout
+replaces it and leaves `Style()` alone. Where both declare the same property, `Style()` wins,
+as a script's inline style does in a browser, so a value written from code holds until the
+code resets it.
+
+A live texture is bound by name: register it with `UIManager::SetExternalTexture` (or
+`SetExternalTextureRG`), then name it as the background image:
 
 ```cpp title="A live background texture"
-el.Styles()
-  .SetBackgroundResourceName("scene_main")
-  .SetBackgroundSizeCover()
-  .SetBackgroundTint(0xFFFFFFFF);
+el.Style()
+  .Set(Style::BackgroundImage, BackgroundImageSource::Resource("scene_main"))
+  .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Cover})
+  .Set(Style::BackgroundTint, 0xFFFFFFFFu);
 ```
 
 ## Events
@@ -267,7 +347,7 @@ if (Ui.FindElement("Score") is Ui.Label score)
 
 ### Element calls from a script
 
-Each call returns `false` when the element no longer exists. The calls that set a style (`SetWidthPercent`, `SetZIndex` and `SetOffset`) write the element's style overrides, so a value a script sets wins over the stylesheet and over the element's own `style` attribute, and stays until the script sets it again.
+Each call returns `false` when the element no longer exists. The calls that set a style (`SetWidthPercent`, `SetZIndex` and `SetOffset`) write the element's style (`Style()` in C++), so a value a script sets wins over the stylesheet and over the element's own `style` attribute, and stays until the script sets it again.
 
 | Call | What it does |
 |---|---|
@@ -365,7 +445,7 @@ struct Parser<Badge::Mode> {
 Prefer dedicated APIs:
 - `SetId`, `AddClass`, `RemoveClass`
 - `SetEnabled`, `SetFocusable`, `SetTabIndex`
-- `Overrides()` for style changes (typed `StyleOverrides` API)
+- `Style()` for style changes (typed `StyleDeclaration` API)
 
 Inline `style` and arbitrary attributes are intended for XML/CSS parsing rather
 than runtime code.

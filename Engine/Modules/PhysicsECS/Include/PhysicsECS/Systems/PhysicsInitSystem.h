@@ -13,6 +13,9 @@ namespace GameEngine::PhysicsECS
 class PhysicsInitSystem : public ECS::ISystem
 {
 public:
+    PhysicsInitSystem();
+    ~PhysicsInitSystem() override;
+
     const char* GetName() const override { return "PhysicsInitSystem"; }
     void Update(ECS::World& world, float32 deltaTime) override;
 
@@ -38,6 +41,11 @@ private:
     float32 m_RebuildQuiescenceSeconds = kDefaultRebuildQuiescenceSeconds;
     std::unordered_map<uint32, std::shared_ptr<PendingHeightFieldBuild>> m_PendingHeightFields; // by EntityHandle::id
     ECS::SwapGenerationGuard m_SwapGuard;
+
+    // The frame containers, the queries and the bodies it found no collider for, for the world
+    // this system last updated (defined in the .cpp).
+    struct WorldScratch;
+    std::unique_ptr<WorldScratch> m_Scratch;
 };
 
 } // namespace GameEngine::PhysicsECS

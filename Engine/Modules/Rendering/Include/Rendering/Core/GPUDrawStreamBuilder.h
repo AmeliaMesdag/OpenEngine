@@ -11,6 +11,7 @@
  */
 #pragma once
 
+#include "Mathematics/Vector3.h"
 #include "Rendering/Core/BatchRegistry.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/Device.h"
@@ -153,7 +154,7 @@ class GPUDrawStreamBuilder
     // these from its camera before RegisterSlice.
     struct ViewLODParams
     {
-        float    cameraPos[3] = {0.0f, 0.0f, 0.0f};
+        Mathematics::Vector3 cameraPos{0.0f, 0.0f, 0.0f};
         float    projScaleY   = 0.0f;          // proj[1][1]; <= 0 forces LOD0
         float    lodBiasGlobal = 0.0f;         // log2 bias; positive keeps detail
         uint32_t forceLod     = 0xFFFFFFFFu;   // 0xFFFFFFFF = auto-select

@@ -9,11 +9,11 @@
 #include "Components/Transform.h"
 #include "Core/Engine.h"
 #include "ECS/ECSTemplates.h"
+#include "Mathematics/Matrix4x4.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "TerrainECS/TerrainService.h"
 
 #include <algorithm>
-#include <cstring>
 #include <format>
 #include <limits>
 #include <utility>
@@ -30,32 +30,13 @@ void SetError(std::string* error, const char* message)
         *error = message;
 }
 
-void MultiplyMatrices(const float32 a[16], const float32 b[16], float32 out[16])
-{
-    for (int col = 0; col < 4; ++col)
-    {
-        for (int row = 0; row < 4; ++row)
-        {
-            out[col * 4 + row] =
-                a[0 * 4 + row] * b[col * 4 + 0] +
-                a[1 * 4 + row] * b[col * 4 + 1] +
-                a[2 * 4 + row] * b[col * 4 + 2] +
-                a[3 * 4 + row] * b[col * 4 + 3];
-        }
-    }
-}
-
 struct SceneMeshCandidate
 {
     GUID ModelGuid;
     uint32 MeshId = 0;
     Rendering::RenderLayerMask RenderLayers;
     bool IsSkinnedRenderer = false;
-    float32 WorldTransform[16] = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f};
+    Mathematics::Matrix4x4 WorldTransform = Mathematics::Matrix4x4::Identity();
 };
 
 void CollectSceneMeshCandidates(ECS::World& world,
@@ -114,7 +95,7 @@ void CollectSceneMeshCandidates(ECS::World& world,
             candidate.MeshId = renderer.meshId;
             candidate.RenderLayers = renderer.RenderLayers;
             candidate.IsSkinnedRenderer = isSkinned;
-            std::memcpy(candidate.WorldTransform, worldTransform.matrix, sizeof(candidate.WorldTransform));
+            candidate.WorldTransform = Mathematics::Matrix4x4::FromColumnMajor(worldTransform.matrix);
             outCandidates.push_back(candidate);
             ++stats.CandidateRenderers;
         });
@@ -278,7 +259,8 @@ bool BakeOceanDepthCacheFromSceneMeshes(ECS::World& world,
         source.IndexCount = static_cast<uint32>(mesh.Indices.size());
         source.UseLocalToWorld = true;
         source.Layers = candidate.RenderLayers;
-        MultiplyMatrices(candidate.WorldTransform, mesh.SourceNodeTransform, source.LocalToWorld);
+        source.LocalToWorld =
+            candidate.WorldTransform * Mathematics::Matrix4x4::FromColumnMajor(mesh.SourceNodeTransform);
 
         sources.push_back(source);
         heldAssets.push_back(std::move(asset));

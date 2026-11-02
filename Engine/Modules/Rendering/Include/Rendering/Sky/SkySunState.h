@@ -3,6 +3,9 @@
 #include "Mathematics/Angle.h"
 
 namespace GameEngine {
+namespace Mathematics {
+struct Vector3;
+}
 namespace Rendering {
 
 struct SolarFrame;
@@ -36,8 +39,8 @@ struct SkySunState
 /// `moonArcPosition` on its cycle (0 new, 0.5 full), on the site `frame` describes, seen by a camera
 /// `cameraAltitudeMeters` above a planet of `planetRadiusMeters`.
 SkySunState ComputeSkySunState(const SolarFrame& frame,
-                               const float sunDir[3],
-                               const float moonDir[3],
+                               const Mathematics::Vector3& sunDir,
+                               const Mathematics::Vector3& moonDir,
                                float moonArcPosition,
                                float cameraAltitudeMeters,
                                float planetRadiusMeters);

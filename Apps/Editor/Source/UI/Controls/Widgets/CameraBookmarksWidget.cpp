@@ -482,7 +482,7 @@ void CameraBookmarksWidget::PositionPreviewPopup(UIElement* popup, const Button&
         y = std::clamp(y, minY, std::max(minY, maxY));
     }
 
-    popup->Overrides()
+    popup->Style()
         .Set(Style::PositionLeft, StyleLength::Px(x))
         .Set(Style::PositionTop, StyleLength::Px(y));
 }

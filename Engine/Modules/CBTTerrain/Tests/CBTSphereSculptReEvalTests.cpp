@@ -362,7 +362,8 @@ TEST_F(CBTSphereSculptReEval, ResizeRemapKeepsConformityAndAnchorsContent)
 
     // Max |vertex| - radius over live corners inside/outside the cap around the dab direction.
     auto probe = [&](float radius, float& maxInCap, float& maxOutCap) {
-        const std::vector<float> v = ReadVerts(inst);
+        const auto words =
+            inst.DebugReadWords(CBTBinding::CurrentVertex, kDefaultBisectorPoolSize * kVertexWordsPerSlot);
         const std::vector<uint64_t> heap = ReadHeap(inst);
         const float capCos = std::cos(ang);
         maxInCap = -1e9f;
@@ -373,11 +374,12 @@ TEST_F(CBTSphereSculptReEval, ResizeRemapKeepsConformityAndAnchorsContent)
                 continue;
             for (uint32_t corner = 0; corner < 3u; ++corner)
             {
-                const float* p = &v[s * kVertexWordsPerSlot + corner * 4u];
-                const float len = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+                double p[3];
+                ReadCornerWorld(words, s, corner, p);
+                const float len = static_cast<float>(std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]));
                 if (len <= 0.0f)
                     continue;
-                const float d = (p[0] * nx + p[1] * ny + p[2] * nz) / len;
+                const float d = static_cast<float>(p[0] * nx + p[1] * ny + p[2] * nz) / len;
                 const float h = len - radius;
                 if (d >= capCos)
                     maxInCap = std::max(maxInCap, h);

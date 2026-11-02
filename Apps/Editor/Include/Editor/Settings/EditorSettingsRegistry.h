@@ -49,10 +49,8 @@ struct SettingsFieldDescriptor
     std::string Tooltip;        // full wording when Label is shortened; optional
     std::string SearchKeywords; // extra lowercase keywords for panel + palette search
 
-    // Optional subsection break emitted immediately above this row, for pages
-    // whose rows fall into named groups ("Steam Deck install", "Web export").
-    // The category Title already heads the page, so leave both empty for a page
-    // that is one flat list.
+    // Optional group break above this row: SectionHeader names the group, SectionDescription
+    // explains it in an info card. Leave both empty on a page that is one flat list.
     std::string SectionHeader;
     std::string SectionDescription;
 
@@ -198,8 +196,8 @@ struct SettingsCategoryDescriptor
     // child that names a parent nobody has registered yet falls back to the
     // group root, and moves under the parent as soon as it appears.
     std::string ParentCategoryId;
-    std::string Description; // optional trailing settings-description paragraph
-    // Keeps that paragraph on screen when explanatory cards are globally
+    std::string Description; // optional info card at the end of the page
+    // Keeps that card on screen when explanatory cards are globally
     // hidden. For the page that owns the switch; leave false everywhere else.
     bool DescriptionAlwaysVisible = false;
     std::string TreeRowClass; // optional Settings tree icon/style class

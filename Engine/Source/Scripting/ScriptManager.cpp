@@ -287,15 +287,10 @@ bool ScriptManager::Initialize(const ScriptsConfig& config, JobSystem::WorkSteal
         }
     }
 
+    // No .NET SDK probe here (`dotnet --version` is a child process, about 100 ms): each compile
+    // calls IsDotnetSdkAvailable() first, and that first call reports a missing SDK with its fix.
     if (!config.disableClr)
     {
-        // Check if .NET CLI is available. Skipped in packaged mode: a shipped
-        // game never compiles, and user machines have no SDK to probe.
-        if (!m_PackagedMode && !IsDotnetSdkAvailable())
-        {
-            Logger::Log::Warning(".NET CLI not found - C# compilation will not be available");
-        }
-
         // Initialize CoreCLR host
         std::filesystem::path runtimeConfig = ScriptingPaths::ResolveScriptsRuntimeConfig();
         if (!m_ClrHost.Initialize(runtimeConfig))
@@ -739,10 +734,9 @@ void ScriptManager::Shutdown()
     m_EditorScriptsWatchSubscription.reset();
     m_PackageModuleWatchSubscriptions.clear();
 
-    // Unsubscribing does not wait for a change event already being dispatched.
-    // Once this lock is held, every reload start either published its future
-    // and task handle (joined below) or will see m_ShuttingDown and refuse, so
-    // none reaches m_HotReloadPipeline after it is reset.
+    // The unsubscribes above waited for running OnFileChanged calls, but other threads can
+    // still start a reload. Under this lock, each reload start has published its task
+    // handle (joined below) or sees m_ShuttingDown and refuses.
     std::vector<JobSystem::TaskHandle> trackedCompileTasks;
     {
         std::lock_guard<std::mutex> lock(m_HotReloadStartMutex);
@@ -1392,7 +1386,9 @@ bool ScriptManager::EnsurePackageModuleProject(const PackageCodeModule& module,
 {
     try
     {
-        if (module.UsesManagedNativeCache && !RetainPackageNativeCache(module.CacheDir))
+        // The compile channel: Initialize can reach this line before EngineCore creates the startup
+        // channel. The job never delays the compile that queues it.
+        if (module.UsesManagedNativeCache && !RetainPackageNativeCache(module.CacheDir, *m_CompileChannel))
         {
             Logger::Log::Error("[Packages] cannot lease managed native cache '{}' for C# module '{}'",
                                module.CacheDir.string(), module.AssemblyName);
@@ -2234,8 +2230,9 @@ UniquePtr<FileWatchSubscription> ScriptManager::WatchScriptDirectory(const std::
     if (directory.empty())
         return nullptr;
 
-    // OnFileChanged runs on a FileWatchingService watcher thread. The host app
-    // arms and stops the service (the editor does both); this only subscribes.
+    // OnFileChanged runs on a watcher thread; the host app arms and stops the service.
+    // The main thread releases the returned handle, which waits for this subscription's
+    // running OnFileChanged, so OnFileChanged must never wait for the main thread.
     FilePattern pattern(directory, ".*", {".cs", ".csproj"}, /*recursive*/ true);
     return MakeUnique<FileWatchSubscription>(FileWatchingService::GetInstance().Subscribe(
         pattern, [this](const FileChangeEvent& event) { OnFileChanged(event); }));
@@ -2299,6 +2296,13 @@ size_t ScriptManager::ProcessMainThreadTasks()
         {
             drain(1);
         }
+    }
+
+    // No thread waits for a hot-reload run, so the main thread's pump ends a run
+    // that passed its time bound.
+    if (m_HotReloadPipeline && EngineCore::GetInstance().IsMainThread())
+    {
+        m_HotReloadPipeline->CancelOverdueRun(std::chrono::steady_clock::now());
     }
 
     // RACE CONDITION FIX: Check if hot-reload is in progress and prioritize those tasks
@@ -2421,7 +2425,8 @@ void ScriptManager::SetAsyncHotReloadEnabled(bool enabled)
 
 std::filesystem::path ScriptManager::GetAssembliesDirectory() const
 {
-    // Assemblies directory is provided by ScriptsConfig and kept stable for the lifetime of ScriptManager
+    // Set from ScriptsConfig by Initialize and reassigned by RebindProjectScripts on the main
+    // thread; read here without a lock.
     return m_AssembliesDirectory;
 }
 
@@ -3013,8 +3018,9 @@ bool ScriptManager::EnsureEditorAutoProject(std::filesystem::path& outProjectPat
 
 void ScriptManager::OnFileChanged(const FileChangeEvent& event)
 {
-    // Shutdown does not wait for an event already being dispatched. This is an
-    // early out; StartHotReload re-checks the flag under the start mutex.
+    // Shutdown sets m_ShuttingDown and then unsubscribes, which waits for a call
+    // already running here. This is an early out; StartHotReload re-checks the
+    // flag under the start mutex.
     if (!m_HotReloadEnabled || m_ShuttingDown.load(std::memory_order_relaxed))
     {
         return;

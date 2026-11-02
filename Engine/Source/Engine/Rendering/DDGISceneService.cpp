@@ -52,11 +52,6 @@ constexpr float kMaxSaneWorldUnits = 1.0e6f;
 // specific to the software lane rather than a divergence from its filter.
 constexpr float kMinInvertibleDeterminant = 1.0e-12f;
 
-// Sentinel for Material::GetGpuSceneMaterialIndex on a material that has not
-// been assigned an SSBO row. Mirrors Material::kInvalidSSBOIndex, which is
-// private.
-constexpr uint32_t kUnassignedMaterialSlot = 0xFFFFFFFFu;
-
 // A plan-mesh slot recorded for a gpuMeshIndex that failed to resolve this
 // sweep, so the next instance referencing it skips the lookup instead of
 // retrying it per instance.
@@ -260,7 +255,7 @@ DDGISceneService::PlanHashes DDGISceneService::SweepScene()
             [&](const GUID&, const Material& material)
             {
                 const uint32_t slot = material.GetGpuSceneMaterialIndex();
-                if (slot != kUnassignedMaterialSlot)
+                if (slot != Material::kInvalidSSBOIndex)
                     materialBySlot[slot] = &material;
             });
     }

@@ -8,9 +8,9 @@
 #include "ECSModules/Rendering/Systems/RenderExtractionSystem.h"
 #include "Mathematics/Geometry.h"
 #include "Mathematics/Vector3.h"
-#include "Scene/FunctionRef.h"
 #include "Rendering/RenderLayerMask.h"
 #include "Scene/TlasInstance.h"
+#include "Types/FunctionRef.h"
 #include "Types/Types.h"
 
 namespace GameEngine::ECS { class World; }
@@ -43,10 +43,14 @@ enum class RefitExecution : uint8
 // (RequestCurrent / WaitCurrent): the main thread detects what changed and
 // snapshots it, and the refit or reconcile runs on the world's job system
 // from that snapshot, never reading the ECS, so the next frame's systems run
-// beside it. A world that is never queried never pays for it.
+// beside it. That work is a pool task with a handle: later requests poll it
+// across frames, WaitCurrent joins it, and destruction cancels it or waits for
+// it. A world that is never queried never pays for it.
 //
 // Threading: RequestCurrent and WaitCurrent are main-thread only and run
-// between frames. Traversals (TraverseRay/Sphere/Frustum) are valid when the
+// between frames. Destruction (ReleaseSceneTlas) is main-thread only too: it
+// may wait for work in flight, which a worker of the world's job system must
+// never do. Traversals (TraverseRay/Sphere/Frustum) are valid when the
 // tree is ready (no work in flight) and answer for the poses of the last
 // request's snapshot; debug builds assert readiness. Contains and the counts
 // may be read from any thread and may briefly block on in-flight work.
@@ -145,11 +149,12 @@ public:
     /// every renderable; otherwise the entities in chunks whose
     /// WorldTransform was written are refit. The changed data is copied into
     /// a snapshot here, and the work runs on the world's job system (inline
-    /// on a world without one), so the main thread pays the detection and the
-    /// copy only. Nothing changed: Ready, no work. Work in flight: joins it
-    /// and reports Updating until it finishes; a refit that moves an entity
-    /// into a sector it has no replica in is followed by a reconcile before
-    /// the tree reports Ready.
+    /// on a world without one, or whose job system has shut down), so the
+    /// main thread pays the detection and the copy only. Nothing changed:
+    /// Ready, no work. Work in flight: starts no more, never waits, and
+    /// reports Updating until it finishes; a refit that moves an entity into
+    /// a sector it has no replica in is followed by a reconcile before the
+    /// tree reports Ready.
     Readiness RequestCurrent(GameEngine::ECS::World& world);
 
     /// Finishes the last request without looking for new changes: Updating
@@ -160,10 +165,11 @@ public:
     /// whenever anything kept moving, and the query would never resolve.
     Readiness CheckRequest(GameEngine::ECS::World& world);
 
-    /// RequestCurrent, then joins the work with a participating wait until
-    /// the tree is ready. For callers that need an answer inside the same call
-    /// (placement and drape tools); blocks only when something changed since
-    /// the last request.
+    /// RequestCurrent, then joins its work until the tree is ready: runs it on
+    /// the calling thread when no worker has started it, else waits for it.
+    /// For callers that need an answer inside the same call (placement and
+    /// drape tools); blocks only when something changed since the last
+    /// request.
     void WaitCurrent(GameEngine::ECS::World& world);
 
     // ---- Building blocks (also the test seams) --------------------------
@@ -283,6 +289,16 @@ private:
     SyncResult RefitResolvedCandidates(JobSystem::WorkStealingThreadPool* pool);
     // RequestCurrent's refit job: the refit core over the kick's snapshot.
     void RefitFromSnapshot();
+    // The work RequestCurrent chose: the reconcile from the gathered records,
+    // or the refit from the moved renderables' snapshot.
+    void RunRequestedWork();
+    // Publishes RunRequestedWork as a pool task that later requests poll.
+    // False without a pool, or when the pool is shutting down and refuses
+    // it: the caller runs the work itself.
+    bool PublishRequestedWork(JobSystem::WorkStealingThreadPool* pool);
+    // Joins the published work as a participating wait does: runs it on the
+    // calling thread when no worker has started it, else waits for it.
+    void JoinRequestedWork();
 
     // Defined in Source/TlasInternal.h. Public free functions (Detail::*)
     // operate on it. The unique_ptr is destroyed in SceneTlas.cpp where

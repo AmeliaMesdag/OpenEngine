@@ -1,3 +1,4 @@
+#include "NavigationSourceCollector.h"
 #include "PathfindingECS/NavigationService.h"
 #include "PathfindingECS/Components/NavigationObstacle.h"
 #include "Components/Navigation/NavigationSurface.h"
@@ -484,8 +485,13 @@ TEST_F(NavigationAssetWatchTest, EditingANavGridUnderTheAssetRootRebakesGridSurf
     world->ProcessCommands();
 
     NavigationSurfaceSystem system;
-    system.Update(*world, kDeltaTime);
-    world->ProcessCommands();
+    // The grid bakes on the job system: update until it is published.
+    const auto bakeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (entity.Get<Components::NavigationSurface>()->BakeVersion == 0 && std::chrono::steady_clock::now() < bakeDeadline)
+    {
+        system.Update(*world, kDeltaTime);
+        world->ProcessCommands();
+    }
     const uint64 firstVersion = entity.Get<Components::NavigationSurface>()->BakeVersion;
     ASSERT_GT(firstVersion, 0u);
 
@@ -551,6 +557,9 @@ TEST_F(NavigationAssetWatchTest, BakeWaitsForAModelStillLoadingAndThenReadsIt)
         system.Update(*world, kDeltaTime);
         world->ProcessCommands();
         const auto& current = *entity.Get<Components::NavigationSurface>();
+        // The grid bakes on the job system once the model has loaded.
+        if (current.BakePhase == Components::NavigationBakePhase::Baking)
+            continue;
         if (current.BakePhase != Components::NavigationBakePhase::Waiting)
             break;
         EXPECT_EQ(Navigation::FormatBakeStatus(current), "Waiting for: model NavigationFloor is still loading");
@@ -560,6 +569,19 @@ TEST_F(NavigationAssetWatchTest, BakeWaitsForAModelStillLoadingAndThenReadsIt)
     const auto& baked = *entity.Get<Components::NavigationSurface>();
     EXPECT_EQ(baked.BakePhase, Components::NavigationBakePhase::Baked) << Navigation::FormatBakeStatus(baked);
     EXPECT_TRUE(assets.IsAssetLoaded(model));
+}
+
+// A generated mesh (a spline chunk) has no asset behind it, so a bake never waits for its model.
+TEST_F(NavigationAssetWatchTest, GeneratedMeshIsNoModelTheBakeWaitsFor)
+{
+    auto chunk = world->Create();
+    Components::MeshRenderer renderer{};
+    renderer.meshGpuHandleId = 1u;
+    chunk.Set(renderer);
+    chunk.Set(Components::WorldTransform{});
+    world->ProcessCommands();
+
+    EXPECT_TRUE(FindUnloadedNavigationModels(*world).empty());
 }
 
 // Shutdown-order hazard: the editor destroys the SystemManager (and every

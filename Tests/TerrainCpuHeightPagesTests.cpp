@@ -10,12 +10,12 @@
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "TerrainECS/PlanarHeightfieldEditCursor.h"
 #include "TerrainSkyline.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainService.h"
 
 #include "PageStreaming/GeneratedHeightPageProvider.h"
-#include "PageStreaming/HeightPageOverlay.h"
-#include "PageStreaming/HeightStoreCache.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightStoreCache.h"
 #include "PageStreaming/PageResidency.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
 #include "PageStreaming/PageStore/PageStoreReader.h"
@@ -388,7 +388,7 @@ std::shared_ptr<const PageStreaming::HeightPageOverlay> RaisedOverlay(const Page
 }
 
 // Runs `frames` frames of `request`, keeping the latest upload of every level-0 page.
-void RunAndCollectLevel0Uploads(TerrainHeightPages& pages, const PagedTerrainRequest& request, uint64& frame,
+void RunAndCollectLevel0Uploads(TerrainPages& pages, const PagedTerrainRequest& request, uint64& frame,
                                 uint64 frames, std::map<std::pair<uint32, uint32>, std::vector<float32>>& uploads)
 {
     const Mathematics::Vector3 camera{200.0f, 10.0f, 200.0f};
@@ -414,7 +414,7 @@ void RunAndCollectLevel0Uploads(TerrainHeightPages& pages, const PagedTerrainReq
 
 // Every level-0 sample the query answers is bit-equal to the GPU upload's sample (level-0 lattice
 // points: the query's bilinear weights are zero there, so it returns the page's sample).
-void ExpectQueryBitEqualToUploads(const TerrainHeightPages& pages,
+void ExpectQueryBitEqualToUploads(const TerrainPages& pages,
                                   const std::map<std::pair<uint32, uint32>, std::vector<float32>>& uploads)
 {
     const SurfaceHeightQuery query = pages.SurfaceQuery(TerrainHandle{kTerrain, kGeneration});
@@ -497,7 +497,7 @@ void AddBody(ECS::World& world, float32 x, float32 z, Physics::MotionType motion
 
 TEST(CpuHeightPages, TheCpuPagesHoldTheBytesTheGpuUploadsWithTheOverlayAndItsEdits)
 {
-    TerrainHeightPages pages(nullptr, nullptr, kDesktopHeightPages);
+    TerrainPages pages(nullptr, nullptr, kDesktopHeightPages, kDesktopSurfacePages);
     const PageStreaming::PageSource source = NoiseSource();
     const PageStreaming::PageSampleRect rect{300, 300, 420, 380};
     std::map<std::pair<uint32, uint32>, std::vector<float32>> uploads;
@@ -522,7 +522,8 @@ TEST(CpuHeightPages, ADynamicBodyFarFromEveryCameraKeepsItsFinestPages)
 {
     // 64 slots: the pyramid streams (only the top page is pinned), so level 0 near the body comes
     // from its window alone.
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     const Mathematics::Vector3 camera{100.0f, 10.0f, 100.0f};
     const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, 11.0f);
@@ -554,7 +555,8 @@ TEST(CpuHeightPages, ADynamicBodyFarFromEveryCameraKeepsItsFinestPages)
 // (no camera) streams the CPU pages too.
 TEST(CpuHeightPages, ATerrainTheGpuDrawsFromItsTextureStillHasCpuPagesAndPublishesNoTable)
 {
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     request.GpuPages = false;
     const Mathematics::Vector3 camera{300.0f, 10.0f, 300.0f};
@@ -593,7 +595,9 @@ TEST(CpuHeightPages, ATerrainTheGpuDrawsFromItsTextureStillHasCpuPagesAndPublish
 // The CPU reads what the GPU fetched: a page the GPU wants beyond every CPU window answers finest.
 TEST(CpuHeightPages, APageTheGpuFetchedAnswersFinestOutsideEveryCpuWindow)
 {
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{512, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr,
+                       HeightPageProfile{512, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     const PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     const Mathematics::Vector3 camera{100.0f, 10.0f, 100.0f};
     const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, 11.0f);
@@ -723,7 +727,8 @@ TEST(CpuHeightPages, AFailedFetchLeavesACoarserPageAnsweringUntilARetryLands)
 
 TEST(CpuHeightPages, AWindowIsTwoPagesWideWithTheNeighborOnTheNearerSide)
 {
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     // The CPU pages alone: the GPU's level-0 pages around the camera would be on the CPU too.
     PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     request.GpuPages = false;
@@ -752,7 +757,8 @@ TEST(CpuHeightPages, AWindowIsTwoPagesWideWithTheNeighborOnTheNearerSide)
 
 TEST(CpuHeightPages, AChangeOfFramesInFlightKeepsTheCpuPages)
 {
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     const PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, 11.0f);
     const Mathematics::Vector3 camera{200.0f, 10.0f, 200.0f};
@@ -778,8 +784,9 @@ TEST(CpuHeightPages, BodyWindowsAreBoundedToTheBodiesNearestACamera)
 {
     // A CPU budget of 16 pages: body windows may hold a quarter of it, one body's window.
     constexpr uint64 kSixteenPages = 16ull * PageStreaming::kPageSampleCount * sizeof(float32);
-    TerrainHeightPages pages(nullptr, nullptr,
-                             HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, kSixteenPages, 4u});
+    TerrainPages pages(nullptr, nullptr,
+                       HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, kSixteenPages, 4u},
+                       kDesktopSurfacePages);
     const PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, 11.0f);
     const Mathematics::Vector3 camera{100.0f, 10.0f, 100.0f};
@@ -803,7 +810,8 @@ TEST(CpuHeightPages, BodyWindowsAreBoundedToTheBodiesNearestACamera)
 
 TEST(CpuHeightPages, AReaderWindowBringsTheFinestPagesAwayFromEveryCamera)
 {
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     request.GpuPages = false; // only the CPU windows want level 0
     const Mathematics::Vector3 camera{100.0f, 10.0f, 100.0f};
@@ -833,7 +841,8 @@ TEST(CpuHeightPages, AReaderWindowBringsTheFinestPagesAwayFromEveryCamera)
 
 TEST(CpuHeightPages, AFetchOfTheFinestPageAnswersFinestBeforeTheNextUpdate)
 {
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords, 0, 64ull << 20, 4u},
+                       kDesktopSurfacePages);
     PagedTerrainRequest request = PinnedNoiseRequest(NoiseSource(), nullptr, 0);
     request.GpuPages = false;
     const Mathematics::Vector3 camera{100.0f, 10.0f, 100.0f};

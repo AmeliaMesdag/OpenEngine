@@ -298,10 +298,10 @@ TEST(FloatingPanelTests, ShowClampsInitialPositionInsideParent)
     host.AddChild(std::move(frame));
     raw->Show("Inspector", &panel, "Inspector", 2400.0f, 1800.0f, 400.0f, 300.0f);
 
-    const auto left = raw->Overrides().Get(Style::PositionLeft);
-    const auto top = raw->Overrides().Get(Style::PositionTop);
-    const auto width = raw->Overrides().Get(Style::Width);
-    const auto height = raw->Overrides().Get(Style::Height);
+    const auto left = raw->Style().Get(Style::PositionLeft);
+    const auto top = raw->Style().Get(Style::PositionTop);
+    const auto width = raw->Style().Get(Style::Width);
+    const auto height = raw->Style().Get(Style::Height);
     ASSERT_TRUE(left.has_value() && left->IsPx());
     ASSERT_TRUE(top.has_value() && top->IsPx());
     ASSERT_TRUE(width.has_value() && width->IsPx());
@@ -326,7 +326,7 @@ TEST(FloatingPanelTests, DragAllowsHangingOffLeftEdge)
     SendTo(titleBar, kEventMouseDown, 180.0f, 90.0f);
     SendTo(titleBar, kEventMouseMove, -400.0f, 90.0f);
 
-    const auto left = raw->Overrides().Get(Style::PositionLeft);
+    const auto left = raw->Style().Get(Style::PositionLeft);
     ASSERT_TRUE(left.has_value() && left->IsPx());
     EXPECT_FLOAT_EQ(left->Value, -328.0f);
 }
@@ -564,13 +564,13 @@ TEST(FloatingPanelTests, MouseUpOverSecondFrameReleasesTitleDrag)
     EXPECT_FALSE(frameB->IsTitleDragging());
     EXPECT_TRUE(ui.GetCaptureId().empty());
 
-    const auto leftAfterUp = frameA->Overrides().Get(Style::PositionLeft);
+    const auto leftAfterUp = frameA->Style().Get(Style::PositionLeft);
     ASSERT_TRUE(leftAfterUp.has_value() && leftAfterUp->IsPx());
     const float leftAtRelease = leftAfterUp->Value;
 
     ui.OnMouseMove(500.0f, 80.0f);
     ui.Update(0.016f, /*interactive=*/true);
-    const auto leftAfterMove = frameA->Overrides().Get(Style::PositionLeft);
+    const auto leftAfterMove = frameA->Style().Get(Style::PositionLeft);
     ASSERT_TRUE(leftAfterMove.has_value() && leftAfterMove->IsPx());
     EXPECT_FLOAT_EQ(leftAfterMove->Value, leftAtRelease);
 }

@@ -9,10 +9,10 @@
 // the byte layout a refusal test patches.
 
 #include "PageStreaming/GeneratedHeightPageProvider.h"
-#include "PageStreaming/HeightPageCooker.h"
-#include "PageStreaming/HeightPageOverlay.h"
-#include "PageStreaming/HeightStoreCache.h"
-#include "PageStreaming/HeightStoreKey.h"
+#include "PageStreaming/Height/HeightPageCooker.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightStoreCache.h"
+#include "PageStreaming/Height/HeightStoreKey.h"
 #include "PageStreaming/PageLoader.h"
 #include "PageStreaming/PageResidency.h"
 #include "PageStreaming/PageStore/PageStoreAccess.h"
@@ -23,8 +23,8 @@
 #include "PageStreaming/PageTableEntry.h"
 #include "PageStreaming/TerrainPageContainer.h"
 
-#include "HeightPageCodec.h"
-#include "HeightStepPlanner.h"
+#include "Height/HeightPageCodec.h"
+#include "Height/HeightStepPlanner.h"
 #include "PagePyramidBuilder.h"
 #include "PageStore/PageStoreSerialization.h"
 
@@ -39,6 +39,7 @@
 #include "Terrain/Heightfield.h"
 #include "TerrainECS/PageLevelRule.h"
 #include "TerrainECS/TerrainService.h"
+#include "PageResidency/UploadedPages.h"
 #include "TestTempDir.h"
 #include "Types/Color.h"
 #include "Types/Fnv1a.h"
@@ -66,6 +67,7 @@
 
 using namespace GameEngine;
 using namespace GameEngine::PageStreaming;
+using GameEngine::PageStreaming::Test::UploadedPages;
 
 namespace
 {
@@ -2493,6 +2495,12 @@ std::vector<PageWant> EveryPage(const GeneratedHeightPageProvider& provider)
     return EveryPage(provider.Levels());
 }
 
+// A camera at `position` that looks every way.
+std::array<TerrainECS::PageRequestCamera, 1> DiscCamera(const Mathematics::Vector3& position)
+{
+    return {TerrainECS::PageRequestCamera{position, {}, 0.0f, false}};
+}
+
 // Frames until `done` holds (loads land between frames on the pool), at most a few seconds.
 template <typename Done>
 uint64 RunFramesUntil(PageResidencyManager& residency, uint64 frame, Done done)
@@ -2554,6 +2562,43 @@ TEST(PageResidencyTest, WantedPagesLoadAssignAndThenAParkedCameraDoesNoWork)
     // under the budget nothing is dropped, so nothing is fetched twice.
     EXPECT_EQ(residency.CpuBytes(), uint64(wanted.size()) * kPageSampleCount * sizeof(float32));
     EXPECT_NE(residency.Bytes(7, wanted.front().Address), nullptr);
+    pool.Shutdown();
+}
+
+// A parked frame repeats no per-page pass: each pass runs only when its input changed. Pages no
+// longer wanted are still released after the hysteresis while the frames are otherwise quiet.
+TEST(PageResidencyTest, AParkedFrameAfterASettledSetVisitsNoPage)
+{
+    JobSystem::WorkStealingThreadPool pool(2);
+    const auto provider = std::make_shared<GeneratedHeightPageProvider>(NoiseLattice(0.0f, 0.0f, 1024.0f, 1, 1));
+    PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
+    residency.ConfigureField(7, 128, 2, 0.4f);
+    residency.Configure(7, 7, PageSource{nullptr, provider});
+    const std::vector<PageWant> wanted = EveryPage(*provider);
+    residency.Request(7, wanted);
+    uint64 frame = RunFramesUntil(residency, 0, [&] { return residency.FieldCache(7).ResidentCount() == wanted.size(); });
+    ASSERT_EQ(residency.FieldCache(7).ResidentCount(), wanted.size());
+    ASSERT_GT(wanted.size(), 5u);
+    for (int i = 0; i < 40; ++i) // past the arrival fades
+        residency.Update(++frame, 1.0f / 60.0f, false);
+    for (int i = 0; i < 5; ++i)
+    {
+        residency.Request(7, wanted);
+        residency.Update(++frame, 1.0f / 60.0f, false);
+        EXPECT_EQ(residency.PageVisitsThisFrame(), 0u) << "parked frame " << i;
+    }
+
+    // The top two levels only: the others go after the hysteresis, then the frames are quiet again.
+    const std::vector<PageWant> few(wanted.end() - 5, wanted.end());
+    for (uint32 i = 0; i <= kPageReleaseHysteresisFrames + 4u; ++i)
+    {
+        residency.Request(7, few);
+        residency.Update(++frame, 1.0f / 60.0f, false);
+    }
+    EXPECT_EQ(residency.FieldCache(7).ResidentCount(), few.size());
+    residency.Request(7, few);
+    residency.Update(++frame, 1.0f / 60.0f, false);
+    EXPECT_EQ(residency.PageVisitsThisFrame(), 0u);
     pool.Shutdown();
 }
 
@@ -2968,6 +3013,13 @@ std::vector<uint8> Level0Rows(std::span<const PageStoreLevel> levels, uint32 fir
     return rows;
 }
 
+// The level-0 samples that the level-0 page rows [firstRow, endRow) own.
+PageSampleRect Level0RowsRect(std::span<const PageStoreLevel> levels, uint32 firstRow, uint32 endRow)
+{
+    return PageSampleRect{0u, firstRow * kPageOwnedSamples, levels[0].SamplesX - 1u,
+                          std::min(endRow * kPageOwnedSamples, levels[0].SamplesZ) - 1u};
+}
+
 // Writes the level-0 rows [firstRow, endRow) of `expected` into the store `access` writes.
 std::string WriteLevel0Rows(PageStoreAccess& access, const PageStoreReader& expected, uint32 firstRow, uint32 endRow)
 {
@@ -3019,7 +3071,7 @@ std::string PatchRun(PageStoreAccess& access, const std::filesystem::path& file,
         return error;
     if (std::string error = WriteLevel0Rows(access, expected, firstRow, endRow); !error.empty())
         return error;
-    access.Commit();
+    access.Commit(Level0RowsRect(expected.Layout().Levels, firstRow, endRow));
     return access.Finish();
 }
 
@@ -3034,12 +3086,26 @@ std::string BakeLevel0InTwoRuns(PageStoreAccess& access, const std::filesystem::
 }
 
 // True when stream `stream` of `residency` holds every page of `wanted` of `level` in rows [firstRow, endRow).
-bool AllLoaded(const PageResidencyManager& residency, uint32 stream, std::span<const PageWant> wanted, uint32 level,
-               uint32 firstRow, uint32 endRow)
+// RunFramesUntil, taking each frame's uploads into `uploaded`.
+template <typename Done>
+uint64 RunFramesUploading(PageResidencyManager& residency, uint64 frame, UploadedPages& uploaded, Done done)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!done() && std::chrono::steady_clock::now() < deadline)
+    {
+        residency.Update(++frame, 1.0f / 60.0f, false);
+        uploaded.Take(residency);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return frame;
+}
+
+bool AllUploaded(const UploadedPages& uploaded, uint32 stream, std::span<const PageWant> wanted, uint32 level,
+                 uint32 firstRow, uint32 endRow)
 {
     for (const PageWant& want : wanted)
         if (want.Address.Level == level && want.Address.Z >= firstRow && want.Address.Z < endRow &&
-            residency.Bytes(stream, want.Address) == nullptr)
+            uploaded.Find(stream, want.Address) == nullptr)
             return false;
     return true;
 }
@@ -3153,14 +3219,15 @@ TEST_F(PageStoreTest, AStreamOverAStoreAccessLoadsAPageBakedMidRunAndAStreamOpen
     PageResidencyManager residency(&pool, nullptr, budget);
     const std::vector<PageWant> wanted = EveryPage(levels);
     residency.ConfigureField(3, 2u * static_cast<uint32>(wanted.size()), 2, 0.0f);
-    residency.Configure(3, 3, PageSource{nullptr, nullptr, access});
-    residency.Configure(4, 3, PageSource{nullptr, nullptr, access});
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {access}});
+    residency.Configure(4, 3, PageSource{nullptr, nullptr, {access}});
     residency.Request(3, wanted);
     residency.Request(4, {});
-    uint64 frame =
-        RunFramesUntil(residency, 0, [&] { return AllLoaded(residency, 3, wanted, 1, 0u, levels[1].PagesZ); });
-    ASSERT_TRUE(AllLoaded(residency, 3, wanted, 1, 0u, levels[1].PagesZ)) << "the coarse pages did not load";
-    ASSERT_EQ(residency.Bytes(3, PageAddress{0, 0, 0, 0}), nullptr) << "a level-0 page loaded before it was baked";
+    UploadedPages uploaded(3);
+    uint64 frame = RunFramesUploading(residency, 0, uploaded,
+                                      [&] { return AllUploaded(uploaded, 3, wanted, 1, 0u, levels[1].PagesZ); });
+    ASSERT_TRUE(AllUploaded(uploaded, 3, wanted, 1, 0u, levels[1].PagesZ)) << "the coarse pages did not load";
+    ASSERT_EQ(uploaded.Find(3, PageAddress{0, 0, 0, 0}), nullptr) << "a level-0 page loaded before it was baked";
 
     // A run: the first rows are baked and committed; the store is not published yet.
     const uint32 half = levels[0].PagesZ / 2u;
@@ -3173,28 +3240,31 @@ TEST_F(PageStoreTest, AStreamOverAStoreAccessLoadsAPageBakedMidRunAndAStreamOpen
     ASSERT_EQ(access->OpenForPatch(live, std::move(layout)), "");
     ASSERT_EQ(access->AddPresentPages(Level0Rows(levels, 0u, levels[0].PagesZ)), "");
     ASSERT_EQ(WriteLevel0Rows(*access, expected, 0u, half), "");
-    access->Commit();
-    frame = RunFramesUntil(residency, frame, [&] { return AllLoaded(residency, 3, wanted, 0, 0u, half); });
-    EXPECT_TRUE(AllLoaded(residency, 3, wanted, 0, 0u, half))
+    access->Commit(Level0RowsRect(levels, 0u, half));
+    frame = RunFramesUploading(residency, frame, uploaded,
+                               [&] { return AllUploaded(uploaded, 3, wanted, 0, 0u, half); });
+    EXPECT_TRUE(AllUploaded(uploaded, 3, wanted, 0, 0u, half))
         << "a page baked mid-run did not load before the run ended";
     EXPECT_FALSE(std::filesystem::exists(live)) << "the run published the store";
     for (uint32 px = 0; px < levels[0].PagesX; ++px)
-        if (const std::vector<uint8>* bytes = residency.Bytes(3, PageAddress{0, 0, px, 0}))
+        if (const std::vector<uint8>* bytes = uploaded.Find(3, PageAddress{0, 0, px, 0}))
             EXPECT_EQ(*bytes, StoredPayload(expected, PageAddress{0, 0, px, 0})) << "level-0 page " << px;
 
     // The run ends: the rest is baked and the store published at its file.
     ASSERT_EQ(WriteLevel0Rows(*access, expected, half, levels[0].PagesZ), "");
     ASSERT_EQ(access->Finish(), "");
-    frame = RunFramesUntil(residency, frame, [&] { return AllLoaded(residency, 3, wanted, 0, 0u, levels[0].PagesZ); });
-    ASSERT_TRUE(AllLoaded(residency, 3, wanted, 0, 0u, levels[0].PagesZ))
+    frame = RunFramesUploading(residency, frame, uploaded,
+                               [&] { return AllUploaded(uploaded, 3, wanted, 0, 0u, levels[0].PagesZ); });
+    ASSERT_TRUE(AllUploaded(uploaded, 3, wanted, 0, 0u, levels[0].PagesZ))
         << "the pages baked at the run's end did not load";
 
     // A stream configured before the run reads after it: the pages the run moved read at their new place.
     residency.Request(4, wanted);
-    frame = RunFramesUntil(residency, frame, [&] { return AllLoaded(residency, 4, wanted, 0, 0u, levels[0].PagesZ); });
+    frame = RunFramesUploading(residency, frame, uploaded,
+                               [&] { return AllUploaded(uploaded, 4, wanted, 0, 0u, levels[0].PagesZ); });
     for (const PageWant& want : wanted)
     {
-        const std::vector<uint8>* bytes = residency.Bytes(4, want.Address);
+        const std::vector<uint8>* bytes = uploaded.Find(4, want.Address);
         ASSERT_NE(bytes, nullptr);
         EXPECT_EQ(*bytes, StoredPayload(expected, want.Address))
             << "level " << int(want.Address.Level) << " page " << want.Address.X << "," << want.Address.Z;
@@ -3224,13 +3294,13 @@ TEST_F(PageStoreTest, APageReadAbsentBeforeItsCommitAndLandedAfterItIsReadAgain)
     JobSystem::WorkStealingThreadPool pool(1);
     PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
     residency.ConfigureField(3, 4, 2, 0.0f);
-    residency.Configure(3, 3, PageSource{nullptr, nullptr, access});
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {access}});
     const PageAddress page{0, 0, 0, 0};
     residency.Request(3, std::vector<PageWant>{PageWant{page, 0.0f, true}});
     residency.Update(1, 1.0f / 60.0f, false); // the read starts and finds the page absent
     pool.Submit([] {}, JobSystem::JobPriority::Background).Wait();
     ASSERT_EQ(WriteLevel0Rows(*access, expected, 0u, 1u), "");
-    access->Commit();
+    access->Commit(Level0RowsRect(levels, 0u, 1u));
     RunFramesUntil(residency, 1, [&] { return residency.Bytes(3, page) != nullptr; });
     const std::vector<uint8>* bytes = residency.Bytes(3, page);
     ASSERT_NE(bytes, nullptr) << "the read before the commit marked the page absent";
@@ -3238,6 +3308,122 @@ TEST_F(PageStoreTest, APageReadAbsentBeforeItsCommitAndLandedAfterItIsReadAgain)
     residency.Forget(3);
     pool.Shutdown();
     access->Close();
+}
+
+namespace
+{
+
+// The loads that `frames` Updates of `residency` start, a short sleep apart so the reads land.
+uint64 LoadsOverFrames(PageResidencyManager& residency, uint64& frame, uint32 frames)
+{
+    uint64 loads = 0;
+    for (uint32 i = 0; i < frames; ++i)
+    {
+        residency.Update(++frame, 1.0f / 60.0f, false);
+        loads += residency.LoadsStartedThisFrame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return loads;
+}
+
+} // namespace
+
+// A commit makes a stream read again only its absent pages that read the commit's rect. The other
+// absent pages are not read again.
+TEST_F(PageStoreTest, ACommitReadsAgainOnlyTheAbsentPagesThatReadItsRect)
+{
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(BuildLiveReadSource(m_Dir), PageFieldKind::Splat), "");
+    const std::vector<PageStoreLevel>& levels = expected.Layout().Levels;
+    ASSERT_GE(levels[0].PagesZ, 4u);
+    const std::filesystem::path live = m_Dir / "live.gepage";
+    auto access = std::make_shared<PageStoreAccess>(PageFieldKind::Splat, expected.Layout().Header);
+    ASSERT_EQ(CreateCoarseStore(*access, live, expected), "");
+    PageStoreLayout layout;
+    {
+        PageStoreReader before;
+        ASSERT_EQ(before.Open(live, PageFieldKind::Splat), "");
+        layout = before.Layout();
+    }
+    ASSERT_EQ(access->OpenForPatch(live, std::move(layout)), "");
+    ASSERT_EQ(access->AddPresentPages(Level0Rows(levels, 0u, levels[0].PagesZ)), "");
+
+    JobSystem::WorkStealingThreadPool pool(1);
+    PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
+    std::vector<PageWant> wanted;
+    for (uint32 pz = 0; pz < levels[0].PagesZ; ++pz)
+        for (uint32 px = 0; px < levels[0].PagesX; ++px)
+            wanted.push_back(PageWant{PageAddress{0, 0, px, pz}, 0.0f, true});
+    residency.ConfigureField(3, static_cast<uint32>(wanted.size()), 2, 0.0f);
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {access}});
+    residency.Request(3, wanted);
+    uint64 frame = 0;
+    ASSERT_EQ(LoadsOverFrames(residency, frame, 100), wanted.size()) << "each page is read once and found absent";
+
+    ASSERT_EQ(WriteLevel0Rows(*access, expected, 0u, 1u), "");
+    const PageSampleRect rect = Level0RowsRect(levels, 0u, 1u);
+    access->Commit(rect);
+    const std::size_t reading = static_cast<std::size_t>(std::ranges::count_if(
+        wanted, [&rect](const PageWant& want) { return PageReadsLevel0Rect(want.Address, rect); }));
+    ASSERT_LT(reading, wanted.size());
+    EXPECT_EQ(LoadsOverFrames(residency, frame, 100), reading) << "the commit read again a page outside its rect";
+    residency.Forget(3);
+    pool.Shutdown();
+    access->Close();
+}
+
+// A stream over two planes: a page whose second plane is not written yet stays absent, and lands
+// with both planes' bytes, the first plane's first, once the second plane commits it.
+TEST_F(PageStoreTest, AStreamOverTwoPlanesLoadsAPageOnlyWithEveryPlaneAndHoldsThePlanesInOrder)
+{
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(BuildLiveReadSource(m_Dir), PageFieldKind::Splat), "");
+    const std::vector<PageStoreLevel>& levels = expected.Layout().Levels;
+    auto first = std::make_shared<PageStoreAccess>(PageFieldKind::Splat, expected.Layout().Header);
+    auto second = std::make_shared<PageStoreAccess>(PageFieldKind::Splat, expected.Layout().Header);
+    const std::array<std::shared_ptr<PageStoreAccess>, 2> planes = {first, second};
+    for (std::size_t plane = 0; plane < planes.size(); ++plane)
+    {
+        const std::filesystem::path file = m_Dir / ("plane" + std::to_string(plane) + ".gepage");
+        ASSERT_EQ(CreateCoarseStore(*planes[plane], file, expected), "");
+        PageStoreLayout layout;
+        {
+            PageStoreReader published;
+            ASSERT_EQ(published.Open(file, PageFieldKind::Splat), "");
+            layout = published.Layout();
+        }
+        ASSERT_EQ(planes[plane]->OpenForPatch(file, std::move(layout)), "");
+        ASSERT_EQ(planes[plane]->AddPresentPages(Level0Rows(levels, 0u, 1u)), "");
+    }
+    ASSERT_EQ(WriteLevel0Rows(*first, expected, 0u, 1u), "");
+    first->Commit(Level0RowsRect(levels, 0u, 1u));
+
+    JobSystem::WorkStealingThreadPool pool(1);
+    PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
+    residency.ConfigureField(3, 4, 2, 0.0f);
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {first, second}});
+    const PageAddress page{0, 0, 0, 0};
+    residency.Request(3, std::vector<PageWant>{PageWant{page, 0.0f, true}});
+    uint64 frame = 0;
+    for (uint32 attempt = 0; attempt < 8u; ++attempt)
+    {
+        residency.Update(++frame, 1.0f / 60.0f, false);
+        pool.Submit([] {}, JobSystem::JobPriority::Background).Wait();
+    }
+    EXPECT_EQ(residency.Bytes(3, page), nullptr) << "a page loaded before its second plane held it";
+
+    ASSERT_EQ(WriteLevel0Rows(*second, expected, 0u, 1u), "");
+    second->Commit(Level0RowsRect(levels, 0u, 1u));
+    RunFramesUntil(residency, frame, [&] { return residency.Bytes(3, page) != nullptr; });
+    const std::vector<uint8>* bytes = residency.Bytes(3, page);
+    ASSERT_NE(bytes, nullptr) << "the page did not load once every plane held it";
+    std::vector<uint8> both = StoredPayload(expected, page);
+    both.insert(both.end(), both.begin(), both.end());
+    EXPECT_EQ(*bytes, both);
+    residency.Forget(3);
+    pool.Shutdown();
+    first->Close();
+    second->Close();
 }
 
 // The owner of a store access lets it go while a run writes it and a stream reads it: the stream's
@@ -3259,22 +3445,25 @@ TEST_F(PageStoreTest, AStoreAccessItsOwnerLetsGoMidRunServesTheStreamUntilTheStr
     ASSERT_EQ(owner->OpenForPatch(live, std::move(layout)), "");
     ASSERT_EQ(owner->AddPresentPages(Level0Rows(levels, 0u, levels[0].PagesZ)), "");
     ASSERT_EQ(WriteLevel0Rows(*owner, expected, 0u, levels[0].PagesZ), "");
-    owner->Commit();
+    owner->Commit(Level0RowsRect(levels, 0u, levels[0].PagesZ));
 
     JobSystem::WorkStealingThreadPool pool(2);
     PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
     const std::vector<PageWant> wanted = EveryPage(levels);
     residency.ConfigureField(3, static_cast<uint32>(wanted.size()), 2, 0.0f);
-    residency.Configure(3, 3, PageSource{nullptr, nullptr, owner});
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {owner}});
     const std::weak_ptr<PageStoreAccess> watched = owner;
     residency.Request(3, wanted);
     residency.Update(1, 1.0f / 60.0f, false); // the loads start with the owner alive
     owner.reset();
     EXPECT_FALSE(watched.expired()) << "the stream does not hold its source";
-    RunFramesUntil(residency, 1, [&] { return AllLoaded(residency, 3, wanted, 0u, 0u, levels[0].PagesZ); });
+    UploadedPages uploaded(3);
+    uploaded.Take(residency);
+    RunFramesUploading(residency, 1, uploaded,
+                       [&] { return AllUploaded(uploaded, 3, wanted, 0u, 0u, levels[0].PagesZ); });
     for (const PageWant& want : wanted)
     {
-        const std::vector<uint8>* bytes = residency.Bytes(3, want.Address);
+        const std::vector<uint8>* bytes = uploaded.Find(3, want.Address);
         ASSERT_NE(bytes, nullptr) << "a page did not load after its owner let the store go";
         EXPECT_EQ(*bytes, StoredPayload(expected, want.Address));
     }
@@ -3338,8 +3527,48 @@ TEST_F(PageStoreTest, RequestCpuOnAStreamOverAStoreAccessIsRefused)
     ASSERT_EQ(CreateCoarseStore(*access, m_Dir / "live.gepage", expected), "");
     PageResidencyManager residency(nullptr, nullptr, PageResidencyBudget{});
     residency.ConfigureField(3, 4, 2, 0.0f);
-    residency.Configure(3, 3, PageSource{nullptr, nullptr, access});
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {access}});
     EXPECT_DEBUG_DEATH(residency.RequestCpu(3, static_cast<uint32>(levels.size()) - 1u, {}), "PageStoreAccess");
+}
+
+// A stream over planes has no CPU readers: a page's bytes are readable in the frame it is uploaded,
+// then dropped at the next Update, and a page that stays resident is not fetched again.
+TEST_F(PageStoreTest, AStreamOverPlanesDropsAPagesBytesAfterItsUploadAndDoesNotFetchItAgain)
+{
+    PageStoreReader expected;
+    ASSERT_EQ(expected.Open(BuildLiveReadSource(m_Dir), PageFieldKind::Splat), "");
+    const std::vector<PageStoreLevel>& levels = expected.Layout().Levels;
+    auto access = std::make_shared<PageStoreAccess>(PageFieldKind::Splat, expected.Layout().Header);
+    ASSERT_EQ(CreateCoarseStore(*access, m_Dir / "live.gepage", expected), "");
+    JobSystem::WorkStealingThreadPool pool(1);
+    PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
+    residency.ConfigureField(3, 4, 2, 0.0f);
+    residency.Configure(3, 3, PageSource{nullptr, nullptr, {access}});
+    const PageAddress top{0, static_cast<uint8>(levels.size() - 1u), 0, 0};
+    const std::vector<PageWant> wanted{PageWant{top, 0.0f, true}};
+    residency.Request(3, wanted);
+    uint64 frame = RunFramesUntil(
+        residency, 0, [&] { return residency.FieldCache(3).SlotOf(CachedPage{3, top}) != kNoResidentSlot; });
+    ASSERT_NE(residency.FieldCache(3).SlotOf(CachedPage{3, top}), kNoResidentSlot) << "the page never arrived";
+    ASSERT_EQ(residency.FieldCache(3).Uploads().size(), 1u);
+    ASSERT_NE(residency.Bytes(3, top), nullptr) << "the owner reads the bytes of an upload after its Update";
+
+    uint32 loads = 0;
+    for (uint32 i = 0; i < 10u; ++i)
+    {
+        residency.Request(3, wanted);
+        residency.Update(++frame, 1.0f / 60.0f, false);
+        pool.Submit([] {}, JobSystem::JobPriority::Background).Wait();
+        loads += residency.LoadsStartedThisFrame();
+    }
+    EXPECT_EQ(residency.Bytes(3, top), nullptr) << "the uploaded page's bytes stayed on the CPU";
+    EXPECT_EQ(residency.CpuBytes(), 0u);
+    EXPECT_NE(residency.FieldCache(3).SlotOf(CachedPage{3, top}), kNoResidentSlot);
+    EXPECT_EQ(loads, 0u) << "a resident page was fetched again";
+    EXPECT_EQ(residency.PageVisitsThisFrame(), 0u) << "a parked frame walked the resident page";
+    residency.Forget(3);
+    pool.Shutdown();
+    access->Close();
 }
 
 TEST(PageResidencyTest, ALoadOfARestartedStreamsOldSourceNeverLands)
@@ -3394,8 +3623,8 @@ TEST(PageResidencyTest, ASmallPyramidUnderItsCapStaysWhollyResidentWithNoFurther
     terrain.Level0TexelX = terrain.Level0TexelZ = 1.0f;
     terrain.MaxHeight = 1.0f;
     terrain.CacheSlots = 512; // the desktop height cache: a pyramid of up to 128 pages is pinned whole
-    TerrainECS::HeightPageRequester requester;
-    requester.Configure(terrain);
+    TerrainECS::PageRequester requester;
+    requester.Configure(terrain, TerrainECS::PageRequestArea::Disc);
     ASSERT_EQ(requester.FirstPinnedLevel(), 0u);
 
     PageResidencyManager residency(&pool, nullptr, PageResidencyBudget{});
@@ -3407,14 +3636,14 @@ TEST(PageResidencyTest, ASmallPyramidUnderItsCapStaysWhollyResidentWithNoFurther
     const std::size_t pages = EveryPage(*provider).size();
     uint64 frame = 0;
     frame = RunFramesUntil(residency, frame, [&] {
-        requester.Build(std::span(&far, 1), view, wants);
+        requester.Build(DiscCamera(far), view, wants);
         residency.Request(1, wants);
         return residency.FieldCache(1).ResidentCount() == pages;
     });
     ASSERT_EQ(residency.FieldCache(1).ResidentCount(), pages);
     for (int i = 0; i < 10; ++i)
     {
-        requester.Build(std::span(&far, 1), view, wants);
+        requester.Build(DiscCamera(far), view, wants);
         residency.Request(1, wants);
         residency.Update(++frame, 1.0f / 60.0f, false);
         EXPECT_EQ(residency.LoadsStartedThisFrame(), 0u);

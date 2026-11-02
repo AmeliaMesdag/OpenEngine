@@ -1,5 +1,7 @@
 #include "Rendering/Sky/SkyViewLutAltitude.h"
 
+#include "Mathematics/Vector3.h"
+
 #include <cmath>
 
 namespace GameEngine {
@@ -13,7 +15,7 @@ constexpr float kBandsPerOctave = 4.0f;
 
 } // namespace
 
-float AltitudeAbovePlanetMeters(const float position[3], float planetRadius)
+float AltitudeAbovePlanetMeters(const Mathematics::Vector3& position, float planetRadius)
 {
     const double y = static_cast<double>(position[1]) + planetRadius;
     const double r = std::sqrt(static_cast<double>(position[0]) * position[0] + y * y +

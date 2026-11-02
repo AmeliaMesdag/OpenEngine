@@ -307,7 +307,7 @@ void GraphCanvas::ApplyNodeDropShadows()
                       static_cast<double>(Math::Clamp01(g_NodeDropShadowOpacity)));
     else
         std::snprintf(shadow, sizeof(shadow), "none");
-    Overrides().SetCustom(HashStringId("--graph-node-shadow"), std::string(shadow));
+    Style().SetCustom(HashStringId("--graph-node-shadow"), std::string(shadow));
 }
 
 float GraphCanvas::SnapGraphCoordinate(float value)
@@ -803,7 +803,7 @@ void GraphCanvas::EnsureNodeChrome()
 {
     auto layer = std::make_unique<UIElement>();
     layer->AddClass("graph-node-layer");
-    layer->Overrides()
+    layer->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(m_PanX))
         .Set(Style::PositionTop, StyleLength::Px(m_PanY))
@@ -877,17 +877,17 @@ void GraphCanvas::ApplyNodeLayerZoomClass()
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.4f", m_Zoom);
         static const StringId kLengthScaleVar = HashStringId("--length-scale");
-        m_NodeLayer->Overrides().SetCustom(kLengthScaleVar, buf);
+        m_NodeLayer->Style().SetCustom(kLengthScaleVar, buf);
 
         const float radiusPx = publishedRadius * m_Zoom;
         static const StringId kNodeRadiusVar = HashStringId("--graph-node-radius");
         static const StringId kValueRadiusVar = HashStringId("--graph-value-radius");
         static const StringId kRingRadiusVar = HashStringId("--graph-ring-radius");
         std::snprintf(buf, sizeof(buf), "%.2fpx", radiusPx);
-        m_NodeLayer->Overrides().SetCustom(kNodeRadiusVar, buf);
-        m_NodeLayer->Overrides().SetCustom(kValueRadiusVar, buf);
+        m_NodeLayer->Style().SetCustom(kNodeRadiusVar, buf);
+        m_NodeLayer->Style().SetCustom(kValueRadiusVar, buf);
         std::snprintf(buf, sizeof(buf), "%.2fpx", radiusPx + std::max(1.0f, m_Zoom));
-        m_NodeLayer->Overrides().SetCustom(kRingRadiusVar, buf);
+        m_NodeLayer->Style().SetCustom(kRingRadiusVar, buf);
         static const StringId kRingWidthVar = HashStringId("--graph-ring-width");
         /* Never thinner than the 2px base: a ~1px border on the fractional
            edges a zoomed-out layout produces drops below pixel coverage on
@@ -895,7 +895,7 @@ void GraphCanvas::ApplyNodeLayerZoomClass()
            chrome keeps screen weight at zoom-out (it scales up with zoom-in
            as before). */
         std::snprintf(buf, sizeof(buf), "%.2fpx", std::max(2.0f, 2.0f * m_Zoom));
-        m_NodeLayer->Overrides().SetCustom(kRingWidthVar, buf);
+        m_NodeLayer->Style().SetCustom(kRingWidthVar, buf);
         m_NodeLayer->MarkDirty(StyleDirty);
     }
 }
@@ -908,7 +908,7 @@ void GraphCanvas::SyncNodeLayerTransform()
     // Layout impact: Yoga must restyle left/top this frame. SetPositionOnlyPx is
     // visual-only, so committed node rects stay put while the overlay (which
     // draws from m_PanX) moves — edges slide, nodes jump on the next solve.
-    m_NodeLayer->Overrides()
+    m_NodeLayer->Style()
         .Set(Style::PositionLeft, StyleLength::Px(m_PanX))
         .Set(Style::PositionTop, StyleLength::Px(m_PanY));
 

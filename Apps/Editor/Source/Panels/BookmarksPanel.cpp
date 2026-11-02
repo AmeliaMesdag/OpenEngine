@@ -26,7 +26,6 @@
 #include "Panels/AssetsPanel.h"
 #include "Assets/Polyhaven/PolyhavenDownloadManager.h"
 #include "Assets/Polyhaven/PolyhavenService.h"
-#include "Scheduler/Scheduler.h"
 #include "Panels/HierarchyPanel.h"
 #include "Thumbnails/IThumbnailProvider.h"
 #include "Logger/Logger.h"
@@ -211,7 +210,7 @@ void BookmarksPanel::BuildUI()
     auto scrollView = std::make_unique<ScrollView>();
     scrollView->SetId("bookmarks-scroll");
     scrollView->AddClass("bookmarks-list");
-    scrollView->Overrides().SetCustomNumber(StringId("--ui_scrollview_measure_horizontal"), 0.0f);
+    scrollView->Style().SetCustomNumber(HashStringId("--ui_scrollview_measure_horizontal"), 0.0f);
     m_ScrollView = scrollView.get();
     
     // Handle Ctrl+Scroll to adjust row height
@@ -571,7 +570,7 @@ void BookmarksPanel::CreateBookmarkRow(size_t index, UIElement* container)
     if (m_SelectedIndices.count(index) != 0)
         row->AddClass("selected");
     // Apply custom row height (dynamic, needs inline style)
-    row->Overrides().Set(Style::MinHeight, StyleLength::Px(m_RowHeight)).Set(Style::Height, StyleLength::Px(m_RowHeight));
+    row->Style().Set(Style::MinHeight, StyleLength::Px(m_RowHeight)).Set(Style::Height, StyleLength::Px(m_RowHeight));
     
     // Drag handle - use icon image (styled via CSS class)
     auto dragHandle = std::make_unique<UIElement>();
@@ -587,7 +586,7 @@ void BookmarksPanel::CreateBookmarkRow(size_t index, UIElement* container)
     iconEl->AddClass("bookmark-icon");
     iconEl->AddClass("list-item-icon");
     // Dynamic icon size needs inline style
-    iconEl->Overrides().Set(Style::Width, StyleLength::Px(iconSize)).Set(Style::Height, StyleLength::Px(iconSize))
+    iconEl->Style().Set(Style::Width, StyleLength::Px(iconSize)).Set(Style::Height, StyleLength::Px(iconSize))
         .Set(Style::MinWidth, StyleLength::Px(iconSize)).Set(Style::MinHeight, StyleLength::Px(iconSize));
     UpdateBookmarkIcon(iconEl.get(), bookmark);
     
@@ -996,27 +995,8 @@ void BookmarksPanel::PerformDrop(const UI::Interaction::DropRequest& request)
         // Immediate rebuild + next-frame rebuild so first drop always shows.
         if (m_ListContainer)
         {
-            RebuildBookmarkRows();
-            m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
-            if (m_ScrollView)
-                m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-            MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-            RequestRelayout();
-            Scheduler::IScheduler* sched = GetScheduler();
-            if (sched)
-            {
-                sched->ScheduleNext([this]()
-                {
-                    if (!m_ListContainer)
-                        return;
-                    RebuildBookmarkRows();
-                    m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
-                    if (m_ScrollView)
-                        m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    RequestRelayout();
-                });
-            }
+            RebuildRowsAndRelayout();
+            PostAction([this]() { RebuildRowsAndRelayout(); });
         }
         return;
     }
@@ -1136,7 +1116,7 @@ void BookmarksPanel::SetDropPreview(const UI::Interaction::DropPreviewState& sta
     if (!wantsLine)
     {
         if (m_InsertionIndicator)
-            m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
         return;
     }
 
@@ -1156,7 +1136,7 @@ void BookmarksPanel::SetDropPreview(const UI::Interaction::DropPreviewState& sta
     if (!row)
     {
         if (m_InsertionIndicator)
-            m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
         return;
     }
 
@@ -1171,7 +1151,7 @@ void BookmarksPanel::SetDropPreview(const UI::Interaction::DropPreviewState& sta
     const float topPx = (lineBelowRow ? (ry + rh) : ry) - containerY;
 
     const uint32_t lineArgb = state.Allowed ? 0xF200C864u : 0xF2FF5050u; // rgba(0,200,100,0.95) / rgba(255,80,80,0.95)
-    m_InsertionIndicator->Overrides()
+    m_InsertionIndicator->Style()
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionTop, StyleLength::Px(topPx))
         .Set(Style::Width, StyleLength::Percent(100.0f))
@@ -1254,47 +1234,26 @@ void BookmarksPanel::AddBookmarkAt(const Bookmark& bookmark, size_t insertIndex)
     {
         if (UIElement::IsInEventDispatch())
         {
-            // Schedule rebuild at the start of the NEXT frame so layout/paint run after our
-            // changes. PostAction runs after event dispatch in the same frame, but layout/paint
-            // have already run for this frame, so the new bookmark only appears after focusing
-            // the panel. ScheduleNext runs in the next Update()'s first drain, before layout/paint.
-            Scheduler::IScheduler* sched = GetScheduler();
-            if (sched)
-            {
-                sched->ScheduleNext([this]()
-                {
-                    if (!m_ListContainer)
-                        return;
-            RebuildBookmarkRows();
-                    if (m_ListContainer)
-                        m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
-                    if (m_ScrollView)
-                        m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    RequestRelayout();
-        });
-    }
-    else
-    {
-                PostAction([this]()
-                {
-                    if (!m_ListContainer)
-                        return;
-        RebuildBookmarkRows();
-                    if (m_ListContainer)
-                        m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
-                    if (m_ScrollView)
-                        m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    RequestRelayout();
-                });
-            }
+            // RemoveChild defers during dispatch, so the rebuild runs in the drain right after it.
+            PostAction([this]() { RebuildRowsAndRelayout(); });
         }
         else
         {
             RebuildBookmarkRows();
         }
     }
+}
+
+void BookmarksPanel::RebuildRowsAndRelayout()
+{
+    if (!m_ListContainer)
+        return;
+    RebuildBookmarkRows();
+    m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
+    if (m_ScrollView)
+        m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
+    MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
+    RequestRelayout();
 }
 
 void BookmarksPanel::RemoveBookmark(size_t index)
@@ -1534,17 +1493,8 @@ void BookmarksPanel::NavigateToEntity(const std::string& scenePath, const std::s
                 if (m_OnOpenScene)
                 {
                     m_OnOpenScene(sp);
-                    // Schedule selection for the next 2 frames to let the scene load
-                    Scheduler::IScheduler* sched = GetScheduler();
-                    if (sched)
-                    {
-                        sched->ScheduleNext([this, eid]()
-                        {
-                            Scheduler::IScheduler* s = GetScheduler();
-                            if (s)
-                                s->ScheduleNext([this, eid]() { SelectEntityById(eid); });
-                        });
-                    }
+                    // Two deferred drains later the scene open has settled.
+                    SelectEntityAfterDrains(eid, 2);
                 }
             });
 
@@ -1558,6 +1508,16 @@ void BookmarksPanel::NavigateToEntity(const std::string& scenePath, const std::s
     }
 
     SelectEntityById(entityId);
+}
+
+void BookmarksPanel::SelectEntityAfterDrains(std::string entityId, int drains)
+{
+    if (drains <= 0)
+    {
+        SelectEntityById(entityId);
+        return;
+    }
+    PostAction([this, entityId = std::move(entityId), drains] { SelectEntityAfterDrains(entityId, drains - 1); });
 }
 
 void BookmarksPanel::SelectEntityById(const std::string& entityId)
@@ -2093,7 +2053,7 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
         mouseOverPanel = false;
         m_AssetDropInsertIndex = -1;
         if (m_InsertionIndicator)
-            m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
     });
 
     // Mouse move - show insertion line when dragging an asset (g_DragState) or reordering bookmarks (DragDropManager)
@@ -2123,7 +2083,7 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
             const bool isCurrentTarget = (dd->GetCurrentTargetElement() == this);
             if (!isCurrentTarget)
             {
-                insertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+                insertionIndicator->Style().Set(Style::Display, DisplayMode::None);
                 return;
             }
             UI::Interaction::DropHit hit{};
@@ -2155,7 +2115,7 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
                     const float containerY = m_ListContainer->GetLayoutY();
                     const float topPx = yLine - containerY;
                     const uint32_t lineArgb = fb.Allowed ? 0xF200C864u : 0xF2FF5050u;
-                    insertionIndicator->Overrides()
+                    insertionIndicator->Style()
                         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
                         .Set(Style::PositionTop, StyleLength::Px(topPx))
                         .Set(Style::Width, StyleLength::Percent(100.0f))
@@ -2166,14 +2126,14 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
                     return;
                 }
             }
-            insertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            insertionIndicator->Style().Set(Style::Display, DisplayMode::None);
             return;
         }
 
         if (!g_DragState.active || g_DragState.assetPath.empty())
         {
             m_AssetDropInsertIndex = -1;
-            insertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            insertionIndicator->Style().Set(Style::Display, DisplayMode::None);
             return;
         }
 
@@ -2232,7 +2192,7 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
             indicatorAbsY = lastRow->GetLayoutY() + lastRow->GetLayoutHeight();
         }
         float indicatorY = indicatorAbsY - containerY;
-        insertionIndicator->Overrides().Set(Style::PositionTop, StyleLength::Px(indicatorY)).Set(Style::Display, DisplayMode::Block);
+        insertionIndicator->Style().Set(Style::PositionTop, StyleLength::Px(indicatorY)).Set(Style::Display, DisplayMode::Block);
     });
     
     // Mouse up - handle drop when mouse is released over the panel
@@ -2244,36 +2204,16 @@ void BookmarksPanel::SetupDropHandlers(UIElement* container)
         int insertIdx = m_AssetDropInsertIndex;
         m_AssetDropInsertIndex = -1;
         if (m_InsertionIndicator)
-            m_InsertionIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            m_InsertionIndicator->Style().Set(Style::Display, DisplayMode::None);
 
         // Force immediate rebuild + schedule next-frame rebuild so first drop always shows.
         auto forceRefresh = [this]()
         {
             if (!m_ListContainer)
                 return;
-            // Immediate rebuild
-            RebuildBookmarkRows();
-            m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
-            if (m_ScrollView)
-                m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-            MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-            RequestRelayout();
-            // Also schedule next-frame rebuild to catch any deferred layout
-            Scheduler::IScheduler* sched = GetScheduler();
-            if (sched)
-            {
-                sched->ScheduleNext([this]()
-                {
-                    if (!m_ListContainer)
-                        return;
-                    RebuildBookmarkRows();
-                    m_ListContainer->MarkDirty(UIElement::ChildrenDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
-                    if (m_ScrollView)
-                        m_ScrollView->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
-                    RequestRelayout();
-                });
-            }
+            RebuildRowsAndRelayout();
+            // Again after the deferred drain, which catches a RemoveChild deferred by the drop.
+            PostAction([this]() { RebuildRowsAndRelayout(); });
         };
         
         if (g_DragState.active)

@@ -171,7 +171,7 @@ class AsyncRegistryCoordinator
 
     /**
      * @brief Stop every scan this coordinator started. Each stage stops at its next file or chunk
-     * boundary, waits for the stage before it, and fails its future with AssetScanCancelled, so a
+     * boundary, starts only after the stage before it, and fails its future with AssetScanCancelled, so a
      * scan's future still resolves only after all of the scan's tasks are done with the registry.
      * Irreversible: a scan started afterwards stops at once.
      */
@@ -196,13 +196,13 @@ class AsyncRegistryCoordinator
     std::shared_ptr<std::atomic<bool>> m_CancelRequested = std::make_shared<std::atomic<bool>>(false);
 
     // Helper methods
-    void SubmitDirectoryScanTask(const std::filesystem::path& directory, bool recursive,
-                                 std::promise<Vector<ScannedFileInfo>> foundAssetsPromise);
+    JobSystem::TaskId SubmitDirectoryScanTask(const std::filesystem::path& directory, bool recursive,
+                                              std::promise<Vector<ScannedFileInfo>> foundAssetsPromise);
     void SubmitMetadataProcessingTask(const Vector<ScannedFileInfo>& assetInfos,
                                       std::promise<Vector<AssetMetadata>> processedMetadataPromise);
     void SubmitRegistryUpdateTask(std::future<Vector<AssetMetadata>> metadataFuture,
                                   std::promise<size_t> registeredCountPromise,
-                                  const std::filesystem::path& scanRoot);
+                                  const std::filesystem::path& scanRoot, JobSystem::TaskId metadataTaskId);
 };
 
 /**

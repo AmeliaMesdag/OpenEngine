@@ -27,7 +27,7 @@ namespace GameEngine::Editor
 // The viewport pixels are provenance for aspect, not its source. Aspect presets
 // and letterboxing can make the matrix aspect differ from the panel ratio.
 // Orthographic projections report orthoHeight and omit both angle fields.
-nlohmann::json DescribeCameraProjection(const float proj[16],
+nlohmann::json DescribeCameraProjection(const Mathematics::Matrix4x4& proj,
                                         std::uint32_t viewportWidthPx,
                                         std::uint32_t viewportHeightPx);
 

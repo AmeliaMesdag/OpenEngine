@@ -14,7 +14,9 @@
 //   ParallelFor helper          16B  (RunBlock* + the lane's unstarted counter*)
 //   ParallelFor run block      ≤128B (one slab; static_assert in ParallelForCore.cpp)
 //   Run() queue visit           16B  (TaggedQueueVisit: TaggedJobs* + the lane's unstarted counter*)
-//   JobCounter::Job<F>          16B + sizeof(F); typical Run captures ≤64B
+//   JobCounter::Job<F>          16B + sizeof(F), and one bool more (padded to
+//                               F's alignment) under GE_DEBUG_INSTRUMENTATION;
+//                               typical Run captures ≤64B
 //   Submit(F&&) lambdas         typical captures ≤64B (previously verified)
 // Envelope bases are ≤40B (vptr + TaskId + flags [+ inline TaskData]), so
 // the 128-byte slab covers every real caller with headroom; oversized

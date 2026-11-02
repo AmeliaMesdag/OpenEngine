@@ -5,6 +5,7 @@
 #include "Components/Rendering/Ocean.h"
 #include "Components/Transform.h"
 #include "Engine/Rendering/RenderServices.h"
+#include "Mathematics/Vector2.h"
 #include "Physics/PhysicsWorld.h"
 #include "PhysicsECS/Components/PhysicsBody.h"
 #include "PhysicsECS/PhysicsWorldService.h"
@@ -37,7 +38,7 @@ void OceanBuoyancySystem::Update(ECS::World& world, float32 /*deltaTime*/)
     IOceanCollisionProvider& collision = feature->GetCollisionProvider();
 
     // Four probes at the corners of a square footprint around the body origin.
-    static constexpr float32 kProbe[4][2] = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+    static const Mathematics::Vector2 kProbe[4] = {{1.0f, 1.0f}, {1.0f, -1.0f}, {-1.0f, 1.0f}, {-1.0f, -1.0f}};
 
     world.Query<ECS::Read<Components::OceanBuoyancy>, ECS::Read<Components::PhysicsBody>,
                 ECS::Read<Components::WorldTransform>>()
@@ -71,8 +72,8 @@ void OceanBuoyancySystem::Update(ECS::World& world, float32 /*deltaTime*/)
                 float32 probeY[4]{};
                 for (uint32 i = 0u; i < 4u; ++i)
                 {
-                    const float32 lx = kProbe[i][0] * r;
-                    const float32 lz = kProbe[i][1] * r;
+                    const float32 lx = kProbe[i].x * r;
+                    const float32 lz = kProbe[i].y * r;
                     points[i].X = ox + r0x * lx + r2x * lz;
                     points[i].Z = oz + r0z * lx + r2z * lz;
                     probeY[i] = oy + r0y * lx + r2y * lz;
@@ -105,7 +106,7 @@ void OceanBuoyancySystem::Update(ECS::World& world, float32 /*deltaTime*/)
                 queryState.Handle = collision.Submit(query);
 
                 int32 submerged = 0;
-                float32 waterVelocity[3] = {};
+                Mathematics::Vector3 waterVelocity;
                 for (int32 i = 0; i < 4; ++i)
                 {
                     const float32 wx = points[i].X;

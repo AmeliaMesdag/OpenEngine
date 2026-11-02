@@ -3,7 +3,6 @@
 
 #include "UI/Controls/Mount.h"
 #include "UI/Controls/ScrollView.h"
-#include "UI/Controls/WeightedPane.h"
 #include "UI/Layout/ElementOverrideHelpers.h"
 #include "UI/Layout/YogaLayout.h"
 #include "UI/Parsers/CSSParser.h"
@@ -575,14 +574,6 @@ void RemoveAllYogaChildren(YGNodeRef node)
     }
 }
 
-void ApplyWeightedPaneFlexGrowOverride(GameEngine::UIElement* el, YGNodeRef node)
-{
-    if (!node || !el || el->Kind() != UIElementKind::WeightedPane)
-        return;
-    auto* pane = static_cast<WeightedPane*>(el);
-    YGNodeStyleSetFlexGrow(node, std::max(0.0f, pane->GetFlexWeight()));
-}
-
 void ApplyBlockFlowShrinkDefault(YGNodeRef node,
                                  const GameEngine::ResolvedStyle& style,
                                  const GameEngine::ResolvedStyle* parentStyle)
@@ -1031,26 +1022,6 @@ void UIManager::AddSheetForAnalysis(const Stylesheet* s, UpdateContext& ctx)
         ctx.analysisSheetHash ^= Hashing::HashPointer(s);
 }
 
-void UIManager::ApplyElementStyleOverrides(UIElement* el, ResolvedStyle& cs, bool allowLiveTextureRegistration)
-{
-    if (!el)
-        return;
-    if (const auto* liveBg = el->GetBackgroundImageTextureOverride())
-    {
-        const std::string key = MakeInternalBgKey(el->GetInstanceId());
-        BackgroundImageSource src{};
-        src.Kind = BackgroundImageSource::SourceKind::ResourceName;
-        src.Value = key;
-        cs.Visual.BackgroundImage.Source = std::move(src);
-        cs.Visual.BackgroundImage.HasImage = cs.Visual.BackgroundImage.Source.HasImage();
-
-        // Live background-image textures resolve directly from the element's
-        // override (GetBackgroundImageTextureOverride) during RenderGraph primitive
-        // generation, so no name-keyed registry entry is needed here.
-        (void)allowLiveTextureRegistration;
-    }
-}
-
 // Thread-local buffers for BuildYogaRecursive (capacity retained across frames).
 static thread_local std::vector<GameEngine::UILayout::YogaAdapter::ChildWithOrder> s_OrderedChildrenBuf;
 
@@ -1176,8 +1147,8 @@ bool UIManager::ComputeCascadeShareKey(UIElement* el,
                           el->GetIdHash() == 0 &&
                           !el->HasSelectorAttributes() &&
                           st.CustomStates.empty() &&
-                          el->Overrides().CustomCount() == 0 &&
-                          el->InlineOverrides().CustomCount() == 0 &&
+                          el->Style().CustomCount() == 0 &&
+                          el->InlineStyle().CustomCount() == 0 &&
                           !ProbeShareSensitive(el, tagId, indices);
     if (!eligible)
         return false;
@@ -1315,13 +1286,9 @@ bool UIManager::ResolveCascadeForElement(UIElement* el,
     return sharedFromCache;
 }
 
-// The last thing that touches an element's ResolvedStyle before the Yoga push
-// reads it: the element's own style attribute lands on top of the cascade, then
-// the override bag a script or a control writes (a script's write wins over the
-// style attribute, as a script's inline style does in a browser), then the used values that no
-// single declaration can decide are resolved (border-style and border-width
-// arrive in declaration order, so neither property's applier can settle the
-// pair on its own).
+// The last write to an element's ResolvedStyle before the Yoga push: the `style` attribute on top of
+// the cascade, then Style(), which wins, then the used values no single declaration decides
+// (border-style and border-width arrive in declaration order, so neither applier settles the pair).
 //
 // All three product cascade paths — ReResolvePseudoStateElement,
 // ComputeElementCascade, ConvergePostLayout — call this immediately after
@@ -1336,19 +1303,14 @@ bool UIManager::ResolveCascadeForElement(UIElement* el,
 // itself rather than routing through here.
 void UIManager::FinalizeElementStyle(UIElement* el)
 {
-    if (el->Overrides().PropCount() > 0 ||
-        el->HasBackgroundImageTextureOverride() ||
-        !el->InlineOverrides().IsEmpty())
-    {
-        if (!el->InlineOverrides().IsEmpty())
-            ApplyOverridesToResolvedStyle(el->GetMutableResolvedStyle(), el->InlineOverrides());
-        ApplyOverridesToResolvedStyle(el->GetMutableResolvedStyle(), el->Overrides());
-        ApplyElementStyleOverrides(el, el->GetMutableResolvedStyle(), /*allowLiveTextureRegistration=*/false);
-    }
+    // The authored style attribute first, then Style(), which wins. Each returns at
+    // once when its declaration holds no property.
+    ApplyOverridesToResolvedStyle(el->GetMutableResolvedStyle(), el->InlineStyle());
+    ApplyOverridesToResolvedStyle(el->GetMutableResolvedStyle(), el->Style());
 
     ResolveUsedBorderWidths(el->GetMutableResolvedStyle());
 
-    el->Overrides().ClearDirty();
+    el->Style().ClearDirty();
 }
 
 void UIManager::ReResolvePseudoStateElement(UIElement* el)
@@ -1537,9 +1499,9 @@ bool UIManager::EvaluateSubtreeSkipGate(UIElement* el, const YogaBuildItem& item
         !ctx.computeLayoutSignaturesAll &&
         !hadChildrenDirty &&
         !el->IsDirty(UIElement::SubtreeDirty) &&
-        !el->Overrides().NeedsCascadeRerun() &&
-        !el->Overrides().IsLayoutDirty() &&
-        !el->Overrides().IsVisualDirty();
+        !el->Style().NeedsCascadeRerun() &&
+        !el->Style().IsLayoutDirty() &&
+        !el->Style().IsVisualDirty();
 
     const bool isDisplayNone = el->GetResolvedStyle().Layout.DisplayMode == DisplayMode::None;
 
@@ -1585,9 +1547,9 @@ bool UIManager::EvaluateSubtreeSkipGate(UIElement* el, const YogaBuildItem& item
         if (ctx.forceGlobalStyle || ctx.computeLayoutSignaturesAll) bump(2u  , 1);
         if (hadChildrenDirty)                                       bump(4u  , 2);
         if (el->IsDirty(UIElement::SubtreeDirty))                   bump(8u  , 3);
-        if (el->Overrides().NeedsCascadeRerun())                    bump(16u , 4);
-        if (el->Overrides().IsLayoutDirty())                        bump(32u , 5);
-        if (el->Overrides().IsVisualDirty())                        bump(64u , 6);
+        if (el->Style().NeedsCascadeRerun())                    bump(16u , 4);
+        if (el->Style().IsLayoutDirty())                        bump(32u , 5);
+        if (el->Style().IsVisualDirty())                        bump(64u , 6);
         if (el->GetResolvedStyle().Layout.DisplayMode == DisplayMode::None) bump(128u, 7);
         if (!retained->CachedSubtreeValid)                          bump(256u, 8);
         if (retained->PrevLocalSheetsHash != localSheetsHashNow)    bump(512u, 9);
@@ -1770,7 +1732,7 @@ void UIManager::ComputeElementCascade(UIElement* el, const ResolvedStyle* parent
     const bool needCascade =
         forceCascade || ctx.forceGlobalStyle || item.IsFreshNode ||
         el->IsDirty(UIElement::StyleDirty) ||
-        el->Overrides().NeedsCascadeRerun();
+        el->Style().NeedsCascadeRerun();
     item.NeedCascade = needCascade;
 
     // MT-4.1 seam: the cascade must stay Yoga-free AND manager-container-free
@@ -1806,7 +1768,7 @@ void UIManager::ComputeElementCascade(UIElement* el, const ResolvedStyle* parent
     }
 
     const bool overridesDirty =
-        el->Overrides().IsLayoutDirty() || el->Overrides().IsVisualDirty();
+        el->Style().IsLayoutDirty() || el->Style().IsVisualDirty();
     item.OverridesDirty = overridesDirty;
 
     if (needCascade || overridesDirty)
@@ -1906,7 +1868,7 @@ BuiltNode UIManager::ApplyElementBuild(UIElement* el, const ResolvedStyle* paren
     }
 
     // Reported to the parent via BuiltNode so an order-only mutation (e.g.
-    // an Overrides().Set(Style::Order), which raises just LayoutDirty)
+    // an Style().Set(Style::Order), which raises just LayoutDirty)
     // still triggers the parent's child re-attach.
     bool orderChangedSinceLastBuild = false;
 
@@ -2056,9 +2018,6 @@ BuiltNode UIManager::ApplyElementBuild(UIElement* el, const ResolvedStyle* paren
                                          : 0;
             }
 
-            auto* wp = (el->Kind() == UIElementKind::WeightedPane) ? static_cast<WeightedPane*>(el) : nullptr;
-            const float effectiveFlexGrow = (wp ? std::max(0.0f, wp->GetFlexWeight()) : cs.Layout.FlexGrow);
-
             // Not derivable from cs.Layout: the container decides it, and this
             // element's own style is unchanged when the container flips.
             const bool parentBlockFlow =
@@ -2068,8 +2027,8 @@ BuiltNode UIManager::ApplyElementBuild(UIElement* el, const ResolvedStyle* paren
                 !retainedNode.HasPrevInputs ||
                 retainedNode.PrevLayout != cs.Layout ||
                 retainedNode.PrevMeasure != curMeasure ||
-                retainedNode.PrevFlexGrowOverride != effectiveFlexGrow ||
-                retainedNode.PrevParentBlockFlow != parentBlockFlow;
+                retainedNode.PrevParentBlockFlow != parentBlockFlow ||
+                ctx.ViewportBasisMoved(retainedNode.PrevViewportBasis);
 
             orderChangedSinceLastBuild =
                 retainedNode.HasPrevInputs && retainedNode.PrevLayout.Order != cs.Layout.Order;
@@ -2080,16 +2039,13 @@ BuiltNode UIManager::ApplyElementBuild(UIElement* el, const ResolvedStyle* paren
                                                ctx.prof ? &ctx.prof->YogaApplyMs : nullptr);
                 retainedNode.PrevLayout = cs.Layout;
                 retainedNode.PrevMeasure = curMeasure;
-                retainedNode.PrevFlexGrowOverride = effectiveFlexGrow;
                 retainedNode.PrevParentBlockFlow = parentBlockFlow;
                 retainedNode.HasPrevInputs = true;
                 ctx.anyLayoutSignatureChanged = true;
-                YogaAdapter::ApplyStyle(n, cs);
+                retainedNode.PrevViewportBasis = YogaAdapter::ApplyStyle(n, cs, ctx.ViewportBasis())
+                                                     ? ctx.ViewportBasis()
+                                                     : Mathematics::Vector2{};
                 ApplyBlockFlowShrinkDefault(n, cs, parentStyle);
-                if (wp)
-                {
-                    YGNodeStyleSetFlexGrow(n, std::max(0.0f, effectiveFlexGrow));
-                }
                 // YGNodeSetMeasureFunc does not dirty the node when the same function
                 // pointer is re-set (Yoga 3.x). Explicitly dirty the node so
                 // CalculateLayout calls MeasureTextFn with the updated text context
@@ -2248,9 +2204,9 @@ BuiltNode UIManager::ApplyElementBuild(UIElement* el, const ResolvedStyle* paren
             UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::ChildrenDirty;
         const bool selfClean =
             (el->IsDirty(kLayoutAffecting) == false) &&
-            !el->Overrides().NeedsCascadeRerun() &&
-            !el->Overrides().IsLayoutDirty() &&
-            !el->Overrides().IsVisualDirty();
+            !el->Style().NeedsCascadeRerun() &&
+            !el->Style().IsLayoutDirty() &&
+            !el->Style().IsVisualDirty();
         if (selfClean)
         {
             bool anyChildSubtreeDirty = false;
@@ -2880,7 +2836,7 @@ void UIManager::ConvergePostLayout(YGNodeRef& rootNode, UpdateContext& ctx)
         auto visitor = [&](UIElement* el) {
             YGNodeRef node = el->m_YogaState ? el->m_YogaState->Node : nullptr;
             if (node && (el->IsDirty(UIElement::StyleDirty) ||
-                         el->Overrides().NeedsCascadeRerun()))
+                         el->Style().NeedsCascadeRerun()))
             {
                 // See ReResolvePseudoStateElement: a stale id resolves to an
                 // empty pool. Only a build walk re-primes it, so escalate to
@@ -2945,7 +2901,8 @@ void UIManager::ConvergePostLayout(YGNodeRef& rootNode, UpdateContext& ctx)
                     parentStyle && EstablishesBlockFlow(parentStyle->Layout.DisplayMode);
                 const bool inputsChanged = !retained || !retained->HasPrevInputs ||
                                            retained->PrevLayout != cs2.Layout ||
-                                           retained->PrevParentBlockFlow != parentBlockFlow;
+                                           retained->PrevParentBlockFlow != parentBlockFlow ||
+                                           ctx.ViewportBasisMoved(retained->PrevViewportBasis);
                 if (inputsChanged)
                 {
                     if (retained)
@@ -2954,10 +2911,11 @@ void UIManager::ConvergePostLayout(YGNodeRef& rootNode, UpdateContext& ctx)
                         retained->PrevParentBlockFlow = parentBlockFlow;
                         retained->HasPrevInputs = true;
                     }
-                    YogaAdapter::ApplyStyle(node, cs2);
+                    const bool usesViewportUnits = YogaAdapter::ApplyStyle(node, cs2, ctx.ViewportBasis());
+                    if (retained)
+                        retained->PrevViewportBasis = usesViewportUnits ? ctx.ViewportBasis() : Mathematics::Vector2{};
                     ApplyBlockFlowShrinkDefault(node, cs2, parentStyle);
                 }
-                ApplyWeightedPaneFlexGrowOverride(el, node);
 
                 const DisplayMode nextDisplay = cs2.Layout.DisplayMode;
                 const uint32_t yogaChildCount = (uint32_t)YGNodeGetChildCount(node);

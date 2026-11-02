@@ -185,7 +185,7 @@ std::string SpanOverrideProblem(const Components::SplineFence& fence, uint32 slo
         const std::string lack = hasPart ? "the fence's " + kindName + " part has no mesh"
                                          : "the fence has no " + kindName + " part";
         return gate ? name + " is an opening: " + lack +
-                          ". Nothing stands in it, so it cannot be selected in the scene view again. " + fix
+                          ". Nothing stands in it, so it cannot be selected in the Scene View again. " + fix
                     : name + " places nothing: " + lack + ". " + fix;
     }
     if (entry.PoolSlot >= pool)

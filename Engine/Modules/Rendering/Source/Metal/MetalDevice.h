@@ -2,11 +2,13 @@
 
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/CommandList.h"
+#include "Types/Types.h"
 
 #include "MetalArgumentBufferLayout.h"
 #include "MetalHdrOutput.h"
 #include "MetalSubmitQueue.h"
 #include "MetalTransientDescriptorArena.h"
+#include "Types/InlineVector.h"
 
 #include <Metal/Metal.hpp>
 #include <QuartzCore/QuartzCore.hpp>
@@ -77,6 +79,14 @@ struct MetalSemaphore
     MTL::SharedEvent* event = nullptr; // owned (+1)
 };
 
+// One resident of a descriptor set as the command list declares it to the
+// encoder: the resource and whether a shader may write it.
+struct MetalCompactResident
+{
+    MTL::Resource* Resource = nullptr;
+    bool Writable = false;
+};
+
 // One descriptor set = one Metal 3 argument table (Tier2, raw 8-byte slots)
 // plus the residency list the command list passes to useResource.
 //
@@ -97,14 +107,14 @@ struct MetalDescriptorSet
     MetalArgumentBufferLayout layout;
     // Indexed by slot id; nullptr where nothing is bound (or for samplers,
     // which need no residency).
-    std::vector<MTL::Resource*> residentResources;
-    std::vector<uint8_t> residentWritable; // parallel: needs Write usage
+    InlineVector<MTL::Resource*, 8> residentResources;
+    InlineVector<uint8_t, 8> residentWritable; // parallel: needs Write usage
     // Parallel: a buffer created with BufferUsage::Indirect (draw records or
     // counts).
-    std::vector<uint8_t> residentIndirectArguments;
-    // Compacted (resource, writable) pairs rebuilt lazily after updates so
-    // binding a sparse bindless array doesn't walk thousands of empty slots.
-    std::vector<std::pair<MTL::Resource*, bool>> compactResidents;
+    InlineVector<uint8_t, 8> residentIndirectArguments;
+    // Compacted residents rebuilt lazily after updates so binding a sparse
+    // bindless array doesn't walk thousands of empty slots.
+    InlineVector<MetalCompactResident, 8> compactResidents;
     // Rebuilt with compactResidents: a writable resident is an indirect-
     // argument buffer, so a render pass that binds the set may rewrite draw
     // records or counts.
@@ -119,14 +129,14 @@ struct MetalDescriptorSet
 
     void RebuildCompactResidents()
     {
-        compactResidents.clear();
+        compactResidents.Clear();
         writesIndirectArguments = false;
-        for (size_t i = 0; i < residentResources.size(); ++i)
+        for (size_t slot = 0; slot < residentResources.Size(); ++slot)
         {
-            if (residentResources[i] != nullptr)
+            if (residentResources[slot] != nullptr)
             {
-                compactResidents.emplace_back(residentResources[i], residentWritable[i] != 0);
-                if (residentWritable[i] != 0 && residentIndirectArguments[i] != 0)
+                compactResidents.PushBack({residentResources[slot], residentWritable[slot] != 0});
+                if (residentWritable[slot] != 0 && residentIndirectArguments[slot] != 0)
                 {
                     writesIndirectArguments = true;
                 }
@@ -134,7 +144,7 @@ struct MetalDescriptorSet
         }
         for (MTL::Resource* resource : extraResidentReads)
         {
-            compactResidents.emplace_back(resource, false);
+            compactResidents.PushBack({resource, false});
         }
         residentsDirty = false;
     }
@@ -363,16 +373,13 @@ class MetalDevice : public IDevice
     void ArmGpuCaptureIfRequested();
     void EndGpuCaptureIfActive();
 
-    // Buffers consumed through GetBufferDeviceAddress are invisible to Metal's
-    // automatic residency (the GPU sees a raw pointer, not a binding), so every
-    // encoder declares the whole BDA registry via useResource. Brute force but
-    // correct; residency sets are the planned optimization.
-    // Seeds `residentCache` so command lists skip redundant per-draw
-    // useResource calls for buffers already covered by the blanket pass.
+    // Declares on the encoder each buffer that shaders read or write through a device address. Metal sees
+    // no binding for such a buffer. The function records each buffer and its usage in `residentCache`.
+    // With a residency set, the function does nothing.
     void DeclareDeviceAddressResidency(MTL::RenderCommandEncoder* encoder,
-                                       std::unordered_map<MTL::Resource*, MTL::ResourceUsage>& residentCache);
+                                       FastHashMap<MTL::Resource*, MTL::ResourceUsage>& residentCache);
     void DeclareDeviceAddressResidency(MTL::ComputeCommandEncoder* encoder,
-                                       std::unordered_map<MTL::Resource*, MTL::ResourceUsage>& residentCache);
+                                       FastHashMap<MTL::Resource*, MTL::ResourceUsage>& residentCache);
 
     // Residency-set / fence path (GE_METAL_RESIDENCY_SET). When enabled, command
     // lists drive the compute->draw hazard through this fence instead of the

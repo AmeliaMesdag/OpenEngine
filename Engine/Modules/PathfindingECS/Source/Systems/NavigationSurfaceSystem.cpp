@@ -36,6 +36,7 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <exception>
 
 namespace GameEngine::PathfindingECS
 {
@@ -325,6 +326,7 @@ struct NavigationSurfaceSystem::SurfaceRecord
     bool KnowsSettings = false;
     uint64 SettingsHash = 0;
     std::unique_ptr<NavigationMeshBake> MeshBake;
+    std::unique_ptr<NavigationGridBake> GridBake;
     // The tiles the mesh's last bake laid out from (0, 0): a bake over the same chart and extent
     // replaces them in place.
     uint32 MeshTilesX = 0;
@@ -555,7 +557,7 @@ void NavigationSurfaceSystem::Update(ECS::World& world, float32 /*deltaTime*/)
             UpdateSurface(world, entity, surface, placed ? transform : nullptr, placed, pool);
         });
 
-    // A record not visited this update belongs to a surface that is gone: dropping it abandons its
+    // A record not visited this update belongs to a surface that is gone: dropping it cancels its
     // bake's jobs, which own everything they touch.
     std::erase_if(m_Surfaces, [this](const auto& entry) { return entry.second->LastUpdate != m_UpdateIndex; });
     ReleaseUnboundMaps(world);
@@ -592,10 +594,12 @@ void NavigationSurfaceSystem::UpdateSurface(ECS::World& world, ECS::EntityHandle
 
     // A surface with no live map bakes as soon as it is seen: a new surface, a loaded scene, a world
     // restored from bytes whose maps were released.
+    // A grid bake in flight has no map to publish into, so it is cancelled.
     if (!bound.IsValid())
     {
         ForgetNavigationSurfaceMap(surface);
         record.Pending = true;
+        record.GridBake.reset();
     }
     if (surface.BakeRequested)
     {
@@ -606,10 +610,16 @@ void NavigationSurfaceSystem::UpdateSurface(ECS::World& world, ECS::EntityHandle
     // A phase this system is not running came with the component's bytes (an undo restoring a
     // snapshot taken mid-bake, a bake another system instance started): bake again.
     const bool inProgress = surface.BakePhase == NavigationBakePhase::Baking || surface.BakePhase == NavigationBakePhase::Waiting;
-    if (inProgress && !record.MeshBake)
+    if (inProgress && !record.MeshBake && !record.GridBake)
         record.Pending = true;
-    if (record.Pending && placed)
-        StartBake(world, entity, surface, transform, record);
+    // A surface runs one grid bake at a time. A finished one read newer sources than the map holds,
+    // so it is published even when another bake is pending; a bake requested while one runs waits
+    // for it and starts from a fresh snapshot in the update that publishes it. Publishing comes
+    // before StartBake, so a grid bake started on the pool is published in a later update.
+    if (record.GridBake)
+        PublishGridBake(world, entity, surface, record);
+    if (record.Pending && placed && !record.GridBake)
+        StartBake(world, entity, surface, transform, pool, record);
     if (record.MeshBake)
         StepMeshBake(world, entity, surface, pool, record);
     if (surface.Mode == NavigationSurfaceMode::Mesh && surface.BakedMode == NavigationSurfaceMode::Mesh &&
@@ -640,7 +650,8 @@ void NavigationSurfaceSystem::ReleaseUnboundMaps(ECS::World& world)
 }
 
 void NavigationSurfaceSystem::StartBake(ECS::World& world, ECS::EntityHandle entity, NavigationSurface& surface,
-                                        const Components::WorldTransform* transform, SurfaceRecord& record)
+                                        const Components::WorldTransform* transform,
+                                        JobSystem::WorkStealingThreadPool* pool, SurfaceRecord& record)
 {
     const NavigationTerrainSource terrain = ResolveNavigationTerrainSource(world, transform);
     if (terrain.Loading)
@@ -650,7 +661,7 @@ void NavigationSurfaceSystem::StartBake(ECS::World& world, ECS::EntityHandle ent
         return;
     }
     // The recipes write roads, walls and the ground under them: a bake before they settle reads
-    // part of the scene. This update runs on a job, so it reads the recipe system's last answer.
+    // part of the scene. This update runs on a job, so it calls the recipe check that a job can call.
     if (!SplineRecipes::IsSceneSettledAtLastUpdate(world))
     {
         surface.BakePhase = NavigationBakePhase::Waiting;
@@ -698,10 +709,22 @@ void NavigationSurfaceSystem::StartBake(ECS::World& world, ECS::EntityHandle ent
         }
     }
 
-    auto geometry = std::make_shared<const NavigationStaticGeometry>(GatherNavigationStaticGeometry(world));
-    const NavigationBounds bounds = NavigationSurfaceBounds(surface, transform, terrain, *geometry);
+    // Building the static triangles is the largest part of reading the sources. Bounds fitted with no
+    // planar terrain are the triangles' bounds, and bounds the terrain does not reach are empty unless a
+    // triangle is inside; a mesh bake reads them here too. Otherwise a grid bake snapshots the sources
+    // once the terrain under its cells is resident, and builds the triangles in its job.
+    std::shared_ptr<const NavigationStaticGeometry> geometry;
+    if (surface.FitBounds && !terrain.Query.IsValid())
+        geometry = std::make_shared<const NavigationStaticGeometry>(
+            BuildNavigationStaticGeometry(SnapshotNavigationGeometrySources(world, FindEngineMeshRegistry()), pool, nullptr));
+    const NavigationStaticGeometry noGeometry;
+    const NavigationBounds bounds = NavigationSurfaceBounds(surface, transform, terrain, geometry ? *geometry : noGeometry);
+    const bool terrainInside = terrain.OverlapsXZ(bounds.Min[0], bounds.Min[2], bounds.Max[0], bounds.Max[2]);
+    if (!geometry && (surface.Mode == NavigationSurfaceMode::Mesh || !terrainInside))
+        geometry = std::make_shared<const NavigationStaticGeometry>(
+            BuildNavigationStaticGeometry(SnapshotNavigationGeometrySources(world, FindEngineMeshRegistry()), pool, nullptr));
     surface.BakeFailure = NavigationBakeFailure::None;
-    if (!HasGeometryInside(bounds, terrain, *geometry))
+    if (!HasGeometryInside(bounds, terrain, geometry ? *geometry : noGeometry))
     {
         surface.BakePhase = NavigationBakePhase::Failed;
         surface.BakeFailure = terrain.Spherical ? NavigationBakeFailure::SphericalTerrain : NavigationBakeFailure::NoGeometry;
@@ -711,7 +734,7 @@ void NavigationSurfaceSystem::StartBake(ECS::World& world, ECS::EntityHandle ent
     }
 
     if (surface.Mode == NavigationSurfaceMode::Grid)
-        BakeGrid(world, entity, surface, terrain, *geometry, bounds, record);
+        StartGridBake(world, entity, surface, terrain, std::move(geometry), bounds, pool, record);
     else
         StartMeshBake(world, entity, surface, terrain, std::move(geometry), bounds, std::move(bakedData), record);
 }
@@ -948,7 +971,7 @@ void NavigationSurfaceSystem::UpdateDirtyTiles(ECS::World& world, ECS::EntityHan
     {
         // A mesh another system instance baked: its chart and agent are the mesh's own, its extent
         // the surface's bounds now, and what it was built from is taken as the current state.
-        record.Geometry = std::make_shared<const NavigationStaticGeometry>(GatherNavigationStaticGeometry(world));
+        record.Geometry = std::make_shared<const NavigationStaticGeometry>(GatherNavigationStaticGeometry(world, FindEngineMeshRegistry()));
         const NavigationBakeExtent extent =
             NavigationBakeExtentOf(surface, NavigationSurfaceBounds(surface, transform, terrain, *record.Geometry));
         record.MeshKnown = true;
@@ -972,7 +995,7 @@ void NavigationSurfaceSystem::UpdateDirtyTiles(ECS::World& world, ECS::EntityHan
     }
     if (!record.PendingBoxes.empty())
     {
-        record.Geometry = std::make_shared<const NavigationStaticGeometry>(GatherNavigationStaticGeometry(world));
+        record.Geometry = std::make_shared<const NavigationStaticGeometry>(GatherNavigationStaticGeometry(world, FindEngineMeshRegistry()));
         touched.insert(touched.end(), record.PendingBoxes.begin(), record.PendingBoxes.end());
         record.PendingBoxes.clear();
     }
@@ -1035,11 +1058,14 @@ void NavigationSurfaceSystem::UpdateDirtyTiles(ECS::World& world, ECS::EntityHan
     surface.TilesBaking = record.Rebake ? record.Rebake->GetTileCount() - record.Rebake->GetFinishedTileCount() : 0u;
 }
 
-void NavigationSurfaceSystem::BakeGrid(ECS::World& world, ECS::EntityHandle entity, NavigationSurface& surface,
-                                       const NavigationTerrainSource& terrain, const NavigationStaticGeometry& geometry,
-                                       const NavigationBounds& bounds, SurfaceRecord& record)
+void NavigationSurfaceSystem::StartGridBake(ECS::World& world, ECS::EntityHandle entity, NavigationSurface& surface,
+                                            const NavigationTerrainSource& terrain,
+                                            std::shared_ptr<const NavigationStaticGeometry> geometry,
+                                            const NavigationBounds& bounds, JobSystem::WorkStealingThreadPool* pool,
+                                            SurfaceRecord& record)
 {
-    Pathfinding::GridSettings settings;
+    NavigationGridBakeInput input;
+    Pathfinding::GridSettings& settings = input.Settings;
     settings.Type = surface.GridType;
     settings.CellSize = surface.CellSize;
     settings.OriginX = bounds.Min[0];
@@ -1066,12 +1092,57 @@ void NavigationSurfaceSystem::BakeGrid(ECS::World& world, ECS::EntityHandle enti
     settings.Depth = extent.Z;
 
     Mathematics::Vector3 waitPoint;
-    std::unique_ptr<Pathfinding::GridMap> grid =
-        BakeNavigationGrid(settings, terrain, geometry, surface.StepHeight, surface.AgentHeight, waitPoint);
-    if (!grid)
+    if (!SampleNavigationGridTerrain(settings, terrain, input.TerrainHeights, waitPoint))
     {
         WaitForTerrainHeight(surface, terrain, waitPoint);
         record.Pending = true;
+        return;
+    }
+    if (!geometry)
+        input.Sources = SnapshotNavigationGeometrySources(world, FindEngineMeshRegistry());
+    input.Geometry = std::move(geometry);
+    input.StepHeight = surface.StepHeight;
+    input.AgentHeight = surface.AgentHeight;
+    record.GridBake = std::make_unique<NavigationGridBake>(std::move(input), pool);
+    surface.BakePhase = NavigationBakePhase::Baking;
+    surface.BakeDone = 0;
+    surface.BakeTotal = static_cast<uint32>(cells);
+    // With no pool the bake ran in the constructor: it is published in this update, as it was made.
+    if (!pool)
+        PublishGridBake(world, entity, surface, record);
+}
+
+void NavigationSurfaceSystem::PublishGridBake(ECS::World& world, ECS::EntityHandle entity, NavigationSurface& surface,
+                                              SurfaceRecord& record)
+{
+    if (!record.GridBake->IsComplete())
+        return;
+    const std::unique_ptr<NavigationGridBake> bake = std::move(record.GridBake);
+    // An undo can bind the surface to another kind of map: bake again for what it names.
+    if (!ResolveNavigationSurfaceGrid(world, surface))
+    {
+        record.Pending = true;
+        return;
+    }
+    std::unique_ptr<Pathfinding::GridMap> grid;
+    try
+    {
+        grid = bake->TakeGrid();
+    }
+    catch (const std::exception& error)
+    {
+        surface.BakePhase = NavigationBakePhase::Failed;
+        surface.BakeFailure = NavigationBakeFailure::GridBuild;
+        Logger::Log::Error("[PathfindingECS] Navigation surface on entity {}: the grid bake failed: {}", entity.id,
+                           error.what());
+        return;
+    }
+    catch (...)
+    {
+        surface.BakePhase = NavigationBakePhase::Failed;
+        surface.BakeFailure = NavigationBakeFailure::GridBuild;
+        Logger::Log::Error("[PathfindingECS] Navigation surface on entity {}: the grid bake failed: unknown error",
+                           entity.id);
         return;
     }
     ApplyAuthoredCells(surface, entity, *grid);

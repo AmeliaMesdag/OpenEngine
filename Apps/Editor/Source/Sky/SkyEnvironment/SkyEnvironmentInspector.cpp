@@ -256,20 +256,20 @@ static void AddSkyEnvironmentDayKeyGradientRow(
     if (rowLabel)
         rowLabel->AddClass("inspector-label-no-drag");
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Stretch)
         .Set(Style::Gap, StyleLength::Px(4.0f));
 
     auto bar = std::make_unique<SkyDayKeyGradientBar>();
-    bar->Overrides()
+    bar->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(120.0f));
     SkyDayKeyGradientBar* barRaw = bar.get();
     fieldContainer->AddChild(std::move(bar));
 
     auto labelsRow = std::make_unique<UIElement>();
-    labelsRow->Overrides()
+    labelsRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
@@ -281,7 +281,7 @@ static void AddSkyEnvironmentDayKeyGradientRow(
         stopLabel->SetText(kSkyDayKeyCaptions[i]);
         stopLabel->AddClass("inspector-text");
         stopLabel->AddClass("sky-day-key-label");
-        stopLabel->Overrides()
+        stopLabel->Style()
             .Set(Style::FontSize, StyleLength::Px(10.0f))
             .Set(Style::FlexGrow, 1.0f)
             .Set(Style::MinWidth, StyleLength::Px(0.0f))
@@ -866,7 +866,7 @@ void RegisterSkyEnvironmentInspector()
                 "Hour of day (0–24). Scrub continuously for in-between hours.");
             UIElement* todWrap = InspectorUI::AddFieldContainer(todRow);
             InspectorDrag::ApplySliderWithValueContainerStyle(todWrap);
-            todWrap->Overrides()
+            todWrap->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(4.0f));
@@ -1218,7 +1218,7 @@ void RegisterSkyEnvironmentInspector()
                 "Day time stop",
                 "Snap Time of Day to one of the four day-key stops. The continuous slider above is unchanged.");
             UIElement* dayStopWrap = InspectorUI::AddFieldContainer(dayStopRow);
-            dayStopWrap->Overrides()
+            dayStopWrap->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(8.0f));
@@ -1235,7 +1235,7 @@ void RegisterSkyEnvironmentInspector()
 
             auto dayStopValueLabel = std::make_unique<Label>();
             dayStopValueLabel->AddClass("inspector-value");
-            dayStopValueLabel->Overrides()
+            dayStopValueLabel->Style()
                 .Set(Style::Width, StyleLength::Px(64.0f))
                 .Set(Style::PaddingLeft, StyleLength::Px(8.0f))
                 .Set(Style::PaddingRight, StyleLength::Px(8.0f));

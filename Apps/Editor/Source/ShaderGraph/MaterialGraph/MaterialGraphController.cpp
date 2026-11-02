@@ -37,7 +37,7 @@ void ApplyToggleState(Button* button, bool active)
 {
     if (!button)
         return;
-    button->Overrides().Set(Style::Display, DisplayMode::Flex);
+    button->Style().Set(Style::Display, DisplayMode::Flex);
     if (active)
         button->AddClass("icon-active");
     else
@@ -56,7 +56,7 @@ void ApplyCompileStatusDotStyle(UIElement& dot, bool upToDate)
 {
     const float radius = kCompileStatusDotSizePx * 0.5f;
     const CornerRadiiTLTRBRBL cornerRadius{radius, radius, radius, radius};
-    dot.Overrides()
+    dot.Style()
         .Set(Style::Width, StyleLength::Px(kCompileStatusDotSizePx))
         .Set(Style::Height, StyleLength::Px(kCompileStatusDotSizePx))
         .Set(Style::MinWidth, StyleLength::Px(kCompileStatusDotSizePx))
@@ -265,7 +265,7 @@ void MaterialGraphController::SyncToolbar(const ToolbarItems& items)
 
     if (items.CompileWrap && items.Compile && items.CompileStatusDot)
     {
-        items.CompileWrap->Overrides().Set(Style::Display, DisplayMode::Flex);
+        items.CompileWrap->Style().Set(Style::Display, DisplayMode::Flex);
         if (m_CompileUpToDate)
         {
             items.CompileStatusDot->AddClass("up-to-date");

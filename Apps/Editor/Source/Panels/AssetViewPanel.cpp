@@ -3,6 +3,8 @@
 #include "AssetCore/SharedFileRead.h"
 #include "Editor/EditorPaths.h"
 #include "EditorContext.h"
+#include "Engine/Rendering/RenderServices.h"
+#include "Engine/Rendering/StagingViewPool.h"
 #include "Image/Decode.h"
 #include "Image/Encode.h"
 #include "Logger/Logger.h"
@@ -10,6 +12,7 @@
 #include "Platform/SystemMetrics.h"
 #include "Thumbnails/IThumbnailProvider.h"
 #include "Thumbnails/ModelThumbnail/ModelThumbnailHandler.h"
+#include "UI/Controls/StagingViewport.h"
 #include "Editor/Shortcuts/EditorShortcuts.h"
 #include "UI/UIElement.h"
 #include "UI/UIManager.h"
@@ -259,6 +262,7 @@ AssetViewPanel::AssetViewPanel()
 
 AssetViewPanel::~AssetViewPanel()
 {
+    ReleasePreviewStagingView();
     DrainRetiredVideoTextures(true);
     StopVideoPreview();
 }
@@ -270,7 +274,7 @@ void AssetViewPanel::EnsureUi()
 
     auto root = std::make_unique<UIElement>();
     root->AddClass("asset-view-panel-root");
-    root->Overrides()
+    root->Style()
         .Set(Style::Position, PositionType::Relative)
         .Set(Style::Width, StyleLength::Percent(100.0f))
         .Set(Style::Height, StyleLength::Percent(100.0f));
@@ -278,12 +282,12 @@ void AssetViewPanel::EnsureUi()
     auto image = std::make_unique<UIElement>();
     image->SetId("asset-view-preview-image");
     image->AddClass("asset-view-image");
-    image->Overrides()
+    image->Style()
         .Set(Style::Width, StyleLength::Percent(100.0f))
         .Set(Style::Height, StyleLength::Percent(100.0f))
         .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain})
         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
-        .Set(Style::BackgroundPosition, BackgroundPositionValue{50.0f, true, 50.0f, true})
+        .Set(Style::BackgroundPosition, BackgroundPositionValue::Percent(50.0f, 50.0f))
         // This preview shows the raw texture, not a 9-sliced UI background, so the
         // previewed asset's own Sliced import setting must not lay it out. An
         // all-zero border-image slice replaces that intrinsic slice with none,
@@ -468,7 +472,7 @@ void AssetViewPanel::EnsureUi()
     root->AddChild(std::move(image));
 
     auto animBadgeRow = std::make_unique<UIElement>();
-    animBadgeRow->Overrides()
+    animBadgeRow->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionRight, StyleLength::Px(0.0f))
@@ -479,7 +483,7 @@ void AssetViewPanel::EnsureUi()
     m_AnimBadgeRow = animBadgeRow.get();
 
     auto animBadgeBubble = std::make_unique<UIElement>();
-    animBadgeBubble->Overrides()
+    animBadgeBubble->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::Width, StyleLength::Px(kAnimationBadgeWidthPx))
         .Set(Style::Height, StyleLength::Px(28.0f))
@@ -508,7 +512,7 @@ void AssetViewPanel::EnsureUi()
         button->AddClass("asset-view-anim-arrow");
         button->SetText("");
         button->SetTooltip(tooltip);
-        button->Overrides()
+        button->Style()
             .Set(Style::Width, StyleLength::Px(24.0f))
             .Set(Style::Height, StyleLength::Px(24.0f))
             .Set(Style::MinWidth, StyleLength::Px(24.0f))
@@ -526,19 +530,19 @@ void AssetViewPanel::EnsureUi()
         button->RegisterEventHandler(kEventMouseEnter, [](UIEvent& e) {
             if (auto* target = e.CurrentTarget)
             {
-                target->Overrides().Set(Style::Opacity, kAnimationArrowHoverOpacity);
+                target->Style().Set(Style::Opacity, kAnimationArrowHoverOpacity);
                 target->MarkDirty(UIElement::VisualDirty);
             }
         });
         button->RegisterEventHandler(kEventMouseLeave, [](UIEvent& e) {
             if (auto* target = e.CurrentTarget)
             {
-                target->Overrides().Set(Style::Opacity, kAnimationArrowIdleOpacity);
+                target->Style().Set(Style::Opacity, kAnimationArrowIdleOpacity);
                 target->MarkDirty(UIElement::VisualDirty);
             }
         });
         button->SetOnMouseDown([](Button& b) {
-            b.Overrides().Set(Style::Opacity, kAnimationArrowHoverOpacity);
+            b.Style().Set(Style::Opacity, kAnimationArrowHoverOpacity);
             b.MarkDirty(UIElement::VisualDirty);
         });
         button->RegisterEventHandler(kEventButtonClick, [this, deltaSteps](UIEvent&) {
@@ -553,7 +557,7 @@ void AssetViewPanel::EnsureUi()
 
     auto animLabel = std::make_unique<Label>();
     animLabel->SetText("");
-    animLabel->Overrides()
+    animLabel->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::FlexShrink, 1.0f)
         .Set(Style::FlexBasis, StyleLength::Px(0.0f))
@@ -578,7 +582,7 @@ void AssetViewPanel::EnsureUi()
     root->AddChild(std::move(animBadgeRow));
 
     auto hdriExposureRow = std::make_unique<UIElement>();
-    hdriExposureRow->Overrides()
+    hdriExposureRow->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionRight, StyleLength::Px(0.0f))
@@ -589,7 +593,7 @@ void AssetViewPanel::EnsureUi()
     m_HdriExposureBadgeRow = hdriExposureRow.get();
 
     auto hdriExposureBubble = std::make_unique<UIElement>();
-    hdriExposureBubble->Overrides()
+    hdriExposureBubble->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::Width, StyleLength::Px(kAnimationBadgeWidthPx))
         .Set(Style::Height, StyleLength::Px(28.0f))
@@ -610,7 +614,7 @@ void AssetViewPanel::EnsureUi()
         button->AddClass("asset-view-anim-arrow");
         button->SetText("");
         button->SetTooltip(tooltip);
-        button->Overrides()
+        button->Style()
             .Set(Style::Width, StyleLength::Px(24.0f))
             .Set(Style::Height, StyleLength::Px(24.0f))
             .Set(Style::MinWidth, StyleLength::Px(24.0f))
@@ -628,19 +632,19 @@ void AssetViewPanel::EnsureUi()
         button->RegisterEventHandler(kEventMouseEnter, [](UIEvent& e) {
             if (auto* target = e.CurrentTarget)
             {
-                target->Overrides().Set(Style::Opacity, kAnimationArrowHoverOpacity);
+                target->Style().Set(Style::Opacity, kAnimationArrowHoverOpacity);
                 target->MarkDirty(UIElement::VisualDirty);
             }
         });
         button->RegisterEventHandler(kEventMouseLeave, [](UIEvent& e) {
             if (auto* target = e.CurrentTarget)
             {
-                target->Overrides().Set(Style::Opacity, kAnimationArrowIdleOpacity);
+                target->Style().Set(Style::Opacity, kAnimationArrowIdleOpacity);
                 target->MarkDirty(UIElement::VisualDirty);
             }
         });
         button->SetOnMouseDown([](Button& b) {
-            b.Overrides().Set(Style::Opacity, kAnimationArrowHoverOpacity);
+            b.Style().Set(Style::Opacity, kAnimationArrowHoverOpacity);
             b.MarkDirty(UIElement::VisualDirty);
         });
         button->RegisterEventHandler(kEventButtonClick, [this, deltaEV](UIEvent&) {
@@ -655,7 +659,7 @@ void AssetViewPanel::EnsureUi()
 
     auto exposureLabel = std::make_unique<Label>();
     exposureLabel->SetText("");
-    exposureLabel->Overrides()
+    exposureLabel->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::FlexShrink, 1.0f)
         .Set(Style::FlexBasis, StyleLength::Px(0.0f))
@@ -679,7 +683,7 @@ void AssetViewPanel::EnsureUi()
     root->AddChild(std::move(hdriExposureRow));
 
     auto filterBadgeRow = std::make_unique<UIElement>();
-    filterBadgeRow->Overrides()
+    filterBadgeRow->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionRight, StyleLength::Px(0.0f))
@@ -692,7 +696,7 @@ void AssetViewPanel::EnsureUi()
     m_FilterBadgeRow = filterBadgeRow.get();
 
     auto filterBadge = std::make_unique<UIElement>();
-    filterBadge->Overrides()
+    filterBadge->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::Width, StyleLength::Px(160.0f))
         .Set(Style::Height, StyleLength::Px(24.0f))
@@ -705,7 +709,7 @@ void AssetViewPanel::EnsureUi()
 
     auto filterLabel = std::make_unique<Label>();
     filterLabel->SetText("Bilinear");
-    filterLabel->Overrides()
+    filterLabel->Style()
         .Set(Style::Width, StyleLength::Percent(100.0f))
         .Set(Style::Color, 0xFFFFFFFFu)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
@@ -722,7 +726,7 @@ void AssetViewPanel::EnsureUi()
     root->AddChild(std::move(filterBadgeRow));
 
     auto lensFlareNameRow = std::make_unique<UIElement>();
-    lensFlareNameRow->Overrides()
+    lensFlareNameRow->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionRight, StyleLength::Px(0.0f))
@@ -734,7 +738,7 @@ void AssetViewPanel::EnsureUi()
     m_LensFlareNameRow = lensFlareNameRow.get();
 
     auto lensFlareNamePill = std::make_unique<UIElement>();
-    lensFlareNamePill->Overrides()
+    lensFlareNamePill->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::Height, StyleLength::Px(24.0f))
         .Set(Style::PaddingLeft, StyleLength::Px(12.0f))
@@ -745,7 +749,7 @@ void AssetViewPanel::EnsureUi()
         .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{12.0f, 12.0f, 12.0f, 12.0f});
 
     auto lensFlareNameLabel = std::make_unique<Label>();
-    lensFlareNameLabel->Overrides()
+    lensFlareNameLabel->Style()
         .Set(Style::Color, 0xFFFFFFFFu)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::WhiteSpaceProp, WhiteSpace::NoWrap)
@@ -762,7 +766,7 @@ void AssetViewPanel::EnsureUi()
 
     // Shape selector row for material previews (sphere / cube / plane / capsule).
     auto shapeRow = std::make_unique<UIElement>();
-    shapeRow->Overrides()
+    shapeRow->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionRight, StyleLength::Px(0.0f))
@@ -784,7 +788,7 @@ void AssetViewPanel::EnsureUi()
     for (const auto& btn : kShapes)
     {
         auto pill = std::make_unique<UIElement>();
-        pill->Overrides()
+        pill->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::Height, StyleLength::Px(24.0f))
             .Set(Style::PaddingLeft, StyleLength::Px(10.0f))
@@ -797,7 +801,7 @@ void AssetViewPanel::EnsureUi()
 
         auto lbl = std::make_unique<Label>();
         lbl->SetText(btn.label);
-        lbl->Overrides()
+        lbl->Style()
             .Set(Style::Color, 0xFFFFFFFFu)
             .Set(Style::FontSize, StyleLength::Px(11.0f))
             .Set(Style::MarginTop, StyleLength::Px(0.0f))
@@ -852,6 +856,7 @@ void AssetViewPanel::StartVideoPreview(const std::filesystem::path& path)
     m_VideoNeedsBackgroundBind = true;
 
     m_IsVideoPreview = true;
+    ShowPreviewViewport(false);
     m_PreviewIsModel = false;
     m_PreviewIsMaterial = false;
     m_PreviewIsLensFlare = false;
@@ -863,7 +868,7 @@ void AssetViewPanel::StartVideoPreview(const std::filesystem::path& path)
     ModelThumbnailHandler::ClearLensFlareFocus();
     UpdateFilterModeClass();
     if (m_FilterBadgeRow)
-        m_FilterBadgeRow->Overrides().Set(Style::Opacity, 0.0f);
+        m_FilterBadgeRow->Style().Set(Style::Opacity, 0.0f);
     UpdateHdriExposureBadge(false);
     m_VideoPreviewPath = path;
     m_VideoPlayer.SetLoop(true);
@@ -1206,51 +1211,23 @@ void AssetViewPanel::Update(float dt)
 
     DrainRetiredVideoTextures();
 
-    // Push the current image element size down to the thumbnail handler so the
-    // focused preview's RT is recreated whenever the panel is resized. Grid
-    // thumbnails keep the square default; only the focused preview uses these
-    // dimensions. Clearing the preview path reverts to square via (0, 0).
-    if ((m_PreviewIsModel || m_PreviewIsMaterial || m_PreviewIsLensFlare) &&
-        m_Image && m_Image->GetOwnerManager() != nullptr)
+    // Show the staging view once it writes a frame after the focus switch: the
+    // previous content stays on screen until the new asset has rendered.
+    SyncPreviewStagingView();
+    if (!m_PendingEngineResource.empty() && !m_IsVideoPreview && m_PreviewViewport &&
+        m_PreviewViewport->IsOutputShown())
     {
-        const float w = m_Image->GetLayoutWidth();
-        const float h = m_Image->GetLayoutHeight();
-        if (w > 0.0f && h > 0.0f)
-        {
-            ModelThumbnailHandler::SetPreviewSize(
-                static_cast<uint32_t>(std::lround(w)),
-                static_cast<uint32_t>(std::lround(h)));
-        }
-    }
-    else if (!m_PreviewIsModel && !m_PreviewIsMaterial && !m_PreviewIsLensFlare)
-    {
-        ModelThumbnailHandler::SetPreviewSize(0, 0);
-    }
-
-    // Apply a deferred preview-resource swap once the new render is ready.
-    // See ApplyAssetPreviewBackground: when the user picks a new asset whose
-    // thumbnail isn't rendered yet, we keep the previous content visible
-    // and stash the desired resource here. Polling each frame is fine —
-    // the readiness check is a hash-map lookup.
-    if (!m_PendingEngineResource.empty() && !m_IsVideoPreview && m_Image && m_Image->GetOwnerManager() != nullptr
-        && m_Context && m_Context->Thumbnails)
-    {
-        const uint64_t windowId = m_Context->ThumbnailHostWindowId;
-        const std::string engineName = ResourceNameWithoutEnginePrefix(m_PendingEngineResource);
-        if (m_Context->Thumbnails->IsEngineThumbnailReadyForWindow(windowId, engineName))
-        {
-            UI::Layout::SetBackgroundResourceName(*m_Image, engineName);
-            m_DisplayedEngineResource = m_PendingEngineResource;
-            m_PendingEngineResource.clear();
-            ReleaseVideoPreviewGpuResources();
-        }
+        UI::Layout::ClearBackgroundOverride(*m_Image);
+        m_DisplayedEngineResource = m_PendingEngineResource;
+        m_PendingEngineResource.clear();
+        ReleaseVideoPreviewGpuResources();
     }
 
     if (m_FilterPillSecondsRemaining > 0.0f)
     {
         m_FilterPillSecondsRemaining = std::max(0.0f, m_FilterPillSecondsRemaining - dt);
         if (m_FilterPillSecondsRemaining <= 0.0f && m_FilterBadgeRow)
-            m_FilterBadgeRow->Overrides().Set(Style::Opacity, 0.0f);
+            m_FilterBadgeRow->Style().Set(Style::Opacity, 0.0f);
     }
 
     if (!m_IsVideoPreview || !m_VideoPlayer.IsLoaded()) return;
@@ -1266,11 +1243,16 @@ void AssetViewPanel::OnMountVisibilityChanged(bool isVisible)
     if (!m_IsMounted)
     {
         StopVideoPreview();
+        ReleasePreviewStagingView();
         return;
     }
 
+    if (m_PreviewViewport)
+        m_PreviewViewport->SetHostVisible(true);
     if (!m_PreviewPath.empty() && IsVideoPath(m_PreviewPath))
         StartVideoPreview(m_PreviewPath);
+    else
+        UpdatePreviewVisual();
 }
 
 // ── Preview ──────────────────────────────────────────────────────────────────
@@ -1348,19 +1330,19 @@ void AssetViewPanel::UpdatePreviewVisual()
         // nothing displays.
         m_DisplayedEngineResource.clear();
         m_PendingEngineResource.clear();
+        ShowPreviewViewport(false);
         ModelThumbnailHandler::ClearOrbitFocus();
         ModelThumbnailHandler::ClearMaterialOrbitFocus();
         ModelThumbnailHandler::ClearLensFlareFocus();
-        ModelThumbnailHandler::SetPreviewSize(0, 0);
         UpdateAnimationBadge("");
         m_PreviewIsModel = false;
         m_PreviewIsMaterial = false;
         m_PreviewIsLensFlare = false;
         UpdateLensFlareNamePill(false);
         if (m_ShapeRow)
-            m_ShapeRow->Overrides().Set(Style::Display, DisplayMode::None);
+            m_ShapeRow->Style().Set(Style::Display, DisplayMode::None);
         if (m_FilterBadgeRow)
-            m_FilterBadgeRow->Overrides().Set(Style::Opacity, 0.0f);
+            m_FilterBadgeRow->Style().Set(Style::Opacity, 0.0f);
         UpdateHdriExposureBadge(false);
         return;
     }
@@ -1432,10 +1414,11 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
         UpdateAnimationBadge("");
         m_DisplayedEngineResource.clear();
         m_PendingEngineResource.clear();
+        ShowPreviewViewport(false);
         if (m_ShapeRow)
-            m_ShapeRow->Overrides().Set(Style::Display, DisplayMode::None);
+            m_ShapeRow->Style().Set(Style::Display, DisplayMode::None);
         if (m_FilterBadgeRow)
-            m_FilterBadgeRow->Overrides().Set(Style::Opacity, 0.0f);
+            m_FilterBadgeRow->Style().Set(Style::Opacity, 0.0f);
         UpdateHdriExposureBadge(false);
         return;
     }
@@ -1448,8 +1431,8 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
     {
         const std::string engineName = relOrEngine.substr(kEnginePrefixLen);
 
-        // Eagerly switch the orbit focus so the thumbnail handler starts
-        // rendering the new asset at preview size on the next frame (a
+        // Eagerly switch the orbit focus so the preview lane starts
+        // rendering the new asset into the staging view on the next frame (a
         // material whose tile is not cached yet renders that tile first:
         // ModelThumbnailHandler::PromotePendingMaterialFocus). The
         // *visible* swap of the bound resource is gated below until the
@@ -1469,7 +1452,7 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
             UpdateAnimationBadge("");
             UpdateFilterModeClass();
             if (m_ShapeRow)
-                m_ShapeRow->Overrides().Set(Style::Display, DisplayMode::Flex);
+                m_ShapeRow->Style().Set(Style::Display, DisplayMode::Flex);
             UpdateHdriExposureBadge(false);
         }
         else if (isLensFlare)
@@ -1484,7 +1467,7 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
             UpdateAnimationBadge("");
             UpdateFilterModeClass();
             if (m_ShapeRow)
-                m_ShapeRow->Overrides().Set(Style::Display, DisplayMode::None);
+                m_ShapeRow->Style().Set(Style::Display, DisplayMode::None);
             UpdateHdriExposureBadge(false);
         }
         else
@@ -1499,20 +1482,14 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
             UpdateAnimationBadge(ModelThumbnailHandler::GetFocusedAnimationLabel());
             UpdateFilterModeClass();
             if (m_ShapeRow)
-                m_ShapeRow->Overrides().Set(Style::Display, DisplayMode::None);
+                m_ShapeRow->Style().Set(Style::Display, DisplayMode::None);
             UpdateHdriExposureBadge(false);
         }
 
         if (relOrEngine == m_DisplayedEngineResource)
         {
-            // Already showing this resource. Clear any pending swap (the
-            // previous click was superseded but happened to land on the
-            // same selection again). Re-apply the binding anyway — selection
-            // events are rare, the call is idempotent, and the bookkeeping
-            // can outlive the element's actual background (a deselect path
-            // that cleared the override but not this string would otherwise
-            // leave the panel transparent forever).
-            UI::Layout::SetBackgroundResourceName(*m_Image, engineName);
+            // Already showing this resource: a superseded click landed on the same selection again.
+            ShowPreviewViewport(true);
             m_PendingEngineResource.clear();
             return;
         }
@@ -1520,27 +1497,26 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
         const uint64_t windowId = m_Context ? m_Context->ThumbnailHostWindowId : 0;
         if (m_Context && m_Context->Thumbnails)
             m_Context->Thumbnails->EnsureEngineThumbnailRequested(windowId, engineName);
-        const bool ready = m_Context && m_Context->Thumbnails
-                              && m_Context->Thumbnails->IsEngineThumbnailReadyForWindow(windowId, engineName);
-        // Show the new content only when its render is ready. If it isn't,
-        // queue it as pending and keep the previous bound resource on
-        // screen — Update() polls each frame and applies once ready.
-        // First-time switch (no previous content) skips the gate so the
-        // panel doesn't sit empty waiting for itself.
-        if (ready || m_DisplayedEngineResource.empty())
+        SyncPreviewStagingView();
+        if (!m_PreviewViewport || !m_PreviewViewport->View().IsAlive())
+            return;
+        // The view keeps its last frame on screen until the new asset's first frame overwrites it.
+        // A texture or video on screen stays instead, and the view shows after that frame.
+        const auto background = m_Image->Style().Get(Style::BackgroundImage);
+        const bool imageOnScreen = background && !background->Value.empty();
+        if (m_PreviewViewport->IsOutputShown() || !imageOnScreen)
         {
-            UI::Layout::SetBackgroundResourceName(*m_Image, engineName);
+            ShowPreviewViewport(true);
             m_DisplayedEngineResource = relOrEngine;
             m_PendingEngineResource.clear();
-            ReleaseVideoPreviewGpuResources();
+            return;
         }
-        else
-        {
-            m_PendingEngineResource = relOrEngine;
-        }
+        m_PendingEngineResource = relOrEngine;
+        m_PreviewViewport->ShowAfterNextFrame();
         return;
     }
 
+    ShowPreviewViewport(false);
     m_PreviewIsModel = false;
     m_PreviewIsMaterial = false;
     m_PreviewIsLensFlare = false;
@@ -1552,7 +1528,7 @@ void AssetViewPanel::ApplyAssetPreviewBackground(const std::string& relOrEngine,
     UpdateFilterModeClass();
     UpdateAnimationBadge("");
     if (m_ShapeRow)
-        m_ShapeRow->Overrides().Set(Style::Display, DisplayMode::None);
+        m_ShapeRow->Style().Set(Style::Display, DisplayMode::None);
     UpdateHdriExposureBadge(IsHdriExposurePreviewPath(m_PreviewPath));
     m_DisplayedEngineResource.clear();
     m_PendingEngineResource.clear();
@@ -1634,13 +1610,13 @@ void AssetViewPanel::UpdateHdriExposureBadge(bool visible)
 
     if (!visible)
     {
-        m_HdriExposureBadgeRow->Overrides().Set(Style::Display, DisplayMode::None);
+        m_HdriExposureBadgeRow->Style().Set(Style::Display, DisplayMode::None);
         m_HdriExposureBadgeRow->MarkDirty(UIElement::VisualDirty);
         return;
     }
 
     m_HdriExposureLabel->SetText(FormatExposureEV(GetHdriExposureEVForPath(m_PreviewPath)));
-    m_HdriExposureBadgeRow->Overrides().Set(Style::Display, DisplayMode::Flex);
+    m_HdriExposureBadgeRow->Style().Set(Style::Display, DisplayMode::Flex);
     m_HdriExposureLabel->MarkDirty(UIElement::VisualDirty);
     m_HdriExposureBadgeRow->MarkDirty(UIElement::VisualDirty);
 }
@@ -1674,7 +1650,7 @@ void AssetViewPanel::ShowFilterModePill()
 
     m_FilterPillSecondsRemaining = 1.0f;
     m_FilterBadgeLabel->SetText(m_UsePointFilter ? "Point Filter" : "Bilinear Filter");
-    m_FilterBadgeRow->Overrides().Set(Style::Display, DisplayMode::Flex).Set(Style::Opacity, 1.0f);
+    m_FilterBadgeRow->Style().Set(Style::Display, DisplayMode::Flex).Set(Style::Opacity, 1.0f);
     m_FilterBadgeLabel->MarkDirty(UIElement::VisualDirty);
     m_FilterBadgeRow->MarkDirty(UIElement::VisualDirty);
 }
@@ -1687,18 +1663,18 @@ void AssetViewPanel::UpdateAnimationBadge(const std::string& text)
     m_AnimLabel->SetText(text);
     if (text.empty())
     {
-        m_AnimBadgeRow->Overrides().Set(Style::Display, DisplayMode::None);
+        m_AnimBadgeRow->Style().Set(Style::Display, DisplayMode::None);
         return;
     }
 
-    m_AnimBadgeRow->Overrides().Set(Style::Display, DisplayMode::Flex);
+    m_AnimBadgeRow->Style().Set(Style::Display, DisplayMode::Flex);
     const DisplayMode buttonDisplay = ModelThumbnailHandler::GetFocusedAnimationCount() > 1
         ? DisplayMode::Flex
         : DisplayMode::None;
     if (m_AnimPrevButton)
-        m_AnimPrevButton->Overrides().Set(Style::Display, buttonDisplay);
+        m_AnimPrevButton->Style().Set(Style::Display, buttonDisplay);
     if (m_AnimNextButton)
-        m_AnimNextButton->Overrides().Set(Style::Display, buttonDisplay);
+        m_AnimNextButton->Style().Set(Style::Display, buttonDisplay);
 }
 
 void AssetViewPanel::StepAnimation(float deltaSteps)
@@ -1715,15 +1691,54 @@ void AssetViewPanel::UpdateLensFlareNamePill(bool visible)
     const std::string name = m_PreviewPath.stem().string();
     if (!visible || name.empty())
     {
-        m_LensFlareNameRow->Overrides().Set(Style::Display, DisplayMode::None);
+        m_LensFlareNameRow->Style().Set(Style::Display, DisplayMode::None);
         m_LensFlareNameRow->MarkDirty(UIElement::VisualDirty);
         return;
     }
 
     m_LensFlareNameLabel->SetText(name);
-    m_LensFlareNameRow->Overrides().Set(Style::Display, DisplayMode::Flex);
+    m_LensFlareNameRow->Style().Set(Style::Display, DisplayMode::Flex);
     m_LensFlareNameLabel->MarkDirty(UIElement::VisualDirty);
     m_LensFlareNameRow->MarkDirty(UIElement::VisualDirty);
+}
+
+void AssetViewPanel::SyncPreviewStagingView()
+{
+    // A hidden panel holds no view: the preview lane renders only into a shown panel.
+    if (!m_IsMounted || !m_Image || !m_Context || !m_Context->RenderServices || !m_Context->RenderGraphTicks)
+        return;
+    Engine::Renderer::RenderServices& services = *m_Context->RenderServices;
+    auto& pool = services.EnsureFeature<Engine::Renderer::StagingViewPool>(services);
+    if (!m_PreviewViewport)
+    {
+        auto viewport = std::make_unique<Editor::StagingViewport>(
+            pool, *m_Context->RenderGraphTicks, Engine::Renderer::StagingViewDesc{.DebugName = "Asset Preview"});
+        m_PreviewViewport = viewport.get();
+        m_Image->AddChild(std::move(viewport));
+        ShowPreviewViewport(false);
+    }
+    const uint64_t windowId = m_Context->ThumbnailHostWindowId;
+    if (windowId == 0)
+        return;
+    ModelThumbnailHandler::SetPreviewStagingView(windowId, &m_PreviewViewport->View());
+}
+
+void AssetViewPanel::ReleasePreviewStagingView()
+{
+    if (!m_PreviewViewport)
+        return;
+    // The thumbnail system lets go of the staging view before the viewport releases it.
+    if (m_Context)
+        ModelThumbnailHandler::SetPreviewStagingView(m_Context->ThumbnailHostWindowId, nullptr);
+    m_PreviewViewport->SetHostVisible(false);
+    m_DisplayedEngineResource.clear();
+    m_PendingEngineResource.clear();
+}
+
+void AssetViewPanel::ShowPreviewViewport(bool show)
+{
+    if (m_PreviewViewport)
+        m_PreviewViewport->SetOutputShown(show);
 }
 
 } // namespace GameEngine

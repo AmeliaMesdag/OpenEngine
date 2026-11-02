@@ -422,7 +422,7 @@ void ScriptEditorPanel::SetupUI()
     // Create scroll view for text area
     auto scrollView = std::make_unique<ScrollView>();
     scrollView->AddClass("script-editor-scroll");
-    scrollView->Overrides().SetCustomNumber(HashStringId("--ui_scrollview_primary_modifier_passthrough"), 1.0f);
+    scrollView->Style().SetCustomNumber(HashStringId("--ui_scrollview_primary_modifier_passthrough"), 1.0f);
     m_ScrollView = scrollView.get();
     
     // When scroll view is clicked (scrollbar, empty space), refresh Inspector to show script variables
@@ -931,7 +931,7 @@ void ScriptEditorPanel::ApplyTextScalePercent(float percent, bool persist)
 
     if (m_TextArea)
     {
-        m_TextArea->Overrides().Set(Style::FontSize, StyleLength::Px(GetScriptFontSizePx()));
+        m_TextArea->Style().Set(Style::FontSize, StyleLength::Px(GetScriptFontSizePx()));
         m_TextArea->MarkDirty(StyleDirty | LayoutDirty | VisualDirty);
     }
 

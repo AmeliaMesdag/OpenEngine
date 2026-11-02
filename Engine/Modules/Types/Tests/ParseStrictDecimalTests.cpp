@@ -85,6 +85,25 @@ TEST(ParseStrictDecimal, RefusesAnOverflowRatherThanReturningInfinity)
     EXPECT_TRUE(Rejects("-1e400"));
 }
 
+TEST(ParseStrictDecimalFloat, ReadsAStrictDecimalThatAFloatHolds)
+{
+    float value = 0.0f;
+    ASSERT_TRUE(GameEngine::ParseStrictDecimalFloat(" -2.5 ", value));
+    EXPECT_EQ(-2.5f, value);
+    ASSERT_TRUE(GameEngine::ParseStrictDecimalFloat("3.4028234663852886e38", value));
+    EXPECT_EQ(std::numeric_limits<float>::max(), value);
+}
+
+TEST(ParseStrictDecimalFloat, RefusesWhatParseStrictDecimalRefusesAndPastTheFloatRange)
+{
+    for (const char* text : {"0x10", "inf", "nan", "1.5px", "", "3.5e38", "-1e39", "1e300"})
+    {
+        float value = -12345.0f;
+        EXPECT_FALSE(GameEngine::ParseStrictDecimalFloat(text, value)) << text;
+        EXPECT_EQ(-12345.0f, value) << text;
+    }
+}
+
 TEST(ParseNumber, ReportsAValuePastTheRangeApartFromANonNumber)
 {
     float floatValue = 0.0f;

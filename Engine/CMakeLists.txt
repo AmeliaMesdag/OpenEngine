@@ -35,6 +35,7 @@ set(ENGINE_SOURCES
     Source/Assets/Textures/BC7TransparentEndpointRepair.cpp
     Source/Assets/Textures/TextureMimeType.cpp
     Source/Assets/AssetDecodeCancellation.cpp
+    Source/Assets/AssetDecodeInputFiles.cpp
     Source/Assets/SvgRasterizer.cpp
     Source/Assets/AudioAsset.cpp
     Source/Assets/AlphaUVFootprint.cpp
@@ -104,6 +105,7 @@ set(ENGINE_SOURCES
     Source/Scene/PrefabSpawn.cpp
     Source/Scene/PrefabAuthoring.cpp
     Source/Scene/PrefabOverrideWriter.cpp
+    Source/Scene/PrefabOverrideEdits.cpp
     Source/Scene/KeptComponentResolver.cpp
     Source/Scene/SceneEngineEmbedMaterializer.cpp
 
@@ -328,6 +330,8 @@ set(ENGINE_HEADERS
 	# Rendering hot-reload bridge header
 	Include/Engine/RenderingHotReloadBridge.h
 	Include/Engine/Rendering/RenderDeviceContext.h
+	Include/Engine/Rendering/StagingView.h
+	Include/Engine/Rendering/StagingViewPool.h
     Include/Engine/Rendering/AnimationSampling.h
     Include/Engine/Rendering/ProjectMaterialPrewarmService.h
 
@@ -344,6 +348,8 @@ set(ENGINE_HEADERS
 add_library(RenderServices OBJECT
 	Source/Engine/Rendering/TextureMipUpload.cpp
 	Source/Engine/Rendering/RenderWorldHooks.cpp
+	Source/Engine/Rendering/StagingView.cpp
+	Source/Engine/Rendering/StagingViewPool.cpp
 	Source/Engine/Rendering/RenderServices.cpp
 	Source/Engine/Rendering/AntiAliasingEnvOverrides.cpp
 	Source/Engine/Rendering/CameraAntiAliasing.cpp
@@ -427,6 +433,7 @@ add_library(RenderServices OBJECT
 	Source/Engine/Rendering/Pipeline/ReflectionsProvider.cpp
 	Source/Engine/Rendering/DeformationMotionParams.cpp
 	Source/Engine/Rendering/Pipeline/ViewMotionVectors.cpp
+	Source/Engine/Rendering/Pipeline/ViewContentStamp.cpp
 	Source/Engine/Rendering/Pipeline/ViewExposureCompensation.cpp
 	Source/Engine/Rendering/Pipeline/ViewExposureHistory.cpp
 	Source/Engine/Rendering/Pipeline/ForwardFogKeywords.cpp
@@ -545,7 +552,7 @@ set_source_files_properties(Source/Engine/Rendering/ScreenSpaceShadows/ScreenSpa
 
 # Engine.dll references five C-ABI hot-reload entry points (GE_PreloadAssemblyContext,
 # GE_SwapPreloadedContext, GE_CleanupOldContext, GE_ClearCompilerCache, GE_GetCompilerStats)
-# from IncrementalCompilationTask / AssemblyPrepTask / MainThreadSwapTask. Their real
+# from IncrementalCompilationTask / AssemblyPrepTask / AssemblySwapTask. Their real
 # implementations live in GameEngine.Native.dll, which depends on Engine.dll — a SHARED↔SHARED
 # cycle that the linker can't resolve at Engine.dll's link step.
 #
@@ -674,7 +681,8 @@ foreach(_root ${_ge_module_include_roots})
         list(APPEND _ge_scan_in_args --enum-include-root "${_root}")
     endif()
 endforeach()
-set(_GE_COMPONENT_GEN_DEPFILE "${_GE_COMPONENT_GEN_DIR}/ComponentReflection.gen.d")
+# The depfile names this build tree's paths: keep it out of generated/, which the SDK stages.
+set(_GE_COMPONENT_GEN_DEPFILE "${CMAKE_CURRENT_BINARY_DIR}/ComponentReflection.gen.d")
 
 # Re-glob the scanned headers (core + module) at build time so adding either
 # re-triggers the scan without re-running configure.
@@ -1670,6 +1678,7 @@ if(GTest_FOUND OR TARGET GTest::gtest)
     add_executable(TextureAlphaCoverageGpuTests Tests/TextureAlphaCoverageGpuTests.cpp
         ${CMAKE_SOURCE_DIR}/Tests/EngineShutdownTestEnvironment.cpp)
     target_link_libraries(TextureAlphaCoverageGpuTests PRIVATE Engine GTest::gtest GTest::gtest_main)
+    target_include_directories(TextureAlphaCoverageGpuTests PRIVATE ${CMAKE_SOURCE_DIR}/Tests) # TestTempDir.h
     set_target_properties(TextureAlphaCoverageGpuTests PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
@@ -1909,7 +1918,7 @@ endif()
 
 # Engine tests: HotReloadPipeline compile-failure reporting, stage lifetime and
 # cancellation, on every platform. The suite drives the pipeline with fake
-# compilers and the mock loader and swapper, and the swap stage against a
+# compilers and the mock loader, and the swap stage against a
 # headless engine with the CLR disabled, so it needs neither GameEngine.Native
 # nor the managed test projects. It links
 # Engine only: JobSystem (issue #340) and Scripting (issue #356) are already
@@ -2262,6 +2271,7 @@ endif()
                 Tests/AntiAliasingProjectSettingsTests.cpp
                 Tests/UIScaleProjectSettingsTests.cpp
                 Tests/RenderServicesDeviceRecoveryTests.cpp
+                Tests/RenderDeviceContextCreationTests.cpp
                 Tests/ViewLightBufferWriterTests.cpp
                 Tests/DeviceLostEcsRecoveryTests.cpp
                 Tests/CameraProjectionTests.cpp
@@ -2440,9 +2450,10 @@ endif()
 			    # from EnginePostProcessTests so shader/control tests do not depend on
 			    # the render-services executables' platform-specific tripwire main.
 			    add_executable(BloomRenderingTests Tests/BloomRenderingTests.cpp)
-			    target_link_libraries(BloomRenderingTests PRIVATE Engine GTest::gtest GTest::gtest_main)
+			    target_link_libraries(BloomRenderingTests PRIVATE Engine nlohmann_json::nlohmann_json GTest::gtest GTest::gtest_main)
 			    target_compile_definitions(BloomRenderingTests PRIVATE
-			        RENDERING_SHADER_OUTPUT_DIR="${CMAKE_BINARY_DIR}/Shaders")
+			        RENDERING_SHADER_OUTPUT_DIR="${CMAKE_BINARY_DIR}/Shaders"
+			        GE_RENDERER_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 			    add_dependencies(BloomRenderingTests CompileShaders)
 			    set_target_properties(BloomRenderingTests PROPERTIES
 			        CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON FOLDER "Engine/Tests")
@@ -2775,6 +2786,7 @@ endif()
 
 			    add_executable(RenderPipelineDeclareTests
 			        Tests/RenderPipelineDeclareTests.cpp
+			        Tests/StagingViewPoolTests.cpp
 			        # Which depth the auto-exposure meter reads, and the ocean step's post-ocean resolve.
 			        Tests/MeteringDepthDeclareTests.cpp
 			        # The water surface keeps writing the screen-space reflection slices.
@@ -3591,6 +3603,7 @@ endif()
 	        Tests/SceneIOTests.cpp
 	        Tests/EmbeddedAnimationPersistenceTests.cpp
 	        Tests/PrefabLibraryTests.cpp
+	        Tests/PrefabSpawnTests.cpp
 	        Tests/PrefabTimingTests.cpp
 	        Tests/SceneIntegerTests.cpp
 	        Tests/SceneStructArrayTests.cpp

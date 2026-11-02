@@ -440,10 +440,24 @@ TEST(QueryBenchmarks, ForEachChunk_AdapterOverhead_FragmentedOptional) {
         << "explicit-count=" << tCount << "us no-count=" << tNoCount << "us";
 }
 
-// The per-frame query shape — construct, match, snapshot, iterate — on a world whose
-// archetype spread makes the match and the snapshot the cost, not the entity loop. The
-// retained shape beside it shows what the snapshot costs. Reported, not gated: the pass
-// rule (a change may not make the fresh shape slower) compares two builds.
+namespace {
+// The common per-frame query on an archetype spread of 200: a fresh temporary that matches 2 of
+// them (masks 198 and 199 are the only ones below 200 that carry tags 1, 2, 6 and 7).
+std::size_t RunSelectiveQuery(World& w) {
+    std::size_t visited = 0;
+    w.Query<Read<Position>, Read<ArchetypeTag<1>>, Read<ArchetypeTag<2>>, Read<ArchetypeTag<6>>,
+            Read<ArchetypeTag<7>>>()
+        .Each([&visited](const Position&, const ArchetypeTag<1>&, const ArchetypeTag<2>&,
+                         const ArchetypeTag<6>&, const ArchetypeTag<7>&) { ++visited; });
+    return visited;
+}
+} // namespace
+
+// The per-frame query shape — construct, find the matching archetypes, iterate — on a world
+// whose archetype spread makes finding the archetypes the cost, not the entity loop. The
+// retained shape beside it shows what construction costs. The selective shape is the common
+// per-frame query: it matches 2 of the 200 archetypes. Reported, not gated: the pass rule (a
+// change may not make the fresh shapes slower) compares two builds.
 TEST(QueryBenchmarks, FreshConstructionOnArchetypeSpread) {
     constexpr unsigned kArchetypeCount = 200;
     constexpr int kConstructionsPerSample = 200;
@@ -471,10 +485,19 @@ TEST(QueryBenchmarks, FreshConstructionOnArchetypeSpread) {
             retained.Each(visit);
     });
 
+    constexpr int kSelectiveConstructionsPerSample = 2000;
+    ASSERT_EQ(RunSelectiveQuery(w), 2u);
+    const uint64_t selectiveBatch = MeasureMedianMicros(3, 15, [&w]{
+        for (int i = 0; i < kSelectiveConstructionsPerSample; ++i)
+            RunSelectiveQuery(w);
+    });
+
     std::printf("[Bench] query over %u archetypes: fresh construction + Each %.3f us, retained Each %.3f us"
-                " (medians of 15 samples of %d)\n",
+                " (medians of 15 samples of %d); fresh selective (2 of them) %.4f us (samples of %d)\n",
                 kArchetypeCount,
                 static_cast<double>(freshBatch) / kConstructionsPerSample,
                 static_cast<double>(retainedBatch) / kConstructionsPerSample,
-                kConstructionsPerSample);
+                kConstructionsPerSample,
+                static_cast<double>(selectiveBatch) / kSelectiveConstructionsPerSample,
+                kSelectiveConstructionsPerSample);
 }

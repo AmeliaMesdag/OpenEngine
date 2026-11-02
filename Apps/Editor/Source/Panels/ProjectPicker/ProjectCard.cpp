@@ -73,7 +73,7 @@ ProjectCard::ProjectCard(const std::string& elementId, const Editor::ProjectCata
         entry.Name, meta, entry.ThumbnailRef,
         entry.ThumbnailContain ? BackgroundSizeMode::Contain : BackgroundSizeMode::Cover);
     if (preview && entry.AccentColor != 0)
-        preview->Overrides().Set(Style::BackgroundColor, entry.AccentColor);
+        preview->Style().Set(Style::BackgroundColor, entry.AccentColor);
 }
 
 void ProjectCard::AddCardLook(const char* rootClass)
@@ -105,7 +105,7 @@ UIElement* ProjectCard::AddThumbnailContent(const std::string& name, const std::
     }
     UIElement* previewImage = lift->FindById("project-card-preview-image"_sid);
     UI::Layout::SetBackgroundPath(*previewImage, thumbnailPath.empty() ? kProjectPlaceholderPath : thumbnailPath);
-    previewImage->Overrides().Set(Style::BackgroundSize, BackgroundSizeValue{thumbnailSize});
+    previewImage->Style().Set(Style::BackgroundSize, BackgroundSizeValue{thumbnailSize});
 
     nameLabel->SetText(name);
     metaLabel->SetText(meta);

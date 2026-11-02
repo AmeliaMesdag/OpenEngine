@@ -4,6 +4,7 @@
 //     MemoryBench ArenaBump [samples]
 //     MemoryBench ObjectPoolChurn <pool|heap> <small|large> [samples]
 //     MemoryBench Scratch AB|BA [samples]
+//     MemoryBench Frame [samples]
 //     MemoryBench RangeChurn range <1k|10k> [samples]
 //
 // ArenaBump: one sample is a frame of 4096 bump allocations of 16, 64 and 256 bytes in a
@@ -26,6 +27,11 @@
 // vectors cleared and resized to the same sizes. One sample is 1000 calls; it reports
 // nanoseconds per call. Both arms run in one process, in the order given.
 //
+// Frame: the scratch call's three allocations through Memory::FrameMemory, each written once;
+// every 1000th call starts the next frame, so one frame holds one sample's calls. The same
+// process then runs Scratch case (b), the call nested inside an open scope, as the reference.
+// Both report nanoseconds per call.
+//
 // RangeChurn: a mesh stream's ranges in a Memory::RangeAllocator, counted in 32-byte vertices:
 // a live set of 1,000 or 10,000 ranges with vertex counts log-uniform from 24 to 65,536, in a
 // space 1.25 times the live set's expected size. One sample is a frame: 256 pairs, each a range
@@ -40,6 +46,8 @@
 // remaining samples.
 
 #include "Memory/Arena.h"
+#include "Memory/FrameJoinedScope.h"
+#include "Memory/FrameMemory.h"
 #include "Memory/ObjectPool.h"
 #include "Memory/RangeAllocator.h"
 #include "Memory/ScratchScope.h"
@@ -307,6 +315,46 @@ void RunScratchArm(char arm, std::size_t samples)
     PrintCase("B", "nested", samples, MeasureCalls(samples, ScratchCall));
 }
 
+/// The scratch call's three allocations through frame memory, each written once. The first
+/// call of each sample starts the next frame.
+std::uintptr_t FrameCall()
+{
+    static std::size_t s_Calls = 0;
+    if (s_Calls++ % kScratchCallsPerSample == 0)
+        GameEngine::Memory::Detail::AdvanceFrameIndex();
+    std::uintptr_t sink = 0;
+    for (const std::size_t bytes : kScratchSizes)
+    {
+        auto* memory = static_cast<unsigned char*>(GameEngine::Memory::FrameMemory::Allocate(bytes));
+        *memory = static_cast<unsigned char>(bytes);
+        sink ^= reinterpret_cast<std::uintptr_t>(memory);
+    }
+    return sink;
+}
+
+void PrintFrameCase(const char* frameCase, std::size_t samples, std::vector<double> perCall)
+{
+    const Summary summary = Summarize(perCall);
+    std::printf("Frame case=%s samples=%zu median_ns_per_call=%.4f p99_ns_per_call=%.4f\n", frameCase, samples,
+                summary.MedianNanoseconds, summary.P99Nanoseconds);
+}
+
+void RunFrame(std::size_t samples)
+{
+    {
+#if GE_DEBUG_INSTRUMENTATION
+        const GameEngine::Memory::Detail::FrameJoinedScope frameJoined(true);
+#endif
+        PrintFrameCase("frame", samples, MeasureCalls(samples, FrameCall));
+#if GE_DEBUG_INSTRUMENTATION
+        GameEngine::Memory::Detail::StopFrameLoop();
+#endif
+    }
+    GameEngine::Memory::ScratchScope outer;
+    static_cast<unsigned char*>(outer.Allocate(64))[0] = 1;
+    PrintFrameCase("scratch-nested", samples, MeasureCalls(samples, ScratchCall));
+}
+
 constexpr std::size_t kRangePairsPerSample = 256;
 constexpr std::uint64_t kRangeRetireFrames = 4;
 constexpr std::uint64_t kVertexBytes = 32;
@@ -422,6 +470,7 @@ int Usage()
     std::fprintf(stderr, "usage: MemoryBench ArenaBump [samples]\n"
                          "       MemoryBench ObjectPoolChurn <pool|heap> <small|large> [samples]\n"
                          "       MemoryBench Scratch AB|BA [samples]\n"
+                         "       MemoryBench Frame [samples]\n"
                          "       MemoryBench RangeChurn range <1k|10k> [samples]\n");
     return 2;
 }
@@ -467,6 +516,14 @@ int main(int argc, char** argv)
             return Usage();
         for (const char arm : order)
             RunScratchArm(arm, samples);
+        return 0;
+    }
+    if (benchName == "Frame")
+    {
+        const std::size_t samples = ParseSamples(argc, argv, 2);
+        if (samples == 0)
+            return Usage();
+        RunFrame(samples);
         return 0;
     }
     if (benchName == "RangeChurn" && argc >= 4)

@@ -929,7 +929,7 @@ TEST(TerrainBakeCache, ASaveStoresNothingForATerrainWithoutATag)
 // the new values from the failure message.
 TEST(TerrainBakeCache, TheKeyAndTheBakeOutputArePinnedToTheFormatVersion)
 {
-    constexpr uint64 kPinnedKey = 0xf9c04502f6686a22ull;
+    constexpr uint64 kPinnedKey = 0xd8de17d9994ee485ull;
     constexpr uint64 kPinnedOutput = 0xf19e25b84ba58001ull;
     TempDirectory dir;
     const BakeResult bake = BakeScene({}, {dir.Path, true});

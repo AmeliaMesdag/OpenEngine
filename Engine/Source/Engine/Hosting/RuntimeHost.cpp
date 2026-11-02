@@ -561,17 +561,11 @@ void RuntimeHost::RenderFrameRG(Engine::Renderer::RenderServices& rs,
     clear.clearColor = true;
     if (useBlackClear)
     {
-        clear.clearColorValue[0] = 0.0f;
-        clear.clearColorValue[1] = 0.0f;
-        clear.clearColorValue[2] = 0.0f;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue = ColorLinear(0.0f, 0.0f, 0.0f, 1.0f);
     }
     else
     {
-        clear.clearColorValue[0] = 0.02f;
-        clear.clearColorValue[1] = 0.02f;
-        clear.clearColorValue[2] = 0.02f;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue = ColorLinear(0.02f, 0.02f, 0.02f, 1.0f);
     }
     clear.clearDepth = true;
     clear.clearDepthValue = Rendering::ReverseZ::kClearFar;

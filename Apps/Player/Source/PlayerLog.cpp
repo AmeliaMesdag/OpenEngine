@@ -26,12 +26,14 @@ void OpenPlayerLogFile(Logger::DeferredSink& heldRecords, const std::filesystem:
     const std::filesystem::path logFile =
         logsDirectory / ("game-" + std::to_string(Platform::GetCurrentProcessId()) + ".log");
 
+    const Logger::FileLogLevel fileLevel = Logger::ResolveFileLogLevel();
+
     Logger::FileSink::Config fileConfig;
     fileConfig.filename = logFile.generic_string();
     // This process owns the file: a reused process id starts it clean rather than
     // continuing an unrelated earlier session.
     fileConfig.append = false;
-    fileConfig.minLevel = Logger::LogLevel::Info;
+    fileConfig.minLevel = fileLevel.level;
     fileConfig.includeTimestamp = true;
     fileConfig.includeSource = false;
     // The file is read after a crash; losing its tail to buffering defeats it.
@@ -40,7 +42,7 @@ void OpenPlayerLogFile(Logger::DeferredSink& heldRecords, const std::filesystem:
     const bool fileOpened = fileSink->IsAvailable();
     heldRecords.Attach(std::move(fileSink));
     if (fileOpened)
-        Logger::Log::Info("Player: log file '{}'", fileConfig.filename);
+        Logger::AnnounceFileSink("Player: log file", fileConfig.filename, fileLevel);
     else
         Logger::Log::Error("Player: cannot open the log file '{}'; this run keeps no log file. "
                            "Make the directory writable to restore it.",

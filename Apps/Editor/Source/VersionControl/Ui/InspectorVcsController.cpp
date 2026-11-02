@@ -161,7 +161,7 @@ void InsertDiffDot(UIElement* row, Label* label,
     dot->AddClass("inspector-vcs-diff-dot");
     if (const char* cssClass = DiffClass(property.State))
         dot->AddClass(cssClass);
-    dot->Overrides().Set(Style::BackgroundTint,
+    dot->Style().Set(Style::BackgroundTint,
                          SceneDiffStateColorArgb(property.State));
 
     dot->SetTooltip(DiffTooltip(providerName, property));

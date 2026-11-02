@@ -17,6 +17,8 @@
 
 #include <cmath>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace GameEngine;
 using nlohmann::json;
@@ -186,4 +188,72 @@ TEST(PointerCoordsRequestTests, AClickCountOutOfRangeIsRefusedBeforeItNarrows)
         const std::string message = ClickCountRejection(text);
         EXPECT_NE(message.find(json::parse(text)["clickCount"].dump()), std::string::npos) << message;
     }
+}
+
+TEST(PointerCoordsRequestTests, AStraightDragMovesInEvenStepsToItsEnd)
+{
+    const std::vector<Mathematics::Vector2> moves =
+        Editor::SampleDragPath({Mathematics::Vector2(0.0f, 10.0f), Mathematics::Vector2(100.0f, 10.0f)}, 4);
+
+    ASSERT_EQ(moves.size(), 4u);
+    for (std::size_t i = 0; i < moves.size(); ++i)
+    {
+        EXPECT_FLOAT_EQ(moves[i].x, 25.0f * static_cast<float>(i + 1)) << i;
+        EXPECT_FLOAT_EQ(moves[i].y, 10.0f) << i;
+    }
+}
+
+// A path's corners are the gesture: each segment takes moves by its length and ends on its point,
+// so a stroke that comes back to its start ends exactly there.
+TEST(PointerCoordsRequestTests, APathDragLandsOnEveryCornerAndSpreadsTheMovesByLength)
+{
+    const std::vector<Mathematics::Vector2> corners = {
+        Mathematics::Vector2(0.0f, 0.0f), Mathematics::Vector2(300.0f, 0.0f), Mathematics::Vector2(300.0f, 100.0f),
+        Mathematics::Vector2(0.0f, 100.0f), Mathematics::Vector2(0.0f, 0.0f)};
+    const std::vector<Mathematics::Vector2> moves = Editor::SampleDragPath(corners, 16);
+
+    ASSERT_EQ(moves.size(), 16u);
+    // 800 px over 16 moves: 6 on each long side, 2 on each short side.
+    for (const auto& [index, corner] : {std::pair{5, 1}, std::pair{7, 2}, std::pair{13, 3}, std::pair{15, 4}})
+    {
+        EXPECT_FLOAT_EQ(moves[index].x, corners[corner].x) << index;
+        EXPECT_FLOAT_EQ(moves[index].y, corners[corner].y) << index;
+    }
+    EXPECT_FLOAT_EQ(moves[0].x, 50.0f);
+    EXPECT_FLOAT_EQ(moves[6].y, 50.0f);
+
+    // Fewer steps than segments still visits every corner.
+    const std::vector<Mathematics::Vector2> few = Editor::SampleDragPath(corners, 2);
+    ASSERT_EQ(few.size(), 4u);
+    for (std::size_t i = 0; i < few.size(); ++i)
+        EXPECT_EQ(few[i], corners[i + 1]) << i;
+}
+
+TEST(PointerCoordsRequestTests, ADragPathIsThePathPointsThenTheEnd)
+{
+    std::vector<Mathematics::Vector2> points;
+    json error;
+    ASSERT_TRUE(Editor::ReadDragPath(
+        json::parse(R"({"path": [{"x": 1, "y": 2}, {"x": 3, "y": 4}], "endX": 5, "endY": 6})"), 8, points, error))
+        << error.dump();
+    ASSERT_EQ(points.size(), 3u);
+    EXPECT_EQ(points[0], Mathematics::Vector2(1.0f, 2.0f));
+    EXPECT_EQ(points[1], Mathematics::Vector2(3.0f, 4.0f));
+    EXPECT_EQ(points[2], Mathematics::Vector2(5.0f, 6.0f));
+
+    for (const char* text : {R"({})", R"({"path": []})", R"({"path": [{"x": 1}]})", R"({"path": [[1, 2]]})",
+                             R"({"path": {"x": 1, "y": 2}})", R"({"path": [{"x": 1e300, "y": 2}]})",
+                             R"({"path": [{"x": 1, "y": 2}, {"x": 1, "y": 2}, {"x": 1, "y": 2}]})"})
+    {
+        points.clear();
+        error = json();
+        EXPECT_FALSE(Editor::ReadDragPath(json::parse(text), 2, points, error)) << text;
+        EXPECT_TRUE(Editor::IsRefusal(error)) << text << " " << error.dump();
+    }
+
+    // The handler puts the start in `points` first: an empty path with no end is still refused.
+    points = {Mathematics::Vector2(1.0f, 2.0f)};
+    error = json();
+    EXPECT_FALSE(Editor::ReadDragPath(json::parse(R"({"path": []})"), 2, points, error));
+    EXPECT_TRUE(Editor::IsRefusal(error)) << error.dump();
 }

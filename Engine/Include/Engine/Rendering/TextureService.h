@@ -10,7 +10,6 @@
 
 #include "AssetCore/Asset.h"         // SharedPtr<Asset> in PendingGpuUpload
 #include "Assets/AssetManager.h"     // AssetLoadHandle in m_TextureLoadHandles
-#include "Image/PixelImage.h"
 #include "Engine/Rendering/CpuTextureSource.h"
 #include "Engine/Rendering/MaterialBindingCache.h"
 #include "Engine/Rendering/TextureGPUCache.h"
@@ -99,8 +98,8 @@ class TextureService
     // COLLIDE with a reissued handle id, not miss), re-bake every material's
     // default bindless indices, and replay the retained material<->texture ref
     // graph to re-upload real textures from the (RAM-resident) AssetManager. The
-    // ref graph and CPU decode cache are PRESERVED (unlike Shutdown). Runs on the
-    // render thread inside the rebuild callback, with the device usable.
+    // ref graph is PRESERVED (unlike Shutdown). Runs on the render thread inside
+    // the rebuild callback, with the device usable.
     void ReprovisionAfterDeviceRebuild();
 
     // Engine-owned CPU image publication for pipeline inputs. Duplicate live
@@ -254,12 +253,6 @@ class TextureService
     // yield Null and route to embedded handling.
     GUID ResolveTextureRefGuid(const std::string& guidStr, const std::string& pathStr) const;
 
-    // Upload embedded image data (from GLB models) to the GPU, cached by the
-    // derived (modelGuid, imageIndex[, /linear]) GUID. `linear` selects
-    // RGBA8_UNORM (data textures) vs RGBA8_SRGB (albedo/emissive).
-    TextureHandle UploadEmbeddedImage(const GUID& modelGuid, uint32_t imageIndex,
-                                      const EmbeddedImage& image, bool linear = false);
-
     // Drop a single texture from the GPU + bindless caches so the next
     // GetOrUpload reloads (skybox HDRI swaps, hot-reload paths). Repairs
     // material bindings to defaults first and re-queues them for rebind.
@@ -277,9 +270,9 @@ class TextureService
     // person's setting edit, Low for a usage re-key a material bind starts.
     void RequestRecook(const GUID& textureGuid, AssetLoadPriority priority);
     // Hand a reloaded model's embedded images to the materials that sample it,
-    // then release the embedded textures (and decode-cache entries) no model
-    // references any more. Every material slot ResolveEmbeddedTextures bound
-    // from this model and still binding one of its textures is rebound to the
+    // then release the embedded textures no model references any more. Every
+    // material slot ResolveEmbeddedTextures bound from this model and still
+    // binding one of its textures is rebound to the
     // same image index of `images` first, or to its awaited default when
     // `images` lacks it (empty: the model left memory), so no material binds a
     // texture when it is destroyed. A tracked slot still awaiting its image
@@ -295,7 +288,7 @@ class TextureService
     // ── Material texture binding ──────────────────────────────────────────
     // Assign a texture + its bindless index to a material slot in one call. An
     // invalid handle is a texture that failed to upload: the slot takes its
-    // awaited default (BindAwaitedTexture).
+    // awaited default (BindAwaitedTexture). The texture binds with no variance companion.
     void BindMaterialTexture(Material* mat, StringId slotName, TextureHandle tex);
     // An ASSIGNED slot whose texture is not resident (its load is pending, it
     // was evicted for a reload, or it failed): binds AwaitedSlotDefault's
@@ -404,9 +397,16 @@ class TextureService
     // Single write point for a material texture slot: keeps the CPU handle, the
     // bindless index and the Classic bind group consistent. Every repair path
     // (upload flush, hot swap, eviction) routes through it so no mode can be
-    // updated without the others.
-    void ApplyMaterialSlotBinding(Material* mat, StringId slotName, TextureHandle tex,
+    // updated without the others. A normal slot also takes the entry's variance companion.
+    void ApplyMaterialSlotBinding(Material* mat, StringId slotName, const TextureGPUCache::Entry& entry,
                                   uint32_t bindlessIndex);
+    // BindMaterialTexture for a cache entry: the texture and its normal-variance companion.
+    void BindCachedMaterialTexture(Material* mat, StringId slotName, const TextureGPUCache::Entry& entry);
+    // GetOrUpload's whole cache entry.
+    TextureGPUCache::Entry GetOrUploadEntry(const GUID& textureGuid);
+    // Free an entry's textures: their bindless slots first, then the textures. The caller has
+    // already repointed every material that bound them (the InvalidateBindless precondition).
+    void RetireCacheEntry(const TextureGPUCache::Entry& entry);
 
     uint32_t DefaultBindlessIndex(SlotDefaultTexture texture) const;
     TextureHandle DefaultTexture(SlotDefaultTexture texture) const;
@@ -415,10 +415,10 @@ class TextureService
     // then destroy the old texture (no default-texture gap, unlike Evict).
     // Render-thread only; called from FlushPendingUploads.
     void HotSwapTexture(const GUID& textureGuid);
-    // The new texture a hot swap binds: a cook source's resident AssetManager instance
-    // re-uploaded (invalid when none is resident), anything else through GetOrUpload.
+    // The new cache entry a hot swap binds: a cook source's resident AssetManager instance
+    // re-uploaded (empty when none is resident), anything else through GetOrUploadEntry.
     // Render-thread only.
-    Rendering::TextureHandle UploadForHotSwap(const GUID& textureGuid);
+    TextureGPUCache::Entry UploadForHotSwap(const GUID& textureGuid);
 
     // Park a GPU texture this thread uploaded but lost the race to publish, for
     // the render thread to destroy in FlushPendingUploads. Callable from any
@@ -486,6 +486,9 @@ class TextureService
         GUID MaterialGuid;
         StringId SlotName{};
         GUID TextureGuid;
+        // An embedded image's bind: its derived GUID is no asset, so it is not tracked for asset
+        // eviction, and an Evict of that GUID drops it.
+        bool Embedded = false;
     };
     // The CPU half of a texture upload (TextureService.cpp): an adopted cooked container, or a
     // raw decode with its mip chain built. Built off the render thread for the async paths.
@@ -521,6 +524,18 @@ class TextureService
     // instance is shared, and a reload swaps the payload in place. Thread-safe.
     void ScheduleTextureUploadJob(const GUID& texGuid, const GUID& matGuid, StringId slotName);
     void RunTextureUploadJob(const GUID& texGuid, uint32_t epoch, const std::shared_ptr<std::atomic<bool>>& cancel);
+    // Queues the embedded bind and, once per content key, a job that decodes `bytes` and builds
+    // their mips; FlushPendingUploads submits the upload and binds. Render thread.
+    void ScheduleEmbeddedUploadJob(const GUID& derivedGuid, const GUID& matGuid, StringId slotName,
+                                   const Vector<uint8>& bytes, bool linear);
+    void RunEmbeddedUploadJob(const GUID& derivedGuid, uint32_t epoch, const std::shared_ptr<std::atomic<bool>>& cancel,
+                              const Vector<uint8>& bytes, bool linear);
+    // The CPU half of an embedded image's upload: decode, then the cook's mip chain.
+    static void PrepareEmbeddedUpload(const Vector<uint8>& bytes, bool linear, const GUID& derivedGuid,
+                                      PreparedTextureUpload& prepared);
+    // A job's result: queued for the drain, or the binds that wait on it released. Takes the lock.
+    void CompleteUploadJob(const GUID& texGuid, uint32_t epoch, const std::shared_ptr<std::atomic<bool>>& cancel,
+                           std::shared_ptr<const PreparedTextureUpload> prepared);
     // Cancels every upload job and waits for the running ones to finish (Shutdown, destructor).
     void DrainUploadJobs();
     // The CPU half: adopt `resident` (or load the texture, adopting a cooked artifact when one
@@ -534,7 +549,7 @@ class TextureService
                                                                       bool logTiming);
     // The upload half: create, upload and publish (or publish the refusal). Render thread, or an
     // extraction worker through GetOrUpload.
-    Rendering::TextureHandle SubmitPreparedUpload(const GUID& textureGuid, const PreparedTextureUpload& prepared);
+    TextureGPUCache::Entry SubmitPreparedUpload(const GUID& textureGuid, const PreparedTextureUpload& prepared);
 
     struct CubeLutGpuCacheKey
     {
@@ -643,12 +658,6 @@ class TextureService
     mutable std::unordered_map<CubeLutGpuCacheKey, CubeLutGpuBindingState, CubeLutGpuCacheKeyHash> m_CubeLutGpuCache;
     mutable std::unordered_set<GUID> m_CubeLutWarnedFailureGuids;
 
-    // CPU-decoded RGBA cache for embedded images, keyed by the linearity-free
-    // content GUID (hash of the compressed bytes): the same source image used
-    // as both sRGB albedo and linear data needs two GPU textures but only one
-    // decode, and byte-identical images embedded by different models share one
-    // entry (asset packs embed the same atlas into every FBX).
-    std::unordered_map<GUID, Image::Image8> m_EmbeddedDecodeCache;
     // Parent ModelAsset GUID -> derived content GUIDs of embedded images it
     // references; ReloadEmbeddedForModel walks this (the parent GUID itself
     // never keys m_TextureGPUCache).

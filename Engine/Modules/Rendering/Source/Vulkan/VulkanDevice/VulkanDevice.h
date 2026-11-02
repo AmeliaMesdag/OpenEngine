@@ -223,6 +223,7 @@ class VulkanDevice : public IDevice
     // IDevice interface
     bool Initialize(const DeviceDesc& desc) override;
     void Shutdown() override;
+    void BindOwnerThread() override;
 
     GraphicsAPI GetAPI() const override { return GraphicsAPI::Vulkan; }
     const RenderingDeviceCapabilities& GetCapabilities() const override { return m_Capabilities; }

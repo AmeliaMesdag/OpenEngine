@@ -6,7 +6,7 @@ file(GLOB_RECURSE INPUT_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/Include/Input
 set(INPUT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/InputScriptApi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/InputSystem.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/GamepadPolling.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/GamepadPoller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/GamepadEdgeTracker.cpp
 )
 
@@ -39,6 +39,7 @@ if(BUILD_TESTING)
     find_package(GTest REQUIRED)
 
     add_executable(InputSystemTests
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tests/GamepadPollerTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/InputScriptApiTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/InputSystemTests.cpp
     )
@@ -47,8 +48,12 @@ if(BUILD_TESTING)
     # resolve module symbols via the import lib. See GenerationalVector/Tests
     # for the same fix pattern.
     find_package(nlohmann_json CONFIG REQUIRED)
+    # glfw: GamepadPollerTests observes the poller's platform calls through the
+    # glfw3 DLL Engine loads.
+    find_package(glfw3 CONFIG REQUIRED)
     target_link_libraries(InputSystemTests PRIVATE
         Engine
+        glfw
         GTest::gtest
         GTest::gtest_main
         nlohmann_json::nlohmann_json

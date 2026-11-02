@@ -1,6 +1,6 @@
 #include "PagePyramidBuilder.h"
 
-#include "HeightPageCodec.h"
+#include "Height/HeightPageCodec.h"
 #include "PageCodec.h"
 #include "PageFieldFilter.h"
 #include "PageStreaming/PageStore/PageStoreWriter.h"

@@ -33,9 +33,6 @@ std::string ResolvePropertyKeyForUniform(const MaterialDocument& doc, std::strin
 
 // Return true if the two names are equivalent under our heuristics.
 bool NamesEquivalent(std::string_view a, std::string_view b);
-
-// Convenience helpers for common value retrieval patterns.
-bool TryGetFloat4(const MaterialDocument& doc, std::string_view uniformName, float out4[4]);
 } // namespace MaterialPropertyBinding
 } // namespace GameEngine::Rendering
 

@@ -74,6 +74,30 @@ SharedPtr<Asset> DecodeLoadedPage(PendingPageLoad& load, Vector<uint8> bytes)
     return nullptr;
 }
 
+// Page `address` of every plane of `source`, the planes' bytes one after the other. A single plane's
+// bytes are returned as read.
+PageFetchOutcome FetchPlanes(const PageSource& source, const PageAddress& address)
+{
+    if (source.Planes.size() == 1u)
+        return source.Planes.front()->Fetch(address);
+    PageFetchOutcome outcome;
+    outcome.Address = address;
+    auto payload = std::make_shared<std::vector<uint8>>();
+    payload->reserve(source.PayloadBytes());
+    for (const std::shared_ptr<const PageStoreAccess>& plane : source.Planes)
+    {
+        PageFetchOutcome own = plane->Fetch(address);
+        if (!own.Bytes)
+        {
+            own.Address = address;
+            return own;
+        }
+        payload->insert(payload->end(), own.Bytes->begin(), own.Bytes->end());
+    }
+    outcome.Bytes = std::move(payload);
+    return outcome;
+}
+
 } // namespace
 
 void SubmitPageLoad(AssetIOService& io, PageLoadRequest request)
@@ -101,10 +125,21 @@ void SubmitPageLoad(AssetIOService& io, PageLoadRequest request)
 
 uint32 PageSource::PayloadBytes() const
 {
-    assert((Store || Generated || Access) && "a page source has a store, a generated provider or a store access");
-    if (Access)
-        return PagePayloadBytes(Access->Format());
-    return PagePayloadBytes(Store ? Store->Layout().Header.Format : PageFieldFormat::HeightSteps);
+    assert((Store || Generated || !Planes.empty()) && "a page source has a store, a generated provider or planes");
+    if (Planes.empty())
+        return PagePayloadBytes(Store ? Store->Layout().Header.Format : PageFieldFormat::HeightSteps);
+    uint32 bytes = 0;
+    for (const std::shared_ptr<const PageStoreAccess>& plane : Planes)
+        bytes += PagePayloadBytes(plane->Format());
+    return bytes;
+}
+
+uint64 PageSource::PlanesVersion() const
+{
+    uint64 version = 0;
+    for (const std::shared_ptr<const PageStoreAccess>& plane : Planes)
+        version += plane->Version();
+    return version;
 }
 
 uint64 NextPageFetchRetryFrame(uint64 frameIndex, uint32 failedAttempts)
@@ -115,8 +150,8 @@ uint64 NextPageFetchRetryFrame(uint64 frameIndex, uint32 failedAttempts)
 
 PageFetchOutcome FetchPage(const PageSource& source, const PageAddress& address)
 {
-    if (source.Access)
-        return source.Access->Fetch(address);
+    if (!source.Planes.empty())
+        return FetchPlanes(source, address);
     PageFetchOutcome outcome;
     outcome.Address = address;
     if (source.Store && !source.Store->Layout().FindPresent(address))

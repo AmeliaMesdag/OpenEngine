@@ -42,7 +42,7 @@ On a grid, a wall, a fence, or the side of a box blocks every cell it stands in,
 
 - **Terrain**: the first enabled planar terrain's heights, after its modifiers. A terrain tile that has not streamed in holds the bake until it arrives. Planet terrains are not baked.
 - **Collider shapes**: box, sphere, capsule, and plane colliders on **Static** physics bodies. Triggers are not baked.
-- **Mesh renderers**: each renderer's own mesh, models and primitives alike, as its [Navigation Source](#leave-out-or-bring-in-a-mesh) policy admits it. A model that is still loading holds the bake until it arrives. One that cannot be loaded is left out, with a warning in the log.
+- **Mesh renderers**: each renderer's own mesh, models, primitives and the meshes spline recipes generate (roads, walls, paved areas) alike, as its [Navigation Source](#leave-out-or-bring-in-a-mesh) policy admits it. A generated mesh takes the policy of the spline entity that makes it. A model that is still loading holds the bake until it arrives. One that cannot be loaded is left out, with a warning in the log.
 
 By default, dynamic and kinematic bodies and navigation agents are not part of the surface, nor are the meshes under them: they move.
 
@@ -90,6 +90,7 @@ A dirty tile is rebuilt only when its content changed: its hash (see [Saved tile
 | The notice says | Meaning |
 |---|---|
 | `Baking: 212 of 1,024 tiles` | The mesh is being built tile by tile in the background. Tiles already built are in use. |
+| `Baking: 65,536 cells` | The grid is being built in the background. The previous grid stays in use until the new one is ready. On a first bake there is no grid yet, so the orders of the agents on the surface wait until the bake finishes. The same holds for a bake into a new map, after a Mode change or once the old map was released. If that bake fails, the orders keep waiting until a bake succeeds. |
 | `Baked: 1,024 tiles, 1,948 polygons, 0.5 MiB, version 1036` | Done. On a mesh, the version counts the tiles put into the surface by bakes, loads, and rebakes, so it changes whenever a tile does. On a grid it counts bakes. |
 | `Baked: … version 1036. Rebaking: 12 tiles` | Tiles a terrain edit, a carving obstacle, or MarkDirty touched are waiting or being rebuilt. The old tiles are in use until then. |
 | `Baked: … version 1036. Stale: 3 tiles, (2, 5) among them, whose ground changed since the bake: rebaking` | Tiles loaded from Baked Data were built from other ground. They are in use and rebake on their own. |
@@ -101,6 +102,7 @@ A dirty tile is rebuilt only when its content changed: its hash (see [Saved tile
 | `Failed: no geometry inside the bounds; …` | Nothing the surface bakes from is inside its bounds. Move the bounds, or add a terrain, a static collider, or a mesh. |
 | `Failed: the bounds need 4,761 tiles and a mesh surface spans at most 64 x 64 tiles (2,048 m on a side at this Cell Size): …` | A mesh surface wider than 64 tiles on a side is refused. Shrink the bounds to 2,048 m or less, or raise Cell Size. |
 | `Failed: the bounds need 5,000,000 cells: …` | The bounds are too large for a grid at this cell size. Raise Cell Size or shrink the bounds. |
+| `Failed: the grid bake failed (the log says why)` | The grid bake stopped on an error, such as running out of memory. The log names it. Bake again once it is fixed. |
 
 ## From C++ and C#
 

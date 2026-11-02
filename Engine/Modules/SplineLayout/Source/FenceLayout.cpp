@@ -4,7 +4,7 @@
 #include "Mathematics/Interpolation.h"
 #include "SplineLayout/PieceBasis.h"
 #include "SplineLayout/SeamShear.h"
-#include "SplineLayout/SpanMitre.h"
+#include "SplineLayout/SpanMiter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -296,7 +296,7 @@ struct Run
     uint32 RollBorrowedSpans = 0;
     // Per span, parallel to SpanPoses: whether it borrowed its roll, and how
     // each end meets the span beyond its station. The poses and scales above
-    // stay the chord's; a mitred end's overhang is applied where the span is
+    // stay the chord's; a mitered end's overhang is applied where the span is
     // emitted, so every rule that reads the bay between two stations — the
     // crest cells, the bury check — keeps reading the bay.
     std::vector<uint8> SpanRollBorrowed;
@@ -570,7 +570,7 @@ std::string JoinName(const SpanJoin& join)
            std::to_string(join.Before->EndPoint);
 }
 
-void MitreBareJoins(std::vector<Run>& runs, const FenceLayoutParams& params,
+void MiterBareJoins(std::vector<Run>& runs, const FenceLayoutParams& params,
                     std::vector<std::string>& validation);
 
 // What a registered crest adds to a run's spans at a join: the widest crest
@@ -609,7 +609,7 @@ SpanJoinSide JoinSideOf(const Run& run, size_t span, bool atStart, const FenceLa
     return side;
 }
 
-// Decides every span end's join (fence design section 4c). A join is mitred
+// Decides every span end's join (fence design section 4c). A join is mitered
 // where all of these hold: two spans meet there — a gate is a span, an opening
 // places nothing to meet; no post mesh stands on it,
 // because a post covers the join and a variant inside it would be a mesh for
@@ -617,10 +617,10 @@ SpanJoinSide JoinSideOf(const Run& run, size_t span, bool atStart, const FenceLa
 // opening station's frame rather than on the chord and its end is not where
 // the plane is; the notch its square ends would leave exceeds a millimetre,
 // below which the turn is the polyline's chord noise; the turn is within the
-// mitre limit; and the reach that carries both ends across the plane leaves
+// miter limit; and the reach that carries both ends across the plane leaves
 // both spans within the stretch cap. Past the limit or the cap the ends stay
 // square and the author is told.
-void MitreJoinsOfRuns(std::vector<Run>& runs, const FenceLayoutParams& params,
+void MiterJoinsOfRuns(std::vector<Run>& runs, const FenceLayoutParams& params,
                       const std::vector<CrestReach>& crests, std::vector<std::string>& validation)
 {
     for (Run& run : runs)
@@ -634,7 +634,7 @@ void MitreJoinsOfRuns(std::vector<Run>& runs, const FenceLayoutParams& params,
     if (params.HasPostMesh)
         return;
 
-    const float32 limitRadians = kMitreLimitDegrees * Mathematics::Pi / 180.0f;
+    const float32 limitRadians = kMiterLimitDegrees * Mathematics::Pi / 180.0f;
     for (const SpanJoin& join : CollectSpanJoins(runs, params.Closed))
     {
         Run& before = *join.Before;
@@ -651,7 +651,7 @@ void MitreJoinsOfRuns(std::vector<Run>& runs, const FenceLayoutParams& params,
             validation.push_back("Fence: " + JoinName(join) + " turns " +
                                  WholeDegrees(std::abs(turn)) + " degrees, past the " +
                                  WholeDegrees(limitRadians) +
-                                 " degree mitre limit. The spans meet with square ends there; "
+                                 " degree miter limit. The spans meet with square ends there; "
                                  "plant a post at it.");
             continue;
         }
@@ -673,10 +673,10 @@ void MitreJoinsOfRuns(std::vector<Run>& runs, const FenceLayoutParams& params,
     // The reach is a stretch the piece takes, so the cap governs it: a join
     // whose reach would carry either span past the cap, where its fill alone
     // did not, keeps square ends. A span whose fill is already past the cap has
-    // been reported and is built at that stretch, so its joins stay mitred. Undoing a join only shortens its spans, so
+    // been reported and is built at that stretch, so its joins stay mitered. Undoing a join only shortens its spans, so
     // one pass along the fence settles every join.
     const float32 maxStretch = std::max(params.SpanMaxStretch, 1.0f);
-    const auto mitredScale = [&params](const Run& run, size_t span)
+    const auto miteredScale = [&params](const Run& run, size_t span)
     {
         const float32 length =
             std::max(SpanPieceOf(run, span, params).Length(), kMinPieceLengthMetres);
@@ -686,17 +686,17 @@ void MitreJoinsOfRuns(std::vector<Run>& runs, const FenceLayoutParams& params,
     };
     const auto overCap = [&](const Run& run, size_t span)
     {
-        return mitredScale(run, span) > maxStretch && run.SpanLengthScales[span] <= maxStretch;
+        return miteredScale(run, span) > maxStretch && run.SpanLengthScales[span] <= maxStretch;
     };
     for (const SpanJoin& join : CollectSpanJoins(runs, params.Closed))
     {
         Run& before = *join.Before;
         Run& after = *join.After;
-        if (!before.SpanEnds[join.BeforeSpan].Mitred ||
+        if (!before.SpanEnds[join.BeforeSpan].Mitered ||
             (!overCap(before, join.BeforeSpan) && !overCap(after, join.AfterSpan)))
             continue;
         const float32 needed =
-            std::max(mitredScale(before, join.BeforeSpan), mitredScale(after, join.AfterSpan));
+            std::max(miteredScale(before, join.BeforeSpan), miteredScale(after, join.AfterSpan));
         before.SpanEnds[join.BeforeSpan] = FenceEndPlane{};
         after.SpanStarts[join.AfterSpan] = FenceEndPlane{};
         before.SpanEndOverhangs[join.BeforeSpan] = 0.0f;
@@ -719,7 +719,7 @@ void SetTopInset(FenceEndPlane& plane, bool atStart, const FencePieceBounds& pie
                                               std::tan(plane.LeanRadians) * rise / lengthScale;
 }
 
-// A span as it is emitted: laid longer by each mitred end's overhang, its
+// A span as it is emitted: laid longer by each mitered end's overhang, its
 // base moved along travel by half their difference so each end reaches its
 // own plane, and its planes stated in its final scale. A span with square
 // ends is exactly its chord pose.
@@ -731,7 +731,7 @@ void ShapeEmittedSpan(const Run& run, size_t span, const FenceLayoutParams& para
     outLengthScale = run.SpanLengthScales[span];
     outStart = run.SpanStarts[span];
     outEnd = run.SpanEnds[span];
-    if (!outStart.Mitred && !outEnd.Mitred)
+    if (!outStart.Mitered && !outEnd.Mitered)
         return;
 
     const FencePieceBounds& piece = SpanPieceOf(run, span, params);
@@ -747,13 +747,13 @@ void ShapeEmittedSpan(const Run& run, size_t span, const FenceLayoutParams& para
     // The measured inset is in the frame's metres; the variant reads it in
     // the piece's unscaled local metres.
     const float32 stationLocalY = -PlantedPivotLift(piece, params.PlantMode);
-    if (outStart.Mitred)
+    if (outStart.Mitered)
     {
         outStart.StationInset /= outLengthScale;
         outStart.StationLocalY = stationLocalY;
         SetTopInset(outStart, true, piece, outLengthScale);
     }
-    if (outEnd.Mitred)
+    if (outEnd.Mitered)
     {
         outEnd.StationInset /= outLengthScale;
         outEnd.StationLocalY = stationLocalY;
@@ -762,7 +762,7 @@ void ShapeEmittedSpan(const Run& run, size_t span, const FenceLayoutParams& para
 }
 
 // Lays one end of an emitted span square at its station: the piece budget
-// stopped emission before the span that end was mitred against, so a cut there
+// stopped emission before the span that end was mitered against, so a cut there
 // would show its angled face to nothing.
 void SquareUnpairedEnd(std::vector<Run>& runs, const FenceLayoutParams& params, bool atStart,
                        FenceSpan& span)
@@ -1063,8 +1063,8 @@ bool CrestRegistersToSpans(const Run& run, const FenceLayoutParams& params,
 }
 
 // Decides every span end's join, with what a registered crest adds to each
-// run's spans (MitreJoinsOfRuns).
-void MitreBareJoins(std::vector<Run>& runs, const FenceLayoutParams& params,
+// run's spans (MiterJoinsOfRuns).
+void MiterBareJoins(std::vector<Run>& runs, const FenceLayoutParams& params,
                     std::vector<std::string>& validation)
 {
     std::vector<CrestReach> crests(runs.size());
@@ -1086,7 +1086,7 @@ void MitreBareJoins(std::vector<Run>& runs, const FenceLayoutParams& params,
                 crests[r] = reach;
         }
     }
-    MitreJoinsOfRuns(runs, params, crests, validation);
+    MiterJoinsOfRuns(runs, params, crests, validation);
 }
 
 // One piece of one run's crest row, solved on the crest axis before anything is
@@ -1309,7 +1309,7 @@ bool CrestPoseOnRun(const Run& run, const CrestAxis& axis, const FenceLayoutPara
 // at the span's LengthScale, so its two ends are the span's two ends and the
 // row closes wherever the wall does.
 //
-// A mitred span's crest takes the span's two planes into its own frame: the
+// A mitered span's crest takes the span's two planes into its own frame: the
 // station stands as far from the crest's centre as from the span's, and at the
 // wall top's depth below the crest's own base.
 void PlaceCrestOnSpan(const Run& run, const FenceLayoutParams& params, size_t spanIndex,
@@ -1339,11 +1339,11 @@ void PlaceCrestOnSpan(const Run& run, const FenceLayoutParams& params, size_t sp
     crest.End.StationInset += endDifference;
     crest.Start.StationLocalY = -top;
     crest.End.StationLocalY = -top;
-    if (crest.Start.Mitred)
+    if (crest.Start.Mitered)
         SetTopInset(crest.Start, true, piece, crest.LengthScale);
     else
         crest.Start = FenceEndPlane{};
-    if (crest.End.Mitred)
+    if (crest.End.Mitered)
         SetTopInset(crest.End, false, piece, crest.LengthScale);
     else
         crest.End = FenceEndPlane{};
@@ -1613,9 +1613,9 @@ FenceLayoutResult BuildFenceLayout(const std::vector<CenterSample>& center,
 
         run.Fill = SolveRunFill(run.LengthMetres, params.Seed, spanOrdinal, params.SpanPieces,
                                 params.GatePieces, overridesByRun[r], maxStretch, minScale);
-        // The fill answers for its own stretch. The reach a mitred end is laid
+        // The fill answers for its own stretch. The reach a mitered end is laid
         // with is checked against the same cap where the joins are decided
-        // (MitreJoinsOfRuns): the joins follow from the stations this fill
+        // (MiterJoinsOfRuns): the joins follow from the stations this fill
         // places, so the fill cannot count them without depending on its own
         // result.
         if (!run.Fill.Slots.empty() && !run.Fill.WithinCap)
@@ -1775,7 +1775,7 @@ FenceLayoutResult BuildFenceLayout(const std::vector<CenterSample>& center,
     // Needs the frames of the spans on both sides of every station, so it
     // follows the span pass; what it decides is applied where each span is
     // emitted.
-    MitreBareJoins(runs, params, result.Validation);
+    MiterBareJoins(runs, params, result.Validation);
 
     // ---- Pass E: emit. ----------------------------------------------------
     // A shared station belongs to both runs; it is emitted with the run that
@@ -1958,9 +1958,9 @@ FenceLayoutResult BuildFenceLayout(const std::vector<CenterSample>& center,
     // whose partner is the loop's last span.
     if (budgetReported && !result.Spans.empty())
     {
-        if (result.Spans.back().End.Mitred)
+        if (result.Spans.back().End.Mitered)
             SquareUnpairedEnd(runs, params, false, result.Spans.back());
-        if (params.Closed && result.Spans.front().Start.Mitred)
+        if (params.Closed && result.Spans.front().Start.Mitered)
             SquareUnpairedEnd(runs, params, true, result.Spans.front());
     }
 

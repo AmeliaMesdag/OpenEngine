@@ -408,17 +408,24 @@ if(MSVC)
             -P ${CMAKE_SOURCE_DIR}/cmake/Tests/GenerateEngineExportsDefTest.cmake)
 endif()
 
-# An export compiles the Player against the Editor's staged SDK. An editor that
-# runs outside its build tree has no vcpkg tree to name, so the Player must
-# configure and link without one. Needs the Editor built (its SDK staged); runs
-# a real configure and link of the SDK's Player template, about a minute.
-if(TARGET Editor AND WIN32)
+# An export outside the build tree compiles the Player against the staged SDK with no vcpkg tree.
+# Needs the Editor built (its SDK staged): a real configure and link, about a minute. A Mac export
+# injects a prebuilt Player bundle and compiles none.
+if(TARGET Editor AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
   add_test(NAME EngineSdk.PlayerLinksWithoutAVcpkgTree
     COMMAND ${CMAKE_COMMAND}
             -DSDK=$<TARGET_FILE_DIR:Editor>/SDK
             "-DGENERATOR=${CMAKE_GENERATOR}"
             -DWORK=${CMAKE_BINARY_DIR}/Tests/EngineSdkPlayerLinkScratch
             -P ${CMAKE_SOURCE_DIR}/cmake/Tests/EngineSdkPlayerLinkTest.cmake)
+endif()
+
+# The SDK ships to other machines, and a build depfile in it names the build tree's paths.
+# Needs the Editor built (its SDK staged).
+if(TARGET Editor)
+  add_test(NAME EngineSdk.ShipsNoBuildDepfiles
+    COMMAND ${CMAKE_COMMAND} -DSDK_DIR=$<TARGET_FILE_DIR:Editor>/SDK
+            -P ${CMAKE_SOURCE_DIR}/cmake/Tests/EngineSdkDepfilesTest.cmake)
 endif()
 
 # Opt into a shader parity review against a pinned Git baseline. This is not a
@@ -1157,11 +1164,15 @@ add_executable(TerrainRegionBakeTests
   # pre-volume components, effect stack ordering, spline path-vs-area, the
   # inward feather / master weight, and the sphere guards.
   TerrainModifierVolumeTests.cpp
+  # A flatten on a closed spline area: the harmonic fill of its rim, each road's grade at its opening.
+  TerrainAreaFlattenSurfaceTests.cpp
   # Pooled flattens: the per-station route heights a SplinePath volume feeds a
   # pooled flatten, the Average blend's pool, the ground claim masked PER MEMBER
   # in every blend mode, and the contracts around them (a claim writes no
   # height; claims combine by max). Emits the offline twin's parity fixture.
   TerrainFlattenPoolTests.cpp
+  # The GPU height bake's refusal report: the reason and the volume that keep a bake on the CPU.
+  TerrainGpuBakeRefusalTests.cpp
   # Surface rules (F10 S2): condition evaluation, the AND product, the band and
   # curve shapes, the caps, the GPU splat gate, and the rules arm of the splat
   # claim end to end.
@@ -1329,8 +1340,8 @@ target_include_directories(TerrainAtlasTests PRIVATE
   # TerrainSkyline.h, private to TerrainECS.
   ${CMAKE_SOURCE_DIR}/Engine/Modules/TerrainECS/Source
   ${CMAKE_SOURCE_DIR}/Engine/Modules/PageStreaming/Include
-  # Grass atlas params builder oracle (TerrainGrassRenderFeature::BuildAtlasParams) + its deps.
-  ${CMAKE_SOURCE_DIR}/Engine/Modules/TerrainGrass/Include
+  # The grass surface params builder (GrassSurfaceParams.h, private to TerrainGrass).
+  ${CMAKE_SOURCE_DIR}/Engine/Modules/TerrainGrass/Source
   ${CMAKE_SOURCE_DIR}/Engine/Modules/Terrain/Include
   ${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Include
   ${CMAKE_SOURCE_DIR}/Engine/Modules/Types/Include

@@ -15,6 +15,8 @@
 
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Spline/SplineExtrude.h"
+#include "Components/Spline/SplineNetworkMember.h"
+#include "Components/Spline/SplinePaving.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Terrain/TerrainModifierEffects.h"
 #include "Components/Terrain/TerrainModifierVolume.h"
@@ -24,6 +26,7 @@
 #include "ECS/UnresolvedComponentStore.h"
 #include "ECS/World.h"
 #include "SplineECS/SplineService.h"
+#include "Terrain/TerrainMaterialRecord.h"
 #include "TerrainECS/TerrainModifierSystem.h"
 #include "TerrainECS/TerrainService.h"
 
@@ -270,6 +273,55 @@ TEST(SplineGroundAuthority, ARoadProvisionsAClaimAndAPoolThatDoesNotDeferToIt)
     EXPECT_LT(volume->Priority, SplineRecipes::kGradedRunPriority)
         << "a claim only holds ground against pools that flush AFTER it, so an owning run must "
            "sort below the graded runs that stop at it";
+}
+
+TEST(SplineGroundAuthority, ARoadThatOwnsItsGroundClearsItsGrassAndPaintsItDirt)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    ECS::World world;
+    const ECS::EntityHandle run = CreateRun(world, SplineECS::SplineService::Get(), 0.0f);
+    Components::SplineExtrude recipe{};
+    recipe.Profile = Components::SplineExtrudeProfile::Crown;
+    world.AddComponentImmediate<Components::SplineExtrude>(run, recipe);
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+
+    const auto* grass = world.GetComponent<Components::TerrainGrassEffect>(run);
+    ASSERT_NE(grass, nullptr);
+    EXPECT_EQ(grass->DensityScale, 0.0f);
+    const auto* paint = world.GetComponent<Components::TerrainPaintLayerEffect>(run);
+    ASSERT_NE(paint, nullptr);
+    ASSERT_LT(paint->LayerIndex, Terrain::kTerrainLayerRoleCount);
+    EXPECT_STREQ(Terrain::kTerrainLayerRoleNames[paint->LayerIndex], "Dirt");
+    const auto* marker = world.GetComponent<Components::SplineGroundProvisioned>(run);
+    ASSERT_NE(marker, nullptr);
+    EXPECT_TRUE(marker->Grass && marker->Paint);
+}
+
+TEST(SplineGroundAuthority, ARoadMovedToGradesDropsItsGrassAndPaint)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    ECS::World world;
+    const ECS::EntityHandle run = CreateRun(world, SplineECS::SplineService::Get(), 0.0f);
+    Components::SplineExtrude recipe{};
+    recipe.Profile = Components::SplineExtrudeProfile::Crown;
+    world.AddComponentImmediate<Components::SplineExtrude>(run, recipe);
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+    ASSERT_NE(world.GetComponent<Components::TerrainGrassEffect>(run), nullptr);
+    world.GetComponentForWrite<Components::SplineExtrude>(run)->GroundAuthority = SplineGroundAuthority::Grades;
+    controller.Update(world, nullptr);
+
+    EXPECT_NE(world.GetComponent<Components::TerrainFlattenEffect>(run), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainGrassEffect>(run), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainPaintLayerEffect>(run), nullptr);
+    const auto* marker = world.GetComponent<Components::SplineGroundProvisioned>(run);
+    ASSERT_NE(marker, nullptr);
+    EXPECT_FALSE(marker->Grass || marker->Paint);
 }
 
 // ------------------------------------------------------ lifecycle contracts --
@@ -555,4 +607,131 @@ TEST(SplineGroundAuthority, ASceneSwapAdoptsTheIncomingSceneAfterShutdown)
     EXPECT_EQ(Components::EffectPoolName(*after), std::string_view("Aqueduct"))
         << "a record surviving the swap made the incoming run look like an authority change "
            "and rewrote it on load";
+}
+
+// ------------------------------------------------------------ a paved area --
+
+TEST(SplineGroundAuthority, APavedAreaOnAutoOwnsItsGroundOnASplineAreaVolumeAndClearsAndPaintsIt)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    ECS::World world;
+    const ECS::EntityHandle area = CreatePavedArea(world, SplineECS::SplineService::Get(), {});
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+
+    const auto* volume = world.GetComponent<Components::TerrainModifierVolume>(area);
+    ASSERT_NE(volume, nullptr);
+    EXPECT_EQ(volume->Shape, Components::TerrainVolumeShape::SplineArea);
+    EXPECT_EQ(volume->Priority, SplineRecipes::kOwnedRunPriority);
+    const auto* flatten = world.GetComponent<Components::TerrainFlattenEffect>(area);
+    ASSERT_NE(flatten, nullptr);
+    EXPECT_EQ(flatten->Blend, Components::TerrainModifierBlend::Average);
+    EXPECT_EQ(Components::EffectPoolName(*flatten), std::string_view(SplineRecipes::kOwnedRunGroupName));
+    EXPECT_FALSE(flatten->RespectClaims);
+    EXPECT_NE(world.GetComponent<Components::TerrainGroundClaimEffect>(area), nullptr);
+    const auto* grass = world.GetComponent<Components::TerrainGrassEffect>(area);
+    ASSERT_NE(grass, nullptr);
+    EXPECT_EQ(grass->HeightScale, 0.0f);
+    EXPECT_EQ(grass->DensityScale, 0.0f);
+    EXPECT_EQ(grass->GroundDarkeningScale, 0.0f);
+    const auto* paint = world.GetComponent<Components::TerrainPaintLayerEffect>(area);
+    ASSERT_NE(paint, nullptr);
+    ASSERT_LT(paint->LayerIndex, Terrain::kTerrainLayerRoleCount);
+    EXPECT_STREQ(Terrain::kTerrainLayerRoleNames[paint->LayerIndex], "Dirt");
+    EXPECT_TRUE(paint->Replace);
+    const auto* marker = world.GetComponent<Components::SplineGroundProvisioned>(area);
+    ASSERT_NE(marker, nullptr);
+    EXPECT_TRUE(marker->Volume && marker->Flatten && marker->Claim && marker->Grass && marker->Paint);
+}
+
+TEST(SplineGroundAuthority, APavedAreaGradesTheGroundInsideItsRimToTheRimsHeight)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    auto& terrainSvc = TerrainService::Get();
+    const TerrainHandle handle = CreateBakedTerrain(terrainSvc);
+    ECS::World world;
+    CreateTerrainEntity(world, handle);
+    CreatePavedArea(world, SplineECS::SplineService::Get(), {});
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+    const std::vector<float32> baked = BakeWorld(world, terrainSvc, handle);
+
+    const std::size_t centre = static_cast<std::size_t>(kHeightmapDim / 2) * kHeightmapDim + kHeightmapDim / 2;
+    EXPECT_NEAR(baked[centre] * kHeightScale, kRunGrade, 1e-3f);
+}
+
+TEST(SplineGroundAuthority, APavedAreaOnNoneAndAPavingOnARoadProvisionNothing)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    ECS::World world;
+    Components::SplinePaving none{};
+    none.GroundAuthority = SplineGroundAuthority::None;
+    const ECS::EntityHandle area = CreatePavedArea(world, SplineECS::SplineService::Get(), none);
+    const ECS::EntityHandle road = CreatePavedArea(world, SplineECS::SplineService::Get(), {});
+    world.AddComponentImmediate(road, Components::SplineNetworkMember{Components::SplineNetworkMemberKind::Road});
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+
+    for (const ECS::EntityHandle e : {area, road})
+    {
+        EXPECT_EQ(world.GetComponent<Components::TerrainModifierVolume>(e), nullptr);
+        EXPECT_EQ(world.GetComponent<Components::TerrainFlattenEffect>(e), nullptr);
+        EXPECT_EQ(world.GetComponent<Components::TerrainGroundClaimEffect>(e), nullptr);
+        EXPECT_EQ(world.GetComponent<Components::TerrainGrassEffect>(e), nullptr);
+        EXPECT_EQ(world.GetComponent<Components::TerrainPaintLayerEffect>(e), nullptr);
+        EXPECT_EQ(world.GetComponent<Components::SplineGroundProvisioned>(e), nullptr);
+    }
+}
+
+TEST(SplineGroundAuthority, TurningAPavedAreaOffRemovesEveryPieceItProvisioned)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    ECS::World world;
+    const ECS::EntityHandle area = CreatePavedArea(world, SplineECS::SplineService::Get(), {});
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+    ASSERT_NE(world.GetComponent<Components::TerrainGrassEffect>(area), nullptr);
+
+    auto* live = world.GetComponentForWrite<Components::SplinePaving>(area);
+    ASSERT_NE(live, nullptr);
+    live->GroundAuthority = SplineGroundAuthority::None;
+    controller.Update(world, nullptr);
+
+    EXPECT_EQ(world.GetComponent<Components::TerrainModifierVolume>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainFlattenEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainGroundClaimEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainGrassEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainPaintLayerEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::SplineGroundProvisioned>(area), nullptr);
+}
+
+TEST(SplineGroundAuthority, APavedAreaMovedToGradesDropsItsGrassAndPaintAndKeepsItsGrade)
+{
+    ScopedTerrainService terrainScope;
+    ScopedSplineService splineScope;
+    ECS::World world;
+    const ECS::EntityHandle area = CreatePavedArea(world, SplineECS::SplineService::Get(), {});
+
+    SplineRecipes::SplineGroundAuthorityController controller;
+    controller.Update(world, nullptr);
+    world.GetComponentForWrite<Components::SplinePaving>(area)->GroundAuthority = SplineGroundAuthority::Grades;
+    controller.Update(world, nullptr);
+
+    EXPECT_NE(world.GetComponent<Components::TerrainModifierVolume>(area), nullptr);
+    EXPECT_NE(world.GetComponent<Components::TerrainFlattenEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainGroundClaimEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainGrassEffect>(area), nullptr);
+    EXPECT_EQ(world.GetComponent<Components::TerrainPaintLayerEffect>(area), nullptr);
+    const auto* marker = world.GetComponent<Components::SplineGroundProvisioned>(area);
+    ASSERT_NE(marker, nullptr);
+    EXPECT_TRUE(marker->Volume && marker->Flatten);
+    EXPECT_FALSE(marker->Claim || marker->Grass || marker->Paint);
 }

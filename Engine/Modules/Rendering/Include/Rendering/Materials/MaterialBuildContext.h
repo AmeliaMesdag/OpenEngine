@@ -80,6 +80,8 @@ struct MaterialBuildContext
 // lists sources in mount priority order, so a Player development run that mounts the project and
 // the editor at one folder names it "project", as the cook does. Moving the tree keeps the
 // identity; a project material and a package material with the same relative path get two.
+// The root match ignores case, so a case-folded path from the asset registry matches the root on
+// disk. The path under the root keeps the spelling of `materialPath`.
 // Empty when no mounted source holds the material (a synthetic stand-in path).
 std::filesystem::path MaterialSourceIdentity(const std::filesystem::path& materialPath,
                                              const MaterialBuildContext& context);

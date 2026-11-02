@@ -141,9 +141,9 @@ CameraData ViewRegistry::ResolveCameraData(ViewId viewId) const
 {
     const Mathematics::Matrix4x4 identity = Mathematics::Matrix4x4::Identity();
     CameraData cam{};
-    std::memcpy(cam.view, identity.Data(), 64);
-    std::memcpy(cam.proj, identity.Data(), 64);
-    std::memcpy(cam.viewProj, identity.Data(), 64);
+    cam.view = identity;
+    cam.proj = identity;
+    cam.viewProj = identity;
 
     CameraId cameraId = 0;
     for (const auto& v : m_Views)
@@ -172,8 +172,8 @@ CameraData ViewRegistry::ResolveCameraData(ViewId viewId) const
     // so culling, ViewParams (FindCameraData path), and every fragment consumer
     // are unaffected. Inside the activation radius the sector is (0,0,0) and the
     // rebased matrices equal the full-world ones bit-for-bit.
-    ComputeRebasedView(cam.view, cam.proj, cam.viewProj, cam.cameraPos[0], cam.cameraPos[1],
-                       cam.cameraPos[2], cam.viewRel, cam.viewProjRel, cam.renderOriginSector);
+    ComputeRebasedView(cam.view, cam.proj, cam.viewProj, cam.cameraPos.x, cam.cameraPos.y,
+                       cam.cameraPos.z, cam.viewRel, cam.viewProjRel, cam.renderOriginSector);
     return cam;
 }
 
@@ -603,10 +603,7 @@ void ViewRegistry::SetViewTargets(ViewId id,
             view.targets.clearColor = clear.clearColor;
             view.targets.clearDepth = clear.clearDepth;
             view.targets.clearStencil = clear.clearStencil;
-            view.targets.clearColorValue[0] = clear.clearColorValue[0];
-            view.targets.clearColorValue[1] = clear.clearColorValue[1];
-            view.targets.clearColorValue[2] = clear.clearColorValue[2];
-            view.targets.clearColorValue[3] = clear.clearColorValue[3];
+            view.targets.clearColorValue = clear.clearColorValue;
             view.targets.clearDepthValue = clear.clearDepthValue;
             view.targets.clearStencilValue = clear.clearStencilValue;
 
@@ -652,20 +649,14 @@ void ViewRegistry::SetViewClearConfig(ViewId id, ViewClearConfig clear)
             (view.targets.clearStencil != clear.clearStencil) ||
             (view.targets.clearDepthValue != clear.clearDepthValue) ||
             (view.targets.clearStencilValue != clear.clearStencilValue) ||
-            (view.targets.clearColorValue[0] != clear.clearColorValue[0]) ||
-            (view.targets.clearColorValue[1] != clear.clearColorValue[1]) ||
-            (view.targets.clearColorValue[2] != clear.clearColorValue[2]) ||
-            (view.targets.clearColorValue[3] != clear.clearColorValue[3]);
+            (view.targets.clearColorValue != clear.clearColorValue);
         if (!changed)
             return;
 
         view.targets.clearColor = clear.clearColor;
         view.targets.clearDepth = clear.clearDepth;
         view.targets.clearStencil = clear.clearStencil;
-        view.targets.clearColorValue[0] = clear.clearColorValue[0];
-        view.targets.clearColorValue[1] = clear.clearColorValue[1];
-        view.targets.clearColorValue[2] = clear.clearColorValue[2];
-        view.targets.clearColorValue[3] = clear.clearColorValue[3];
+        view.targets.clearColorValue = clear.clearColorValue;
         view.targets.clearDepthValue = clear.clearDepthValue;
         view.targets.clearStencilValue = clear.clearStencilValue;
         return;

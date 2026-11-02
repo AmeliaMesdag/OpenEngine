@@ -1,5 +1,6 @@
 #include "AssetCore/AssetIgnoreRules.h"
 #include "AssetCore/PathNormalization.h"
+#include "Types/PathUtils.h"
 #include "Types/StringUtils.h"
 
 #include <algorithm>
@@ -105,16 +106,21 @@ static std::string NormalizeIgnoreRule(std::string_view in)
     return s;
 }
 
+// A path spelled under the root (every directory-walk entry) is relative by its
+// spelling alone. Only a different spelling of the root (drive case, a link) needs
+// the file system: std::filesystem::relative canonicalizes both paths on every call.
 static std::string TryGetCanonicalRelativeNoThrow(const std::filesystem::path& assetRoot,
                                                   const std::filesystem::path& absOrRel)
 {
-    std::error_code ec;
-    std::filesystem::path abs = absOrRel;
-    if (abs.is_relative())
+    const std::filesystem::path abs =
+        (absOrRel.is_relative() ? assetRoot / absOrRel : absOrRel).lexically_normal();
+    const std::filesystem::path lexical = RelativePathUnderRoot(abs, assetRoot);
+    if (!lexical.empty())
     {
-        abs = (assetRoot / abs).lexically_normal();
+        return NormalizeCanonicalPath(lexical.generic_string());
     }
 
+    std::error_code ec;
     std::filesystem::path rel = std::filesystem::relative(abs, assetRoot, ec);
     if (ec)
     {

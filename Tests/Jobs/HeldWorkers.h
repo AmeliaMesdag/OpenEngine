@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <thread>
 
 namespace GameEngine::Tests
@@ -25,26 +26,38 @@ inline bool WaitUntil(const std::function<bool()>& pred, std::chrono::millisecon
     return true;
 }
 
-// Holds every worker of the pool inside one task each until Release(), which
-// returns once every holding task has stopped touching this object, so it may
-// be destroyed before the pool.
+// Holds `workers` workers of the pool (every worker by default) inside one
+// task each until Release(), which returns once every holding task has stopped
+// touching this object, so it may be destroyed before the pool. A pool that
+// shuts down lets its held workers go, since its shutdown joins them; they
+// then take no more work. Destroying it releases the workers it still holds,
+// so a test that returns early on a failed assertion does not leave the pool
+// held.
 class HeldWorkers
 {
   public:
-    explicit HeldWorkers(JobSystem::WorkStealingThreadPool& pool)
+    static constexpr size_t kEveryWorker = std::numeric_limits<size_t>::max();
+
+    explicit HeldWorkers(JobSystem::WorkStealingThreadPool& pool, size_t workers = kEveryWorker)
     {
-        const size_t workers = pool.GetWorkerCount();
+        if (workers == kEveryWorker)
+            workers = pool.GetWorkerCount();
         for (size_t i = 0; i < workers; ++i)
         {
-            pool.EnqueueWork([this] {
+            pool.EnqueueWork([this, &pool] {
                 m_Holding.fetch_add(1);
-                while (!m_Released.load())
+                while (!m_Released.load() && !pool.IsShuttingDown())
                     std::this_thread::yield();
                 m_Holding.fetch_sub(1);
             });
         }
         EXPECT_TRUE(WaitUntil([this, workers] { return m_Holding.load() == workers; }, std::chrono::seconds(10)));
     }
+    ~HeldWorkers() { Release(); }
+
+    HeldWorkers(const HeldWorkers&) = delete;
+    HeldWorkers& operator=(const HeldWorkers&) = delete;
+
     void Release()
     {
         m_Released.store(true);

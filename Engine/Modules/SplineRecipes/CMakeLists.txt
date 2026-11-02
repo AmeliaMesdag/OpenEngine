@@ -8,14 +8,23 @@ project(SplineRecipes LANGUAGES CXX)
 # conform. Linked into Engine, so the editor, the Player and a game run one builder.
 add_library(SplineRecipes OBJECT
     Source/FenceEmission.cpp
-    Source/FenceMitreVariants.cpp
+    Source/FenceMiterVariants.cpp
     Source/FencePieceReuse.cpp
     Source/FenceRecipeLayout.cpp
     Source/FenceSpanOverrides.cpp
+    Source/Paving/PavingApproach.cpp
+    Source/Paving/PavingApproachGround.cpp
+    Source/Paving/PavingMesh.cpp
+    Source/Paving/PavingPlan.cpp
+    Source/Paving/PavingSources.cpp
+    Source/Paving/PavingRoadTrim.cpp
+    Source/Paving/SplinePavingController.cpp
+    Source/Paving/SplinePavingSanitize.cpp
     Source/PlacementGroundGap.cpp
     Source/RecipeBuildStates.cpp
     Source/RecipeControllers.cpp
     Source/RecipeValidation.cpp
+    Source/RoadVerge.cpp
     Source/SplineChunkCommit.cpp
     Source/SplineChunkSlots.cpp
     Source/SplineExtrudeController.cpp
@@ -23,7 +32,7 @@ add_library(SplineRecipes OBJECT
     Source/SplineFenceController.cpp
     Source/SplineFillRebuild.cpp
     Source/SplineGroundAuthority.cpp
-    Source/SplineGroundCleanup.cpp
+    Source/SplineGroundEdit.cpp
     Source/SplinePieceMaterial.cpp
     Source/SplinePlacementController.cpp
     Source/SplineRebuildGate.cpp
@@ -31,9 +40,9 @@ add_library(SplineRecipes OBJECT
     Source/SplineRecipesScriptApi.cpp
     Source/SplineSurfaceConform.cpp
     Source/SplineSweepStations.cpp
-    Source/SplineWallBuild.cpp
-    Source/SplineWallController.cpp
-    Source/SplineWallSanitize.cpp
+    Source/SplineWall/SplineWallBuild.cpp
+    Source/SplineWall/SplineWallController.cpp
+    Source/SplineWall/SplineWallSanitize.cpp
 )
 
 target_compile_features(SplineRecipes PUBLIC cxx_std_20)
@@ -121,7 +130,7 @@ if(BUILD_TESTING)
         # The fence's cut span variants from the layout's plan to the registry: the
         # unit SplineFenceController::Rebuild hands its plan to, on a registry with
         # no device — dedupe, stable keys, release, the byte budget, open meshes.
-        Tests/FenceMitreVariantsTests.cpp
+        Tests/FenceMiterVariantsTests.cpp
         # End-to-end coverage of the extrude's None-conform station path over the
         # RiverVignette water spline: arc sampling (Spline, via Engine.dll), chunk
         # carving and the strip sweep (SplineGeometry, via Engine.dll) together must
@@ -173,11 +182,29 @@ if(BUILD_TESTING)
         Tests/FenceRecipeLayoutTests.cpp
         # Writing a fence's span overrides: gate, pinned piece, clear, full table.
         Tests/FenceSpanOverridesTests.cpp
+        # The paving's regions: the arms of each junction, the ignored roads, a junction two
+        # pavings share built once under one owner, and the Open edges where the roads go on.
+        Tests/Paving/PavingPlanTests.cpp
+        # The paving recipe: the sanitizer, and the geometry key a look edit leaves alone.
+        Tests/Paving/SplinePavingRecipeTests.cpp
+        # The paving's lid: on a sloped rim it follows the ground with no crease; the seed and the
+        # owner's turn move its pattern.
+        Tests/Paving/PavingMeshTests.cpp
+        # A road's strip around the paved regions on it: the skipped arc length, the Open-edge cap,
+        # a closed road's seam.
+        Tests/Paving/PavingRoadTrimTests.cpp
+        # A road's verge where the road leaves a paving: the curb and the verge as one sweep on the
+        # Open edge, at a Flared and a Straight mouth, and the verge's vertex cost.
+        Tests/RoadVergeTests.cpp
+        # The paving through the recipe controllers over a headless device: what it builds and
+        # the state it reports.
+        Tests/Paving/SplinePavingControllerTests.cpp
         # Fixtures here initialize the engine; this shuts it down before the process exits.
         ${CMAKE_SOURCE_DIR}/Tests/EngineShutdownTestEnvironment.cpp
     )
     # TestTempDir.h, shared across the test trees.
-    target_include_directories(SplineRecipesTests PRIVATE ${CMAKE_SOURCE_DIR}/Tests)
+    # RoadVergeTests.cpp: the private header beside RoadVerge.cpp.
+    target_include_directories(SplineRecipesTests PRIVATE ${CMAKE_SOURCE_DIR}/Tests ${CMAKE_CURRENT_SOURCE_DIR}/Source)
     target_link_libraries(SplineRecipesTests PRIVATE Engine SharedHeadlessDeviceTestSupport GTest::gtest GTest::gtest_main)
     set_target_properties(SplineRecipesTests PROPERTIES FOLDER "Engine/Tests")
     ge_set_output_tests(SplineRecipesTests)

@@ -36,6 +36,8 @@
 #include "DebugServer/AssistantSessionHandlers.h"
 #include "DebugServer/BenchSceneHandlers.h"
 #include "DebugServer/BuildStatusReport.h"
+#include "DebugServer/Capture/FrameSequence/FrameSequenceRecorder.h"
+#include "DebugServer/Capture/ScreenshotUtils.h"
 #include "DebugServer/CameraProjectionReport.h"
 #include "Editor/CaptureOutputDirectory.h"
 #include "DebugServer/Components/ComponentValueReader.h"
@@ -1135,505 +1137,6 @@ static std::string EntityNameFromWorld(ECS::World* world, ECS::EntityHandle enti
     return {};
 }
 
-// In-place gamma encode (linear → sRGB) for pixels already quantized to RGBA8.
-// Only for sources that are 8-bit to begin with (no precision left to recover).
-// Float sources must encode in float inside ConvertToRGBA8 BEFORE the quantize:
-// encoding after quantizing spreads one 1/255 linear quantum across ~4 output
-// LSB near black, manufacturing banding the screen never shows.
-static void ApplySRGBEncodeRGBA8(std::vector<uint8_t>& rgba)
-{
-    auto encode = [](uint8_t v) -> uint8_t
-    {
-        float linear = static_cast<float>(v) / 255.0f;
-        float srgb = (linear <= 0.0031308f)
-                         ? 12.92f * linear
-                         : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
-        srgb = std::max(0.0f, std::min(1.0f, srgb));
-        return static_cast<uint8_t>(srgb * 255.0f + 0.5f);
-    };
-    for (size_t i = 0; i + 3 < rgba.size(); i += 4)
-    {
-        rgba[i + 0] = encode(rgba[i + 0]);
-        rgba[i + 1] = encode(rgba[i + 1]);
-        rgba[i + 2] = encode(rgba[i + 2]);
-        // alpha is left untouched
-    }
-}
-
-// Interleaved gradient noise, ported verbatim from encode_srgb.frag.
-// Coordinates are pixel centers (x+0.5, y+0.5) to mirror gl_FragCoord.
-static float InterleavedGradientNoiseAt(uint32_t px, uint32_t py, float offset)
-{
-    auto fract = [](float v) -> float { return v - std::floor(v); };
-    const float x = static_cast<float>(px) + 0.5f + offset;
-    const float y = static_cast<float>(py) + 0.5f + offset * 0.7f;
-    return fract(52.9829189f * fract(0.06711056f * x + 0.00583715f * y));
-}
-
-// Per-pixel triangular-PDF dither, ported verbatim from encode_srgb.frag
-// (InterleavedGradientNoise + inverse-CDF remap). The screen's sRGB encode pass
-// dithers its 8-bit quantize with exactly this pattern; captures quantizing the
-// same linear source must match or they show staircase banding the display
-// never had. Returns a value in (-1, 1).
-static float TriangularDitherAt(uint32_t px, uint32_t py)
-{
-    const float u = InterleavedGradientNoiseAt(px, py, 0.0f);
-    const float o = 2.0f * u - 1.0f;
-    const float s = (o > 0.0f) ? 1.0f : ((o < 0.0f) ? -1.0f : 0.0f);
-    return s * (1.0f - std::sqrt(std::max(0.0f, 1.0f - std::abs(o))));
-}
-
-// Clamp-to-edge bilinear sample of a plane of 3 floats per pixel, at pixel-center
-// coordinates (sx, sy).
-static Mathematics::Vector3 SampleEncodedPlaneBilinear(
-    const std::vector<float>& plane, uint32_t width, uint32_t height, float sx, float sy)
-{
-    const float fx = std::clamp(sx - 0.5f, 0.0f, static_cast<float>(width - 1));
-    const float fy = std::clamp(sy - 0.5f, 0.0f, static_cast<float>(height - 1));
-    const uint32_t x0 = static_cast<uint32_t>(fx);
-    const uint32_t y0 = static_cast<uint32_t>(fy);
-    const uint32_t x1 = std::min(x0 + 1, width - 1);
-    const uint32_t y1 = std::min(y0 + 1, height - 1);
-    const float tx = fx - static_cast<float>(x0);
-    const float ty = fy - static_cast<float>(y0);
-    const float* p00 = &plane[(static_cast<size_t>(y0) * width + x0) * 3];
-    const float* p10 = &plane[(static_cast<size_t>(y0) * width + x1) * 3];
-    const float* p01 = &plane[(static_cast<size_t>(y1) * width + x0) * 3];
-    const float* p11 = &plane[(static_cast<size_t>(y1) * width + x1) * 3];
-    Mathematics::Vector3 rgb;
-    for (size_t c = 0; c < 3; ++c)
-    {
-        const float top = p00[c] + (p10[c] - p00[c]) * tx;
-        const float bot = p01[c] + (p11[c] - p01[c]) * tx;
-        rgb[c] = top + (bot - top) * ty;
-    }
-    return rgb;
-}
-
-// Gradient-aware deband on the encoded float plane — the CPU mirror of
-// encode_srgb.frag's pre-dither DebandEncoded, kept so captures continue to
-// match the screen (the same parity contract as TriangularDitherAt above):
-// identical noise fields, tap geometry, iteration schedule, and all-channel
-// threshold gate, with clamp-to-edge bilinear taps mirroring the pass's
-// sampler. One deliberate divergence: the shader encodes each bilinear tap of
-// the LINEAR source, this taps the pre-ENCODED plane — the two differ only by
-// transfer-curve curvature across a tap's bilinear footprint, sub-LSB on the
-// shallow gradients the gate opens for, and the gate is shut at real edges
-// either way. `thresholdLsb` is the pass-published effective gate — the SAME
-// volume/env resolution the screen's backbuffer encode used (see
-// GetBackbufferOutputDebandThresholdLsb), so a volume toggle or a GE_DEBAND
-// relaunch changes screen and captures together. Radius stays process-wide.
-//
-// Reached only on frames whose composite is still LINEAR — an HDR-display
-// capture, where the terminal pass remains the single encode and debands
-// full-frame. On SDR frames each world view debanded inside its own image, so the
-// composite arrives finalized and the conversion below requantizes it without
-// running either filter.
-static std::vector<float> DebandEncodedPlane(
-    const std::vector<float>& enc, uint32_t width, uint32_t height, float thresholdLsb)
-{
-    const float threshold = thresholdLsb / 255.0f;
-    const float baseRadius = Rendering::Passes::GetOutputDebandSettings().RadiusPx;
-    constexpr int kIterations = 3; // encode_srgb.frag kDebandIterations
-    constexpr float kGolden = 0.61803399f;
-    constexpr float kTwoPi = 6.2831853f;
-
-    std::vector<float> out(enc.size());
-    for (uint32_t py = 0; py < height; ++py)
-    {
-        for (uint32_t px = 0; px < width; ++px)
-        {
-            const float u1 = InterleavedGradientNoiseAt(px, py, 5.0f);
-            const float u2 = InterleavedGradientNoiseAt(px, py, 11.0f);
-            const float cx = static_cast<float>(px) + 0.5f;
-            const float cy = static_cast<float>(py) + 0.5f;
-            const float* center = &enc[(static_cast<size_t>(py) * width + px) * 3];
-            Mathematics::Vector3 debanded(center[0], center[1], center[2]);
-            for (int i = 1; i <= kIterations; ++i)
-            {
-                const float r1 = Math::Fract(u1 + static_cast<float>(i) * kGolden);
-                const float r2 = Math::Fract(u2 + static_cast<float>(i) * kGolden);
-                const float dist = baseRadius * static_cast<float>(i) * (0.25f + 0.75f * r1);
-                const float angle = kTwoPi * r2;
-                const float ox = dist * std::cos(angle);
-                const float oy = dist * std::sin(angle);
-                const Mathematics::Vector3 t0 = SampleEncodedPlaneBilinear(enc, width, height, cx + ox, cy + oy);
-                const Mathematics::Vector3 t1 = SampleEncodedPlaneBilinear(enc, width, height, cx - oy, cy + ox);
-                const Mathematics::Vector3 t2 = SampleEncodedPlaneBilinear(enc, width, height, cx - ox, cy - oy);
-                const Mathematics::Vector3 t3 = SampleEncodedPlaneBilinear(enc, width, height, cx + oy, cy - ox);
-                // Gate against the ORIGINAL center (mirrors DebandEncoded):
-                // bounds total displacement to one threshold by construction.
-                Mathematics::Vector3 avg;
-                bool pass = true;
-                for (size_t c = 0; c < 3; ++c)
-                {
-                    avg[c] = 0.25f * (t0[c] + t1[c] + t2[c] + t3[c]);
-                    pass = pass && std::abs(avg[c] - center[c]) < threshold;
-                }
-                if (pass)
-                    debanded = avg;
-            }
-            float* dst = &out[(static_cast<size_t>(py) * width + px) * 3];
-            dst[0] = debanded[0];
-            dst[1] = debanded[1];
-            dst[2] = debanded[2];
-        }
-    }
-    return out;
-}
-
-// Encode-filter state a capture should mirror: the effective deband gate the
-// screen's backbuffer encode declared. Snapshotted on the render thread right
-// after the target window's encode declaration (the render callback) so a sibling
-// window's later declaration can't clobber the value before the deferred
-// conversion runs; null falls back to the process-wide publish.
-struct CaptureEncodeFilterState
-{
-    float DebandThresholdLsb = 0.0f;
-};
-
-// Encoded-domain finish for float color planes (3 floats per pixel, linear,
-// already range-scaled): transfer curve, optional deband, TPDF dither,
-// quantize to RGBA8. Splitting the encode from the quantize (vs the inline
-// toU8 in ConvertToRGBA8) lets the deband tap a fully-encoded plane the way
-// the screen's shader taps its source; with the deband inactive the op order
-// (curve, +dither, clamp-quantize) is identical to the inline path.
-static void EncodeDitherQuantizePlane(
-    std::vector<float>& plane, uint32_t width, uint32_t height,
-    bool srgbEncode, bool dither, bool deband, const CaptureEncodeFilterState* filterState,
-    std::vector<uint8_t>& rgba)
-{
-    // Captures always quantize to 8 bits whatever depth the swapchain runs at,
-    // so the mirror's dither is sized to ITS OWN quantizer — not to the screen's.
-    constexpr float kCaptureDitherLsb = 1.0f / 255.0f;
-    // BOTH filters are conditioned on `srgbEncode`, which asks "does this
-    // conversion own the transfer curve?" — and therefore also "has anything
-    // quantized these values for a destination yet?". A linear source (an
-    // HDR-display frame's composite, a float data plane) has not been, so the
-    // mirror encodes it and runs the screen's filters. An already-encoded source
-    // arrives FINALIZED: every world view applied the OETF, debanded and dithered
-    // at the presented step inside its own image, and the chrome around it is CSS
-    // bytes that quantize exactly. Filtering that a second time would displace
-    // world pixels the screen kept and grain chrome the screen left byte-stable,
-    // so the conversion is a pure requantize — which makes screen-vs-capture
-    // parity exact on chrome by construction. The residual it accepts: an 8-bit
-    // capture of a world dithered for a 10-bit screen keeps only a quarter of
-    // that noise, so a shallow gradient can contour in the PNG where the screen
-    // shows none. Fixing that belongs upstream (finalize at the capture's step),
-    // not in a filter here that cannot tell world from chrome.
-    if (srgbEncode)
-    {
-        for (float& v : plane)
-            v = (v <= 0.0031308f) ? 12.92f * v
-                                  : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-    }
-    // The gate is the pass-published effective threshold (volume AND env
-    // resolved), 0 whenever the screen's filter is off — captures and screen
-    // stay in lockstep through every combination of lever and override.
-    const float effectiveDebandLsb =
-        filterState ? filterState->DebandThresholdLsb
-                    : Rendering::Passes::GetBackbufferOutputDebandThresholdLsb();
-    if (deband && srgbEncode && effectiveDebandLsb > 0.0f)
-        plane = DebandEncodedPlane(plane, width, height, effectiveDebandLsb);
-
-    const bool ditherThisPlane = dither && srgbEncode;
-    for (uint32_t py = 0; py < height; ++py)
-    {
-        for (uint32_t px = 0; px < width; ++px)
-        {
-            const size_t i = static_cast<size_t>(py) * width + px;
-            const float d =
-                ditherThisPlane ? TriangularDitherAt(px, py) * kCaptureDitherLsb : 0.0f;
-            for (int c = 0; c < 3; ++c)
-            {
-                const float v = plane[i * 3 + c] + d;
-                rgba[i * 4 + c] =
-                    static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v * 255.0f + 0.5f)));
-            }
-        }
-    }
-}
-
-// Convert raw readback bytes into RGBA8 for PNG encoding.
-// Handles depth (linearize 0-1 → grayscale), float (tonemap), and integer formats.
-// srgbEncode applies the linear→sRGB transfer curve (same constants as
-// ApplySRGBEncodeRGBA8) — in float before the quantize for float/packed sources,
-// in 8-bit for sources that are already quantized.
-// dither adds a 1-LSB (1/255) TPDF offset in output space right before any
-// float→8-bit quantize, matching the screen's encode pass. It never applies to
-// sources that are already 8-bit — there is no sub-LSB information to recover,
-// noise would only corrupt them.
-// deband mirrors the screen's pre-dither deband on sRGB-encoded float sources
-// (see DebandEncodedPlane); like dither it recovers/reshapes sub-LSB structure
-// and never applies to already-quantized sources.
-static std::vector<uint8_t> ConvertToRGBA8(
-    const void* raw, uint32_t width, uint32_t height,
-    Rendering::TextureFormat fmt, float rangeMin, float rangeMax, bool srgbEncode,
-    bool dither, bool deband, const CaptureEncodeFilterState* filterState = nullptr)
-{
-    using TF = Rendering::TextureFormat;
-    const size_t pixelCount = static_cast<size_t>(width) * height;
-    std::vector<uint8_t> rgba(pixelCount * 4, 255);
-
-    constexpr float kDitherLsb = 1.0f / 255.0f;
-
-    // d is the per-pixel TPDF offset (already scaled to the 1/255 output LSB;
-    // 0 when dithering is off), applied after the transfer curve — the same
-    // order as encode_srgb.frag (encode, dither in sRGB space, quantize).
-    auto toU8 = [srgbEncode](float v, float d) -> uint8_t
-    {
-        if (srgbEncode)
-            v = (v <= 0.0031308f) ? 12.92f * v
-                                  : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-        v += d;
-        return static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v * 255.0f + 0.5f)));
-    };
-
-    auto ditherAt = [dither, width](size_t i) -> float
-    {
-        if (!dither)
-            return 0.0f;
-        const uint32_t px = static_cast<uint32_t>(i % width);
-        const uint32_t py = static_cast<uint32_t>(i / width);
-        return TriangularDitherAt(px, py) * kDitherLsb;
-    };
-
-    float scale = (rangeMax > rangeMin) ? 1.0f / (rangeMax - rangeMin) : 1.0f;
-
-    if (fmt == TF::RGBA8_UNORM || fmt == TF::RGBA8_SRGB)
-    {
-        std::memcpy(rgba.data(), raw, pixelCount * 4);
-        if (srgbEncode)
-            ApplySRGBEncodeRGBA8(rgba);
-        return rgba;
-    }
-
-    if (fmt == TF::BGRA8_UNORM || fmt == TF::BGRA8_SRGB)
-    {
-        auto* src = static_cast<const uint8_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            rgba[i * 4 + 0] = src[i * 4 + 2]; // B→R
-            rgba[i * 4 + 1] = src[i * 4 + 1]; // G→G
-            rgba[i * 4 + 2] = src[i * 4 + 0]; // R→B
-            rgba[i * 4 + 3] = src[i * 4 + 3]; // A→A
-        }
-        if (srgbEncode)
-            ApplySRGBEncodeRGBA8(rgba);
-        return rgba;
-    }
-
-    if (fmt == TF::D32_FLOAT)
-    {
-        auto* src = static_cast<const float*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            float v = (src[i] - rangeMin) * scale;
-            uint8_t g = toU8(v, ditherAt(i));
-            rgba[i * 4 + 0] = g;
-            rgba[i * 4 + 1] = g;
-            rgba[i * 4 + 2] = g;
-        }
-        return rgba;
-    }
-
-    if (fmt == TF::D24_UNORM_S8_UINT || fmt == TF::X8_D24_UNORM_PACK32)
-    {
-        auto* src = static_cast<const uint32_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            float depth = static_cast<float>(src[i] & 0x00FFFFFFu) / 16777215.0f;
-            float v = (depth - rangeMin) * scale;
-            uint8_t g = toU8(v, ditherAt(i));
-            rgba[i * 4 + 0] = g;
-            rgba[i * 4 + 1] = g;
-            rgba[i * 4 + 2] = g;
-        }
-        return rgba;
-    }
-
-    if (fmt == TF::D16_UNORM)
-    {
-        auto* src = static_cast<const uint16_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            float depth = static_cast<float>(src[i]) / 65535.0f;
-            float v = (depth - rangeMin) * scale;
-            uint8_t g = toU8(v, ditherAt(i));
-            rgba[i * 4 + 0] = g;
-            rgba[i * 4 + 1] = g;
-            rgba[i * 4 + 2] = g;
-        }
-        return rgba;
-    }
-
-    if (fmt == TF::R16G16B16A16_FLOAT)
-    {
-        // half-float: use bit manipulation to convert to float
-        auto halfToFloat = [](uint16_t h) -> float
-        {
-            uint32_t sign = (h >> 15) & 1;
-            uint32_t exp = (h >> 10) & 0x1F;
-            uint32_t mantissa = h & 0x3FF;
-            if (exp == 0)
-                return sign ? -0.0f : 0.0f;
-            if (exp == 31)
-                return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
-            float f = std::ldexp(static_cast<float>(mantissa) / 1024.0f + 1.0f, static_cast<int>(exp) - 15);
-            return sign ? -f : f;
-        };
-
-        auto* src = static_cast<const uint16_t*>(raw);
-        std::vector<float> plane(pixelCount * 3);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            plane[i * 3 + 0] = (halfToFloat(src[i * 4 + 0]) - rangeMin) * scale;
-            plane[i * 3 + 1] = (halfToFloat(src[i * 4 + 1]) - rangeMin) * scale;
-            plane[i * 3 + 2] = (halfToFloat(src[i * 4 + 2]) - rangeMin) * scale;
-        }
-        EncodeDitherQuantizePlane(plane, width, height, srgbEncode, dither, deband, filterState, rgba);
-        return rgba;
-    }
-
-    if (fmt == TF::R16_FLOAT)
-    {
-        auto halfToFloat = [](uint16_t h) -> float
-        {
-            uint32_t sign = (h >> 15) & 1;
-            uint32_t exp = (h >> 10) & 0x1F;
-            uint32_t mantissa = h & 0x3FF;
-            if (exp == 0)
-                return sign ? -0.0f : 0.0f;
-            if (exp == 31)
-                return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
-            float f = std::ldexp(static_cast<float>(mantissa) / 1024.0f + 1.0f, static_cast<int>(exp) - 15);
-            return sign ? -f : f;
-        };
-
-        auto* src = static_cast<const uint16_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            float v = (halfToFloat(src[i]) - rangeMin) * scale;
-            uint8_t g = toU8(v, ditherAt(i));
-            rgba[i * 4 + 0] = g;
-            rgba[i * 4 + 1] = g;
-            rgba[i * 4 + 2] = g;
-        }
-        return rgba;
-    }
-
-    if (fmt == TF::R32_FLOAT)
-    {
-        auto* src = static_cast<const float*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            const uint8_t g = toU8((src[i] - rangeMin) * scale, ditherAt(i));
-            rgba[i * 4 + 0] = g;
-            rgba[i * 4 + 1] = g;
-            rgba[i * 4 + 2] = g;
-        }
-        return rgba;
-    }
-
-    if (fmt == TF::R32G32B32A32_FLOAT)
-    {
-        auto* src = static_cast<const float*>(raw);
-        std::vector<float> plane(pixelCount * 3);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            plane[i * 3 + 0] = (src[i * 4 + 0] - rangeMin) * scale;
-            plane[i * 3 + 1] = (src[i * 4 + 1] - rangeMin) * scale;
-            plane[i * 3 + 2] = (src[i * 4 + 2] - rangeMin) * scale;
-        }
-        EncodeDitherQuantizePlane(plane, width, height, srgbEncode, dither, deband, filterState, rgba);
-        return rgba;
-    }
-
-    if (fmt == TF::R11G11B10_FLOAT)
-    {
-        auto* src = static_cast<const uint32_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            // Unpack R11G11B10 — 11-bit R, 11-bit G, 10-bit B (all unsigned float)
-            uint32_t bits = src[i];
-            auto unpack11 = [](uint32_t v) -> float
-            {
-                uint32_t exp = (v >> 6) & 0x1F;
-                uint32_t mantissa = v & 0x3F;
-                if (exp == 0)
-                    return 0.0f;
-                if (exp == 31)
-                    return 65536.0f;
-                return std::ldexp(static_cast<float>(mantissa) / 64.0f + 1.0f, static_cast<int>(exp) - 15);
-            };
-            auto unpack10 = [](uint32_t v) -> float
-            {
-                uint32_t exp = (v >> 5) & 0x1F;
-                uint32_t mantissa = v & 0x1F;
-                if (exp == 0)
-                    return 0.0f;
-                if (exp == 31)
-                    return 65536.0f;
-                return std::ldexp(static_cast<float>(mantissa) / 32.0f + 1.0f, static_cast<int>(exp) - 15);
-            };
-            float r = (unpack11(bits & 0x7FF) - rangeMin) * scale;
-            float g = (unpack11((bits >> 11) & 0x7FF) - rangeMin) * scale;
-            float b = (unpack10((bits >> 22) & 0x3FF) - rangeMin) * scale;
-            const float d = ditherAt(i);
-            rgba[i * 4 + 0] = toU8(r, d);
-            rgba[i * 4 + 1] = toU8(g, d);
-            rgba[i * 4 + 2] = toU8(b, d);
-        }
-        return rgba;
-    }
-
-    if (fmt == TF::R8_UNORM)
-    {
-        auto* src = static_cast<const uint8_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            rgba[i * 4 + 0] = src[i];
-            rgba[i * 4 + 1] = src[i];
-            rgba[i * 4 + 2] = src[i];
-        }
-        if (srgbEncode)
-            ApplySRGBEncodeRGBA8(rgba);
-        return rgba;
-    }
-
-    if (fmt == TF::RGB10A2_UNORM)
-    {
-        auto* src = static_cast<const uint32_t*>(raw);
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            uint32_t bits = src[i];
-            float r = static_cast<float>(bits & 0x3FF) / 1023.0f;
-            float g = static_cast<float>((bits >> 10) & 0x3FF) / 1023.0f;
-            float b = static_cast<float>((bits >> 20) & 0x3FF) / 1023.0f;
-            const float d = ditherAt(i);
-            rgba[i * 4 + 0] = toU8(r, d);
-            rgba[i * 4 + 1] = toU8(g, d);
-            rgba[i * 4 + 2] = toU8(b, d);
-        }
-        return rgba;
-    }
-
-    // Fallback: copy raw bytes as RGBA8 (best effort).
-    size_t bpp = Rendering::BytesPerPixel(fmt);
-    if (bpp > 0)
-    {
-        auto* src = static_cast<const uint8_t*>(raw);
-        size_t copyBytes = std::min(bpp, size_t(4));
-        for (size_t i = 0; i < pixelCount; ++i)
-        {
-            std::memcpy(&rgba[i * 4], &src[i * bpp], copyBytes);
-        }
-        if (srgbEncode)
-            ApplySRGBEncodeRGBA8(rgba);
-    }
-    return rgba;
-}
-
 // Crop an RGBA8 buffer to a sub-rectangle. Clamps the rect to the source extents.
 // Returns an empty buffer if the rect is fully out of bounds.
 static std::vector<uint8_t> CropRGBA8(
@@ -1925,7 +1428,7 @@ static json FinishResourceCaptureResult(Rendering::ViewReadbackResult readback,
 {
     // Named resources have no color-space stamp. Visualize their declared range
     // without a transfer curve; raw captures retain values outside that range.
-    auto rgba8 = ConvertToRGBA8(readback.pixels.data(), readback.width, readback.height,
+    auto rgba8 = Editor::ConvertToRGBA8(readback.pixels.data(), readback.width, readback.height,
                                 readback.format, rangeMin, rangeMax,
                                 /*srgbEncode*/ false, /*dither*/ false, /*deband*/ false);
     std::string safeName = metadata.at("resourceName").get<std::string>();
@@ -2628,12 +2131,591 @@ bool ApplyMainSceneViewPose(EditorApplication& app, const SceneViewCameraPose& p
     return true;
 }
 
+// Parses a take_screenshot request and schedules its readback on a coming rendered frame.
+// Returns the poll that serves the capture, or an empty function with the refusal in `outRefusal`.
+EditorDebugServer::DeferredPollFn BeginScreenshotCapture(EditorApplication& app, EditorDebugServer& server,
+                                                         const std::string& requestId, const json& params,
+                                                         json& outRefusal)
+{
+    if (app.m_Windows.empty())
+    {
+        outRefusal = Editor::RefuseRequest("No editor window");
+        return {};
+    }
+
+    // Parse parameters up-front (before scheduling render callback).
+    const std::string target = params.value("target", std::string("window"));
+    const std::string panelId = params.value("panelId", std::string());
+    const std::string elementId = params.value("elementId", std::string());
+    const int32_t rectX = params.value("x", 0);
+    const int32_t rectY = params.value("y", 0);
+    const int32_t rectW = params.value("w", 0);
+    const int32_t rectH = params.value("h", 0);
+    // coords: "logical" (default) treats x/y/w/h as logical UI pixels —
+    // matches get_ui_tree / get_panel_tree output and panel/element bounds.
+    // "physical" treats them as raw pixel coords on the saved PNG, useful
+    // when post-processing a previously-saved screenshot. Only meaningful
+    // for target='rect'.
+    const std::string coords = params.value("coords", std::string("logical"));
+    // dither: default ON — captures quantize the linear readback with the same
+    // TPDF the screen's sRGB encode pass applies, so screenshots match what the
+    // eye sees. Harness/golden consumers that diff or hash pixels numerically
+    // should pass dither=false for deterministic staircase-quantized output.
+    // GE_OUTPUT_DITHER=0 turns the screen's dither off, so it has to turn the
+    // mirror's off too — otherwise that A/B silently compares two identically
+    // dithered captures. The step stays the capture's own 8-bit LSB (the PNG
+    // quantizes at 1/255 in every output mode); only the enable is shared.
+    const bool dither =
+        params.value("dither", true) && Rendering::Passes::IsOutputDitherEnabled();
+    // deband: default ON — same parity rationale as dither, for the screen's
+    // pre-dither gradient deband (also process-gated by GE_DEBAND). Pass
+    // deband=false to profile the raw quantization structure of the source.
+    const bool deband = params.value("deband", true);
+    // allowWindowCapture: opt in to an OS window capture (PrintWindow) when the
+    // render graph cannot hand over the frame. Off by default — a window
+    // capture is a picture of what the compositor holds, not the frame the
+    // render graph produced, and it is a plausible PNG either way, so serving
+    // one unasked turns a rendering failure into evidence the caller trusts.
+    // The response states which one it is in `method`.
+    const bool allowWindowCapture = params.value("allowWindowCapture", false);
+
+    // Validate target.
+    if (target != "window" && target != "viewport" && target != "panel"
+        && target != "element" && target != "rect" && target != "asset_preview")
+    {
+        outRefusal = Editor::RefuseRequest("Unknown target '" + target + "'. Use one of: window, viewport, panel, element, rect, asset_preview.");
+        return {};
+    }
+    if (coords != "logical" && coords != "physical")
+    {
+        outRefusal = Editor::RefuseRequest("coords must be 'logical' or 'physical'");
+        return {};
+    }
+    if (target == "panel" && panelId.empty())
+    {
+        outRefusal = Editor::RefuseRequest("target='panel' requires 'panelId'");
+        return {};
+    }
+    if (target == "element" && elementId.empty())
+    {
+        outRefusal = Editor::RefuseRequest("target='element' requires 'elementId'");
+        return {};
+    }
+    if (target == "rect" && (rectW <= 0 || rectH <= 0))
+    {
+        outRefusal = Editor::RefuseRequest("target='rect' requires positive 'w' and 'h'");
+        return {};
+    }
+
+    auto cropHolder = std::make_shared<ScreenshotCropDesc>();
+    // What the readback pixels hold, stated by whichever declaration arm below
+    // schedules the copy. Disengaged means "nobody stated a space" — the
+    // conversion refuses rather than guessing from the format, so a new capture
+    // target cannot inherit a silent default.
+    auto sourceSpaceHolder = std::make_shared<std::optional<UI::UITextureSpace>>();
+    // RenderGraph arm (8c-4): ticket readback — declared against the frame driver's
+    // published per-frame capture context.
+    auto ticketHolder = std::make_shared<std::shared_ptr<Rendering::RGReadbackTicket>>();
+    auto assetPreviewPathHolder = std::make_shared<std::string>();
+    // Frame the readback was declared on — reported for staleness diagnosis.
+    auto frameIndexHolder = std::make_shared<uint64_t>(0);
+    // Deband gate + scope snapshotted at readback declaration (right after
+    // this frame's encode declared, same render thread) so the deferred
+    // conversion mirrors THE frame it read — not whichever window
+    // published last while the GPU finished.
+    auto encodeFilterStateHolder = std::make_shared<std::optional<Editor::CaptureEncodeFilterState>>();
+
+    LOG_DEBUG("Screenshot: request received target={} requestId={}", target, requestId);
+
+    // How long this request keeps asking the render graph for a frame, and
+    // what the caller is told when it stops. The attempt below reports into
+    // it from the render phase; the poll drives it.
+    auto wait = std::make_shared<Editor::ScreenshotCaptureWait>(allowWindowCapture);
+
+    // One render-phase attempt at declaring the readback (pre-Execute on the
+    // pure RenderGraph path, where the frame driver publishes the capture
+    // context). The poll re-arms it every frame until the wait ends, so a
+    // pane that is one frame behind — a scene view catching up on extraction —
+    // is a retry rather than a failed capture.
+    //
+    // At most one attempt is in flight: the poll runs once per tick and the
+    // render phase drains the whole callback queue at once, so queuing an
+    // attempt per tick would make a starved frame loop spend the whole
+    // refusal budget inside a single rendered frame.
+    auto attemptQueued = std::make_shared<bool>(false);
+    auto attempt = std::make_shared<std::function<void()>>();
+    *attempt = [&app, wait, attemptQueued, ticketHolder, cropHolder, sourceSpaceHolder,
+                assetPreviewPathHolder, frameIndexHolder, encodeFilterStateHolder, target,
+                panelId, elementId, rectX, rectY, rectW, rectH, coords]()
+    {
+        *attemptQueued = false;
+        // The poll can end the wait with this attempt still queued, and the
+        // request is answered by then: declaring a readback nobody consumes
+        // would cost the frame another composite for nothing.
+        if (!wait->GiveUpReason().empty())
+            return;
+        // Every attempt re-declares from scratch: a crop from an earlier
+        // frame must never ride along with this frame's pixels.
+        *cropHolder = ScreenshotCropDesc{};
+
+        if (app.m_Windows.empty())
+        {
+            wait->RecordBlocked("the editor has no window");
+            return;
+        }
+
+        auto* wndCtx = app.m_Windows[0].get();
+        if (!wndCtx->renderCtx)
+        {
+            wait->RecordBlocked("the editor window has no render context");
+            return;
+        }
+
+        auto* device = wndCtx->renderCtx->GetDevice();
+        if (!device)
+        {
+            wait->RecordBlocked("the editor window has no render device");
+            return;
+        }
+
+        // 8c-4: RenderGraph capture context, filled by the frame driver right
+        // before this callback runs; ids are frame-local and valid only
+        // for the published incarnation.
+        auto* rg2Frame = wndCtx->rg2Capture.frame;
+        const bool rg2 =
+            rg2Frame && wndCtx->rg2Capture.frameIndex == rg2Frame->FrameIndex();
+        if (!rg2)
+        {
+            wait->RecordRefusal("the frame published no render-graph capture context");
+            return;
+        }
+        *frameIndexHolder = wndCtx->rg2Capture.frameIndex;
+
+        // ---- ASSET PREVIEW path: readback live video frame texture ---------
+        if (target == "asset_preview")
+        {
+            auto* assetViewPanel = FindPanel<AssetViewPanel>(app.m_PanelStorage);
+            if (!assetViewPanel)
+            {
+                wait->RecordBlocked("the Asset View panel is not open");
+                return;
+            }
+
+            Rendering::TextureHandle previewTexture{};
+            Rendering::TextureFormat previewFormat = Rendering::TextureFormat::RGBA8_UNORM;
+            if (!assetViewPanel->TryGetVideoPreviewReadbackTexture(previewTexture, previewFormat))
+            {
+                wait->RecordBlocked(
+                    "the Asset View has no uploaded video frame — select an .mp4 first");
+                return;
+            }
+
+            *assetPreviewPathHolder = assetViewPanel->GetPreviewDebugState().previewPath;
+            *ticketHolder = Rendering::RequestDeviceTextureReadbackRG(
+                device, *rg2Frame, previewTexture,
+                Rendering::ResourceState::ShaderResource, "AssetViewVideoPreview");
+            // Decoded video frames are authored sRGB — the same stamp the Asset
+            // View panel registers this texture to the UI with.
+            *sourceSpaceHolder = UI::UITextureSpace::SrgbAuthored();
+            return;
+        }
+
+        // ---- VIEWPORT path: scene-view pipeline-output readback ------------
+        if (target == "viewport")
+        {
+            if (!wndCtx->scene)
+            {
+                wait->RecordBlocked("the editor window has no scene view controller");
+                return;
+            }
+            auto* renderServices = app.m_EditorContext ? app.m_EditorContext->RenderServices : nullptr;
+            if (!renderServices)
+            {
+                wait->RecordBlocked("the editor has no render services");
+                return;
+            }
+            SceneViewController* activeSceneCtrl = Editor::ResolveActiveSceneController(*wndCtx);
+            Rendering::ViewId viewId = activeSceneCtrl ? activeSceneCtrl->GetViewId() : 0u;
+            if (viewId == 0)
+            {
+                wait->RecordRefusal("the scene view has no registered view yet");
+                return;
+            }
+            // The scene view's pipeline output — the texture the UI
+            // samples (post-FX FinalColor).
+            const auto out = renderServices->GetPipelineOutputRG(*rg2Frame, viewId);
+            if (!out.IsValid())
+            {
+                // The pane declared no pipeline output this frame: its tab is
+                // behind another, its rect collapsed, or its view is a frame
+                // behind on extraction. The first two do not clear on their
+                // own; the wait tells them apart by how long the refusal lasts.
+                wait->RecordRefusal(
+                    "the scene view produced no render-graph output — its tab may be behind "
+                    "another, its pane collapsed, or the view is still catching up");
+                return;
+            }
+            *ticketHolder = Rendering::RequestTextureReadbackRG(
+                device, *rg2Frame, out.Out, "ViewportScreenshot");
+            // The pipeline's own stamp for what it wrote into FinalColor —
+            // LINEAR, overlays and gizmos included. The view's own finalize
+            // is downstream of this point, so a viewport capture does its own
+            // encode and its own 8-bit filters rather than inheriting the
+            // screen's, which are sized to the display's step. Same content,
+            // filtered for the file's depth.
+            *sourceSpaceHolder = renderServices->GetPipelineOutputSpaceRG();
+            return;
+        }
+
+        // ---- WINDOW / PANEL / ELEMENT / RECT: presentation-target readback --
+        // Every pure editor frame routes through Editor.FinalLinear, so
+        // the full composite is always readable there.
+        if (wndCtx->rg2Capture.finalLinearId != 0xFFFFFFFFu)
+        {
+            Rendering::RenderGraph::RGTexture finalLinear{};
+            finalLinear.Id = wndCtx->rg2Capture.finalLinearId;
+            *ticketHolder = Rendering::RequestTextureReadbackRG(
+                device, *rg2Frame, finalLinear, "WindowScreenshot");
+            // The frame driver publishes the space the composite's bytes
+            // hold under the declared UI target (#767/#784): SrgbAuthored
+            // on SDR frames (encoded blend — no second OETF at readback),
+            // DisplayLinearSdr on HDR-display capture frames.
+            *sourceSpaceHolder = wndCtx->rg2Capture.compositeSpace;
+            // This window's encode declared just before this callback ran —
+            // the publish is exactly the state this readback's pixels see.
+            *encodeFilterStateHolder = Editor::CaptureEncodeFilterState{
+                Rendering::Passes::GetBackbufferOutputDebandThresholdLsb()};
+        }
+        else
+        {
+            wait->RecordRefusal("the frame declared no composite to read back");
+            return;
+        }
+
+        // Compute crop rect for panel/element/rect targets (image-space crop).
+        // GetLayoutX/Y/Width/Height returns logical pixels; the readback is in
+        // physical pixels — scale by content scale.
+        if (target == "window")
+            return;
+
+        float layoutX = 0.0f;
+        float layoutY = 0.0f;
+        float layoutW = 0.0f;
+        float layoutH = 0.0f;
+        std::string label;
+        bool found = false;
+
+        if (target == "panel")
+        {
+            if (app.m_Docking)
+            {
+                if (UIElement* panel = app.m_Docking->GetPanel(panelId))
+                {
+                    layoutX = panel->GetLayoutX();
+                    layoutY = panel->GetLayoutY();
+                    layoutW = panel->GetLayoutWidth();
+                    layoutH = panel->GetLayoutHeight();
+                    label = "panel:" + panelId;
+                    found = true;
+                }
+            }
+        }
+        else if (target == "element")
+        {
+            if (wndCtx->ui)
+            {
+                if (UIElement* root = wndCtx->ui->GetRootElement())
+                {
+                    if (UIElement* el = root->FindById(HashStringId(elementId)))
+                    {
+                        layoutX = el->GetLayoutX();
+                        layoutY = el->GetLayoutY();
+                        layoutW = el->GetLayoutWidth();
+                        layoutH = el->GetLayoutHeight();
+                        label = "element:" + elementId;
+                        found = true;
+                    }
+                }
+            }
+        }
+        else if (target == "rect")
+        {
+            layoutX = static_cast<float>(rectX);
+            layoutY = static_cast<float>(rectY);
+            layoutW = static_cast<float>(rectW);
+            layoutH = static_cast<float>(rectH);
+            label = "rect";
+            found = true;
+        }
+
+        if (!found || layoutW <= 0.0f || layoutH <= 0.0f)
+        {
+            LOG_WARNING("Screenshot: crop target not found or empty — returning full window");
+            return;
+        }
+
+        // panel/element values come from layout (always logical). For
+        // rect, honor the caller's coords choice.
+        const bool applyScale = (target != "rect") || (coords == "logical");
+        const float scale = applyScale && wndCtx->ui
+                                ? std::max(0.01f, wndCtx->ui->GetContentScale())
+                                : 1.0f;
+        cropHolder->valid = true;
+        cropHolder->x = static_cast<int32_t>(std::floor(layoutX * scale));
+        cropHolder->y = static_cast<int32_t>(std::floor(layoutY * scale));
+        cropHolder->w = static_cast<int32_t>(std::ceil(layoutW * scale));
+        cropHolder->h = static_cast<int32_t>(std::ceil(layoutH * scale));
+        cropHolder->label = std::move(label);
+        LOG_DEBUG("Screenshot: crop {} -> ({},{},{},{})",
+                  cropHolder->label, cropHolder->x, cropHolder->y, cropHolder->w, cropHolder->h);
+    };
+    *attemptQueued = true;
+    server.EnqueueRenderCallback([attempt]() { (*attempt)(); });
+
+    // Deferred poll: each frame, re-arm the attempt until the readback is
+    // declared, then wait for the GPU copy. The wait decides when to stop and
+    // says why; a window capture is served only to a caller that asked for
+    // one, because it is a picture of the window rather than the frame the
+    // render graph produced.
+    const auto requestStart = std::chrono::steady_clock::now();
+    // Naming the opt-in flag helps only a caller that has not already passed
+    // it, and only where an OS window capture can stand in: asset_preview
+    // reads a video texture no picture of the window substitutes for.
+    const bool offerWindowCaptureHint = !allowWindowCapture && target != "asset_preview";
+    // The job that converts, encodes and serializes the finished readback.
+    auto encodeHolder = std::make_shared<JobSystem::TaskHandle>();
+    return [&app, &server, attempt, attemptQueued, wait, ticketHolder, requestStart, cropHolder,
+            sourceSpaceHolder,
+            assetPreviewPathHolder, frameIndexHolder, encodeFilterStateHolder, encodeHolder, target,
+            panelId, elementId, rectX, rectY, rectW, rectH, coords, dither, deband,
+            offerWindowCaptureHint, requestId](json& outResult) -> bool
+    {
+        auto reportFailure = [&](const std::string& reason,
+                                 bool offerWindowCapture = false) -> bool
+        {
+            LOG_WARNING("Screenshot ({}): {}", target, reason);
+            outResult =
+                Editor::RefuseRequest(Editor::ScreenshotFailureMessage(reason, offerWindowCapture),
+                                      json{{"fallbackReason", reason}});
+            return true;
+        };
+
+        // The readback has been handed to the encode job: wait for its line.
+        if (encodeHolder->IsValid())
+        {
+            std::string jobError;
+            if (!Editor::PollHandlerReplyJob(*encodeHolder, outResult, jobError))
+                return false;
+            if (!jobError.empty())
+                return reportFailure("the screenshot encode job did not complete: " + jobError);
+            return true;
+        }
+
+        auto windowCapture = [&](const std::string& reason) -> bool
+        {
+            // asset_preview reads a video texture no window capture can
+            // substitute for — it fails whatever the caller allowed.
+            if (target == "asset_preview")
+                return reportFailure(reason + "; asset_preview has no window-capture substitute");
+            if (app.m_Windows.empty() || !app.m_Windows[0] || !app.m_Windows[0]->window)
+                return reportFailure(reason + "; no window to capture either");
+            auto* wndCtx = app.m_Windows[0].get();
+            std::vector<uint8_t> rgba8;
+            uint32_t srcW = 0;
+            uint32_t srcH = 0;
+            if (!CaptureWindowClientAreaRGBA8(wndCtx->window.get(), rgba8, srcW, srcH))
+                return reportFailure(reason +
+                                     "; the window capture also failed (non-Windows "
+                                     "platform, hidden window, or capture error)");
+            LOG_WARNING("Screenshot ({}): {} — served the window capture the request allowed",
+                        target, reason);
+
+            // The render callback that normally fills cropHolder may
+            // never have run on this path — compute the crop from the
+            // live layout instead. viewport degrades to the scene-view
+            // mount's on-screen region of the composite.
+            ScreenshotCropDesc crop;
+            float layoutX = 0.0f;
+            float layoutY = 0.0f;
+            float layoutW = 0.0f;
+            float layoutH = 0.0f;
+            bool found = false;
+            if (target == "panel" && app.m_Docking)
+            {
+                if (UIElement* panel = app.m_Docking->GetPanel(panelId))
+                {
+                    layoutX = panel->GetLayoutX();
+                    layoutY = panel->GetLayoutY();
+                    layoutW = panel->GetLayoutWidth();
+                    layoutH = panel->GetLayoutHeight();
+                    crop.label = "panel:" + panelId;
+                    found = true;
+                }
+            }
+            else if ((target == "element" || target == "viewport") && wndCtx->ui)
+            {
+                if (UIElement* root = wndCtx->ui->GetRootElement())
+                {
+                    const std::string lookupId =
+                        target == "viewport" ? std::string(EditorPanelIds::MountSceneView)
+                                             : elementId;
+                    if (UIElement* el = root->FindById(HashStringId(lookupId)))
+                    {
+                        layoutX = el->GetLayoutX();
+                        layoutY = el->GetLayoutY();
+                        layoutW = el->GetLayoutWidth();
+                        layoutH = el->GetLayoutHeight();
+                        crop.label = "element:" + lookupId;
+                        found = true;
+                    }
+                }
+            }
+            else if (target == "rect")
+            {
+                layoutX = static_cast<float>(rectX);
+                layoutY = static_cast<float>(rectY);
+                layoutW = static_cast<float>(rectW);
+                layoutH = static_cast<float>(rectH);
+                crop.label = "rect";
+                found = true;
+            }
+            if (found && layoutW > 0.0f && layoutH > 0.0f)
+            {
+                const bool applyScale = (target != "rect") || (coords == "logical");
+                const float scale = applyScale && wndCtx->ui
+                                        ? std::max(0.01f, wndCtx->ui->GetContentScale())
+                                        : 1.0f;
+                crop.valid = true;
+                crop.x = static_cast<int32_t>(std::floor(layoutX * scale));
+                crop.y = static_cast<int32_t>(std::floor(layoutY * scale));
+                crop.w = static_cast<int32_t>(std::ceil(layoutW * scale));
+                crop.h = static_cast<int32_t>(std::ceil(layoutH * scale));
+            }
+
+            FinishScreenshotResult(outResult, std::move(rgba8), srcW, srcH, crop, target,
+                                   "printwindow", PendingMaterialTextureBinds());
+            outResult["fallbackReason"] = reason;
+            if (!Editor::IsRefusal(outResult))
+                outResult.update(CaptureRecordContext(app));
+            return true;
+        };
+
+        Rendering::ViewReadbackResult result;
+        bool readbackReady = false;
+        // RenderGraph arm: deterministic ticket completion (8c-1). The
+        // attempt creates the ticket in the render phase.
+        if (*ticketHolder)
+        {
+            if ((*ticketHolder)->IsConsumed())
+            {
+                // A cancelled ticket (declaring frame abandoned) can never
+                // resolve — drop it and let a later frame declare again.
+                ticketHolder->reset();
+                wait->RecordRefusal("the frame that declared the readback was abandoned "
+                                    "before submit");
+            }
+            else
+            {
+                wait->RecordReadbackDeclared();
+                readbackReady = (*ticketHolder)->TryGet(result);
+            }
+        }
+
+        if (!readbackReady)
+        {
+            // The same condition the render loop skips a window on: with no
+            // framebuffer there is no frame to declare a readback into, and
+            // no later frame changes that on its own.
+            if (!*ticketHolder && !app.m_Windows.empty() && app.m_Windows[0] &&
+                app.m_Windows[0]->window)
+            {
+                int fbW = 0;
+                int fbH = 0;
+                app.m_Windows[0]->window->GetFramebufferSize(fbW, fbH);
+                if (fbW <= 0 || fbH <= 0)
+                    wait->RecordBlocked("the editor window has no framebuffer (minimized "
+                                        "or hidden), so it renders no frame to capture");
+            }
+            const double elapsed =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - requestStart)
+                    .count();
+            const auto outcome = wait->Step(elapsed);
+            if (outcome == Editor::ScreenshotCaptureWait::Outcome::ServeWindowCapture)
+                return windowCapture(wait->GiveUpReason());
+            if (outcome == Editor::ScreenshotCaptureWait::Outcome::Fail)
+                return reportFailure(wait->GiveUpReason(), offerWindowCaptureHint);
+            // Keep waiting: the next rendered frame gets its own attempt.
+            if (!*ticketHolder && !*attemptQueued)
+            {
+                *attemptQueued = true;
+                server.EnqueueRenderCallback([attempt]() { (*attempt)(); });
+            }
+            return false;
+        }
+
+        LOG_DEBUG("Screenshot: readback complete {}x{} fmt={}", result.width, result.height,
+                  static_cast<uint32_t>(result.format));
+
+        // The declaring arm states the space; a scheduled ticket without one is
+        // a capture target that forgot to, not a licence to infer.
+        if (!*sourceSpaceHolder)
+            return reportFailure("the readback declared no source colour space");
+
+        // The frame's share ends with the readback: conversion, PNG encode,
+        // file write, base64 and serialization run on a job, and a later poll
+        // sends the line it produced.
+        *encodeHolder = Editor::SubmitHandlerReplyJob(
+            EngineCore::GetInstance().GetJobSystem(), requestId,
+            [readback = std::move(result), srgbEncode = !UI::IsEncodedAtRest(**sourceSpaceHolder),
+             dither, deband,
+             filterState = encodeFilterStateHolder->value_or(Editor::CaptureEncodeFilterState{
+                 Rendering::Passes::GetBackbufferOutputDebandThresholdLsb()}),
+             crop = *cropHolder, target,
+             frameIndex = *frameIndexHolder, previewPath = *assetPreviewPathHolder,
+             pendingBinds = PendingMaterialTextureBinds(),
+             recordContext = CaptureRecordContext(app)]() -> json
+            {
+                auto rgba8 = Editor::ConvertToRGBA8(readback.pixels.data(), readback.width, readback.height,
+                                            readback.format, 0.0f, 1.0f, srgbEncode, dither, deband,
+                                            &filterState);
+                json reply;
+                FinishScreenshotResult(reply, std::move(rgba8), readback.width, readback.height, crop,
+                                       target, "rendergraph", pendingBinds);
+                if (!Editor::IsRefusal(reply))
+                {
+                    reply["frameIndex"] = frameIndex;
+                    reply.update(recordContext);
+                    if (target == "asset_preview" && !previewPath.empty())
+                        reply["previewPath"] = previewPath;
+                }
+                return reply;
+            });
+        if (!encodeHolder->IsValid())
+            return reportFailure("the job system is shutting down; the capture was not encoded");
+        return false;
+    };
+}
+
+// The pointer as the UI manager sees it this frame, for a response that states what a capture shows.
+static json ReadPointerState(const UIManager& ui)
+{
+    const Mathematics::Vector2 position = ui.GetMousePosition();
+    const auto* dragDrop = ui.GetDragDropManager();
+    return json{{"x", position.x},
+                {"y", position.y},
+                {"buttonDown", ui.IsMouseDown()},
+                {"hoveredElement", ui.GetHoveredElementDebugName()},
+                {"mouseCaptured", ui.IsMouseCaptured()},
+                {"captureElementId", ui.GetCaptureId()},
+                {"dragDropActive", dragDrop && dragDrop->IsDragging()}};
+}
+
 void RegisterDebugHandlers(EditorDebugServer& server,
                            EditorApplication& app,
                            Logger::RingBufferSink* ringBufferSink)
 {
     // 1. get_editor_state
-    server.RegisterHandler("get_editor_state", [&app](const EditorDebugServer::RequestContext& /*ctx*/) -> json
+    server.RegisterHandler("get_editor_state", [&app](const EditorDebugServer::RequestContext& ctx) -> json
                            {
         json result;
 
@@ -2690,10 +2772,12 @@ void RegisterDebugHandlers(EditorDebugServer& server,
             //
             // Both records, because they answer different questions and reporting only one made
             // this surface contradict the window title. BuildSceneDegradedReport owns that
-            // reconciliation and the shape it produces.
+            // reconciliation and the shape it produces. `skipsOffset` selects the page of rows.
+            const std::size_t skipsOffset = ctx.params.value("skipsOffset", std::size_t{0});
             result["sceneDegraded"] =
                 BuildSceneDegradedReport(app.m_SceneEditor->GetLastSceneLoadDegraded(),
-                                         app.m_SceneEditor->GetOutstandingSceneLoadDegraded());
+                                         app.m_SceneEditor->GetOutstandingSceneLoadDegraded(),
+                                         skipsOffset);
         }
         else
         {
@@ -3155,6 +3239,9 @@ void RegisterDebugHandlers(EditorDebugServer& server,
     //     Nsight Graphics capture triggering
     RegisterGpuToolingHandlers(server, app);
 
+    // 4f2. start_frame_recording / stop_frame_recording: every presented frame to PNG files
+    FrameSequenceRecorder::RegisterHandlers(server, app);
+
     // 4g. an assistant session's binding and its permission for actions outside the
     //     editor, answered by the gate that claims them
     RegisterAssistantSessionHandlers(server);
@@ -3594,6 +3681,8 @@ void RegisterDebugHandlers(EditorDebugServer& server,
                     j["icon"] = item.Icon;
                 if (!item.Color.empty())
                     j["color"] = item.Color;
+                if (!item.Shortcut.empty())
+                    j["shortcut"] = item.Shortcut;
             }
             items.push_back(std::move(j));
         }
@@ -4318,9 +4407,12 @@ void RegisterDebugHandlers(EditorDebugServer& server,
     // simulate_mouse_drag
     // Drives a press-move-release drag across frames so controls that arm on
     // press, begin dragging on later move, and commit on release see the same
-    // event sequence as a real mouse gesture. button defaults to left; middle
-    // and right match click_element. holdBeforeReleaseFrames keeps the button
-    // down at the end so a concurrent screenshot can observe in-flight drag.
+    // event sequence as a real mouse gesture. The pointer walks from the start
+    // through the path points, then to endX/endY, one move per frame; each
+    // segment ends on its point. button defaults to left; middle and right
+    // match click_element. holdBeforeReleaseFrames keeps the button down at the
+    // last point. captureAtFrame takes a window readback at that hold
+    // frame; the button stays down until the capture is served.
     server.RegisterHandler("simulate_mouse_drag", [&app, &server](const EditorDebugServer::RequestContext& ctx) -> json
                            {
         const int windowIndex = ctx.params.value("windowIndex", 0);
@@ -4356,25 +4448,32 @@ void RegisterDebugHandlers(EditorDebugServer& server,
             return Editor::RefuseRequest("Provide elementId or startX/startY");
         }
 
-        if (!ctx.params.contains("endX") || !ctx.params.contains("endY"))
-            return Editor::RefuseRequest("Provide endX/endY coordinates");
-
-        float endX = 0.0f;
-        float endY = 0.0f;
+        constexpr int kMaxSteps = 240;
+        std::vector<Mathematics::Vector2> pathPoints{Mathematics::Vector2(startX, startY)};
         {
-            json coordError;
-            if (!Editor::ReadPointerCoords(ctx.params, "endX", "endY", endX, endY, coordError))
-                return coordError;
+            json pathError;
+            if (!Editor::ReadDragPath(ctx.params, kMaxSteps, pathPoints, pathError))
+                return pathError;
         }
+        const Mathematics::Vector2 end = pathPoints.back();
         // Allow a longer single gesture for sustained-drag performance tests.
         // Its deferred-response budget is scoped to this request; all other
         // automation operations retain the normal 30-frame timeout.
         const int holdFrames = std::max(1, std::min(4, ctx.params.value("holdFrames", 1)));
-        const int holdBeforeReleaseFrames =
-            std::max(0, std::min(60, ctx.params.value("holdBeforeReleaseFrames", 0)));
-        const int maxSteps = 240;
-        const int steps = std::max(2, std::min(maxSteps, ctx.params.value("steps", 20)));
-        const int pollBudget = holdFrames + steps + holdBeforeReleaseFrames + 4;
+        constexpr int kMaxHoldBeforeReleaseFrames = 1200;
+        const int holdBeforeReleaseFrames = std::max(
+            0, std::min(kMaxHoldBeforeReleaseFrames, ctx.params.value("holdBeforeReleaseFrames", 0)));
+        auto moves = std::make_shared<const std::vector<Mathematics::Vector2>>(Editor::SampleDragPath(
+            pathPoints, std::max(2, std::min(kMaxSteps, ctx.params.value("steps", 20)))));
+        const int steps = static_cast<int>(moves->size());
+        const int captureAtFrame = ctx.params.value("captureAtFrame", -1);
+        if (ctx.params.contains("captureAtFrame") &&
+            (captureAtFrame < 0 || captureAtFrame >= holdBeforeReleaseFrames))
+            return Editor::RefuseRequest(
+                "captureAtFrame must be a hold frame: at least 0 and less than holdBeforeReleaseFrames");
+        const bool captureInHold = captureAtFrame >= 0;
+        const int pollBudget = holdFrames + steps + holdBeforeReleaseFrames + 4 +
+                               (captureInHold ? Editor::kScreenshotPollBackstop : 0);
 
         int button = 0;
         if (ctx.params.contains("button"))
@@ -4411,9 +4510,13 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         auto pressedCaptureId = std::make_shared<std::string>();
         auto pressedCaptured = std::make_shared<bool>(false);
         auto dragDropSession = std::make_shared<bool>(false);
+        auto capturePoll = std::make_shared<EditorDebugServer::DeferredPollFn>();
+        auto capture = std::make_shared<json>();
+        const std::string requestId = ctx.id;
         server.EnqueueDeferredResponse(ctx.id,
-            [ui, wndCtx, startX, startY, endX, endY, steps, holdBeforeReleaseFrames, button, frame,
-             pressedHovered, pressedCaptureId, pressedCaptured, dragDropSession](json& outResult) -> bool
+            [&app, &server, ui, wndCtx, startX, startY, end, moves, steps, holdBeforeReleaseFrames, button, frame,
+             pressedHovered, pressedCaptureId, pressedCaptured, dragDropSession, captureInHold, captureAtFrame,
+             capturePoll, capture, requestId](json& outResult) -> bool
             {
                 if (const auto* dragDrop = ui->GetDragDropManager(); dragDrop && dragDrop->IsDragging())
                     *dragDropSession = true;
@@ -4431,22 +4534,46 @@ void RegisterDebugHandlers(EditorDebugServer& server,
                         *pressedCaptureId = ui->GetCaptureId();
                         *pressedCaptured = ui->IsMouseCaptured();
                     }
-                    const float t = static_cast<float>(*frame + 1) / static_cast<float>(steps);
-                    const float x = startX + (endX - startX) * t;
-                    const float y = startY + (endY - startY) * t;
-                    Editor::InjectMouseMove(wndCtx->inputConfig, wndCtx->window.get(), wndCtx->ui.get(), x, y);
+                    const Mathematics::Vector2 position = (*moves)[static_cast<size_t>(*frame)];
+                    Editor::InjectMouseMove(wndCtx->inputConfig, wndCtx->window.get(), wndCtx->ui.get(), position.x,
+                                            position.y);
                     ++(*frame);
                     return false;
                 }
 
-                if (*frame < steps + holdBeforeReleaseFrames)
+                if (captureInHold && *frame == steps + captureAtFrame)
                 {
-                    Editor::InjectMouseMove(wndCtx->inputConfig, wndCtx->window.get(), wndCtx->ui.get(), endX, endY);
+                    json refusal;
+                    *capturePoll = BeginScreenshotCapture(app, server, requestId, json{{"target", "window"}}, refusal);
+                    *capture = *capturePoll ? json{{"holdFrame", captureAtFrame}, {"pointer", ReadPointerState(*ui)}}
+                                            : refusal;
+                }
+                if (*capturePoll)
+                {
+                    json reply;
+                    if ((*capturePoll)(reply))
+                    {
+                        *capturePoll = nullptr;
+                        // A served capture is a serialized reply; its gate copy holds the result without the PNG bytes.
+                        const json* response = Editor::SerializedReplyGateResponse(reply);
+                        if (!response)
+                            capture->update(reply);
+                        else if (response->contains("result"))
+                            capture->update(response->at("result"));
+                        else
+                            *capture = Editor::RefuseRequest(response->value("error", std::string()));
+                    }
+                }
+
+                if (*frame < steps + holdBeforeReleaseFrames || *capturePoll)
+                {
+                    Editor::InjectMouseMove(wndCtx->inputConfig, wndCtx->window.get(), wndCtx->ui.get(), end.x, end.y);
                     ++(*frame);
                     return false;
                 }
 
-                Editor::InjectMouseMove(wndCtx->inputConfig, wndCtx->window.get(), wndCtx->ui.get(), endX, endY);
+                const json heldPointer = ReadPointerState(*ui);
+                Editor::InjectMouseMove(wndCtx->inputConfig, wndCtx->window.get(), wndCtx->ui.get(), end.x, end.y);
                 Editor::InjectMouseButton(wndCtx->inputConfig, wndCtx->ui.get(), button, false);
                 // "dragged" reports the pointer gesture; "dragDropSession" whether it started a
                 // drag-and-drop session, which is what a drop needs.
@@ -4454,13 +4581,19 @@ void RegisterDebugHandlers(EditorDebugServer& server,
                                  {"dragDropSession", *dragDropSession},
                                  {"startX", startX},
                                  {"startY", startY},
-                                 {"endX", endX},
-                                 {"endY", endY},
+                                 {"endX", end.x},
+                                 {"endY", end.y},
                                  {"steps", steps},
                                  {"button", button},
                                  {"pressedHoveredElement", *pressedHovered},
                                  {"pressedMouseCaptured", *pressedCaptured},
-                                 {"pressedCaptureElementId", *pressedCaptureId}};
+                                 {"pressedCaptureElementId", *pressedCaptureId},
+                                 {"heldPointer", heldPointer}};
+                if (captureInHold && Editor::IsRefusal(*capture))
+                    outResult = Editor::RefuseRequest(
+                        "The hold capture failed: " + Editor::RefusalReason(*capture), outResult);
+                else if (captureInHold)
+                    outResult["capture"] = *capture;
                 return true;
             }, pollBudget);
 
@@ -6481,562 +6614,11 @@ void RegisterDebugHandlers(EditorDebugServer& server,
     // poll then checks the ticket's TryGet() each frame until the GPU copy completes.
     server.RegisterHandler("take_screenshot", [&app, &server](const EditorDebugServer::RequestContext& ctx) -> json
                            {
-        if (app.m_Windows.empty())
-            return Editor::RefuseRequest("No editor window");
-
-        std::string requestId = ctx.id;
-
-        // Parse parameters up-front (before scheduling render callback).
-        const std::string target = ctx.params.value("target", std::string("window"));
-        const std::string panelId = ctx.params.value("panelId", std::string());
-        const std::string elementId = ctx.params.value("elementId", std::string());
-        const int32_t rectX = ctx.params.value("x", 0);
-        const int32_t rectY = ctx.params.value("y", 0);
-        const int32_t rectW = ctx.params.value("w", 0);
-        const int32_t rectH = ctx.params.value("h", 0);
-        // coords: "logical" (default) treats x/y/w/h as logical UI pixels —
-        // matches get_ui_tree / get_panel_tree output and panel/element bounds.
-        // "physical" treats them as raw pixel coords on the saved PNG, useful
-        // when post-processing a previously-saved screenshot. Only meaningful
-        // for target='rect'.
-        const std::string coords = ctx.params.value("coords", std::string("logical"));
-        // dither: default ON — captures quantize the linear readback with the same
-        // TPDF the screen's sRGB encode pass applies, so screenshots match what the
-        // eye sees. Harness/golden consumers that diff or hash pixels numerically
-        // should pass dither=false for deterministic staircase-quantized output.
-        // GE_OUTPUT_DITHER=0 turns the screen's dither off, so it has to turn the
-        // mirror's off too — otherwise that A/B silently compares two identically
-        // dithered captures. The step stays the capture's own 8-bit LSB (the PNG
-        // quantizes at 1/255 in every output mode); only the enable is shared.
-        const bool dither =
-            ctx.params.value("dither", true) && Rendering::Passes::IsOutputDitherEnabled();
-        // deband: default ON — same parity rationale as dither, for the screen's
-        // pre-dither gradient deband (also process-gated by GE_DEBAND). Pass
-        // deband=false to profile the raw quantization structure of the source.
-        const bool deband = ctx.params.value("deband", true);
-        // allowWindowCapture: opt in to an OS window capture (PrintWindow) when the
-        // render graph cannot hand over the frame. Off by default — a window
-        // capture is a picture of what the compositor holds, not the frame the
-        // render graph produced, and it is a plausible PNG either way, so serving
-        // one unasked turns a rendering failure into evidence the caller trusts.
-        // The response states which one it is in `method`.
-        const bool allowWindowCapture = ctx.params.value("allowWindowCapture", false);
-
-        // Validate target.
-        if (target != "window" && target != "viewport" && target != "panel"
-            && target != "element" && target != "rect" && target != "asset_preview")
-        {
-            return Editor::RefuseRequest("Unknown target '" + target + "'. Use one of: window, viewport, panel, element, rect, asset_preview.");
-        }
-        if (coords != "logical" && coords != "physical")
-            return Editor::RefuseRequest("coords must be 'logical' or 'physical'");
-        if (target == "panel" && panelId.empty())
-            return Editor::RefuseRequest("target='panel' requires 'panelId'");
-        if (target == "element" && elementId.empty())
-            return Editor::RefuseRequest("target='element' requires 'elementId'");
-        if (target == "rect" && (rectW <= 0 || rectH <= 0))
-            return Editor::RefuseRequest("target='rect' requires positive 'w' and 'h'");
-
-        auto cropHolder = std::make_shared<ScreenshotCropDesc>();
-        // What the readback pixels hold, stated by whichever declaration arm below
-        // schedules the copy. Disengaged means "nobody stated a space" — the
-        // conversion refuses rather than guessing from the format, so a new capture
-        // target cannot inherit a silent default.
-        auto sourceSpaceHolder = std::make_shared<std::optional<UI::UITextureSpace>>();
-        // RenderGraph arm (8c-4): ticket readback — declared against the frame driver's
-        // published per-frame capture context.
-        auto ticketHolder = std::make_shared<std::shared_ptr<Rendering::RGReadbackTicket>>();
-        auto assetPreviewPathHolder = std::make_shared<std::string>();
-        // Frame the readback was declared on — reported for staleness diagnosis.
-        auto frameIndexHolder = std::make_shared<uint64_t>(0);
-        // Deband gate + scope snapshotted at readback declaration (right after
-        // this frame's encode declared, same render thread) so the deferred
-        // conversion mirrors THE frame it read — not whichever window
-        // published last while the GPU finished.
-        auto encodeFilterStateHolder = std::make_shared<std::optional<CaptureEncodeFilterState>>();
-
-        LOG_DEBUG("Screenshot: request received target={} requestId={}", target, requestId);
-
-        // How long this request keeps asking the render graph for a frame, and
-        // what the caller is told when it stops. The attempt below reports into
-        // it from the render phase; the poll drives it.
-        auto wait = std::make_shared<Editor::ScreenshotCaptureWait>(allowWindowCapture);
-
-        // One render-phase attempt at declaring the readback (pre-Execute on the
-        // pure RenderGraph path, where the frame driver publishes the capture
-        // context). The poll re-arms it every frame until the wait ends, so a
-        // pane that is one frame behind — a scene view catching up on extraction —
-        // is a retry rather than a failed capture.
-        //
-        // At most one attempt is in flight: the poll runs once per tick and the
-        // render phase drains the whole callback queue at once, so queuing an
-        // attempt per tick would make a starved frame loop spend the whole
-        // refusal budget inside a single rendered frame.
-        auto attemptQueued = std::make_shared<bool>(false);
-        auto attempt = std::make_shared<std::function<void()>>();
-        *attempt = [&app, wait, attemptQueued, ticketHolder, cropHolder, sourceSpaceHolder,
-                    assetPreviewPathHolder, frameIndexHolder, encodeFilterStateHolder, target,
-                    panelId, elementId, rectX, rectY, rectW, rectH, coords]()
-        {
-            *attemptQueued = false;
-            // The poll can end the wait with this attempt still queued, and the
-            // request is answered by then: declaring a readback nobody consumes
-            // would cost the frame another composite for nothing.
-            if (!wait->GiveUpReason().empty())
-                return;
-            // Every attempt re-declares from scratch: a crop from an earlier
-            // frame must never ride along with this frame's pixels.
-            *cropHolder = ScreenshotCropDesc{};
-
-            if (app.m_Windows.empty())
-            {
-                wait->RecordBlocked("the editor has no window");
-                return;
-            }
-
-            auto* wndCtx = app.m_Windows[0].get();
-            if (!wndCtx->renderCtx)
-            {
-                wait->RecordBlocked("the editor window has no render context");
-                return;
-            }
-
-            auto* device = wndCtx->renderCtx->GetDevice();
-            if (!device)
-            {
-                wait->RecordBlocked("the editor window has no render device");
-                return;
-            }
-
-            // 8c-4: RenderGraph capture context, filled by the frame driver right
-            // before this callback runs; ids are frame-local and valid only
-            // for the published incarnation.
-            auto* rg2Frame = wndCtx->rg2Capture.frame;
-            const bool rg2 =
-                rg2Frame && wndCtx->rg2Capture.frameIndex == rg2Frame->FrameIndex();
-            if (!rg2)
-            {
-                wait->RecordRefusal("the frame published no render-graph capture context");
-                return;
-            }
-            *frameIndexHolder = wndCtx->rg2Capture.frameIndex;
-
-            // ---- ASSET PREVIEW path: readback live video frame texture ---------
-            if (target == "asset_preview")
-            {
-                auto* assetViewPanel = FindPanel<AssetViewPanel>(app.m_PanelStorage);
-                if (!assetViewPanel)
-                {
-                    wait->RecordBlocked("the Asset View panel is not open");
-                    return;
-                }
-
-                Rendering::TextureHandle previewTexture{};
-                Rendering::TextureFormat previewFormat = Rendering::TextureFormat::RGBA8_UNORM;
-                if (!assetViewPanel->TryGetVideoPreviewReadbackTexture(previewTexture, previewFormat))
-                {
-                    wait->RecordBlocked(
-                        "the Asset View has no uploaded video frame — select an .mp4 first");
-                    return;
-                }
-
-                *assetPreviewPathHolder = assetViewPanel->GetPreviewDebugState().previewPath;
-                *ticketHolder = Rendering::RequestDeviceTextureReadbackRG(
-                    device, *rg2Frame, previewTexture,
-                    Rendering::ResourceState::ShaderResource, "AssetViewVideoPreview");
-                // Decoded video frames are authored sRGB — the same stamp the Asset
-                // View panel registers this texture to the UI with.
-                *sourceSpaceHolder = UI::UITextureSpace::SrgbAuthored();
-                return;
-            }
-
-            // ---- VIEWPORT path: scene-view pipeline-output readback ------------
-            if (target == "viewport")
-            {
-                if (!wndCtx->scene)
-                {
-                    wait->RecordBlocked("the editor window has no scene view controller");
-                    return;
-                }
-                auto* renderServices = app.m_EditorContext ? app.m_EditorContext->RenderServices : nullptr;
-                if (!renderServices)
-                {
-                    wait->RecordBlocked("the editor has no render services");
-                    return;
-                }
-                // The active scene view may be a maximized non-Perspective quad pane
-                // (a secondary controller), not ctx->scene. Read back the controller
-                // that's actually rendering the visible viewport, else the readback
-                // targets a suspended view and never schedules.
-                SceneViewController* activeSceneCtrl = wndCtx->scene.get();
-                if (wndCtx->ui)
-                    if (auto* root = wndCtx->ui->GetRootElement())
-                        if (auto* mount = dynamic_cast<Mount*>(root->FindById(HashStringId(EditorPanelIds::MountSceneView))))
-                            if (auto* svPanel = dynamic_cast<SceneViewPanel*>(mount->GetTarget()))
-                                if (auto* ac = svPanel->GetSceneControllerForSlot(svPanel->GetActiveViewportSlot()))
-                                    activeSceneCtrl = ac;
-                Rendering::ViewId viewId = activeSceneCtrl ? activeSceneCtrl->GetViewId() : 0u;
-                if (viewId == 0)
-                {
-                    wait->RecordRefusal("the scene view has no registered view yet");
-                    return;
-                }
-                // The scene view's pipeline output — the texture the UI
-                // samples (post-FX FinalColor).
-                const auto out = renderServices->GetPipelineOutputRG(*rg2Frame, viewId);
-                if (!out.IsValid())
-                {
-                    // The pane declared no pipeline output this frame: its tab is
-                    // behind another, its rect collapsed, or its view is a frame
-                    // behind on extraction. The first two do not clear on their
-                    // own; the wait tells them apart by how long the refusal lasts.
-                    wait->RecordRefusal(
-                        "the scene view produced no render-graph output — its tab may be behind "
-                        "another, its pane collapsed, or the view is still catching up");
-                    return;
-                }
-                *ticketHolder = Rendering::RequestTextureReadbackRG(
-                    device, *rg2Frame, out.Out, "ViewportScreenshot");
-                // The pipeline's own stamp for what it wrote into FinalColor —
-                // LINEAR, overlays and gizmos included. The view's own finalize
-                // is downstream of this point, so a viewport capture does its own
-                // encode and its own 8-bit filters rather than inheriting the
-                // screen's, which are sized to the display's step. Same content,
-                // filtered for the file's depth.
-                *sourceSpaceHolder = renderServices->GetPipelineOutputSpaceRG();
-                return;
-            }
-
-            // ---- WINDOW / PANEL / ELEMENT / RECT: presentation-target readback --
-            // Every pure editor frame routes through Editor.FinalLinear, so
-            // the full composite is always readable there.
-            if (wndCtx->rg2Capture.finalLinearId != 0xFFFFFFFFu)
-            {
-                Rendering::RenderGraph::RGTexture finalLinear{};
-                finalLinear.Id = wndCtx->rg2Capture.finalLinearId;
-                *ticketHolder = Rendering::RequestTextureReadbackRG(
-                    device, *rg2Frame, finalLinear, "WindowScreenshot");
-                // The frame driver publishes the space the composite's bytes
-                // hold under the declared UI target (#767/#784): SrgbAuthored
-                // on SDR frames (encoded blend — no second OETF at readback),
-                // DisplayLinearSdr on HDR-display capture frames.
-                *sourceSpaceHolder = wndCtx->rg2Capture.compositeSpace;
-                // This window's encode declared just before this callback ran —
-                // the publish is exactly the state this readback's pixels see.
-                *encodeFilterStateHolder = CaptureEncodeFilterState{
-                    Rendering::Passes::GetBackbufferOutputDebandThresholdLsb()};
-            }
-            else
-            {
-                wait->RecordRefusal("the frame declared no composite to read back");
-                return;
-            }
-
-            // Compute crop rect for panel/element/rect targets (image-space crop).
-            // GetLayoutX/Y/Width/Height returns logical pixels; the readback is in
-            // physical pixels — scale by content scale.
-            if (target == "window")
-                return;
-
-            float layoutX = 0.0f;
-            float layoutY = 0.0f;
-            float layoutW = 0.0f;
-            float layoutH = 0.0f;
-            std::string label;
-            bool found = false;
-
-            if (target == "panel")
-            {
-                if (app.m_Docking)
-                {
-                    if (UIElement* panel = app.m_Docking->GetPanel(panelId))
-                    {
-                        layoutX = panel->GetLayoutX();
-                        layoutY = panel->GetLayoutY();
-                        layoutW = panel->GetLayoutWidth();
-                        layoutH = panel->GetLayoutHeight();
-                        label = "panel:" + panelId;
-                        found = true;
-                    }
-                }
-            }
-            else if (target == "element")
-            {
-                if (wndCtx->ui)
-                {
-                    if (UIElement* root = wndCtx->ui->GetRootElement())
-                    {
-                        if (UIElement* el = root->FindById(HashStringId(elementId)))
-                        {
-                            layoutX = el->GetLayoutX();
-                            layoutY = el->GetLayoutY();
-                            layoutW = el->GetLayoutWidth();
-                            layoutH = el->GetLayoutHeight();
-                            label = "element:" + elementId;
-                            found = true;
-                        }
-                    }
-                }
-            }
-            else if (target == "rect")
-            {
-                layoutX = static_cast<float>(rectX);
-                layoutY = static_cast<float>(rectY);
-                layoutW = static_cast<float>(rectW);
-                layoutH = static_cast<float>(rectH);
-                label = "rect";
-                found = true;
-            }
-
-            if (!found || layoutW <= 0.0f || layoutH <= 0.0f)
-            {
-                LOG_WARNING("Screenshot: crop target not found or empty — returning full window");
-                return;
-            }
-
-            // panel/element values come from layout (always logical). For
-            // rect, honor the caller's coords choice.
-            const bool applyScale = (target != "rect") || (coords == "logical");
-            const float scale = applyScale && wndCtx->ui
-                                    ? std::max(0.01f, wndCtx->ui->GetContentScale())
-                                    : 1.0f;
-            cropHolder->valid = true;
-            cropHolder->x = static_cast<int32_t>(std::floor(layoutX * scale));
-            cropHolder->y = static_cast<int32_t>(std::floor(layoutY * scale));
-            cropHolder->w = static_cast<int32_t>(std::ceil(layoutW * scale));
-            cropHolder->h = static_cast<int32_t>(std::ceil(layoutH * scale));
-            cropHolder->label = std::move(label);
-            LOG_DEBUG("Screenshot: crop {} -> ({},{},{},{})",
-                      cropHolder->label, cropHolder->x, cropHolder->y, cropHolder->w, cropHolder->h);
-        };
-        *attemptQueued = true;
-        server.EnqueueRenderCallback([attempt]() { (*attempt)(); });
-
-        // Deferred poll: each frame, re-arm the attempt until the readback is
-        // declared, then wait for the GPU copy. The wait decides when to stop and
-        // says why; a window capture is served only to a caller that asked for
-        // one, because it is a picture of the window rather than the frame the
-        // render graph produced.
-        const auto requestStart = std::chrono::steady_clock::now();
-        // Naming the opt-in flag helps only a caller that has not already passed
-        // it, and only where an OS window capture can stand in: asset_preview
-        // reads a video texture no picture of the window substitutes for.
-        const bool offerWindowCaptureHint = !allowWindowCapture && target != "asset_preview";
-        // The job that converts, encodes and serializes the finished readback.
-        auto encodeHolder = std::make_shared<JobSystem::TaskHandle>();
-        server.EnqueueDeferredResponse(requestId,
-            [&app, &server, attempt, attemptQueued, wait, ticketHolder, requestStart, cropHolder,
-             sourceSpaceHolder,
-             assetPreviewPathHolder, frameIndexHolder, encodeFilterStateHolder, encodeHolder, target,
-             panelId, elementId, rectX, rectY, rectW, rectH, coords, dither, deband,
-             offerWindowCaptureHint, requestId](json& outResult) -> bool
-            {
-                auto reportFailure = [&](const std::string& reason,
-                                         bool offerWindowCapture = false) -> bool
-                {
-                    LOG_WARNING("Screenshot ({}): {}", target, reason);
-                    outResult =
-                        Editor::RefuseRequest(Editor::ScreenshotFailureMessage(reason, offerWindowCapture),
-                                              json{{"fallbackReason", reason}});
-                    return true;
-                };
-
-                // The readback has been handed to the encode job: wait for its line.
-                if (encodeHolder->IsValid())
-                {
-                    std::string jobError;
-                    if (!Editor::PollHandlerReplyJob(*encodeHolder, outResult, jobError))
-                        return false;
-                    if (!jobError.empty())
-                        return reportFailure("the screenshot encode job did not complete: " + jobError);
-                    return true;
-                }
-
-                auto windowCapture = [&](const std::string& reason) -> bool
-                {
-                    // asset_preview reads a video texture no window capture can
-                    // substitute for — it fails whatever the caller allowed.
-                    if (target == "asset_preview")
-                        return reportFailure(reason + "; asset_preview has no window-capture substitute");
-                    if (app.m_Windows.empty() || !app.m_Windows[0] || !app.m_Windows[0]->window)
-                        return reportFailure(reason + "; no window to capture either");
-                    auto* wndCtx = app.m_Windows[0].get();
-                    std::vector<uint8_t> rgba8;
-                    uint32_t srcW = 0;
-                    uint32_t srcH = 0;
-                    if (!CaptureWindowClientAreaRGBA8(wndCtx->window.get(), rgba8, srcW, srcH))
-                        return reportFailure(reason +
-                                             "; the window capture also failed (non-Windows "
-                                             "platform, hidden window, or capture error)");
-                    LOG_WARNING("Screenshot ({}): {} — served the window capture the request allowed",
-                                target, reason);
-
-                    // The render callback that normally fills cropHolder may
-                    // never have run on this path — compute the crop from the
-                    // live layout instead. viewport degrades to the scene-view
-                    // mount's on-screen region of the composite.
-                    ScreenshotCropDesc crop;
-                    float layoutX = 0.0f;
-                    float layoutY = 0.0f;
-                    float layoutW = 0.0f;
-                    float layoutH = 0.0f;
-                    bool found = false;
-                    if (target == "panel" && app.m_Docking)
-                    {
-                        if (UIElement* panel = app.m_Docking->GetPanel(panelId))
-                        {
-                            layoutX = panel->GetLayoutX();
-                            layoutY = panel->GetLayoutY();
-                            layoutW = panel->GetLayoutWidth();
-                            layoutH = panel->GetLayoutHeight();
-                            crop.label = "panel:" + panelId;
-                            found = true;
-                        }
-                    }
-                    else if ((target == "element" || target == "viewport") && wndCtx->ui)
-                    {
-                        if (UIElement* root = wndCtx->ui->GetRootElement())
-                        {
-                            const std::string lookupId =
-                                target == "viewport" ? std::string(EditorPanelIds::MountSceneView)
-                                                     : elementId;
-                            if (UIElement* el = root->FindById(HashStringId(lookupId)))
-                            {
-                                layoutX = el->GetLayoutX();
-                                layoutY = el->GetLayoutY();
-                                layoutW = el->GetLayoutWidth();
-                                layoutH = el->GetLayoutHeight();
-                                crop.label = "element:" + lookupId;
-                                found = true;
-                            }
-                        }
-                    }
-                    else if (target == "rect")
-                    {
-                        layoutX = static_cast<float>(rectX);
-                        layoutY = static_cast<float>(rectY);
-                        layoutW = static_cast<float>(rectW);
-                        layoutH = static_cast<float>(rectH);
-                        crop.label = "rect";
-                        found = true;
-                    }
-                    if (found && layoutW > 0.0f && layoutH > 0.0f)
-                    {
-                        const bool applyScale = (target != "rect") || (coords == "logical");
-                        const float scale = applyScale && wndCtx->ui
-                                                ? std::max(0.01f, wndCtx->ui->GetContentScale())
-                                                : 1.0f;
-                        crop.valid = true;
-                        crop.x = static_cast<int32_t>(std::floor(layoutX * scale));
-                        crop.y = static_cast<int32_t>(std::floor(layoutY * scale));
-                        crop.w = static_cast<int32_t>(std::ceil(layoutW * scale));
-                        crop.h = static_cast<int32_t>(std::ceil(layoutH * scale));
-                    }
-
-                    FinishScreenshotResult(outResult, std::move(rgba8), srcW, srcH, crop, target,
-                                           "printwindow", PendingMaterialTextureBinds());
-                    outResult["fallbackReason"] = reason;
-                    if (!Editor::IsRefusal(outResult))
-                        outResult.update(CaptureRecordContext(app));
-                    return true;
-                };
-
-                Rendering::ViewReadbackResult result;
-                bool readbackReady = false;
-                // RenderGraph arm: deterministic ticket completion (8c-1). The
-                // attempt creates the ticket in the render phase.
-                if (*ticketHolder)
-                {
-                    if ((*ticketHolder)->IsConsumed())
-                    {
-                        // A cancelled ticket (declaring frame abandoned) can never
-                        // resolve — drop it and let a later frame declare again.
-                        ticketHolder->reset();
-                        wait->RecordRefusal("the frame that declared the readback was abandoned "
-                                            "before submit");
-                    }
-                    else
-                    {
-                        wait->RecordReadbackDeclared();
-                        readbackReady = (*ticketHolder)->TryGet(result);
-                    }
-                }
-
-                if (!readbackReady)
-                {
-                    // The same condition the render loop skips a window on: with no
-                    // framebuffer there is no frame to declare a readback into, and
-                    // no later frame changes that on its own.
-                    if (!*ticketHolder && !app.m_Windows.empty() && app.m_Windows[0] &&
-                        app.m_Windows[0]->window)
-                    {
-                        int fbW = 0;
-                        int fbH = 0;
-                        app.m_Windows[0]->window->GetFramebufferSize(fbW, fbH);
-                        if (fbW <= 0 || fbH <= 0)
-                            wait->RecordBlocked("the editor window has no framebuffer (minimized "
-                                                "or hidden), so it renders no frame to capture");
-                    }
-                    const double elapsed =
-                        std::chrono::duration<double>(std::chrono::steady_clock::now() - requestStart)
-                            .count();
-                    const auto outcome = wait->Step(elapsed);
-                    if (outcome == Editor::ScreenshotCaptureWait::Outcome::ServeWindowCapture)
-                        return windowCapture(wait->GiveUpReason());
-                    if (outcome == Editor::ScreenshotCaptureWait::Outcome::Fail)
-                        return reportFailure(wait->GiveUpReason(), offerWindowCaptureHint);
-                    // Keep waiting: the next rendered frame gets its own attempt.
-                    if (!*ticketHolder && !*attemptQueued)
-                    {
-                        *attemptQueued = true;
-                        server.EnqueueRenderCallback([attempt]() { (*attempt)(); });
-                    }
-                    return false;
-                }
-
-                LOG_DEBUG("Screenshot: readback complete {}x{} fmt={}", result.width, result.height,
-                          static_cast<uint32_t>(result.format));
-
-                // The declaring arm states the space; a scheduled ticket without one is
-                // a capture target that forgot to, not a licence to infer.
-                if (!*sourceSpaceHolder)
-                    return reportFailure("the readback declared no source colour space");
-
-                // The frame's share ends with the readback: conversion, PNG encode,
-                // file write, base64 and serialization run on a job, and a later poll
-                // sends the line it produced.
-                *encodeHolder = Editor::SubmitHandlerReplyJob(
-                    EngineCore::GetInstance().GetJobSystem(), requestId,
-                    [readback = std::move(result), srgbEncode = !UI::IsEncodedAtRest(**sourceSpaceHolder),
-                     dither, deband,
-                     filterState = encodeFilterStateHolder->value_or(CaptureEncodeFilterState{
-                         Rendering::Passes::GetBackbufferOutputDebandThresholdLsb()}),
-                     crop = *cropHolder, target,
-                     frameIndex = *frameIndexHolder, previewPath = *assetPreviewPathHolder,
-                     pendingBinds = PendingMaterialTextureBinds(),
-                     recordContext = CaptureRecordContext(app)]() -> json
-                    {
-                        auto rgba8 = ConvertToRGBA8(readback.pixels.data(), readback.width, readback.height,
-                                                    readback.format, 0.0f, 1.0f, srgbEncode, dither, deband,
-                                                    &filterState);
-                        json reply;
-                        FinishScreenshotResult(reply, std::move(rgba8), readback.width, readback.height, crop,
-                                               target, "rendergraph", pendingBinds);
-                        if (!Editor::IsRefusal(reply))
-                        {
-                            reply["frameIndex"] = frameIndex;
-                            reply.update(recordContext);
-                            if (target == "asset_preview" && !previewPath.empty())
-                                reply["previewPath"] = previewPath;
-                        }
-                        return reply;
-                    });
-                if (!encodeHolder->IsValid())
-                    return reportFailure("the job system is shutting down; the capture was not encoded");
-                return false;
-            },
-            Editor::kScreenshotPollBackstop);
-
+        json refusal;
+        EditorDebugServer::DeferredPollFn poll = BeginScreenshotCapture(app, server, ctx.id, ctx.params, refusal);
+        if (!poll)
+            return refusal;
+        server.EnqueueDeferredResponse(ctx.id, std::move(poll), Editor::kScreenshotPollBackstop);
         return EditorDebugServer::DeferredMarker(); });
 
     // Shadow/draw-stream readback diagnostics: returns compact hashes only.
@@ -7131,13 +6713,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
             Rendering::ViewId viewId = static_cast<Rendering::ViewId>(std::max(0, requestedViewId));
             if (viewId == 0)
             {
-                SceneViewController* activeSceneCtrl = wndCtx->scene.get();
-                if (wndCtx->ui)
-                    if (auto* root = wndCtx->ui->GetRootElement())
-                        if (auto* mount = dynamic_cast<Mount*>(root->FindById(HashStringId(EditorPanelIds::MountSceneView))))
-                            if (auto* svPanel = dynamic_cast<SceneViewPanel*>(mount->GetTarget()))
-                                if (auto* ac = svPanel->GetSceneControllerForSlot(svPanel->GetActiveViewportSlot()))
-                                    activeSceneCtrl = ac;
+                SceneViewController* activeSceneCtrl = Editor::ResolveActiveSceneController(*wndCtx);
                 viewId = activeSceneCtrl ? activeSceneCtrl->GetViewId() : 0u;
             }
             if (viewId == 0)
@@ -8385,7 +7961,7 @@ void RegisterDebugHandlers(EditorDebugServer& server,
         // Null while no frame has been recorded, never a stand-in value: a
         // fabricated 60 degrees is the guess this field exists to retire.
         json projection = json(nullptr);
-        float proj[16] = {};
+        Mathematics::Matrix4x4 proj;
         uint32_t viewW = 0;
         uint32_t viewH = 0;
         if (scene->GetLastFrameProjection(proj, viewW, viewH))

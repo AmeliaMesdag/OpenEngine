@@ -58,6 +58,36 @@ PageFetchOutcome PageStoreAccess::Fetch(const PageAddress& address) const
     return outcome;
 }
 
+void PageStoreAccess::AddChange(const std::optional<PageSampleRect>& level0Rect)
+{
+    std::lock_guard lock(m_ChangesMutex);
+    const uint64 version = m_Version.load(std::memory_order_relaxed) + 1u;
+    m_Changes.push_back(ReadableChange{version, level0Rect});
+    if (m_Changes.size() > kReadableChangesKept)
+        m_Changes.pop_front();
+    m_Version.store(version, std::memory_order_release);
+}
+
+uint64 PageStoreAccess::ReadableSince(uint64 since, std::vector<PageSampleRect>& outRects, bool& outWhole) const
+{
+    std::lock_guard lock(m_ChangesMutex);
+    const uint64 version = m_Version.load(std::memory_order_relaxed);
+    if (version == since)
+        return version;
+    if (m_Changes.empty() || m_Changes.front().Version > since + 1u)
+        outWhole = true; // the changes after `since` are not all kept
+    for (const ReadableChange& change : m_Changes)
+    {
+        if (change.Version <= since)
+            continue;
+        if (change.Level0Rect)
+            outRects.push_back(*change.Level0Rect);
+        else
+            outWhole = true;
+    }
+    return version;
+}
+
 std::string PageStoreAccess::PublishLocked(const std::filesystem::path& file)
 {
     m_Reader.reset();
@@ -67,7 +97,7 @@ std::string PageStoreAccess::PublishLocked(const std::filesystem::path& file)
     if (!MatchesShape(reader->Layout()))
         return "the page store " + file.string() + " is for another lattice";
     m_Reader = std::move(reader);
-    m_Version.fetch_add(1, std::memory_order_acq_rel);
+    AddChange(std::nullopt);
     return {};
 }
 
@@ -119,9 +149,9 @@ std::string PageStoreAccess::AddPresentPages(std::span<const uint8> present)
     return error;
 }
 
-void PageStoreAccess::Commit()
+void PageStoreAccess::Commit(const PageSampleRect& level0Rect)
 {
-    m_Version.fetch_add(1, std::memory_order_acq_rel);
+    AddChange(level0Rect);
 }
 
 std::string PageStoreAccess::Finish()

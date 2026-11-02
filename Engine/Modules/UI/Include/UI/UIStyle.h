@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -65,19 +66,24 @@ struct Box4b
     bool operator==(const Box4b&) const = default;
 };
 
-// Length value that can be Auto (unset), Pixels, or Percent.
-// Used for properties where CSS distinguishes between "unset/auto" and a concrete length.
+// A length: Auto (unset), px, percent or a CSS viewport unit (vw, vh, vmin, vmax).
+// A viewport unit is one percent of the UI root's layout size in logical px.
+// Only sizes, flex-basis and insets carry one; YogaAdapter::ApplyStyle resolves it.
 struct StyleLength
 {
     enum class UnitType : uint8_t
     {
         Auto = 0,
         Px,
-        Percent
+        Percent,
+        Vw,
+        Vh,
+        Vmin,
+        Vmax
     };
 
     UnitType Unit = UnitType::Auto;
-    float Value = 0.0f; // for Px or Percent; ignored for Auto
+    float Value = 0.0f; // the number in Unit; ignored for Auto
 
     static StyleLength Auto() { return StyleLength{UnitType::Auto, 0.0f}; }
     static StyleLength Px(float px) { return StyleLength{UnitType::Px, px}; }
@@ -86,6 +92,10 @@ struct StyleLength
     bool IsAuto() const { return Unit == UnitType::Auto; }
     bool IsPercent() const { return Unit == UnitType::Percent; }
     bool IsPx() const { return Unit == UnitType::Px; }
+    bool IsViewport() const
+    {
+        return Unit == UnitType::Vw || Unit == UnitType::Vh || Unit == UnitType::Vmin || Unit == UnitType::Vmax;
+    }
     bool operator==(const StyleLength&) const = default;
 };
 
@@ -364,6 +374,16 @@ struct BackgroundImageSource
     // `url("@editor/path")` syntax in CSS.
     std::string SourceAlias;
 
+    // The texture registered with UIManager::SetExternalTexture under `name`; the CSS
+    // spelling is `background-image: engine("name")`.
+    static BackgroundImageSource Resource(std::string name)
+    {
+        BackgroundImageSource source;
+        source.Kind = SourceKind::ResourceName;
+        source.Value = std::move(name);
+        return source;
+    }
+
     bool HasImage() const { return Kind != SourceKind::None; }
     bool operator==(const BackgroundImageSource&) const = default;
 };
@@ -474,6 +494,10 @@ struct BackgroundPositionValue
     bool XIsPercent = true;
     float Y = 50.0f;
     bool YIsPercent = true;
+
+    // Both axes in percent, as `background-position: x% y%`: Percent(50, 50) centers the image.
+    static BackgroundPositionValue Percent(float x, float y) { return {x, true, y, true}; }
+
     bool operator==(const BackgroundPositionValue&) const = default;
 };
 

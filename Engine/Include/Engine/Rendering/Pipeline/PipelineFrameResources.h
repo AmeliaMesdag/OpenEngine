@@ -2,6 +2,7 @@
 
 #include "Rendering/Camera/CameraTypes.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
+#include "Rendering/Core/RenderGraph/RGFullscreen.h"
 
 #include <string>
 #include <unordered_map>
@@ -31,6 +32,17 @@ struct PipelineBufferBindingRG
     uint64_t Size = 0;
     ::GameEngine::Rendering::RenderGraph::RGBuffer Graph{};
     bool IsValid() const { return Buffer.IsValid(); }
+    /// This range as a fullscreen pass's buffer input, with Graph as the buffer the pass declares a read of.
+    /// The caller sets Binding and IsStorage.
+    ::GameEngine::Rendering::RenderGraph::RGFullscreenBufferInput AsFullscreenInput() const
+    {
+        ::GameEngine::Rendering::RenderGraph::RGFullscreenBufferInput input{};
+        input.Buffer = Buffer;
+        input.Offset = Offset;
+        input.Size = Size;
+        input.Declare = Graph;
+        return input;
+    }
 };
 
 // The pipeline's per-frame blackboard, rebuilt from scratch on every Declare.

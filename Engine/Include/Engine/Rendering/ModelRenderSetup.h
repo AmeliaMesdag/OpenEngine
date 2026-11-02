@@ -77,6 +77,12 @@ std::optional<ModelRenderResources> RegisterModelRenderResourcesForSubmesh(
 uint32 ResolveSubmeshIndex(const GUID& modelGuid, const ModelAsset& model,
                            const Components::MeshRenderer& mr);
 
+// The registry entry `mr` draws: by its mesh handle, else by the key of its model and `mr.meshId`.
+// Like MeshGPURegistry::Find, the entry is valid only until the next registration: inside an ECS
+// wave, hold a TableScope across the lookup and the use.
+const Rendering::MeshGPUEntry* FindRendererMeshEntry(const Rendering::MeshGPURegistry& registry,
+                                                     const Components::MeshRenderer& mr);
+
 // Policy for how PopulateMeshRenderer sets MeshRenderer.materialAssetGuid.
 enum class MeshMaterialFill
 {

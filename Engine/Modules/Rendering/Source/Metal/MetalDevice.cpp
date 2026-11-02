@@ -678,13 +678,13 @@ void MetalDevice::ScrubResidency(MTL::Resource* resource)
     }
     std::lock_guard<std::recursive_mutex> lock(m_ResourceMutex);
     m_DescriptorSets.ForEach([resource](Handle, MetalDescriptorSet& set) {
-        for (size_t i = 0; i < set.residentResources.size(); ++i)
+        for (size_t slot = 0; slot < set.residentResources.Size(); ++slot)
         {
-            if (set.residentResources[i] == resource)
+            if (set.residentResources[slot] == resource)
             {
-                set.residentResources[i] = nullptr;
-                set.residentWritable[i] = 0;
-                set.residentIndirectArguments[i] = 0;
+                set.residentResources[slot] = nullptr;
+                set.residentWritable[slot] = 0;
+                set.residentIndirectArguments[slot] = 0;
                 set.residentsDirty = true;
             }
         }
@@ -1045,7 +1045,7 @@ MTL::SamplerState* MetalDevice::GetMipBlitSampler()
 }
 
 void MetalDevice::DeclareDeviceAddressResidency(MTL::RenderCommandEncoder* encoder,
-                                                std::unordered_map<MTL::Resource*, MTL::ResourceUsage>& residentCache)
+                                                FastHashMap<MTL::Resource*, MTL::ResourceUsage>& residentCache)
 {
     // Residency-set path declares residency once per frame on the queue and
     // orders compute->draw with the fence; the per-encoder blanket is skipped.
@@ -1072,7 +1072,7 @@ void MetalDevice::DeclareDeviceAddressResidency(MTL::RenderCommandEncoder* encod
 }
 
 void MetalDevice::DeclareDeviceAddressResidency(MTL::ComputeCommandEncoder* encoder,
-                                                std::unordered_map<MTL::Resource*, MTL::ResourceUsage>& residentCache)
+                                                FastHashMap<MTL::Resource*, MTL::ResourceUsage>& residentCache)
 {
     if (m_UseResidencySet)
     {

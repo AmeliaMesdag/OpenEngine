@@ -58,17 +58,11 @@ Transform MakeTransformAt(float x, float y, float z) {
                               Mathematics::Vector3{1.0f, 1.0f, 1.0f});
 }
 
-void SetIdentityMatrix(float* m) {
-    for (int i = 0; i < 16; ++i)
-        m[i] = 0.0f;
-    m[0] = m[5] = m[10] = m[15] = 1.0f;
-}
-
 CameraData MakeIdentityCamera() {
     CameraData data{};
-    SetIdentityMatrix(data.view);
-    SetIdentityMatrix(data.proj);
-    SetIdentityMatrix(data.viewProj);
+    data.view = Mathematics::Matrix4x4::Identity();
+    data.proj = Mathematics::Matrix4x4::Identity();
+    data.viewProj = Mathematics::Matrix4x4::Identity();
     return data;
 }
 

@@ -683,8 +683,8 @@ CascadeFrameData ShadowMapRenderFeature::ComputeCascades(
     // Guarded because an orthographic or degenerate projection has no fovY; the
     // fallbacks only ever feed the WorldTexel branch, which such a camera does
     // not meaningfully use.
-    const float projYY = camera.proj[5];
-    const float projXX = camera.proj[0];
+    const float projYY = camera.proj[1][1];
+    const float projXX = camera.proj[0][0];
     const float tanHalfY = (std::abs(projYY) > 1e-6f) ? (1.0f / std::abs(projYY)) : 1.0f;
     const float aspect = (std::abs(projXX) > 1e-6f) ? std::abs(projYY / projXX) : 1.0f;
 
@@ -731,20 +731,18 @@ CascadeFrameData ShadowMapRenderFeature::ComputeCascades(
     // OnScheduleCulling, which tolerates ULP(|eye|) (its slack is in metres).
     // ComputeRebasedView is the one place the engine rebases a camera; only its
     // view-projection output is wanted here (the fit never needs the view alone).
-    float cameraViewRelUnusedHere[16];
-    float cameraViewProjRel[16];
+    Matrix4x4 cameraViewRelUnusedHere;
+    Matrix4x4 cameraViewProjRel;
     int32 originSector[4];
-    ComputeRebasedView(camera.view, camera.proj, camera.viewProj, camera.cameraPos[0],
-                       camera.cameraPos[1], camera.cameraPos[2], cameraViewRelUnusedHere,
+    ComputeRebasedView(camera.view, camera.proj, camera.viewProj, camera.cameraPos.x,
+                       camera.cameraPos.y, camera.cameraPos.z, cameraViewRelUnusedHere,
                        cameraViewProjRel, originSector);
     result.RenderOriginSector[0] = originSector[0];
     result.RenderOriginSector[1] = originSector[1];
     result.RenderOriginSector[2] = originSector[2];
 
     // Inverse of the origin-relative camera VP, for extracting frustum corners.
-    Matrix4x4 viewProjRel;
-    std::memcpy(viewProjRel.Data(), cameraViewProjRel, 16 * sizeof(float));
-    const Matrix4x4 invViewProjRel = Mathematics::Inverse(viewProjRel);
+    const Matrix4x4 invViewProjRel = Mathematics::Inverse(cameraViewProjRel);
 
     // Full frustum corners, render-origin-relative.
     Vector3 fullCornersRel[8];
@@ -761,7 +759,7 @@ CascadeFrameData ShadowMapRenderFeature::ComputeCascades(
     const float frustumRange = farPlane - nearPlane;
     const bool freeze = m_FitFreezeEnabled;
     const Vector3 ldNorm = lightDir.Normalize();
-    const Vector3 camPos{camera.cameraPos[0], camera.cameraPos[1], camera.cameraPos[2]};
+    const Vector3 camPos{camera.cameraPos.x, camera.cameraPos.y, camera.cameraPos.z};
     ShadowReceiverMeasurement::Context currentCamera{};
     SetShadowReceiverCamera(camera, IsOrthographicProjectionLH_ZO(camera.proj), currentCamera);
     const float cascade0Start =
@@ -779,11 +777,11 @@ CascadeFrameData ShadowMapRenderFeature::ComputeCascades(
             : nullptr;
     // The eye, render-origin-relative: the sun glare looks the cascades up there.
     const Vector3 eyeRel{
-        static_cast<float>(static_cast<double>(camera.cameraPos[0]) -
+        static_cast<float>(static_cast<double>(camera.cameraPos.x) -
                            static_cast<double>(result.RenderOriginSector[0]) * kSectorSize),
-        static_cast<float>(static_cast<double>(camera.cameraPos[1]) -
+        static_cast<float>(static_cast<double>(camera.cameraPos.y) -
                            static_cast<double>(result.RenderOriginSector[1]) * kSectorSize),
-        static_cast<float>(static_cast<double>(camera.cameraPos[2]) -
+        static_cast<float>(static_cast<double>(camera.cameraPos.z) -
                            static_cast<double>(result.RenderOriginSector[2]) * kSectorSize)};
     for (uint32_t c = 0; c < m_Config.NumCascades; ++c)
     {
@@ -884,10 +882,9 @@ CascadeFrameData ShadowMapRenderFeature::ComputeCascades(
                 frozen->Fit = fit;
                 frozen->LightDir = ldNorm;
                 frozen->CameraPos = camPos;
-                std::memcpy(frozen->CullCameraViewProj.Data(), camera.viewProj,
-                            16 * sizeof(float));
-                std::memcpy(frozen->LodCameraPos, camera.cameraPos, sizeof(frozen->LodCameraPos));
-                frozen->LodProjScaleY = std::abs(camera.proj[5]);
+                frozen->CullCameraViewProj = camera.viewProj;
+                frozen->LodCameraPos = camera.cameraPos;
+                frozen->LodProjScaleY = std::abs(camera.proj[1][1]);
                 frozen->SliceFarDist = sliceFarDist;
                 frozen->Sector[0] = result.RenderOriginSector[0];
                 frozen->Sector[1] = result.RenderOriginSector[1];
@@ -911,17 +908,16 @@ CascadeFrameData ShadowMapRenderFeature::ComputeCascades(
         {
             result.CullCameraViewProj[c] = frozen->CullCameraViewProj;
             std::memcpy(result.CasterFootprint[c], frozen->Footprint, sizeof(frozen->Footprint));
-            std::memcpy(result.LodCameraPos[c], frozen->LodCameraPos,
-                        sizeof(result.LodCameraPos[c]));
+            result.LodCameraPos[c] = frozen->LodCameraPos;
             result.LodProjScaleY[c] = frozen->LodProjScaleY;
         }
         else
         {
-            std::memcpy(result.CullCameraViewProj[c].Data(), camera.viewProj, 16 * sizeof(float));
+            result.CullCameraViewProj[c] = camera.viewProj;
             LightSpaceBoxToNdc(bounds.CasterBox, fit.CenterXLS, fit.CenterYLS, fit.OrthoHalfExtent,
                                result.CasterFootprint[c]);
-            std::memcpy(result.LodCameraPos[c], camera.cameraPos, sizeof(result.LodCameraPos[c]));
-            result.LodProjScaleY[c] = std::abs(camera.proj[5]);
+            result.LodCameraPos[c] = camera.cameraPos;
+            result.LodProjScaleY[c] = std::abs(camera.proj[1][1]);
         }
         result.CasterFootprintApplies[c] = footprintApplies;
     }
@@ -2386,7 +2382,7 @@ void ShadowMapRenderFeature::OnScheduleCulling(const FeatureCullingContext& ctx)
         float originMagnitude = 0.0f;
         {
             const auto originSector = ComputeRenderOriginSector(
-                camData->cameraPos[0], camData->cameraPos[1], camData->cameraPos[2]);
+                camData->cameraPos.x, camData->cameraPos.y, camData->cameraPos.z);
             float ox, oy, oz;
             SectorToWorld(originSector, ox, oy, oz);
             group.cameraRelativeOrigin = Vector3{ox, oy, oz};

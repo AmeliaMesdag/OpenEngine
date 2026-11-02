@@ -30,7 +30,7 @@
 // specimen triggers a full DFS that refreshes the specimen's subtree too and
 // hides the defect completely. The control therefore runs in its own fixture.
 //
-// MARKING NOTE — StyleOverrides::SetImpl raises VisualDirty ONLY for a
+// MARKING NOTE — StyleDeclaration::SetImpl raises VisualDirty ONLY for a
 // paint-impact property, which never reaches the layout-affecting branch under
 // test. The mark is therefore explicit, matching the editor's own mutate-then-
 // mark idiom (EditorTopToolbar.cpp:515 and ~14 peer call sites).
@@ -154,7 +154,7 @@ TEST(ZeroRectDirtyGate, ControlSizedParentPropagatesOpacityToItsChild)
     ASSERT_NEAR(fx.ChildOpacityOr(-1.0f), 1.0f, 0.001f)
         << "child must emit, and start at an opacity other than the one under test";
 
-    fx.Box->Overrides().Set(Style::Opacity, kFadedOpacity);
+    fx.Box->Style().Set(Style::Opacity, kFadedOpacity);
     fx.Box->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     fx.Pump();
 
@@ -178,7 +178,7 @@ TEST(ZeroRectDirtyGate, ZeroRectParentPropagatesOpacityToItsChild)
         << "a zero-height parent's child must emit before its refresh can be tested";
     ASSERT_NEAR(fx.ChildOpacityOr(-1.0f), 1.0f, 0.001f);
 
-    fx.Box->Overrides().Set(Style::Opacity, kFadedOpacity);
+    fx.Box->Style().Set(Style::Opacity, kFadedOpacity);
     fx.Box->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     fx.Pump();
 
@@ -203,7 +203,7 @@ TEST(ZeroRectDirtyGate, ZeroRectStalenessDoesNotHealOnLaterFrames)
         GTEST_SKIP() << "no headless GPU device";
 
     ASSERT_NEAR(fx.ChildOpacityOr(-1.0f), 1.0f, 0.001f);
-    fx.Box->Overrides().Set(Style::Opacity, kFadedOpacity);
+    fx.Box->Style().Set(Style::Opacity, kFadedOpacity);
     fx.Box->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     for (int i = 0; i < 4; ++i)
         fx.Pump();
@@ -234,7 +234,7 @@ TEST(ZeroRectDirtyGate, GuardOpacityZeroParentBecomingVisibleStillRepaints)
     ASSERT_EQ(fx.Ui->PeekPrimitiveForTesting(*fx.Child, 0), nullptr)
         << "instrument: an opacity:0 parent must cull its subtree, or this guard proves nothing";
 
-    fx.Box->Overrides().Set(Style::Opacity, 1.0f);
+    fx.Box->Style().Set(Style::Opacity, 1.0f);
     fx.Box->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
     fx.Pump();
 
@@ -255,7 +255,7 @@ TEST(ZeroRectDirtyGate, GuardDisplayNoneParentBecomingVisibleStillRepaints)
     ASSERT_EQ(fx.Ui->PeekPrimitiveForTesting(*fx.Child, 0), nullptr)
         << "instrument: a display:none parent must cull its subtree, or this guard proves nothing";
 
-    fx.Box->Overrides().Set(Style::Display, DisplayMode::Flex);
+    fx.Box->Style().Set(Style::Display, DisplayMode::Flex);
     fx.Box->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
     fx.Pump();
 

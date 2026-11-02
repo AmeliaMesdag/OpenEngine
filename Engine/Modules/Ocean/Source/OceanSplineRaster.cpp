@@ -30,7 +30,7 @@ std::vector<OceanRibbonTriangleGPU> BuildOceanRibbon(const std::vector<OceanRibb
         const auto &b = points[i];
         if (std::hypot(b.X - a.X, b.Z - a.Z) < 1e-5f)
             continue;
-        float vertex[4][4]{}, velocity[4][4]{};
+        Mathematics::Vector4 vertex[4], velocity[4];
         for (uint32 j = 0; j < 4; ++j)
         {
             const auto &p = j < 2 ? a : b;
@@ -47,13 +47,13 @@ std::vector<OceanRibbonTriangleGPU> BuildOceanRibbon(const std::vector<OceanRibb
         for (const auto &ids : {std::array<uint32, 3>{0, 1, 2}, std::array<uint32, 3>{2, 1, 3}})
         {
             OceanRibbonTriangleGPU t{};
-            std::copy_n(vertex[ids[0]], 4, t.A);
-            std::copy_n(vertex[ids[1]], 4, t.B);
-            std::copy_n(vertex[ids[2]], 4, t.C);
-            std::copy_n(velocity[ids[0]], 4, t.FlowA);
-            std::copy_n(velocity[ids[1]], 4, t.FlowB);
-            std::copy_n(velocity[ids[2]], 4, t.FlowC);
-            std::copy_n(style.Color, 4, t.Color);
+            t.A = vertex[ids[0]];
+            t.B = vertex[ids[1]];
+            t.C = vertex[ids[2]];
+            t.FlowA = velocity[ids[0]];
+            t.FlowB = velocity[ids[1]];
+            t.FlowC = velocity[ids[2]];
+            t.Color = style.Color;
             t.Values[0] = style.Width;
             t.Values[1] = std::max(style.Depth, 0.0f);
             t.Values[2] = feather;
@@ -68,7 +68,7 @@ std::vector<OceanRibbonTriangleGPU> BuildOceanRibbon(const std::vector<OceanRibb
     }
     return out;
 }
-bool SampleOceanRibbonTriangle(const OceanRibbonTriangleGPU &t, float x, float z, float bary[3])
+bool SampleOceanRibbonTriangle(const OceanRibbonTriangleGPU &t, float x, float z, Mathematics::Vector3 &bary)
 {
     const float bx = t.B[0] - t.A[0], bz = t.B[1] - t.A[1], cx = t.C[0] - t.A[0], cz = t.C[1] - t.A[1];
     const float det = bx * cz - bz * cx;
@@ -79,7 +79,7 @@ bool SampleOceanRibbonTriangle(const OceanRibbonTriangleGPU &t, float x, float z
     bary[0] = 1 - bary[1] - bary[2];
     return bary[0] >= -1e-6f && bary[1] >= -1e-6f && bary[2] >= -1e-6f;
 }
-float OceanRibbonEdgeDistance(const OceanRibbonTriangleGPU &t, const float b[3])
+float OceanRibbonEdgeDistance(const OceanRibbonTriangleGPU &t, const Mathematics::Vector3 &b)
 {
     const float cross = t.A[2] * b[0] + t.B[2] * b[1] + t.C[2] * b[2];
     return (1 - std::abs(cross)) * t.Values[0];
@@ -97,7 +97,7 @@ RibbonTileRange TileRangeOf(const OceanRibbonTriangleGPU &t, const OceanCascadeL
 {
     const float minX = std::min({t.A[0], t.B[0], t.C[0]}), maxX = std::max({t.A[0], t.B[0], t.C[0]});
     const float minZ = std::min({t.A[1], t.B[1], t.C[1]}), maxZ = std::max({t.A[1], t.B[1], t.C[1]});
-    const auto *cascade = layout.CascadeOriginScale[lod];
+    const Mathematics::Vector4& cascade = layout.CascadeOriginScale[lod];
     const float tile = cascade[2] * 8;
     const int last = static_cast<int>(groups) - 1;
     return {std::max(0, static_cast<int>(std::floor((minX - cascade[0]) / tile))),
@@ -131,7 +131,7 @@ static float RibbonFlowWeight(const OceanRibbonTriangleGPU &t, float edge)
 struct RibbonFlowHit
 {
     const OceanRibbonTriangleGPU *Triangle = nullptr;
-    float Bary[3]{};
+    Mathematics::Vector3 Bary;
     float Edge = 0;
 };
 // Adds a ribbon's current when the point lies inside its true edge.
@@ -140,7 +140,7 @@ static void AddRibbonFlow(const RibbonFlowHit &hit, OceanCurrentSample &result)
     if (!hit.Triangle || hit.Edge < 0)
         return;
     const auto &t = *hit.Triangle;
-    const float *b = hit.Bary;
+    const Mathematics::Vector3 &b = hit.Bary;
     const float w = RibbonFlowWeight(t, hit.Edge);
     result.Valid = true;
     result.FlowX += (t.FlowA[0] * b[0] + t.FlowB[0] * b[1] + t.FlowC[0] * b[2]) * w;
@@ -164,7 +164,7 @@ bool OceanSplineRaster::SetTriangles(std::vector<OceanRibbonTriangleGPU> triangl
         if (t.Meta[0] & 32u)
             underwater.push_back(t);
         if (t.Meta[0] & 4u)
-            for (const float *v : {t.A, t.B, t.C})
+            for (const float *v : {t.A.v, t.B.v, t.C.v})
             {
                 m_ClipBounds[0] = m_HasClipBounds ? std::min(m_ClipBounds[0], v[0]) : v[0];
                 m_ClipBounds[1] = m_HasClipBounds ? std::min(m_ClipBounds[1], v[1]) : v[1];
@@ -174,7 +174,7 @@ bool OceanSplineRaster::SetTriangles(std::vector<OceanRibbonTriangleGPU> triangl
             }
         if ((t.Meta[0] & 16u) == 0u)
             continue;
-        for (const float *v : {t.A, t.B, t.C})
+        for (const float *v : {t.A.v, t.B.v, t.C.v})
         {
             m_SurfaceBounds[0] = m_HasSurfaceBounds ? std::min(m_SurfaceBounds[0], v[0]) : v[0];
             m_SurfaceBounds[1] = m_HasSurfaceBounds ? std::min(m_SurfaceBounds[1], v[1]) : v[1];
@@ -194,7 +194,7 @@ bool OceanSplineRaster::SetTriangles(std::vector<OceanRibbonTriangleGPU> triangl
             node.B[axis] = -node.A[axis];
         }
         for (size_t i = begin; i < end; ++i)
-            for (const float *v : {underwater[i].A, underwater[i].B, underwater[i].C})
+            for (const float *v : {underwater[i].A.v, underwater[i].B.v, underwater[i].C.v})
             {
                 const float xyz[] = {v[0], v[3], v[1]};
                 for (uint32 axis = 0; axis < 3; ++axis)
@@ -237,7 +237,7 @@ void OceanSplineRaster::BuildQueryGrid()
         return;
     float minX = std::numeric_limits<float>::max(), minZ = minX, maxX = -minX, maxZ = -minX;
     for (const auto &t : m_Triangles)
-        for (const float *v : {t.A, t.B, t.C})
+        for (const float *v : {t.A.v, t.B.v, t.C.v})
         {
             minX = std::min(minX, v[0]);
             maxX = std::max(maxX, v[0]);
@@ -307,7 +307,7 @@ void OceanSplineRaster::RebaseOrigin(float x, float z, float y)
     m_ClipBounds[2] -= x;
     m_ClipBounds[3] -= z;
     for (auto &t : m_Triangles)
-        for (float *v : {t.A, t.B, t.C})
+        for (float *v : {t.A.v, t.B.v, t.C.v})
         {
             v[0] -= x;
             v[1] -= z;
@@ -325,7 +325,7 @@ void OceanSplineRaster::RebaseOrigin(float x, float z, float y)
             t.B[2] -= z;
         }
         else
-            for (float *v : {t.A, t.B, t.C})
+            for (float *v : {t.A.v, t.B.v, t.C.v})
             {
                 v[0] -= x;
                 v[1] -= z;
@@ -336,7 +336,7 @@ void OceanSplineRaster::RebaseOrigin(float x, float z, float y)
 bool OceanSplineRaster::Contains(float x, float z) const
 {
     std::lock_guard<std::mutex> lock(m_Mutex);
-    float b[3];
+    Mathematics::Vector3 b;
     for (const uint32 index : TrianglesAt(x, z))
     {
         const auto &t = m_Triangles[index];
@@ -376,7 +376,7 @@ void OceanSplineRaster::ApplyFlow(float x, float z, OceanCurrentSample &result) 
     // innermost triangle, so a shared diagonal or a bend overlap does not add twice.
     uint32 ribbon = std::numeric_limits<uint32>::max();
     RibbonFlowHit best;
-    float b[3];
+    Mathematics::Vector3 b;
     for (const uint32 index : TrianglesAt(x, z))
     {
         const auto &t = m_Triangles[index];
@@ -400,7 +400,7 @@ bool OceanSplineRaster::SampleDepth(float x, float z, float &depth) const
 {
     std::lock_guard<std::mutex> lock(m_Mutex);
     bool found = false;
-    float b[3];
+    Mathematics::Vector3 b;
     for (const uint32 index : TrianglesAt(x, z))
     {
         const auto &t = m_Triangles[index];
@@ -418,7 +418,7 @@ bool OceanSplineRaster::UnderwaterDepth(float x, float y, float z, float &depth)
 {
     std::lock_guard<std::mutex> lock(m_Mutex);
     bool found = false;
-    float b[3];
+    Mathematics::Vector3 b;
     depth = 0;
     for (const uint32 index : TrianglesAt(x, z))
     {

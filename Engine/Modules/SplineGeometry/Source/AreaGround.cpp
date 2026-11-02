@@ -22,7 +22,11 @@ namespace
 
 // Outline samples closer than this are one sample.
 constexpr float32 kSameSampleMeters = 1.0e-3f;
-constexpr uint32 kNoTriangle = std::numeric_limits<uint32>::max();
+using Mathematics::kManyTriangles;
+using Mathematics::kNoTriangle;
+constexpr uint32 kNoPoint = std::numeric_limits<uint32>::max();
+// Twice the area, in square meters, that each triangle a lid flip makes must exceed.
+constexpr float32 kMinFlipDoubledArea = 1.0e-8f;
 
 Vector2 GroundXZ(const Vector3& point) { return Vector2(point.x, point.z); }
 
@@ -44,8 +48,8 @@ float32 DistanceToRing(const Vector2& point, std::span<const Vector2> ring)
 
 // The lid's triangulation on the ground plane, relative to the first ring's first point (so a
 // region far from the origin keeps its precision): the rings ear-clipped, then every edge longer
-// than the limit split at its midpoint in both triangles that share it, so no triangle meets
-// another at a T and the raised lid has no cracks.
+// than the limit split in both triangles that share it, so no triangle meets another at a T and
+// the raised lid has no cracks.
 class LidRefiner
 {
   public:
@@ -67,25 +71,14 @@ class LidRefiner
                 m_RingPosition[i] = static_cast<float32>(i - RingStart(ring));
             }
         }
-        std::vector<EdgeRecord> edges;
-        edges.reserve(triangles.size());
         for (std::size_t t = 0; t + 2 < triangles.size(); t += 3)
-        {
-            const uint32 index = static_cast<uint32>(m_Triangles.size());
             m_Triangles.push_back({triangles[t], triangles[t + 1], triangles[t + 2]});
-            for (uint32 k = 0; k < 3; ++k)
-                edges.push_back({Key(triangles[t + k], triangles[t + (k + 1) % 3]), index, k});
-        }
-        LinkNeighbors(std::move(edges));
+        m_Neighbors = Mathematics::LinkTriangles(m_Triangles);
     }
 
-    // Splits until no edge is longer than `maxEdge`, or the triangle cap is reached, by
-    // longest-edge propagation (Rivara's LEPP): a triangle's longest edge is split only once it is
-    // the longest edge of the triangle across it too, after that neighbor has been split along
-    // its own. So the split never cuts a short edge of a sliver, and the triangle count stays near
-    // the area over the limit squared. Each pass for a triangle splits an edge, so it adds a
-    // triangle toward the cap, or it ends that triangle's refinement: an edge that more than two
-    // triangles share cannot be split in all of them, so it is not split.
+    // Splits until no edge is longer than `maxEdge` or the cap is reached (Rivara's LEPP): an edge
+    // splits only as the longest edge of both its triangles, then flips to Delaunay around its new
+    // point. A kManyTriangles edge (three triangles, or two that run it one way) never splits.
     void Refine(float32 maxEdge)
     {
         const float32 limitSquared = maxEdge * maxEdge;
@@ -131,44 +124,6 @@ class LidRefiner
     }
 
   private:
-    // Side `Side` of triangle `Triangle` (from corner `Side` to the next), under its edge's key.
-    struct EdgeRecord
-    {
-        uint64_t Key = 0;
-        uint32 Triangle = 0;
-        uint32 Side = 0;
-    };
-
-    static bool EdgeRecordLess(const EdgeRecord& a, const EdgeRecord& b)
-    {
-        return a.Key != b.Key ? a.Key < b.Key : a.Triangle < b.Triangle;
-    }
-
-    // Fills m_Neighbors from every triangle's three sides: one sort puts the sides of one edge
-    // next to each other. An edge of one triangle lies on a ring; an edge of more than two is
-    // marked kManyTriangles on each of them.
-    void LinkNeighbors(std::vector<EdgeRecord> edges)
-    {
-        std::sort(edges.begin(), edges.end(), EdgeRecordLess);
-        m_Neighbors.assign(m_Triangles.size(), {kNoTriangle, kNoTriangle, kNoTriangle});
-        for (std::size_t first = 0, end = 0; first < edges.size(); first = end)
-        {
-            end = first + 1;
-            while (end < edges.size() && edges[end].Key == edges[first].Key)
-                ++end;
-            if (end - first == 2)
-            {
-                m_Neighbors[edges[first].Triangle][edges[first].Side] = edges[first + 1].Triangle;
-                m_Neighbors[edges[first + 1].Triangle][edges[first + 1].Side] = edges[first].Triangle;
-            }
-            else if (end - first > 2)
-            {
-                for (std::size_t e = first; e < end; ++e)
-                    m_Neighbors[edges[e].Triangle][edges[e].Side] = kManyTriangles;
-            }
-        }
-    }
-
     uint64_t SideKey(uint32 triangle, uint32 side) const
     {
         const std::array<uint32, 3>& corners = m_Triangles[triangle];
@@ -363,10 +318,9 @@ class LidRefiner
         return added;
     }
 
-    // Splits side `side` (u, v) of `triangle` at its midpoint, in it and in the triangle across
-    // it; a midpoint on a ring (a side with no triangle across) takes the height on the line
-    // between its ends, so the lid's edge stays on the walls' top edge. False, and nothing changes,
-    // when more than two triangles share the edge.
+    // Splits side `side` of `triangle` and the triangle across it at a ring edge's left-out sample
+    // nearest its middle, else at the midpoint, then flips to Delaunay around the new point. False,
+    // and nothing changes, when more than two triangles share the edge.
     bool SplitSide(uint32 triangle, uint32 side)
     {
         const uint32 neighbor = m_Neighbors[triangle][side];
@@ -375,14 +329,56 @@ class LidRefiner
         const uint32 u = m_Triangles[triangle][side];
         const uint32 v = m_Triangles[triangle][(side + 1) % 3];
         const uint32 ring = RingOfEdge(u, v, neighbor);
+        uint32 middle = ring != kNoRing ? MiddleSample(ring, u, v) : kNoPoint;
+        if (middle == kNoPoint)
+            middle = AddMidpoint(ring, u, v);
+        const uint32 added = SplitTriangle(triangle, side, middle);
+        std::vector<std::pair<uint32, uint32>> pending{{triangle, 2}, {added, 1}};
+        if (neighbor != kNoTriangle)
+        {
+            const uint32 neighborAdded = SplitTriangle(neighbor, SideToward(neighbor, triangle, Key(u, v)), middle);
+            // (u, middle) is side 0 of `triangle` and of `neighborAdded`; (middle, v) of `added` and
+            // of `neighbor`.
+            m_Neighbors[triangle][0] = neighborAdded;
+            m_Neighbors[neighborAdded][0] = triangle;
+            m_Neighbors[added][0] = neighbor;
+            m_Neighbors[neighbor][0] = added;
+            pending.insert(pending.end(), {{neighbor, 2}, {neighborAdded, 1}});
+        }
+        Mathematics::FlipToDelaunay(m_Points, m_Triangles, m_Neighbors, pending, kMinFlipDoubledArea);
+        return true;
+    }
+
+    // The sample of ring `ring` strictly between the ends of ring edge (u, v), the short way round,
+    // nearest the edge's middle; kNoPoint when no sample lies between them.
+    uint32 MiddleSample(uint32 ring, uint32 u, uint32 v) const
+    {
+        const float32 count = static_cast<float32>(RingSize(ring));
+        float32 from = m_RingPosition[u];
+        float32 span = std::fmod(m_RingPosition[v] - from + count, count);
+        if (span > 0.5f * count)
+        {
+            from = m_RingPosition[v];
+            span = count - span;
+        }
+        const float32 first = std::floor(from) + 1.0f;
+        const float32 last = std::ceil(from + span) - 1.0f;
+        if (first > last)
+            return kNoPoint;
+        const float32 sample = std::clamp(std::round(from + 0.5f * span), first, last);
+        return RingStart(ring) + static_cast<uint32>(sample) % RingSize(ring);
+    }
+
+    // A new point at the middle of side (u, v). On ring `ring` it takes the ring's own height there,
+    // so the lid's edge stays on the walls' top edge; inside the area (kNoRing) the ground's.
+    uint32 AddMidpoint(uint32 ring, uint32 u, uint32 v)
+    {
         const uint32 middle = static_cast<uint32>(m_Points.size());
         const Vector2 point = (m_Points[u] + m_Points[v]) * 0.5f;
         m_Points.push_back(point);
         m_RingOf.push_back(ring);
         if (ring != kNoRing)
         {
-            // On a ring the point takes the ring's own height there, so the lid's edge stays on the
-            // walls' top edge.
             const float32 position = RingPositionOn(ring, u, v, point);
             m_RingPosition.push_back(position);
             m_Heights.push_back(RingHeightAt(ring, position));
@@ -392,20 +388,9 @@ class LidRefiner
             m_RingPosition.push_back(0.0f);
             m_Heights.push_back(std::numeric_limits<float32>::quiet_NaN());
         }
-        const uint32 added = SplitTriangle(triangle, side, middle);
-        if (neighbor == kNoTriangle)
-            return true;
-        const uint32 neighborAdded = SplitTriangle(neighbor, SideToward(neighbor, triangle, Key(u, v)), middle);
-        // (u, middle) is side 0 of `triangle` and of `neighborAdded`; (middle, v) of `added` and
-        // of `neighbor`.
-        m_Neighbors[triangle][0] = neighborAdded;
-        m_Neighbors[neighborAdded][0] = triangle;
-        m_Neighbors[added][0] = neighbor;
-        m_Neighbors[neighbor][0] = added;
-        return true;
+        return middle;
     }
 
-    static constexpr uint32 kManyTriangles = kNoTriangle - 1;
     // The ring of a point inside the area.
     static constexpr uint32 kNoRing = std::numeric_limits<uint32>::max();
 

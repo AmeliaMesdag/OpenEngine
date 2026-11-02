@@ -6,7 +6,7 @@
 // of a flat paged tile, shared by the height pages' tests and the classify's consume test.
 
 #include "TerrainECS/PagedHeightSampler.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 
 #include "PageStreaming/GeneratedHeightPageProvider.h"
 #include "PageStreaming/PageCache.h"

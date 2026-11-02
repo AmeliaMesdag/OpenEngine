@@ -7,6 +7,7 @@
 #include <atomic>
 #include <fstream>
 #include <mutex>
+#include <string_view>
 
 namespace Logger
 {
@@ -36,12 +37,16 @@ struct FileLogLevel
  * under it records nothing extra. A value that names no level resolves to Info
  * and comes back in unrecognizedValue.
  *
- * The editor is the host that resolves its file sink this way, and it reports
+ * The editor and the Player resolve their file sinks this way, and each reports
  * the level it got in the line announcing the log file, so a typo is visible
  * there. Every other file sink in the tree is built at a level its host names
  * directly.
  */
 FileLogLevel ResolveFileLogLevel();
+
+/// Logs the line that names the log file and the level it records, after a
+/// warning when GE_LOG_FILE_LEVEL names no level. Call it after the sink attaches.
+void AnnounceFileSink(std::string_view announcement, std::string_view filename, const FileLogLevel& level);
 
 /**
  * @brief File output sink - writes log messages to a file with optional rotation.

@@ -1304,9 +1304,9 @@ DescriptorSetHandle MetalDevice::CreateDescriptorSet(const DescriptorSetDesc& de
         Logger::Log::Warning("MetalSetLayout '{}': total={}{}", desc.debugName, set.layout.TotalSlotCount, mapping);
     }
     const size_t tableBytes = ArgumentTableBytes(set.layout);
-    set.residentResources.resize(set.layout.TotalSlotCount, nullptr);
-    set.residentWritable.resize(set.layout.TotalSlotCount, 0);
-    set.residentIndirectArguments.resize(set.layout.TotalSlotCount, 0);
+    set.residentResources.Resize(set.layout.TotalSlotCount, nullptr);
+    set.residentWritable.Resize(set.layout.TotalSlotCount, 0);
+    set.residentIndirectArguments.Resize(set.layout.TotalSlotCount, 0);
     if (desc.debugName != nullptr)
     {
         set.debugName = desc.debugName;
@@ -1367,7 +1367,7 @@ void MetalDevice::UpdateDescriptorSet(DescriptorSetHandle descriptorSet, const D
     set->residentsDirty = true;
 
     auto setResident = [&](uint32_t slotId, MTL::Resource* resource, bool writable, bool indirectArguments) {
-        if (slotId < set->residentResources.size())
+        if (slotId < set->residentResources.Size())
         {
             set->residentResources[slotId] = resource;
             set->residentWritable[slotId] = writable ? 1 : 0;
@@ -1485,7 +1485,7 @@ void MetalDevice::DestroyDescriptorSet(DescriptorSetHandle descriptorSet)
     set->argumentBuffer = nullptr;
     set->entries = nullptr;
     set->sizeConstants = nullptr;
-    set->residentResources.clear();
+    set->residentResources.Clear();
     set->extraResidentReads.clear();
     m_DescriptorSets.Destroy(ToGeneric(descriptorSet));
 }

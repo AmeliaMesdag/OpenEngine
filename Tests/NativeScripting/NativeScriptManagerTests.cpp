@@ -10,6 +10,8 @@
 #include "Engine/Build/BuildPipeline.h"
 #include "Engine/Build/MacBundleAssembler.h"
 #include "Engine/Build/NativeScriptStaging.h"
+#include "Memory/FrameMemory.h"
+#include "Memory/Testing/SimulatedFrame.h"
 #include "NativeScripting/BuildCacheRecord.h"
 #include "NativeScripting/CMakeInvoker.h"
 #include "NativeScripting/EngineBuildIdentity.h"
@@ -1251,6 +1253,29 @@ TEST(NativeScriptManager, PlayWaitsOnShippedModuleBuildsAndReadsTheirFailure)
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
 }
+
+#if GE_DEBUG_INSTRUMENTATION && !defined(NDEBUG)
+// A build worker posts the completion task, so Debug refuses it frame memory inside a frame too.
+// The child dies before it cleans up, so the directory name is fixed and the parent removes it.
+TEST(NativeScriptManagerDeathTest, AMainThreadTaskCannotUseFrameMemory)
+{
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "ge_nsm_main_thread_task_frame_memory";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    EXPECT_DEATH(
+        {
+            ns::Testing::InFlightModuleBuild build(root / "src", root / "cache", root / "scratch", "Probe",
+                                                   ns::Testing::ModuleKind::Shipped,
+                                                   [] { GameEngine::Memory::FrameMemory::Allocate(16); });
+            GameEngine::Memory::Testing::SimulatedFrame frame;
+            build.TickUntilCompleted(std::chrono::steady_clock::now() + std::chrono::seconds(240));
+            EXPECT_EQ(build.Completions(), 1) << "the build did not complete before the deadline";
+        },
+        "frame memory is only for the frame thread and the forks it joins");
+    std::filesystem::remove_all(root, ec);
+}
+#endif
 
 // Play mode loads the project module and the runtime package modules, never an editor-only
 // package module. A pass with all three kinds stale builds the first two as one batch and holds

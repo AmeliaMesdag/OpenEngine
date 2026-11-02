@@ -60,21 +60,21 @@ static void ApplyPaletteSwatchStyle(UIElement* swatch, uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(20.0f))
         .Set(Style::Height, StyleLength::Px(20.0f))
         .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{4.0f, 4.0f, 4.0f, 4.0f})
         .Set(Style::Cursor, CursorStyle::Pointer);
     if (argb == kPaletteEmptySlot)
     {
-        swatch->Overrides()
+        swatch->Style()
             .Set(Style::BackgroundColor, (uint32_t)0x00000000)
             .Set(Style::BorderWidth, Box4{0.0f, 0.0f, 0.0f, 0.0f})
             .Set(Style::BorderColor, BorderColorsTRBL{0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u});
     }
     else
     {
-        swatch->Overrides()
+        swatch->Style()
             .Set(Style::BackgroundColor, (uint32_t)argb)
             .Set(Style::BorderWidth, Box4{0.0f, 0.0f, 0.0f, 0.0f})
             .Set(Style::BorderColor, BorderColorsTRBL{0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u});
@@ -110,7 +110,7 @@ ColorWheelElement::ColorWheelElement()
     // Create marker element
     auto marker = std::make_unique<UIElement>();
     marker->SetId("colorpicker-wheel-marker");
-    marker->Overrides()
+    marker->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::Width, StyleLength::Px(12.0f))
         .Set(Style::Height, StyleLength::Px(12.0f))
@@ -271,7 +271,7 @@ ColorSVBoxElement::ColorSVBoxElement()
     // Create marker element
     auto marker = std::make_unique<UIElement>();
     marker->SetId("colorpicker-svbox-marker");
-    marker->Overrides()
+    marker->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::Width, StyleLength::Px(12.0f))
         .Set(Style::Height, StyleLength::Px(12.0f))
@@ -421,7 +421,7 @@ HueBarElement::HueBarElement()
     // Create marker element (horizontal bar indicator)
     auto marker = std::make_unique<UIElement>();
     marker->SetId("colorpicker-huebar-marker");
-    marker->Overrides()
+    marker->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::BackgroundColor, (uint32_t)0xFFFFFFFF)
         .Set(Style::BorderWidth, Box4{1.0f, 1.0f, 1.0f, 1.0f})
@@ -534,7 +534,7 @@ ValueBarElement::ValueBarElement()
 
     auto marker = std::make_unique<UIElement>();
     marker->SetId("colorpicker-valuebar-marker");
-    marker->Overrides()
+    marker->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::BackgroundColor, (uint32_t)0xFFFFFFFF)
         .Set(Style::BorderWidth, Box4{1.0f, 1.0f, 1.0f, 1.0f})
@@ -811,7 +811,7 @@ void ColorPicker::RebuildColorArea()
         // Wheel mode: wheel + value slider
         auto wheel = std::make_unique<ColorWheelElement>();
         wheel->SetId("colorpicker-wheel");
-        wheel->Overrides()
+        wheel->Style()
             .Set(Style::Width, StyleLength::Px(200.0f))
             .Set(Style::Height, StyleLength::Px(200.0f))
             .Set(Style::FlexShrink, 0.0f)
@@ -826,7 +826,7 @@ void ColorPicker::RebuildColorArea()
         // Value bar for wheel mode (brightness gradient: hue color -> black)
         auto valueBar = std::make_unique<ValueBarElement>();
         valueBar->SetId("colorpicker-valuebar");
-        valueBar->Overrides()
+        valueBar->Style()
             .Set(Style::Width, StyleLength::Px(24.0f))
             .Set(Style::Height, StyleLength::Px(200.0f))
             .Set(Style::FlexShrink, 0.0f)
@@ -844,7 +844,7 @@ void ColorPicker::RebuildColorArea()
         // SV Box
         auto svBox = std::make_unique<ColorSVBoxElement>();
         svBox->SetId("colorpicker-svbox");
-        svBox->Overrides()
+        svBox->Style()
             .Set(Style::Width, StyleLength::Px(200.0f))
             .Set(Style::Height, StyleLength::Px(200.0f))
             .Set(Style::FlexShrink, 0.0f)
@@ -861,7 +861,7 @@ void ColorPicker::RebuildColorArea()
         // Hue bar
         auto hueBar = std::make_unique<HueBarElement>();
         hueBar->SetId("colorpicker-huebar");
-        hueBar->Overrides()
+        hueBar->Style()
             .Set(Style::Width, StyleLength::Px(24.0f))
             .Set(Style::Height, StyleLength::Px(200.0f))
             .Set(Style::FlexShrink, 0.0f)
@@ -878,7 +878,7 @@ void ColorPicker::RebuildColorArea()
 void ColorPicker::BuildUI()
 {
     m_PaletteRow = nullptr;
-    Overrides()
+    Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::PaddingTop, StyleLength::Px(12.0f))
@@ -893,7 +893,7 @@ void ColorPicker::BuildUI()
 
     // Mode toggle button row
     auto modeRow = std::make_unique<UIElement>();
-    modeRow->Overrides()
+    modeRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::JustifyContent, JustifyContent::FlexEnd)
@@ -901,7 +901,7 @@ void ColorPicker::BuildUI()
     auto modeBtn = std::make_unique<Button>();
     modeBtn->SetId("colorpicker-mode-toggle");
     modeBtn->SetText(m_Mode == ColorPickerMode::WheelTriangle ? "Wheel" : "Box");
-    modeBtn->Overrides()
+    modeBtn->Style()
         .Set(Style::Width, StyleLength::Px(70.0f))
         .Set(Style::PaddingTop, StyleLength::Px(4.0f))
         .Set(Style::PaddingRight, StyleLength::Px(12.0f))
@@ -923,7 +923,7 @@ void ColorPicker::BuildUI()
 
     // Row: color area (left) + controls (right)
     auto row = std::make_unique<UIElement>();
-    row->Overrides()
+    row->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(16.0f))
@@ -932,7 +932,7 @@ void ColorPicker::BuildUI()
     // Color area container (will hold wheel or box+hue bar based on mode)
     auto colorArea = std::make_unique<UIElement>();
     colorArea->SetId("colorpicker-color-area");
-    colorArea->Overrides()
+    colorArea->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(8.0f))
@@ -944,7 +944,7 @@ void ColorPicker::BuildUI()
     RebuildColorArea();
 
     auto rightCol = std::make_unique<UIElement>();
-    rightCol->Overrides()
+    rightCol->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::Gap, StyleLength::Px(6.0f))
@@ -955,20 +955,20 @@ void ColorPicker::BuildUI()
 
     // Alpha slider row
     auto alphaLabelRow = std::make_unique<UIElement>();
-    alphaLabelRow->Overrides()
+    alphaLabelRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
     auto alphaLabel = std::make_unique<Label>();
     alphaLabel->SetText("Alpha");
-    alphaLabel->Overrides()
+    alphaLabel->Style()
         .Set(Style::Color, (uint32_t)0xFFFFFFFF)
         .Set(Style::FontSize, StyleLength::Px(13.0f));
     alphaLabelRow->AddChild(std::move(alphaLabel));
     auto alphaValueLabel = std::make_unique<Label>();
     alphaValueLabel->SetId("colorpicker-alpha-value");
-    alphaValueLabel->Overrides()
+    alphaValueLabel->Style()
         .Set(Style::Color, (uint32_t)0xFFFFFFFF)
         .Set(Style::FontSize, StyleLength::Px(13.0f));
     m_AlphaValueLabel = alphaValueLabel.get();
@@ -981,27 +981,27 @@ void ColorPicker::BuildUI()
     alphaSlider->SetValue(m_Value.hsv.a);
     alphaSlider->SetOnValueChanging([this](const float& a) { OnAlphaSliderChange(a); });
     alphaSlider->SetOnValueChanged([this](const float& a) { OnAlphaSliderChange(a); });
-    alphaSlider->Overrides()
+    alphaSlider->Style()
         .Set(Style::Height, StyleLength::Px(18.0f));
     m_AlphaSlider = alphaSlider.get();
     rightCol->AddChild(std::move(alphaSlider));
 
     // HDR intensity slider
     auto hdrLabelRow = std::make_unique<UIElement>();
-    hdrLabelRow->Overrides()
+    hdrLabelRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
     auto intensityLabel = std::make_unique<Label>();
     intensityLabel->SetText("HDR");
-    intensityLabel->Overrides()
+    intensityLabel->Style()
         .Set(Style::Color, (uint32_t)0xFFFFFFFF)
         .Set(Style::FontSize, StyleLength::Px(13.0f));
     hdrLabelRow->AddChild(std::move(intensityLabel));
     auto intensityValueLabel = std::make_unique<Label>();
     intensityValueLabel->SetId("colorpicker-hdr-value");
-    intensityValueLabel->Overrides()
+    intensityValueLabel->Style()
         .Set(Style::Color, (uint32_t)0xFFFFFFFF)
         .Set(Style::FontSize, StyleLength::Px(13.0f));
     m_IntensityValueLabel = intensityValueLabel.get();
@@ -1014,14 +1014,14 @@ void ColorPicker::BuildUI()
     intensitySlider->SetValue(m_Value.intensity);
     intensitySlider->SetOnValueChanging([this](const float& i) { OnIntensitySliderChange(i); });
     intensitySlider->SetOnValueChanged([this](const float& i) { OnIntensitySliderChange(i); });
-    intensitySlider->Overrides()
+    intensitySlider->Style()
         .Set(Style::Height, StyleLength::Px(18.0f));
     m_IntensitySlider = intensitySlider.get();
     rightCol->AddChild(std::move(intensitySlider));
 
     // Swatch row: color swatch + eyedropper button
     auto swatchRow = std::make_unique<UIElement>();
-    swatchRow->Overrides()
+    swatchRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(6.0f))
@@ -1031,7 +1031,7 @@ void ColorPicker::BuildUI()
     auto swatch = std::make_unique<UIElement>();
     swatch->SetId("colorpicker-swatch");
     swatch->AddClass("colorpicker-swatch");
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(180.0f))
         .Set(Style::Height, StyleLength::Px(28.0f))
         .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{4.0f, 4.0f, 4.0f, 4.0f})
@@ -1051,7 +1051,7 @@ void ColorPicker::BuildUI()
     auto eyedropperBtn = std::make_unique<Button>();
     eyedropperBtn->SetId("colorpicker-eyedropper");
     eyedropperBtn->SetText("");
-    eyedropperBtn->Overrides()
+    eyedropperBtn->Style()
         .Set(Style::Width, StyleLength::Px(28.0f))
         .Set(Style::Height, StyleLength::Px(28.0f))
         .Set(Style::MinWidth, StyleLength::Px(28.0f))
@@ -1068,7 +1068,7 @@ void ColorPicker::BuildUI()
         .Set(Style::BackgroundImage, BackgroundImageSource{BackgroundImageSource::SourceKind::Path, GUID::Null(), "Icons/colorpicker.svg"})
         .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Explicit, kEyedropperIconSizePx, false, kEyedropperIconSizePx, false})
         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
-        .Set(Style::BackgroundPosition, BackgroundPositionValue{50.0f, true, 50.0f, true});
+        .Set(Style::BackgroundPosition, BackgroundPositionValue::Percent(50.0f, 50.0f));
     eyedropperBtn->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) {
         if (m_EyedropperHandler)
             m_EyedropperHandler();
@@ -1079,7 +1079,7 @@ void ColorPicker::BuildUI()
     // Hex field
     auto hexField = std::make_unique<TextField>();
     hexField->SetId("colorpicker-hex");
-    hexField->Overrides()
+    hexField->Style()
         .Set(Style::PaddingTop, StyleLength::Px(4.0f))
         .Set(Style::PaddingRight, StyleLength::Px(6.0f))
         .Set(Style::PaddingBottom, StyleLength::Px(4.0f))
@@ -1096,14 +1096,14 @@ void ColorPicker::BuildUI()
 
     // HSV fields row
     auto hsvRow = std::make_unique<UIElement>();
-    hsvRow->Overrides()
+    hsvRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(4.0f))
         .Set(Style::AlignItems, AlignItems::Center);
     auto hsvLabel = std::make_unique<Label>();
     hsvLabel->SetText("H");
-    hsvLabel->Overrides()
+    hsvLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1112,7 +1112,7 @@ void ColorPicker::BuildUI()
     {
         auto f = std::make_unique<TextField>();
         f->SetId(id);
-        f->Overrides()
+        f->Style()
             .Set(Style::Width, StyleLength::Px(36.0f))
             .Set(Style::PaddingTop, StyleLength::Px(3.0f))
             .Set(Style::PaddingRight, StyleLength::Px(4.0f))
@@ -1131,7 +1131,7 @@ void ColorPicker::BuildUI()
     hsvRow->AddChild(std::move(hField));
     auto sLabel = std::make_unique<Label>();
     sLabel->SetText("S");
-    sLabel->Overrides()
+    sLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1142,7 +1142,7 @@ void ColorPicker::BuildUI()
     hsvRow->AddChild(std::move(sField));
     auto vLabel = std::make_unique<Label>();
     vLabel->SetText("V");
-    vLabel->Overrides()
+    vLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1155,14 +1155,14 @@ void ColorPicker::BuildUI()
 
     // RGBA fields row
     auto rgbaRow = std::make_unique<UIElement>();
-    rgbaRow->Overrides()
+    rgbaRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::Gap, StyleLength::Px(4.0f))
         .Set(Style::AlignItems, AlignItems::Center);
     auto rLabel = std::make_unique<Label>();
     rLabel->SetText("R");
-    rLabel->Overrides()
+    rLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1173,7 +1173,7 @@ void ColorPicker::BuildUI()
     rgbaRow->AddChild(std::move(rField));
     auto gLabel = std::make_unique<Label>();
     gLabel->SetText("G");
-    gLabel->Overrides()
+    gLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1184,7 +1184,7 @@ void ColorPicker::BuildUI()
     rgbaRow->AddChild(std::move(gField));
     auto bLabel = std::make_unique<Label>();
     bLabel->SetText("B");
-    bLabel->Overrides()
+    bLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1195,7 +1195,7 @@ void ColorPicker::BuildUI()
     rgbaRow->AddChild(std::move(bField));
     auto aLabel = std::make_unique<Label>();
     aLabel->SetText("A");
-    aLabel->Overrides()
+    aLabel->Style()
         .Set(Style::Color, (uint32_t)0xFF888888)
         .Set(Style::FontSize, StyleLength::Px(12.0f))
         .Set(Style::Width, StyleLength::Px(12.0f));
@@ -1213,7 +1213,7 @@ void ColorPicker::BuildUI()
     auto paletteLabel = std::make_unique<Label>();
     paletteLabel->SetText("Palette");
     paletteLabel->SetId("colorpicker-palette-label");
-    paletteLabel->Overrides()
+    paletteLabel->Style()
         .Set(Style::Color, (uint32_t)0xFFFFFFFF)
         .Set(Style::FontSize, StyleLength::Px(14.0f))
         .Set(Style::MarginTop, StyleLength::Px(9.0f))
@@ -1237,7 +1237,7 @@ void ColorPicker::BuildUI()
     auto paletteRow = std::make_unique<UIElement>();
     paletteRow->SetId("colorpicker-palette");
     // 19 columns per row: width = 19*20 + 18*4 = 452px
-    paletteRow->Overrides()
+    paletteRow->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::FlexWrap, true)
@@ -1352,7 +1352,7 @@ void ColorPicker::UpdateSwatchAndFields()
         const uint32_t swatchArgb =
             0xFF000000u | (static_cast<uint32_t>(hdrRInt) << 16) |
             (static_cast<uint32_t>(hdrGInt) << 8) | static_cast<uint32_t>(hdrBInt);
-        m_SwatchEl->Overrides()
+        m_SwatchEl->Style()
             .Set(Style::BackgroundColor, (uint32_t)swatchArgb)
             .Set(Style::Opacity, m_Value.hsv.a);
         m_SwatchEl->MarkDirty(VisualDirty);

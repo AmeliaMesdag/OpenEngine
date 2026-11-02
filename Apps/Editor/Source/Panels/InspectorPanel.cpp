@@ -366,7 +366,7 @@ static void StyleGraphColorSwatch(UIElement* swatch, uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(20.0f))
         .Set(Style::Height, StyleLength::Px(20.0f))
         .Set(Style::MinWidth, StyleLength::Px(20.0f))
@@ -442,7 +442,7 @@ static void AddGraphColorSwatchRow(UIElement* parent,
 
     auto fieldContainer = std::make_unique<UIElement>();
     fieldContainer->AddClass("inspector-field");
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
@@ -557,6 +557,11 @@ constexpr uint32_t kCmdInspectorRestoreLastSettings = 0x5243;
 constexpr uint32_t kCmdInspectorResetComponentValues = 0x5244;
 constexpr uint32_t kCmdInspectorRestoreSavedSettingsBase = 0x5260;
 constexpr uint32_t kCmdInspectorRestoreSavedSettingsMax = 16;
+constexpr uint32_t kCmdInspectorOverrideMenuBase = 0x5280;
+constexpr uint32_t kCmdInspectorOverrideMenuMax = 16;
+// The override entries lead the component header menu, before Copy (-3), with a separator after them.
+constexpr int kOverrideMenuPriority = -6;
+constexpr int kOverrideMenuSeparatorPriority = -5;
 constexpr size_t kMaxSavedComponentSettingsPerType = 24;
 constexpr size_t kMaxSavedComponentSettingsMenuItems = 10;
 constexpr const char* kProjectInspectorSavedSettingsKey = "inspector.componentSavedSettings";
@@ -578,7 +583,7 @@ constexpr std::chrono::milliseconds kPendingAssetLineRefreshInterval{250};
 static std::unique_ptr<UIElement> MakeInspectorPaddedContentColumn()
 {
     auto column = std::make_unique<UIElement>();
-    column->Overrides()
+    column->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::PaddingLeft, StyleLength::Px(kInspectorAssetContentHorizontalInsetPx))
@@ -594,7 +599,7 @@ static void AddInspectorPaddedContent(UIElement* contentRoot, std::unique_ptr<T>
 {
     auto wrap = std::make_unique<UIElement>();
     wrap->AddClass("inspector-asset-content");
-    wrap->Overrides()
+    wrap->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::PaddingLeft, StyleLength::Px(kInspectorAssetContentHorizontalInsetPx))
@@ -2576,6 +2581,37 @@ bool InspectorPanel::HasTextEditFocus() const
     return ui && (UI::FocusIsInTextInput(*ui, m_TopRoot) || UI::FocusIsInTextInput(*ui, m_ContentRoot));
 }
 
+void InspectorPanel::AddOverrideMenuEntries(ContextMenuBuilder& builder, ECS::ComponentTypeId typeId)
+{
+    m_ContextOverrideMenuEntries.clear();
+    if (!m_World || m_Entities.size() > 1)
+        return;
+    const OverrideMenuTarget target{m_World, m_Entity, typeId, {}, m_Undo, m_ChangeNotifications};
+    m_ContextOverrideMenuEntries = InspectorRegistry::Get().QueryOverrideMenu(target);
+    if (m_ContextOverrideMenuEntries.size() > kCmdInspectorOverrideMenuMax)
+        m_ContextOverrideMenuEntries.resize(kCmdInspectorOverrideMenuMax);
+    if (m_ContextOverrideMenuEntries.empty())
+        return;
+    for (uint32_t index = 0; index < m_ContextOverrideMenuEntries.size(); ++index)
+        builder.AddItem(m_ContextOverrideMenuEntries[index].Label, kCmdInspectorOverrideMenuBase + index,
+                        MenuItemFlag_None, kOverrideMenuPriority, m_ContextOverrideMenuEntries[index].IconPath);
+    builder.AddItem("---override", 0, MenuItemFlag_None, kOverrideMenuSeparatorPriority);
+}
+
+bool InspectorPanel::RunOverrideMenuCommand(uint32_t commandId)
+{
+    if (commandId < kCmdInspectorOverrideMenuBase ||
+        commandId >= kCmdInspectorOverrideMenuBase + m_ContextOverrideMenuEntries.size())
+        return false;
+    // A copy: the entry's edit can rebuild the panel, which clears the kept entries.
+    const std::function<void()> run = m_ContextOverrideMenuEntries[commandId - kCmdInspectorOverrideMenuBase].Run;
+    m_ContextOverrideMenuEntries.clear();
+    if (run)
+        run();
+    ShowEntity(m_World, m_Entity, /*force=*/true);
+    return true;
+}
+
 void InspectorPanel::RefreshOverrideMarks()
 {
     if (!m_World || !m_World->IsValid(m_Entity) || m_Entities.size() > 1)
@@ -2918,7 +2954,7 @@ void InspectorPanel::BuildSimpleTopHeader(const std::string& titleText,
     // keep a consistent horizontal position across all inspector modes.
     auto togglePlaceholder = std::make_unique<UIElement>();
     togglePlaceholder->AddClass("inspector-header-toggle-placeholder");
-    togglePlaceholder->Overrides()
+    togglePlaceholder->Style()
         .Set(Style::Width, StyleLength::Px(36.0f))
         .Set(Style::MinWidth, StyleLength::Px(36.0f))
         .Set(Style::MaxWidth, StyleLength::Px(36.0f))
@@ -3043,7 +3079,7 @@ void InspectorPanel::SyncInspectorHistoryButtonState()
     const bool showChrome = !m_Locked;
     if (m_HistoryButtonsRow)
     {
-        m_HistoryButtonsRow->Overrides().Set(Style::Visibility, showChrome);
+        m_HistoryButtonsRow->Style().Set(Style::Visibility, showChrome);
     }
     if (m_HistoryBackButton)
         m_HistoryBackButton->SetEnabled(showChrome && canBack);
@@ -3174,7 +3210,7 @@ void InspectorPanel::BindSectionHeaderDragReorder(
         if (!m_SectionDragHoverBlocker)
         {
             auto blocker = std::make_unique<UIElement>();
-            blocker->Overrides()
+            blocker->Style()
                 .Set(Style::Position, PositionType::Absolute)
                 .Set(Style::PositionLeft, StyleLength::Px(0.0f))
                 .Set(Style::PositionTop, StyleLength::Px(0.0f))
@@ -3192,7 +3228,7 @@ void InspectorPanel::BindSectionHeaderDragReorder(
                 ghost->AddClass("inspector-section-drag-ghost");
                 ghost->SetText(sectionRaw->GetTitle());
                 ghost->SetOverlayLayer(OverlayLayer::DragPreview);
-                ghost->Overrides()
+                ghost->Style()
                     .Set(Style::Position, PositionType::Absolute)
                     .Set(Style::PointerEvents, false)
                     .Set(Style::PositionLeft, StyleLength::Px(x + 12.0f))
@@ -3206,7 +3242,7 @@ void InspectorPanel::BindSectionHeaderDragReorder(
                                      {
         if (m_SectionDragGhost)
         {
-            m_SectionDragGhost->Overrides()
+            m_SectionDragGhost->Style()
                 .Set(Style::PositionLeft, StyleLength::Px(x + 12.0f))
                 .Set(Style::PositionTop, StyleLength::Px(y - 12.0f));
             m_SectionDragGhost->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
@@ -3541,7 +3577,7 @@ void InspectorPanel::ShowSelectedAssets(const std::vector<std::filesystem::path>
 
     auto assetContentRoot = std::make_unique<UIElement>();
     assetContentRoot->AddClass("inspector-asset-content");
-    assetContentRoot->Overrides()
+    assetContentRoot->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::PaddingLeft, StyleLength::Px(kInspectorAssetContentHorizontalInsetPx))
@@ -4079,7 +4115,7 @@ void InspectorPanel::ShowEntity(World* world, EntityHandle entity, bool force, b
                 [pingAsset, path]()
                 { pingAsset(path); });
             iconHost->AddClass("clickable");
-            iconHost->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+            iconHost->Style().Set(Style::Cursor, CursorStyle::Pointer);
         }
         else
         {
@@ -4089,7 +4125,7 @@ void InspectorPanel::ShowEntity(World* world, EntityHandle entity, bool force, b
         // Lock icon slot to 32×32 so header row height is constant regardless
         // of whether a sprite icon or model thumbnail is shown.
         constexpr float kInspectorIconSlotPx = 32.0f;
-        iconHost->Overrides()
+        iconHost->Style()
             .Set(Style::Width, StyleLength::Px(kInspectorIconSlotPx))
             .Set(Style::Height, StyleLength::Px(kInspectorIconSlotPx));
         UIElement* iconHostRaw = iconHost.get();
@@ -4533,6 +4569,9 @@ void InspectorPanel::ShowEntity(World* world, EntityHandle entity, bool force, b
                                                                                             if (!m_World || !m_Entity.IsValid() || !m_World->IsValid(m_Entity))
                                                                                                 return;
 
+                                                                                            if (RunOverrideMenuCommand(cmd))
+                                                                                                return;
+
                                                                                             if (cmd == kCmdInspectorCopyComponent)
                                                                                             {
                                                                                                 const std::vector<ECS::ComponentTypeId> selection = GetContextCopySelection();
@@ -4939,6 +4978,7 @@ void InspectorPanel::ShowEntity(World* world, EntityHandle entity, bool force, b
                                                m_ContextMenu->Clear();
                                                ContextMenuBuilder builder;
                                                m_ContextSavedSettingsMenuIndices.clear();
+                                               AddOverrideMenuEntries(builder, typeId);
 
                                                // Component settings snapshots + copy/paste (skip the pseudo material section, which isn't a real component).
                                                if (typeId != pseudoMaterialSectionId)
@@ -5224,7 +5264,7 @@ void InspectorPanel::ShowEntity(World* world, EntityHandle entity, bool force, b
         addBtn->SetText("Add Component");
         addBtn->SetTooltip("Add a component to the selected entity.");
         addBtn->AddClass("inspector-add-component-button");
-        addBtn->Overrides()
+        addBtn->Style()
             .Set(Style::Width, StyleLength::Px(kInspectorPickerWidthPx))
             .Set(Style::AlignSelf, AlignItems::Center);
 
@@ -6455,13 +6495,7 @@ void InspectorPanel::ShowGraphTransition(const std::string& linkId,
         UIElement* conditionsContent = conditionsSection->GetContentRoot();
         m_ContentRoot->AddChild(std::move(conditionsSection));
 
-        if (m_GraphTransitionDesc.Conditions.empty())
-        {
-            auto hint = std::make_unique<Label>();
-            hint->AddClass("inspector-transition-hint");
-            hint->SetText("Add at least one condition. Compile skips unconditioned transitions.");
-            conditionsContent->AddChild(std::move(hint));
-        }
+        AddGraphTransitionConditionsNotice(conditionsContent, m_GraphTransitionDesc);
 
         for (size_t i = 0; i < m_GraphTransitionDesc.Conditions.size(); ++i)
         {

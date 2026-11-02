@@ -1,6 +1,6 @@
 #include "ECS/CachedQuery.h"
 
-#include "ECS/ArchetypeTable.h"
+#include "ECS/Archetype/ArchetypeTable.h"
 #include "ECS/Component/ComponentRegistry.h"
 #include "ECS/Components.h"
 #include "ECS/Entity.h"

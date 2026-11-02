@@ -845,12 +845,11 @@ TEST(SkyLinkedSun, TheFogSunAtNightIsTheMoon)
         EXPECT_EQ(lit != nullptr, expected.ShowMoon)
             << "moon " << (expected.ShowMoon ? "shown" : "hidden") << ": the fog sun selection";
 
-        const float fallbackDir[3] = {0.0f, -1.0f, 0.0f};
-        const float fallbackColor[3] = {1.0f, 1.0f, 1.0f};
-        const auto fog = Engine::Renderer::ResolveHeightFogSunLighting(
-            services, view, /*trackDirectionalLight=*/true, /*sunIntensityScale=*/1.0f, fallbackDir,
-            fallbackColor, /*fallbackIntensity=*/1.0f);
-        const float delivered = ColorUtils::LinearRec709Luminance({fog.color[0], fog.color[1], fog.color[2]}) * fog.intensity;
+        const Engine::Renderer::ResolvedFogSun fallback{
+            Mathematics::Vector3(0.0f, -1.0f, 0.0f), ColorLinear(1.0f, 1.0f, 1.0f), /*Intensity=*/1.0f};
+        const auto fog = Engine::Renderer::ResolveFogSunLighting(
+            services, view, /*trackDirectionalLight=*/true, /*sunIntensityScale=*/1.0f, fallback);
+        const float delivered = ColorUtils::LinearRec709Luminance(fog.Color) * fog.Intensity;
         EXPECT_NEAR(delivered, expected.DeliveredLuminance, expected.DeliveredLuminance * kRecordedPrecision)
             << "moon " << (expected.ShowMoon ? "shown" : "hidden") << ": the fog's sun at 00:00";
     }

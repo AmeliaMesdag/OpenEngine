@@ -24,7 +24,7 @@
 #include "TerrainECS/TerrainRuleNoise.h"
 #include "TerrainECS/TerrainService.h"
 #include "TerrainECS/TerrainSplatComposite.h"
-#include "TerrainECS/TerrainSurfaceRuleEval.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceRuleEval.h"
 
 #include <algorithm>
 #include <array>

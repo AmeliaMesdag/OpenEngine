@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Mathematics/Matrix4x4.h"
 #include "Mathematics/Vector3.h"
 #include "Rendering/RenderLayerMask.h"
 #include "Types/Types.h"
@@ -93,11 +94,7 @@ struct OceanDepthCacheMeshSource
     // Optional column-major local-to-world transform. When disabled, positions
     // are treated as world space.
     bool UseLocalToWorld = false;
-    float32 LocalToWorld[16] = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f};
+    Mathematics::Matrix4x4 LocalToWorld = Mathematics::Matrix4x4::Identity();
 
     Rendering::RenderLayerMask Layers = Rendering::RenderLayerMask::All();
     bool Enabled = true;

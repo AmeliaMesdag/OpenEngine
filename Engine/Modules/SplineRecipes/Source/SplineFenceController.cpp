@@ -29,7 +29,7 @@
 #include "Spline/SplineData.h"
 #include "Spline/SplineEvaluator.h"
 #include "SplineECS/SplineService.h"
-#include "SplineLayout/SpanMitre.h"
+#include "SplineLayout/SpanMiter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -55,12 +55,12 @@ Rendering::MeshGPURegistry* MeshRegistryOf(Engine::Renderer::RenderServices* ren
 }
 
 // What one pool offers the variant cutter, slot for slot.
-std::vector<FenceMitreSource> MitreSources(const Rendering::MeshGPURegistry& registry,
+std::vector<FenceMiterSource> MiterSources(const Rendering::MeshGPURegistry& registry,
                                            const Components::ModelRef* pool,
                                            const std::vector<FencePoolPiece>& pieces,
                                            const std::vector<SplineLayout::FencePieceBounds>& bounds)
 {
-    std::vector<FenceMitreSource> sources(pieces.size());
+    std::vector<FenceMiterSource> sources(pieces.size());
     const Rendering::MeshGPURegistry::TableScope scope(registry);
     for (size_t i = 0; i < pieces.size(); ++i)
     {
@@ -109,30 +109,30 @@ uint64 PoolContentOf(const Rendering::MeshGPURegistry& registry,
 // Which variant each piece draws, with the ones that could not be cut (no
 // mesh to cut) handed back to their pool piece.
 std::vector<uint32> DrawnVariants(const std::vector<uint32>& planned,
-                                  const FenceMitreVariants& variants)
+                                  const FenceMiterVariants& variants)
 {
     std::vector<uint32> drawn(planned);
     for (uint32& variant : drawn)
     {
-        if (variant != SplineLayout::kNoMitreVariant && !variants.Meshes[variant].Handle.IsValid())
-            variant = SplineLayout::kNoMitreVariant;
+        if (variant != SplineLayout::kNoMiterVariant && !variants.Meshes[variant].Handle.IsValid())
+            variant = SplineLayout::kNoMiterVariant;
     }
     return drawn;
 }
 
 // The pool piece a cut variant was made from: the one its role and slot name.
-const FencePoolPiece& PoolPieceOfVariant(const SplineLayout::MitreVariantKey& key,
+const FencePoolPiece& PoolPieceOfVariant(const SplineLayout::MiterVariantKey& key,
                                          const std::vector<FencePoolPiece>& spans,
                                          const std::vector<FencePoolPiece>& crests,
                                          const std::vector<FencePoolPiece>& gates)
 {
     switch (key.Role)
     {
-    case SplineLayout::MitrePieceRole::Crest:
+    case SplineLayout::MiterPieceRole::Crest:
         return crests[key.PoolSlot];
-    case SplineLayout::MitrePieceRole::Gate:
+    case SplineLayout::MiterPieceRole::Gate:
         return gates[key.PoolSlot];
-    case SplineLayout::MitrePieceRole::Span:
+    case SplineLayout::MiterPieceRole::Span:
     default:
         return spans[key.PoolSlot];
     }
@@ -274,7 +274,7 @@ void SplineFenceController::Update(ECS::World& world,
     {
         m_LastWorldResetGeneration = resetGeneration;
         for (auto& [entityId, state] : m_States)
-            state.MitreVariants.DropAfterWorldReset(&renderServices.GetMeshGPURegistry());
+            state.MiterVariants.DropAfterWorldReset(&renderServices.GetMeshGPURegistry());
         m_States.Clear();
     }
 
@@ -421,8 +421,8 @@ bool SplineFenceController::RetireAll(ECS::World& world,
                                       FenceState& state)
 {
     const bool destroyedAny = RetirePieces(world, state);
-    state.MitreVariants.Retire(world, MeshRegistryOf(renderServices));
-    state.MitreCuts.clear();
+    state.MiterVariants.Retire(world, MeshRegistryOf(renderServices));
+    state.MiterCuts.clear();
     return destroyedAny;
 }
 
@@ -626,7 +626,7 @@ bool SplineFenceController::Rebuild(ECS::World& world,
     ReportSpanRollBorrowed(built.RollBorrowedSpans, candidate.Entity.id,
                            state.LoggedRollBorrowedSpans);
     // One report per rebuild, so the latch compares like with like: the layout's
-    // lines, and on a fence that builds, the mitre variants' lines after them.
+    // lines, and on a fence that builds, the miter variants' lines after them.
     const auto* entityName = world.GetComponent<Components::Name>(candidate.Entity);
     const std::string_view name =
         entityName ? entityName->View() : std::string_view();
@@ -637,20 +637,20 @@ bool SplineFenceController::Rebuild(ECS::World& world,
     }
 
     // ---- Cut variants at the bare joins (fence design section 4c) ----
-    const SplineLayout::MitreVariantPlan plan = SplineLayout::PlanMitreVariants(built);
+    const SplineLayout::MiterVariantPlan plan = SplineLayout::PlanMiterVariants(built);
     const Rendering::MeshGPURegistry& meshRegistry = renderServices.GetMeshGPURegistry();
-    const std::vector<FenceMitreSource> spanSources =
-        MitreSources(meshRegistry, spanPool.Meshes, spanPieces, spanBounds);
-    const std::vector<FenceMitreSource> crestSources =
-        MitreSources(meshRegistry, crestPool.Meshes, crestPieces, crestBounds);
-    const std::vector<FenceMitreSource> gateSources =
-        MitreSources(meshRegistry, gatePool.Meshes, gatePieces, gateBounds);
-    const FenceMitreVariants variants = CommitFenceMitreVariants(
-        renderServices.GetMeshGPURegistry(), state.MitreVariants, state.MitreCuts,
+    const std::vector<FenceMiterSource> spanSources =
+        MiterSources(meshRegistry, spanPool.Meshes, spanPieces, spanBounds);
+    const std::vector<FenceMiterSource> crestSources =
+        MiterSources(meshRegistry, crestPool.Meshes, crestPieces, crestBounds);
+    const std::vector<FenceMiterSource> gateSources =
+        MiterSources(meshRegistry, gatePool.Meshes, gatePieces, gateBounds);
+    const FenceMiterVariants variants = CommitFenceMiterVariants(
+        renderServices.GetMeshGPURegistry(), state.MiterVariants, state.MiterCuts,
         candidate.Entity.id, plan, {spanSources, crestSources, gateSources});
     std::vector<FencePoolPiece> variantPieces(variants.Meshes.size());
     for (size_t v = 0; v < variants.Meshes.size(); ++v)
-        variantPieces[v] = MitreVariantPiece(
+        variantPieces[v] = MiterVariantPiece(
             PoolPieceOfVariant(plan.Variants[v], spanPieces, crestPieces, gatePieces),
             variants.Meshes[v]);
     const std::vector<uint32> spanVariants = DrawnVariants(plan.SpanVariants, variants);

@@ -338,8 +338,8 @@ TEST_F(GameViewControllerReadbackTests, SnapshotTracksDeclaredCameraAndSurvivesA
     Declare(7);
     ASSERT_TRUE(Controller.GetDeclaredCamera().has_value());
     EXPECT_EQ(Controller.GetDeclaredCamera()->FrameIndex, 7u);
-    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos[0], 12.0f);
-    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos[1], 3.0f);
+    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos.x, 12.0f);
+    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos.y, 3.0f);
     EXPECT_EQ(Controller.GetDeclaredCamera()->Width, 160u);
     EXPECT_EQ(Controller.GetDeclaredCamera()->Height, 90u);
     EXPECT_EQ(Controller.GetDeclaredCamera()->ExposureMode, Components::ExposureMode::Auto);
@@ -350,13 +350,13 @@ TEST_F(GameViewControllerReadbackTests, SnapshotTracksDeclaredCameraAndSurvivesA
     EXPECT_TRUE(Controller.IsWaitingForExtraction());
     ASSERT_TRUE(Controller.GetDeclaredCamera().has_value());
     EXPECT_EQ(Controller.GetDeclaredCamera()->FrameIndex, 7u);
-    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos[0], 12.0f);
+    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos.x, 12.0f);
     Services.Views().MarkViewExtracted(view, 8);
     Declare(9);
     EXPECT_FALSE(Controller.IsWaitingForExtraction());
     ASSERT_TRUE(Controller.GetDeclaredCamera().has_value());
     EXPECT_EQ(Controller.GetDeclaredCamera()->FrameIndex, 9u);
-    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos[0], 17.0f);
+    EXPECT_FLOAT_EQ(Controller.GetDeclaredCamera()->Data.cameraPos.x, 17.0f);
 
     Controller.PrepareForActivation(nullptr, 160, 90);
     EXPECT_FALSE(Controller.GetDeclaredCamera().has_value());

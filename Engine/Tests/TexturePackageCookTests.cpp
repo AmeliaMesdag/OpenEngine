@@ -414,6 +414,73 @@ TEST_F(TexturePackageCookTest, StaleGuidUsesSourceAwarePathCompanion)
     EXPECT_EQ(usages.at(Id), TextureCookUsage::Normal);
 }
 
+// An exported normal map ships its variance companion beside the BC5 payload, and the packaged
+// Player loads the pair; a payload whose companion is missing is refused, as a corrupt one is.
+TEST_F(TexturePackageCookTest, APackagedNormalMapShipsItsVarianceCompanionAndThePlayerLoadsIt)
+{
+    if (!IsTextureCookEncoderAvailable()) GTEST_SKIP() << "BC encoder unavailable";
+    Meta = {{kTextureColorSpaceMetaKey, "auto"}};
+    StageSource();
+    StageMaterialBindings({{"normalMap", "Leaves.tga"}});
+    ASSERT_TRUE(Bake()) << Error;
+    const fs::path payload = Artifact(TextureCookOutput::BC5);
+    ASSERT_TRUE(fs::exists(payload));
+    ASSERT_TRUE(fs::exists(TextureCookVarianceCompanionPath(payload))) << "the export left the companion behind";
+
+    AssetManager player;
+    const fs::path userData = Temp.Path() / "UserData";
+    ASSERT_TRUE(player.Initialize(MountRoot / "Assets", nullptr, userData / "AssetDatabase.assetdb",
+                                  userData / ".Cache" / "AssetDatabase"));
+    {
+        AssetManager::ScopedThreadAssetManager context(&player);
+        TextureAsset::SetGpuTranscodeTarget(TextureGpuTranscodeTarget::BC7);
+        TextureAsset texture(Id, MountRoot / "Assets" / "Leaves.tga");
+        ASSERT_TRUE(texture.Load());
+        EXPECT_EQ(texture.GetFormat(), TextureFormat::BC5);
+        ASSERT_NE(texture.GetNormalVarianceCompanion(), nullptr) << "the Player loaded the normal map without its variance";
+        EXPECT_EQ(texture.GetNormalVarianceCompanion()->GetFormat(), TextureFormat::BC4);
+
+        fs::remove(TextureCookVarianceCompanionPath(payload));
+        TextureAsset orphan(Id, MountRoot / "Assets" / "Leaves.tga");
+        EXPECT_FALSE(orphan.Load()) << "a payload without its companion loaded as if it had zero variance";
+    }
+    player.Shutdown();
+}
+
+// The Player's decode job takes no file from the disk, so its reader reads the companion with the payload.
+TEST_F(TexturePackageCookTest, APackagedNormalMapsDecodeJobTakesTheCompanionItsReaderRead)
+{
+    if (!IsTextureCookEncoderAvailable()) GTEST_SKIP() << "BC encoder unavailable";
+    Meta = {{kTextureColorSpaceMetaKey, "auto"}};
+    StageSource();
+    StageMaterialBindings({{"normalMap", "Leaves.tga"}});
+    ASSERT_TRUE(Bake()) << Error;
+    ASSERT_TRUE(fs::exists(TextureCookVarianceCompanionPath(Artifact(TextureCookOutput::BC5))));
+
+    JobSystem::WorkStealingThreadPool pool(2);
+    AssetManager player;
+    const fs::path userData = Temp.Path() / "UserData";
+    ASSERT_TRUE(player.Initialize(MountRoot / "Assets", &pool, userData / "AssetDatabase.assetdb",
+                                  userData / ".Cache" / "AssetDatabase"));
+    player.WaitForStartupScan();
+    TextureAsset::SetGpuTranscodeTarget(TextureGpuTranscodeTarget::BC7);
+    auto result = std::make_shared<std::promise<SharedPtr<Asset>>>();
+    std::future<SharedPtr<Asset>> loaded = result->get_future();
+    AssetLoadHandle handle = player.LoadAsset(Id, [result](Result<SharedPtr<Asset>, AssetError> loadResult) {
+        result->set_value(loadResult.IsOk() ? loadResult.Value() : SharedPtr<Asset>{});
+    });
+    ASSERT_EQ(loaded.wait_for(std::chrono::seconds(20)), std::future_status::ready);
+    const SharedPtr<Asset> asset = loaded.get();
+    const auto* texture = dynamic_cast<const TextureAsset*>(asset.get());
+    ASSERT_NE(texture, nullptr) << "the decode job did not load the packaged normal map";
+    EXPECT_EQ(texture->GetFormat(), TextureFormat::BC5);
+    ASSERT_NE(texture->GetNormalVarianceCompanion(), nullptr);
+    EXPECT_EQ(texture->GetNormalVarianceCompanion()->GetFormat(), TextureFormat::BC4);
+    handle = {};
+    player.Shutdown();
+    pool.Shutdown();
+}
+
 TEST_F(TexturePackageCookTest, ColdPathBoundNormalGetsLinearBC5)
 {
     if (!IsTextureCookEncoderAvailable()) GTEST_SKIP() << "BC encoder unavailable";
@@ -858,12 +925,15 @@ TEST_F(TexturePackageCookTest, MetalDeviceAdoptsTheShippedBc7Artifact)
                                     Rendering::RendererProfile::FromCapabilities(device->GetCapabilities())));
     EXPECT_EQ(TextureAsset::GetGpuTranscodeTarget(), TextureGpuTranscodeTarget::BC7);
 
-    // A host without the encoder bakes uncompressed pixels, so the BC7 payload is
-    // written by hand and recorded in the staged manifest, as a Windows export records it.
+    // A host with the BC encoder bakes the BC7 artifact; a host without it bakes uncompressed
+    // pixels. The test writes a known BC7 payload as the BC7 artifact and records it in the
+    // staged manifest, as an export records it, so the load must read those bytes.
     Meta[kTextureCompressionMetaKey] = "bc7";
     StageSource();
     ASSERT_TRUE(Bake()) << Error;
-    ASSERT_TRUE(fs::exists(Artifact(TextureCookOutput::Uncompressed))) << ListDirectory(MountRoot / "Tex");
+    const TextureCookOutput baked =
+        IsTextureCookEncoderAvailable() ? TextureCookOutput::BC7 : TextureCookOutput::Uncompressed;
+    ASSERT_TRUE(fs::exists(Artifact(baked))) << ListDirectory(MountRoot / "Tex");
     const Vector<uint8> bc7 = HandWrittenBc7Ktx2();
     ASSERT_FALSE(bc7.empty());
     WriteBytes(Artifact(TextureCookOutput::BC7), bc7);

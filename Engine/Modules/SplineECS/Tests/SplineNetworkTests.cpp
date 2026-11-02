@@ -6,6 +6,7 @@
 #include "Components/Spline/SplineNetworkMember.h"
 #include "Components/Spline/SplineNetworkOverrides.h"
 #include "Components/Transform.h"
+#include "Core/CpuProfiler.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "Spline/SplineData.h"
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -29,6 +31,7 @@ using Mathematics::Vector3;
 using SplineECS::SplineNetwork;
 using SplineECS::SplineNode;
 using SplineECS::SplineNodeKind;
+using SplineECS::SplineSnapTarget;
 
 namespace
 {
@@ -123,6 +126,27 @@ class SplineNetworkTest : public ::testing::Test
     {
         m_Derived = world ? world : &World;
         Network.Update(*m_Derived);
+    }
+
+    // Updates World in one profiler frame and returns the pairs it searched again: the calls of
+    // the scope "SplineNetwork.SearchPair".
+    uint32 DerivedPairSearches()
+    {
+        Profiling::CpuProfiler& profiler = Profiling::CpuProfiler::Get();
+        profiler.SetEnabled(true);
+        profiler.BeginFrame();
+        Derive();
+        profiler.BeginFrame();
+        std::vector<Profiling::CpuProfiler::TreeRow> rows;
+        profiler.CopyFrameTree(rows);
+        profiler.SetEnabled(false);
+        uint32 calls = 0;
+        for (const Profiling::CpuProfiler::TreeRow& row : rows)
+        {
+            if (row.name == "SplineNetwork.SearchPair")
+                calls += row.callCount;
+        }
+        return calls;
     }
 
     std::span<const SplineNode> Nodes() const { return Network.GetNodes(*m_Derived); }
@@ -242,6 +266,69 @@ TEST_F(SplineNetworkTest, ARoadThroughASquareEntersItTwiceAndOneEndingOnTheRimOn
     EXPECT_NE(NodeAt(40.0f, 20.0f), nullptr);
     ASSERT_NE(NodeAt(20.0f, 0.0f), nullptr);
     EXPECT_EQ(NodeAt(20.0f, 0.0f)->ArmCount, 3u);
+}
+
+// The editor's snap puts an end on a rim or a ribbon within its reach, where the node rule finds it.
+TEST_F(SplineNetworkTest, AnEndWithinTheReachSnapsToTheRimOrTheRibbonAndOneBeyondItDoesNot)
+{
+    const ECS::EntityHandle square =
+        AddArea({{0.0f, 2.0f, 0.0f}, {40.0f, 2.0f, 0.0f}, {40.0f, 2.0f, 40.0f}, {0.0f, 2.0f, 40.0f}});
+    const ECS::EntityHandle body = AddRoad({{-50.0f, 0.0f, -60.0f}, {90.0f, 0.0f, -60.0f}});
+    Derive();
+    ASSERT_TRUE(Nodes().empty());
+
+    // 3 m north of the square's north edge.
+    const Vector3 nearRim{20.0f, 0.0f, 43.0f};
+    EXPECT_FALSE(Network.FindSnapTarget(World, nearRim, 2.5f, {}).has_value()) << "beyond the reach";
+    const std::optional<SplineSnapTarget> onRim = Network.FindSnapTarget(World, nearRim, 3.5f, {});
+    ASSERT_TRUE(onRim.has_value());
+    EXPECT_EQ(onRim->Member, square);
+    EXPECT_NEAR(onRim->Point.x, 20.0f, kArcTolerance);
+    EXPECT_NEAR(onRim->Point.y, 2.0f, kArcTolerance);
+    EXPECT_NEAR(onRim->Point.z, 40.0f, kArcTolerance);
+    EXPECT_NEAR(onRim->DistanceMetres, 3.0f, kArcTolerance);
+    EXPECT_FALSE(Network.FindSnapTarget(World, nearRim, 3.5f, square).has_value()) << "the excluded member";
+
+    // 1.5 m beyond the edge of the body's 3 m band: the point lands on the edge.
+    const Vector3 nearRibbon{10.0f, 0.0f, -60.0f + kHalfWidth + 1.5f};
+    EXPECT_FALSE(Network.FindSnapTarget(World, nearRibbon, 1.0f, {}).has_value()) << "beyond the reach";
+    const std::optional<SplineSnapTarget> onRibbon = Network.FindSnapTarget(World, nearRibbon, 2.0f, {});
+    ASSERT_TRUE(onRibbon.has_value());
+    EXPECT_EQ(onRibbon->Member, body);
+    EXPECT_NEAR(onRibbon->Point.z, -60.0f + kHalfWidth, kArcTolerance);
+    EXPECT_NEAR(onRibbon->DistanceMetres, 1.5f, kArcTolerance);
+
+    // Roads that end on the two snapped points meet the square and the body there.
+    AddRoad({{20.0f, 2.0f, 80.0f}, onRim->Point});
+    AddRoad({{10.0f, 0.0f, -20.0f}, onRibbon->Point});
+    Derive();
+    ASSERT_EQ(Nodes().size(), 2u);
+    const SplineNode* entry = NodeAt(20.0f, 40.0f);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->Kind, SplineNodeKind::Entry);
+    EXPECT_FALSE(entry->IsSplitLevel());
+    const SplineNode* attachment = NodeAt(10.0f, -60.0f);
+    ASSERT_NE(attachment, nullptr);
+    EXPECT_EQ(attachment->Kind, SplineNodeKind::Attachment);
+}
+
+// An end within the reach of a rim and of a ribbon snaps to the nearer of the two.
+TEST_F(SplineNetworkTest, AnEndWithinTheReachOfTwoMembersSnapsToTheNearer)
+{
+    const ECS::EntityHandle square =
+        AddArea({{0.0f, 2.0f, 0.0f}, {40.0f, 2.0f, 0.0f}, {40.0f, 2.0f, 40.0f}, {0.0f, 2.0f, 40.0f}});
+    const ECS::EntityHandle road = AddRoad({{50.0f, 0.0f, -20.0f}, {50.0f, 0.0f, 60.0f}});
+    Derive();
+
+    // The road's band edge is at x = 47, the square's east edge at x = 40.
+    const std::optional<SplineSnapTarget> nearRoad = Network.FindSnapTarget(World, {45.5f, 0.0f, 20.0f}, 6.0f, {});
+    ASSERT_TRUE(nearRoad.has_value());
+    EXPECT_EQ(nearRoad->Member, road);
+    EXPECT_NEAR(nearRoad->DistanceMetres, 1.5f, kArcTolerance);
+    const std::optional<SplineSnapTarget> nearRim = Network.FindSnapTarget(World, {41.0f, 0.0f, 20.0f}, 6.5f, {});
+    ASSERT_TRUE(nearRim.has_value());
+    EXPECT_EQ(nearRim->Member, square);
+    EXPECT_NEAR(nearRim->DistanceMetres, 1.0f, kArcTolerance);
 }
 
 TEST_F(SplineNetworkTest, TwoRoadsMeetingEndToEndFormOneMerge)
@@ -871,11 +958,14 @@ void ExpectOneCrossingAtEveryGridPlace(std::span<const SplineNode> nodes, float3
     }
 }
 
-// The derivation's node set over a 200-member grid (100 by 100 roads, 10,000 crossings), first and
-// after one knot moved on one road; and, for information, its cost from a test-side clock in this
-// build's configuration.
+// The derivation's node set and the pairs it searches over a 200-member grid (100 by 100 roads,
+// 10,000 crossings), first and after one knot moved on one road; and, for information, its cost
+// from a test-side clock in this build's configuration.
 TEST_F(SplineNetworkTest, ATwoHundredMemberGridDerivesEveryCrossing)
 {
+#if !GE_ENABLE_CPU_PROFILING
+    GTEST_SKIP() << "Counts the pairs searched through the CPU profiler, which this build compiles out";
+#endif
     std::vector<ECS::EntityHandle> roads;
     for (int32 i = 0; i < 100; ++i)
     {
@@ -884,18 +974,22 @@ TEST_F(SplineNetworkTest, ATwoHundredMemberGridDerivesEveryCrossing)
         roads.push_back(AddRoad({{offset, 0.0f, -10.0f}, {offset, 0.0f, 2000.0f}}));
     }
     auto start = std::chrono::steady_clock::now();
-    Derive();
+    const uint32 firstSearches = DerivedPairSearches();
     const std::chrono::duration<double, std::milli> first = std::chrono::steady_clock::now() - start;
     ExpectOneCrossingAtEveryGridPlace(Nodes(), 0.0f, "first");
+    EXPECT_EQ(firstSearches, 10000u);
+    // One knot moved on one road searches only that road's 100 crossing pairs again.
     Spline::SplineData& data = DataOf(roads[100]);
     data.SetPointPosition(1, {2000.0f, 0.0f, 1000.5f});
     Spline::RebuildSplineCache(data);
     start = std::chrono::steady_clock::now();
-    Derive();
+    const uint32 editSearches = DerivedPairSearches();
     const std::chrono::duration<double, std::milli> edit = std::chrono::steady_clock::now() - start;
+    EXPECT_EQ(editSearches, 100u);
     start = std::chrono::steady_clock::now();
-    Derive();
+    const uint32 idleSearches = DerivedPairSearches();
     const std::chrono::duration<double, std::milli> idle = std::chrono::steady_clock::now() - start;
+    EXPECT_EQ(idleSearches, 0u);
     std::printf("[ info ] 200 members, %zu nodes: first derivation %.1f ms, one edit %.1f ms, idle %.3f ms\n",
                 Nodes().size(), first.count(), edit.count(), idle.count());
     ExpectOneCrossingAtEveryGridPlace(Nodes(), 0.5f, "after the edit");

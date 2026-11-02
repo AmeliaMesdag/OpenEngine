@@ -5,6 +5,7 @@
 #include "Types/StringId.h"
 
 #include <atomic>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -47,7 +48,7 @@ enum class TextureCookCompression : uint8 {
 enum class TextureCookUsage : uint8 {
     Auto = 0,     // unknown: cook stays uncompressed (CPU readers keep pixel access)
     Color,        // albedo / emissive (sRGB)  -> BC7
-    Normal,       // tangent-space normal maps -> BC5 (+ per-mip renormalize)
+    Normal,       // tangent-space normal maps -> BC5 (+ per-mip renormalize, BC4 variance companion)
     Mask,         // single-channel data (AO / roughness / metallic) -> BC4
     Packed        // multi-channel packed data (metallicRoughness / ORM) -> BC7
 };
@@ -200,15 +201,21 @@ bool NeedsTextureCook(const TextureCookInputs& inputs, TextureCookOutput output)
 std::string TextureCookArtifactName(const GUID& guid, uint64 sourceHash,
                                     const TextureCookInputs& inputs, TextureCookOutput output);
 
+// The normal-variance companion's file beside its parent artifact, under the parent's key.
+std::filesystem::path TextureCookVarianceCompanionPath(const std::filesystem::path& parentArtifact);
+
 // FNV-1a-64 over the full source payload (same recipe as the LOD cook key).
 uint64 ComputeTextureCookSourceHash(const uint8* bytes, size_t size);
 
-// Folds settings, color space, swizzle, resolved output, the cook version and
-// the versions of the libraries that shape the bytes (stb_image_resize2 for every
-// mip chain; for block outputs the encoder that writes them: bc7e for BC7,
-// DirectXTex for the other BC formats) into the config half of the cache key.
-// Any change lands on a fresh filename.
+// The config half of the cache key: settings, color space, swizzle, output, the cook version, the
+// normal-variance companion version (HasNormalVarianceCompanion) and the versions of the libraries that
+// write the bytes (stb_image_resize2, bc7e, DirectXTex). Any change lands on a fresh filename.
 uint64 ComputeTextureCookConfigHash(const TextureCookInputs& inputs, TextureCookOutput output);
+
+// True for an Auto-compressed BC5 normal map with mips. Its companion is BC4 at half extent:
+// level j holds sigma of normal mip j + 1, sigma^2 = (1 - L) / L, L the mean unit normal's length.
+// Normal mip 0 has zero variance, so shading fades the read by saturate(lod).
+bool HasNormalVarianceCompanion(const TextureCookInputs& inputs, TextureCookOutput output);
 
 // Mip level count for a base extent under the cook settings (full chain to
 // 1x1, clamped by MipLimit; 1 when mips are disabled).
@@ -322,10 +329,14 @@ bool CompressTextureCookLevel(const TextureCookMipLevel& level, bool isFloat,
 // `workers` spreads each level's bands across a pool (see
 // CompressTextureCookLevel); null encodes on the calling thread. The editor's
 // cook and the build's pass the AssetManager's (AssetManager::GetTextureCookWorkers).
+//
+// `outVarianceCompanionKtx2` receives the BC4 normal-variance companion when
+// HasNormalVarianceCompanion holds for `inputs` and `output`, and is left empty otherwise.
 bool CookTexture(const uint8* srcBytes, size_t srcSize, std::string_view sourceName, const std::string& extLower,
                  const TextureCookInputs& inputs, TextureCookOutput output,
                  std::vector<uint8>& outKtx2Bytes, std::string& outError,
                  const std::function<bool()>& cancelRequested = {},
-                 TextureCookWorkers* workers = nullptr);
+                 TextureCookWorkers* workers = nullptr,
+                 std::vector<uint8>* outVarianceCompanionKtx2 = nullptr);
 
 } // namespace GameEngine

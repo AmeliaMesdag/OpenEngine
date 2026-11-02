@@ -415,6 +415,9 @@ ComponentSignature BuildSignature()
 {
     ComponentSignature signature;
     (signature.Add(GetComponentTypeId<Cs>()), ...);
+    // Hash() caches lazily in a mutable member. Computing it here, while the shared static is
+    // built, leaves the query threads that key the World's match cache on it only reading it.
+    signature.Hash();
     return signature;
 }
 } // namespace Detail
@@ -450,6 +453,39 @@ struct ArchetypeFilter
     // query opted back in. Entity activity is never in here, so a per-type
     // opt-in still skips inactive entities.
     const ComponentSignature* DisabledInclude = nullptr;
+
+    // True if an archetype with `signature` belongs to the query: it contains all
+    // of Required and Include, shares no component with Exclude, and carries none
+    // of DisabledExclude except the tags DisabledInclude names back in.
+    bool Matches(const ComponentSignature& signature) const
+    {
+        if (Required != nullptr && !signature.ContainsAll(*Required))
+            return false;
+        if (Include != nullptr && !signature.ContainsAll(*Include))
+            return false;
+        if (Exclude != nullptr && signature.Intersects(*Exclude))
+            return false;
+        return !CarriesExcludedEnableStateTag(signature);
+    }
+
+  private:
+    // The enable-state half of the match. The common shape — exclude by default,
+    // nothing opted back in — is one Intersects against a signature the query
+    // instantiation owns; the per-type opt-in walks the (tiny) exclude set so an
+    // opted-in tag stops rejecting while entity activity still does.
+    bool CarriesExcludedEnableStateTag(const ComponentSignature& signature) const
+    {
+        if (DisabledExclude == nullptr)
+            return false;
+        if (DisabledInclude == nullptr)
+            return signature.Intersects(*DisabledExclude);
+        for (ComponentTypeId id : DisabledExclude->GetComponents())
+        {
+            if (signature.Contains(id) && !DisabledInclude->Contains(id))
+                return true;
+        }
+        return false;
+    }
 };
 
 // Entity metadata for efficient lookups.

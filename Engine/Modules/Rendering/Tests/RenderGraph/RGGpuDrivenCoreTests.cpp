@@ -1538,7 +1538,7 @@ TEST(RGGpuDriven, RecycledSlotDwellHistoryResetsToTheStatelessPick)
         slice.cascadeIndex           = GPUDrawStreamBuilder::kCascadeIndexNone;
         slice.disableVisibilityCheck = true;
         slice.lod.projScaleY         = 1.0f;
-        slice.lod.cameraPos[0]       = dist;
+        slice.lod.cameraPos.x       = dist;
         slice.lod.lodHysteresisBand  = kBand;
         builder->RegisterSlice(slice);
 
@@ -1701,7 +1701,7 @@ TEST(RGGpuDriven, FirstTouchCrossfadeStateArrivesAsNoHistoryAndAdoptsItsPick)
         slice.cascadeIndex           = GPUDrawStreamBuilder::kCascadeIndexNone;
         slice.disableVisibilityCheck = true;
         slice.lod.projScaleY         = 1.0f;
-        slice.lod.cameraPos[0]       = dist;
+        slice.lod.cameraPos.x       = dist;
         slice.lod.crossfadeDuration  = 0.25f; // engages the tail for this slice
         builder->RegisterSlice(slice);
 
@@ -2110,7 +2110,7 @@ TEST(RGGpuDriven, RenderedHistoryStaysUnallocatedUntilAViewAsksForIt)
         slice.cascadeIndex           = GPUDrawStreamBuilder::kCascadeIndexNone;
         slice.disableVisibilityCheck = true;
         slice.lod.projScaleY         = 1.0f;
-        slice.lod.cameraPos[0]       = 5.0f;
+        slice.lod.cameraPos.x       = 5.0f;
         slice.lod.renderedLevelHistoryRequested = requestHistory;
         builder->RegisterSlice(slice);
 
@@ -2191,7 +2191,7 @@ TEST(RGGpuDriven, DeclaredButUnsubmittedFrameNeverBecomesTheNextFramesPrevious)
         slice.cascadeIndex           = GPUDrawStreamBuilder::kCascadeIndexNone;
         slice.disableVisibilityCheck = true;
         slice.lod.projScaleY         = 1.0f;
-        slice.lod.cameraPos[0]       = 5.0f;
+        slice.lod.cameraPos.x       = 5.0f;
         slice.lod.renderedLevelHistoryRequested = true;
         builder->RegisterSlice(slice);
 
@@ -2282,7 +2282,7 @@ TEST(RGGpuDriven, RenderedHistorySurvivesASiblingSliceThatDoesNotAsk)
         sibling.cascadeIndex           = GPUDrawStreamBuilder::kCascadeIndexNone;
         sibling.disableVisibilityCheck = true;
         sibling.lod.projScaleY         = 1.0f;
-        sibling.lod.cameraPos[0]       = 5.0f;
+        sibling.lod.cameraPos.x       = 5.0f;
         sibling.lod.renderedLevelHistoryRequested = siblingAsks;
         builder->RegisterSlice(sibling);
         GPUDrawStreamBuilder::SliceRegistration asking = sibling;

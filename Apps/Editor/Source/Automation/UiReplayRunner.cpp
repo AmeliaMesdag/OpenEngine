@@ -164,6 +164,7 @@ bool UiReplayRunner::Initialize(const Config& cfg, std::string* outError)
     m_AssertElementTextPrev.clear();
     m_AssertElementTextChangeCount = 0;
     m_AssertSelectedCounts.clear();
+    m_AssertElementInstances.clear();
     m_AssertTextContains.clear();
     m_AssertTreeBoundRowsContain.clear();
     m_WaitStartFrames.clear();
@@ -322,6 +323,7 @@ bool UiReplayRunner::LoadScenario(const std::filesystem::path& p, std::string* o
     m_AssertElementTextPrev.clear();
     m_AssertElementTextChangeCount = 0;
     m_AssertSelectedCounts.clear();
+    m_AssertElementInstances.clear();
     m_AssertTextContains.clear();
     m_AssertTreeBoundRowsContain.clear();
     m_WaitStartFrames.clear();
@@ -472,6 +474,21 @@ bool UiReplayRunner::LoadScenario(const std::filesystem::path& p, std::string* o
             m_AssertElementVisible.elementId = a.value("elementId", std::string());
             m_AssertElementVisible.frameStart = a.value("frameStart", 0ull);
             m_AssertElementVisible.frameEnd = a.value("frameEnd", 0ull);
+        }
+        else if (kind == "elementInstanceUnchanged")
+        {
+            ElementInstanceAssertConfig config;
+            config.ElementId = a.value("elementId", std::string());
+            config.FrameStart = a.value("frameStart", 0ull);
+            config.FrameEnd = a.value("frameEnd", 0ull);
+            if (config.ElementId.empty() || config.FrameEnd < config.FrameStart)
+            {
+                scenarioOk = false;
+                if (outError && outError->empty())
+                    *outError = "assert(elementInstanceUnchanged) requires an elementId and an ordered frame range";
+                return;
+            }
+            m_AssertElementInstances.push_back(std::move(config));
         }
         else if (kind == "noHeavyPass")
         {
@@ -1831,6 +1848,7 @@ void UiReplayRunner::TickAfterUiUpdate(UIManager& ui, double deltaSeconds)
             j["probe"]["element"] = {
                 {"id", id},
                 {"exists", true},
+                {"instanceId", el->GetInstanceId()},
                 {"tag", UIRegistration::ElementFactoryRegistry::Instance().GetTagForType(typeid(*el))},
                 {"text", el->GetTextContent()},
                 {"x", el->GetLayoutX()},
@@ -2212,6 +2230,25 @@ void UiReplayRunner::TickAfterUiUpdate(UIManager& ui, double deltaSeconds)
         }
     }
 
+
+    for (auto& config : m_AssertElementInstances)
+    {
+        if (m_Failed)
+            break;
+        if (m_FrameIndex < config.FrameStart || m_FrameIndex > config.FrameEnd)
+            continue;
+        UIElement* element = FindById(ui, config.ElementId);
+        if (!element)
+        {
+            Fail("assert(elementInstanceUnchanged) failed: element not found (id='" + config.ElementId + "')");
+            continue;
+        }
+        const std::uint64_t instanceId = element->GetInstanceId();
+        if (config.InstanceId == 0)
+            config.InstanceId = instanceId;
+        else if (config.InstanceId != instanceId)
+            Fail("assert(elementInstanceUnchanged) failed: element replaced (id='" + config.ElementId + "')");
+    }
 
     if (!m_Failed && m_AssertLayoutConverged.enabled)
     {

@@ -11,6 +11,7 @@
 
 #include "Animation/AnimationClip.h"
 #include "AnimationClipSchema.h"
+#include "Assets/AssetDecodeInputFiles.h"
 #include "Assets/FbxLoaderOptions.h"
 #include "Assets/ModelAsset.h"
 #include "Assets/ModelExtras.h"
@@ -1298,6 +1299,68 @@ TEST(GltfImport, SmallExternalBuffersKeepOnlyOneDeclaredPrefixOfALargeFile)
     ASSERT_EQ(backing->size(), 1u);
     EXPECT_EQ(backing->begin()->second.size(), 64u);
     EXPECT_EQ(backing->begin()->second.capacity(), 64u);
+}
+
+// Inside a decode, the bytes the IO reader read for a glTF's external buffer and image are the only
+// copy: every document opened on the file (the model's, then a clip's) views the buffer's bytes,
+// and the model takes the image's. A second image that names the same file copies the first's.
+TEST(GltfImport, DecodeViewsTheExternalBufferAndTakesTheImageItWasHanded)
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / ("gltf-decode-inputs-" + GUID::Generate().ToString());
+    std::filesystem::create_directories(root);
+    const float positions[] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+    std::ofstream(root / "triangle.bin", std::ios::binary)
+        .write(reinterpret_cast<const char*>(positions), sizeof(positions));
+    const Vector<uint8> image = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4};
+    std::ofstream(root / "albedo.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(image.data()), static_cast<std::streamsize>(image.size()));
+    const auto json = Bytes(R"({"asset": {"version": "2.0"},
+  "buffers": [{"byteLength": 36, "uri": "triangle.bin"}],
+  "bufferViews": [{"buffer": 0, "byteLength": 36}],
+  "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+                 "min": [0, 0, 0], "max": [1, 1, 0]}],
+  "images": [{"uri": "albedo.png"}, {"uri": "albedo.png"}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+  "nodes": [{"mesh": 0}], "scenes": [{"nodes": [0]}], "scene": 0})");
+    const auto model = root / "triangle.gltf";
+
+    // The files as the AssetIOService's reader reads them for the decode.
+    AssetDecodeInputFiles files;
+    String bufferFile;
+    String imageFile;
+    for (const AssetDecodeInput& input : ModelAsset::ResolveDecodeInputs(json, model)) {
+        Vector<uint8> bytes;
+        ASSERT_TRUE(ReadAssetDecodeInputFromDisk(input, bytes)) << input.Path;
+        if (input.PrefixBytes)
+            bufferFile = input.Path.generic_string();
+        else
+            imageFile = input.Path.generic_string();
+        files.Files.emplace(input.Path.generic_string(), std::move(bytes));
+    }
+    ASSERT_EQ(files.Files.size(), 2u);
+    const uint8* bufferBytes = files.Files.at(bufferFile)->data();
+    const uint8* imageBytes = files.Files.at(imageFile)->data();
+
+    {
+        const ScopedAssetDecodeInputFiles published(&files);
+        const GltfDocument document = OpenGltfDocument(json, model);
+        ASSERT_TRUE(document);
+        EXPECT_EQ(document->buffers[0].data, bufferBytes) << "the document copied the buffer it was handed";
+        EXPECT_TRUE(document.get_deleter().ExternalBuffers->empty());
+        const GltfDocument reopened = OpenGltfDocument(json, model);
+        ASSERT_TRUE(reopened);
+        EXPECT_EQ(reopened->buffers[0].data, bufferBytes) << "a document opened again did not view the same bytes";
+
+        ModelAsset asset(GUID::Generate(), model);
+        ASSERT_TRUE(ModelAssetFbxTestAccess::LoadGltf(asset, json, FbxLoaderOptions{}));
+        ASSERT_EQ(asset.GetEmbeddedImages().size(), 2u);
+        EXPECT_EQ(asset.GetEmbeddedImages()[0].Data.data(), imageBytes) << "the model copied the image it was handed";
+        EXPECT_EQ(asset.GetEmbeddedImages()[0].Data, image);
+        EXPECT_EQ(asset.GetEmbeddedImages()[1].Data, image);
+    }
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
 }
 
 TEST(GltfImport, ExternalBufferShorterThanDeclaredIsRefused)

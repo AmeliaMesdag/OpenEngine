@@ -25,9 +25,8 @@
 #ifdef CBT_DECODE_INT64
 
 // Deep-store subdivision cap (mirror DeepDecode::kDeepDecodeSubdiv; locked by
-// CBTLayoutTests.GlslDeepDecodeMirrorsCpp). VertexEval's decode guard uses it when
-// pc.deepDecode is set; S2b lifted the provisioning/classification cap to the same 50
-// (TerrainProvisioning SubdivCapFor, flag-coupled — 40 when the flag is off).
+// CBTLayoutTests.GlslDeepDecodeMirrorsCpp). VertexEval's decode guard uses it for the sphere
+// on the wide arm; the provisioning cap (TerrainProvisioning SubdivCapFor) is the same 50.
 const uint CBT_DEEP_NUM_SUBDIV = 50u;
 
 // Exact 1/1024 (mirror DeepDecode kInvSector; CBT_SECTOR_SIZE lives in cbt_layout.glsl).

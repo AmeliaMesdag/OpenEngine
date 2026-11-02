@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Mathematics/Vector2.h"
+#include "Mathematics/Vector3.h"
+#include "Mathematics/Vector4.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Sky/SkySettings.h"
 #include "Rendering/Sky/SkySystem.h"
@@ -19,44 +22,45 @@ struct AtmosphereParametersGPU
     float atmosphereRadius;
     float rayleighScaleHeight;
     float mieScaleHeight;
-    float betaRayleigh[3];
+    Mathematics::Vector3 betaRayleigh;
     float pad0;
-    float betaMie[3];
+    Mathematics::Vector3 betaMie;
     float pad1;
-    float groundAlbedo[3];
+    Mathematics::Vector3 groundAlbedo;
     float groundBrightness;
-    float groundNightColor[3];
+    Mathematics::Vector3 groundNightColor;
     float groundNightColorStd140Pad;
-    float groundHorizonColor[3];
+    Mathematics::Vector3 groundHorizonColor;
     float groundHorizonColorStd140Pad;
-    float groundHorizonNightColor[3];
+    Mathematics::Vector3 groundHorizonNightColor;
     // std140 gives every vec3 a full 16-byte slot, so a bare pad must follow each
     // vec3 that is itself followed by another vec3. Omitting this one skewed every
     // field below it by 4 bytes versus the shader's layout.
     float groundHorizonNightColorStd140Pad;
-    float nightSkyHorizonColor[3];
+    Mathematics::Vector3 nightSkyHorizonColor;
     float nightSkyHorizonColorStd140Pad;
     float groundHorizonDayCosWidth;
     float groundHorizonNightCosWidth;
     float belowHorizonBlendSharpness;
     float belowHorizonDarkness;
-    float belowHorizonDarkPadding[2];
+    Mathematics::Vector2 belowHorizonDarkPadding;
     // vec3 belowHorizonDarkColor needs a 16-byte boundary; std140 inserts 24 bytes
     // of padding after belowHorizonDarkPadding to reach offset 176.
     float belowHorizonDarkColorStd140PrePad[6];
-    float belowHorizonDarkColor[3];
+    Mathematics::Vector3 belowHorizonDarkColor;
     // Trailing scalar packs into belowHorizonDarkColor's 16-byte slot at offset 188.
     uint32_t belowHorizonMode;
     // PlanetGround aerial-perspective haze strength on its own std140 row at 192.
     float groundHazeStrength;
+    // std140 pads groundHazeStrength to mieAbsorption at 208; GLSL leaves the pad implicit.
     float groundHazeStrengthPad[3];
     // Aerosol absorption per metre at sea level (Mie extinction = betaMie + mieAbsorption), on the
     // Mie density profile.
-    float mieAbsorption[3];
+    Mathematics::Vector3 mieAbsorption;
     // Ozone layer: a tent of density 1 at ozoneCenterHeight falling linearly to 0 at
     // ozoneCenterHeight +- ozoneHalfWidth (metres). It absorbs and does not scatter.
     float ozoneCenterHeight;
-    float ozoneAbsorption[3];
+    Mathematics::Vector3 ozoneAbsorption;
     float ozoneHalfWidth;
 };
 
@@ -89,37 +93,37 @@ static_assert(offsetof(AtmosphereParametersGPU, ozoneHalfWidth) == 236, "Atmosph
 // sky_render.frag / sky_stars_billboard.{vert,frag}.
 struct SkyUBOGPU
 {
-    float cameraPosition[3]; float exposureEV;
-    float cameraRight[3];    float pad0;
-    float cameraUp[3];       float pad1;
-    float cameraForward[3];  float skyPan2D;
-    float sunDirection[3];   float sunAngularRadius;
-    float moonDirection[3];  float moonIntensity;
+    Mathematics::Vector3 cameraPosition; float exposureEV;
+    Mathematics::Vector3 cameraRight;    float pad0;
+    Mathematics::Vector3 cameraUp;       float pad1;
+    Mathematics::Vector3 cameraForward;  float skyPan2D;
+    Mathematics::Vector3 sunDirection;   float sunAngularRadius;
+    Mathematics::Vector3 moonDirection;  float moonIntensity;
     float moonAngularRadius;
     float skyRotateAroundZenithRadians;
     float moonUboPad1;
     float moonUboPad2;
-    float sunColor[3];       float sunIntensity;
+    Mathematics::Vector3 sunColor;       float sunIntensity;
     float timeOfDayHours;    float starsUndoCompensation; // 1: the star pass undoes the exposure compensation
     float viewportAspect;    float tanHalfFovY;
-    float viewportResolution[2]; float nightSkyBlend; float skyTimeSeconds;
+    Mathematics::Vector2 viewportResolution; float nightSkyBlend; float skyTimeSeconds;
     // x = limiting magnitude (V), y = star highlight compression (1 = physical),
     // z = twinkle amount at airmass 10, w = twinkle rate.
-    float starModel[4];
+    Mathematics::Vector4 starModel;
     // x = HDRI rotation in radians; y = HDRI intensity, or kSkyHdriProceduralSentinel (< 0) for
     // the procedural sky; z = the stars' artistic glow (0 = none); w = 1 when faint stars fade to white.
-    float skyboxParams[4];
+    Mathematics::Vector4 skyboxParams;
     // x = the falling stars' slot count, the first instances of the star billboard's draw (0 = off);
     // y = the mean interval between two falling stars in seconds; zw unused.
-    float fallingStarParams[4];
+    Mathematics::Vector4 fallingStarParams;
     // Gradient sky: .rgb = scene-linear premultiplied color, gradientSkyTop.w = mode sentinel
     // (>= 0.5 -> render the gradient instead of the atmosphere). Blended by view-dir.y.
-    float gradientSkyTop[4];
-    float gradientSkyHorizon[4];
-    float gradientSkyBottom[4];
+    Mathematics::Vector4 gradientSkyTop;
+    Mathematics::Vector4 gradientSkyHorizon;
+    Mathematics::Vector4 gradientSkyBottom;
     // x = star core size (1 = physical), y = the spikes' share of the glow, z = spike length in glow
     // radii, w = the star shape (0 = point, 1 = sparkle). Only the star billboard declares it.
-    float starShape[4];
+    Mathematics::Vector4 starShape;
 };
 
 static_assert(sizeof(SkyUBOGPU) == 272, "SkyUBOGPU must match GLSL SkyUBO std140 layout");
@@ -229,13 +233,13 @@ class SkyRenderer
 
     struct CameraState
     {
-        float position[3] = {0, 0, 0};
+        Mathematics::Vector3 position = {0.0f, 0.0f, 0.0f};
         // LH +Z. Live sky does not read this (SkyRenderNode::ExtractCameraVectors
         // copies view row 2). The default must still match that convention so a
         // future SetCamera caller does not inherit a right-handed look.
-        float forward[3] = {0, 0, 1};
-        float up[3] = {0, 1, 0};
-        float right[3] = {1, 0, 0};
+        Mathematics::Vector3 forward = {0.0f, 0.0f, 1.0f};
+        Mathematics::Vector3 up = {0.0f, 1.0f, 0.0f};
+        Mathematics::Vector3 right = {1.0f, 0.0f, 0.0f};
         float fovYDegrees = 60.0f;
         float aspect = 1.777f;
         uint32_t viewportWidth = 1280;

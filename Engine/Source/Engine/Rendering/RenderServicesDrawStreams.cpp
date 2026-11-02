@@ -310,8 +310,17 @@ void RenderServices::EmitProducerForwardCommandsForView(Rendering::ViewId viewId
     ctx.ViewId = viewId;
     ctx.Purpose = purpose;
 
+    // A depth-writing producer's draws carry no content epoch, so a view it draws into can change
+    // its depth this frame (grass sways).
+    bool drawsDynamicDepth = false;
     for (const auto& entry : m_DrawProducers->Forward)
+    {
+        const size_t emittedBefore = pv.ForwardCommands.size();
         entry.Fn(ctx);
+        drawsDynamicDepth = drawsDynamicDepth || (entry.WritesDepth && pv.ForwardCommands.size() > emittedBefore);
+    }
+    if (drawsDynamicDepth)
+        NotifyUnversionedMotion(viewId);
 }
 
 void RenderServices::EmitProducerDepthCommands()

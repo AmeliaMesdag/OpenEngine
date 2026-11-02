@@ -20,6 +20,8 @@ constexpr const char* kStyleAssetPath = "UI/controls/InspectorNotice/InspectorNo
 constexpr const char* kPlateClass = "inspector-notice-plate";
 constexpr const char* kTextClass = "inspector-notice-text";
 constexpr const char* kActionClass = "inspector-notice-action";
+constexpr const char* kDismissClass = "inspector-notice-dismiss";
+constexpr const char* kDismissLabel = "Dismiss";
 constexpr const char* kHeadingClass = "inspector-notice-heading";
 constexpr const char* kTitleClass = "inspector-notice-title";
 constexpr const char* kGlyphClass = "inspector-notice-glyph";
@@ -82,12 +84,14 @@ InspectorNotice::InspectorNotice(const std::string& text, Kind kind)
 
     m_Text = dynamic_cast<Label*>(InspectorDrag::FindChildByClass(plateRaw, kTextClass));
     m_Action = dynamic_cast<Button*>(InspectorDrag::FindChildByClass(plateRaw, kActionClass));
-    if (!m_Text || !m_Action)
+    m_Dismiss = dynamic_cast<Button*>(InspectorDrag::FindChildByClass(plateRaw, kDismissClass));
+    if (!m_Text || !m_Action || !m_Dismiss)
     {
-        Logger::Log::Error("InspectorNotice: {} needs a Label '{}' and a Button '{}' in its plate.", kLayoutAssetPath,
-                           kTextClass, kActionClass);
+        Logger::Log::Error("InspectorNotice: {} needs a Label '{}' and Buttons '{}' and '{}' in its plate.",
+                           kLayoutAssetPath, kTextClass, kActionClass, kDismissClass);
         m_Text = nullptr;
         m_Action = nullptr;
+        m_Dismiss = nullptr;
         return;
     }
 
@@ -98,14 +102,17 @@ InspectorNotice::InspectorNotice(const std::string& text, Kind kind)
     AddKindClass(plateRaw, kPlateClass, kindSuffix);
     AddKindClass(m_Text, kTextClass, kindSuffix);
     AddKindClass(m_Action, kActionClass, kindSuffix);
+    AddKindClass(m_Dismiss, kDismissClass, kindSuffix);
     AddKindClass(m_Title, kTitleClass, kindSuffix);
     AddKindClass(m_Glyph, kGlyphClass, kindSuffix);
-    // The button attaches the shared button sheet to itself, which puts it after this notice's sheet
-    // in the action's cascade. Attaching the notice's sheet to the action as well, after the
+    // A button attaches the shared button sheet to itself, which puts it after this notice's sheet
+    // in the button's cascade. Attaching the notice's sheet to each button as well, after the
     // button's, lets the kind's single-class edge rule outrank the button's border color.
     m_Action->RequestSubtreeStyleAssetPath(kStyleAssetPath, "editor");
+    m_Dismiss->RequestSubtreeStyleAssetPath(kStyleAssetPath, "editor");
     m_Text->SetText(text);
     m_Action->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) { InvokeAction(); });
+    m_Dismiss->RegisterEventHandler(kEventButtonClick, [this](UIEvent&) { InvokeDismiss(); });
 }
 
 void InspectorNotice::SetAction(const std::string& label, const std::string& tooltip, std::function<void()> onInvoke)
@@ -116,6 +123,16 @@ void InspectorNotice::SetAction(const std::string& label, const std::string& too
     m_Action->SetText(label);
     m_Action->SetTooltip(tooltip);
     m_Action->RemoveClass(kHiddenClass);
+}
+
+void InspectorNotice::SetDismiss(const std::string& tooltip, std::function<void()> onDismiss)
+{
+    m_OnDismiss = std::move(onDismiss);
+    if (!m_Dismiss)
+        return;
+    m_Dismiss->SetText(kDismissLabel);
+    m_Dismiss->SetTooltip(tooltip);
+    m_Dismiss->RemoveClass(kHiddenClass);
 }
 
 void InspectorNotice::SetTitle(const std::string& title)
@@ -146,6 +163,12 @@ void InspectorNotice::InvokeAction()
 {
     if (m_OnInvoke)
         m_OnInvoke();
+}
+
+void InspectorNotice::InvokeDismiss()
+{
+    if (m_OnDismiss)
+        m_OnDismiss();
 }
 
 } // namespace GameEngine::EditorUI

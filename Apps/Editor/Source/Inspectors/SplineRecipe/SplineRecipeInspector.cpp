@@ -4,11 +4,17 @@
 #include "Inspectors/DefaultComponentInspector.h"
 #include "Inspectors/InspectorUIHelpers.h"
 #include "Inspectors/SplineRecipe/SplineRecipeStateNotice.h"
+#include "UI/AssetField.h"
 #include "UI/Controls/InspectorNotice.h"
 
 #include "Components/Spline/SplineWall.h"
+#include "Core/Engine.h"
+#include "ECS/Systems.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
+#include "ECSModules/Rendering/RenderingLoop.h"
+#include "SplineRecipes/RecipeControllers.h"
+#include "SplineRecipes/SplineRecipeSystem.h"
 #include "SplineRecipes/SplineRecipesScriptApi.h"
 #include "Types/StringUtils.h"
 
@@ -16,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace GameEngine
 {
@@ -78,6 +85,19 @@ void BuildSplineWallInspector(const InspectorContext& context)
     RenderDefaultComponentInspector(context, ECS::GetComponentTypeId<Components::SplineWall>());
 }
 
+// The first asset field under `element`, depth first; null when it holds none.
+AssetField* FindAssetField(UIElement& element)
+{
+    if (auto* field = dynamic_cast<AssetField*>(&element))
+        return field;
+    for (const auto& child : element.GetChildren())
+    {
+        if (AssetField* field = FindAssetField(*child))
+            return field;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 BuildStateWords DescribeBuildState(BuildState state, std::string_view reason, std::span<const std::string> warnings)
@@ -126,6 +146,23 @@ void AddSplineRecipeBuildStateNotice(const InspectorContext& context)
         return;
     AddBuildStateNotice(context, SplineRecipes::StateOf(*context.World, context.Entity).State,
                         SplineRecipes::ReasonOf(*context.World, context.Entity), {});
+}
+
+const SplineRecipes::RecipeControllers* RunningRecipeControllers()
+{
+    auto* loop = EngineCore::GetInstance().GetRenderingLoop();
+    auto* systems = loop ? loop->GetSystemManager() : nullptr;
+    const auto* recipes = systems ? systems->GetSystem<SplineRecipes::SplineRecipeSystem>() : nullptr;
+    return recipes ? &recipes->GetControllers() : nullptr;
+}
+
+UIElement* ShowAssetFieldEmptyAs(UIElement& rows, std::string emptyText)
+{
+    AssetField* field = FindAssetField(rows);
+    if (!field)
+        return nullptr;
+    field->SetEmptyText(std::move(emptyText));
+    return InspectorUI::RowOfControl(field);
 }
 
 void RegisterSplineWallInspector()

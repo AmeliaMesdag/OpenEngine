@@ -7,6 +7,7 @@
 #include "ECS/Components.h"
 #include "ECS/ECS.h"
 #include "ECS/ECSTemplates.h"
+#include "Mathematics/Geometry.h"
 #include "Mathematics/Interpolation.h"
 #include "Mathematics/MatrixOps.h"
 #include "Mathematics/Ray.h"
@@ -39,11 +40,6 @@ Color MeasureColor(const Components::MeasureComponent& measure, float alphaScale
                  Math::Clamp01(measure.Color[3] * alphaScale));
 }
 
-Vector3 Lerp(const Vector3& a, const Vector3& b, float t)
-{
-    return a + (b - a) * t;
-}
-
 void DrawDottedWorldLine(GizmoRenderContext& context,
                          const Vector3& from,
                          const Vector3& to,
@@ -58,8 +54,8 @@ void DrawDottedWorldLine(GizmoRenderContext& context,
     const float period = std::max(segmentLength, 0.001f) * 2.0f;
     for (float d = 0.0f; d < length; d += period)
     {
-        context.DrawColoredLine(Lerp(from, to, d / length),
-                                Lerp(from, to, std::min(d + segmentLength, length) / length),
+        context.DrawColoredLine(Mathematics::Lerp(from, to, d / length),
+                                Mathematics::Lerp(from, to, std::min(d + segmentLength, length) / length),
                                 color, thickness);
     }
 }

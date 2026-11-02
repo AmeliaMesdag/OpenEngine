@@ -87,16 +87,12 @@ bool UIManager::RenderRG(RenderGraph::RGFrame& frame, RenderGraph::RGTexture tar
     // keeps every draw early-out; the attachment ClearOps run regardless.
     const SdfFrameData fd = PrepareSdfFrameData();
 
-    // Resolve this frame's deferred bindings against the per-frame publish
-    // map. Only stamps matching THIS (frame, frameIndex) are consumable —
-    // anything else is a stale publish from a previous frame/incarnation and
-    // is skipped (the slot keeps its last physical; CreateTransientFrameSet's
-    // dead-handle repair covers destruction). Old-graph rgRef bindings are
-    // skipped entirely on RenderGraph frames: their producers force old-arm excursion
-    // frames, so they are never sampled stale here.
+    // Resolve each deferred binding against this frame's publish map; a stale
+    // publish is skipped and its slot keeps its last texture. The execute step
+    // writes through the reservation, so a slot released before it runs stays as is.
     struct ResolvedBinding
     {
-        uint32_t Slot = 0;
+        ::GenerationalVector::Handle Reservation;
         RenderGraph::RGTexture Tex{};
     };
     std::vector<ResolvedBinding> resolved;
@@ -111,7 +107,7 @@ bool UIManager::RenderRG(RenderGraph::RGFrame& frame, RenderGraph::RGTexture tar
         const PublishedRGTexture& pub = itPub->second;
         if (!pub.For.IsFor(frame) || pub.TexId == RenderGraph::kInvalidId)
             continue; // stale publish — never consume a foreign frame's id
-        resolved.push_back({binding.Slot, RenderGraph::RGTexture{pub.TexId}});
+        resolved.push_back({binding.Reservation, RenderGraph::RGTexture{pub.TexId}});
     }
 
     const BufferHandle primBuf      = m_SdfPrimRing ? m_SdfPrimRing->GetBuffer() : BufferHandle{};
@@ -221,7 +217,7 @@ bool UIManager::RenderRG(RenderGraph::RGFrame& frame, RenderGraph::RGTexture tar
                 {
                     const TextureHandle physical = ctx.GetTexture(rb.Tex);
                     if (physical.IsValid())
-                        m_SdfTextureRegistry->UpdateSlot(rb.Slot, physical);
+                        m_SdfTextureRegistry->UpdateSlot(rb.Reservation, physical);
                 }
             }
             const size_t drawCount = m_DrawOrder.size();

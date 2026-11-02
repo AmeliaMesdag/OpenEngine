@@ -337,12 +337,10 @@ void TemporalFxaaNode::DeclareForView(ViewDeclare& d)
         FxaaResolveParamsCPU params{};
         // UNJITTERED matrices: reprojection must be phase-stable so a static
         // camera maps a pixel to itself exactly (else the image crawls).
-        GameEngine::Rendering::Matrix4x4 vp;
-        std::memcpy(vp.Data(), state->CurrCamera.viewProj, sizeof(float) * 16);
-        const GameEngine::Rendering::Matrix4x4 invVp = GameEngine::Mathematics::Inverse(vp);
+        const GameEngine::Rendering::Matrix4x4 invVp = GameEngine::Mathematics::Inverse(state->CurrCamera.viewProj);
         std::memcpy(params.InvViewProj, invVp.Data(), sizeof(float) * 16);
         std::memcpy(params.PrevViewProj,
-                    state->PrevValid ? state->PrevCamera.viewProj : state->CurrCamera.viewProj,
+                    (state->PrevValid ? state->PrevCamera.viewProj : state->CurrCamera.viewProj).Data(),
                     sizeof(float) * 16);
         params.Extent[0] = static_cast<float>(w);
         params.Extent[1] = static_cast<float>(h);

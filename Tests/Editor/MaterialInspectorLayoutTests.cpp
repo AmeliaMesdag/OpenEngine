@@ -180,7 +180,7 @@ std::unique_ptr<UIElement> MakePanel()
 {
     auto panel = std::make_unique<UIElement>();
     panel->AddClass("inspector-panel");
-    panel->Overrides().Set(Style::Display, DisplayMode::Flex).Set(Style::FlexDir, FlexDirection::Column);
+    panel->Style().Set(Style::Display, DisplayMode::Flex).Set(Style::FlexDir, FlexDirection::Column);
     return panel;
 }
 
@@ -393,7 +393,7 @@ TEST(MaterialInspectorLayout, TheAssetViewRowsSpanTheAssetContent)
     auto panel = MakePanel();
     auto assetContent = std::make_unique<UIElement>();
     assetContent->AddClass("inspector-asset-content");
-    assetContent->Overrides()
+    assetContent->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::PaddingLeft, StyleLength::Px(kAssetContentInsetPx))

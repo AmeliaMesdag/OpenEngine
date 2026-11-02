@@ -1,13 +1,13 @@
 ---
 title: Memory
-description: Counting memory the engine's statistics should show with TrackedBytes, and allocating with Arena, ScratchScope, ObjectPool and RangeAllocator.
+description: Counting memory the engine's statistics should show with TrackedBytes, and allocating with Arena, ScratchScope, ObjectPool, RangeAllocator and FrameMemory.
 sidebar:
   order: 14
 ---
 
 :::note[Who this is for]
 
-engine and game-module developers who hold memory the general heap does not see (device buffers, pools, caches) and want it to show in the engine's memory statistics, or who allocate many short-lived objects together and want to free them all at once, or who need working memory for one call without touching the general heap, or who pool objects, or who place ranges in a buffer they own. The headers are under `Engine/Modules/Memory/Include/Memory/`. A game module reaches them by linking `Engine`, and `GameSDK/GameSDK.h` includes `ScratchScope.h` and `ObjectPool.h`. This guide grows with the Memory module. It covers `TrackedBytes`, the stats snapshot, `Arena`, `ScratchScope`, `ObjectPool` and `RangeAllocator` today.
+engine and game-module developers who hold memory the general heap does not see (device buffers, pools, caches) and want it to show in the engine's memory statistics, or who allocate many short-lived objects together and want to free them all at once, or who need working memory for one call without touching the general heap, or who pool objects, or who place ranges in a buffer they own, or who keep data for the rest of the frame and the next one. The headers are under `Engine/Modules/Memory/Include/Memory/`. A game module reaches them by linking `Engine`, and `GameSDK/GameSDK.h` includes `ScratchScope.h`, `ObjectPool.h` and `FrameMemory.h`. This guide grows with the Memory module. It covers `TrackedBytes`, the stats snapshot, `Arena`, `ScratchScope`, `ObjectPool`, `RangeAllocator` and `FrameMemory` today.
 
 :::
 
@@ -78,7 +78,7 @@ for (const GameEngine::Memory::StatsEntry& entry : GameEngine::Memory::SnapshotS
 ```
 
 - `SnapshotStats()` copies every `TrackedBytes`, `Arena`, `ObjectPool` and `RangeAllocator` alive at the call, and the scratch arena of every thread that has opened a `ScratchScope`, newest first, as `StatsEntry { Name, Kind, Residency, Bytes, ReservedBytes, HighWaterBytes, Blocks, ThreadId, OutOfOrder, Shrinks }`.
-- `Kind` says which registered it. For a `TrackedBytes`, `Bytes` is its count and the other three are 0. For an `Arena`, `Bytes` is the bytes in use, `ReservedBytes` the bytes of its blocks, `HighWaterBytes` the most it has had in use, and `Blocks` how many blocks it holds. An arena updates them when it acquires a block and at `Rewind` and `Reset`, so between those they show the value as of the last one. For an `ObjectPool`, the counts are slot bytes as of its last block acquisition: `Bytes` the live objects' slots and `HighWaterBytes` the most ever live (a pool acquires a block only when every slot is live, so the two are equal), `ReservedBytes` its blocks and `Blocks` how many. Its `LiveCount()` is exact at any time. For a `RangeAllocator`, the counts are bytes (units times its unit size), current after every call: `Bytes` the live ranges (those waiting for `ReclaimThrough` included), `HighWaterBytes` the most ever live, `ReservedBytes` the end of the highest range ever handed out (how much of your storage it has used) and `Blocks` the ranges handed out and not returned. A `Scratch` entry (named `Memory.Scratch`, one per thread) has the arena's counts plus `ThreadId` (the OS thread id), `OutOfOrder` (allocations through a scope that was not the innermost, section 4) and `Shrinks` (times the thread released a retained block). The last three are 0 for every other kind. A thread publishes its scratch counts when it acquires a block and at every 64th outermost close, so between those they can lag.
+- `Kind` says which registered it. For a `TrackedBytes`, `Bytes` is its count and the other three are 0. For an `Arena`, `Bytes` is the bytes in use, `ReservedBytes` the bytes of its blocks, `HighWaterBytes` the most it has had in use, and `Blocks` how many blocks it holds. An arena updates them when it acquires a block and at `Rewind` and `Reset`, so between those they show the value as of the last one. For an `ObjectPool`, the counts are slot bytes as of its last block acquisition: `Bytes` the live objects' slots and `HighWaterBytes` the most ever live (a pool acquires a block only when every slot is live, so the two are equal), `ReservedBytes` its blocks and `Blocks` how many. Its `LiveCount()` is exact at any time. For a `RangeAllocator`, the counts are bytes (units times its unit size), current after every call: `Bytes` the live ranges (those waiting for `ReclaimThrough` included), `HighWaterBytes` the most ever live, `ReservedBytes` the end of the highest range ever handed out (how much of your storage it has used) and `Blocks` the ranges handed out and not returned. A `Scratch` entry (named `Memory.Scratch`, one per thread) has the arena's counts plus `ThreadId` (the OS thread id), `OutOfOrder` (allocations through a scope that was not the innermost, section 4) and `Shrinks` (times the thread released a retained block). A `FrameMemory` entry (named `Memory.Frame.Even` or `Memory.Frame.Odd`, two per thread, section 7) has the arena's counts plus `ThreadId` and `Shrinks`, written at each reset of that arena. `ThreadId`, `OutOfOrder` and `Shrinks` are 0 for every other kind. A thread publishes its scratch counts when it acquires a block and at every 64th outermost close, so between those they can lag.
 - In a running editor, the `get_memory_stats` debug-port method (and the MCP tool of the same name) returns the same entries with each scratch thread's name, the editor's frame count, and the process's resident size.
 - It takes the registry's mutex and allocates the copy: call it from tools, tests, and debug views, not from a per-frame path.
 - Each count is read once, without stopping its owner, so a count another thread is changing reads as its value just before or just after that change.
@@ -295,5 +295,59 @@ class TerrainChunkBuffer
 :::tip[Cost]
 
 The free ranges sit in bins by size (a power of two, split into eight), and a bitmap finds the first bin that can fit a request. `Allocate` takes the smallest free range that fits, the lowest offset among equal ones, from the request's own bin or the first larger bin that has one, so it walks the free ranges of at most two bins, never all of them. The grant is cut from the low end of that range and is never larger than the request. `Free` is constant time and merges with both neighbors. `ReclaimThrough` returns at once when nothing is due, otherwise it walks the queue. The stats are written at every call that changes them.
+
+:::
+
+## 7. FrameMemory: memory for this frame and the next
+
+`Memory::FrameMemory` is memory that stays valid until the end of the next frame. Use it for data that one system makes in its update and other code reads later in the same frame or in the next one: the targets a system selects for the next frame's AI pass, the hits of this frame's queries that the UI shows. Nothing is freed one by one: the engine reuses the memory two frames later. Each thread allocates from its own two arenas, one for even frames and one for odd frames, so threads never wait for each other, and a steady frame allocates nothing from the general heap.
+
+```cpp title="Data for the rest of the frame and the next one with FrameMemory"
+#include "Memory/FrameMemory.h"
+
+void TargetingSystem::Update(ECS::World& world, float deltaTime)
+{
+    std::span<Candidate> candidates =
+        GameEngine::Memory::FrameMemory::AllocateArrayForOverwrite<Candidate>(m_Units.size());
+    std::size_t count = 0;
+    for (const Unit& unit : m_Units)
+        if (unit.IsHostile())
+            candidates[count++] = {unit.Handle, unit.DistanceTo(m_Origin)};
+    m_LastCandidates = candidates.first(count);                       // read until the next frame ends
+    std::pmr::vector<Hit> hits{&GameEngine::Memory::FrameMemory::Resource()};
+    ...
+}
+```
+
+| Part | What it does |
+|---|---|
+| `Allocate(bytes, alignment)` | Raw memory from the calling thread's arena for this frame, aligned to any power of two. Never null: memory that cannot be acquired throws `std::bad_alloc`. |
+| `AllocateArray<T>(n)` / `AllocateArrayForOverwrite<T>(n)` / `CopyArray<T>(span)` | As on `Arena`: zeroed, indeterminate (fill it before reading), or a copy. Trivially destructible `T` only. |
+| `Resource()` | One `std::pmr::memory_resource` for every thread: each allocation comes from the arena of the thread that makes it. A container on it runs its own destructor; its frees do nothing. |
+
+### Who may allocate
+
+- The frame thread during the frame, and the units it joins: the units of a `ParallelFor` it runs, and the units of a `Run` whose counter it waits before the frame ends. The units that those units fork get the same right.
+- A `Submit`, `EnqueueWork` or channel body can run after the frame ends, and so can a fork that it publishes. Debug and DebugFast stop its allocation at an assert ("frame memory is only for the frame thread and the forks it joins; this body may outlive the frame: use an Arena you own"). Use an `Arena` you own there.
+- Wait every `Run` in the frame that publishes it. Debug and DebugFast assert at the start of the next frame when a `Run` unit that frame code published has not run ("a Run unit that frame code published is still outstanding at the frame advance"). Put work that you poll across frames in a `Submit` or an `EnqueueWork`.
+- The tasks that scripting posts to the main thread run without the right, because the work that posts them can outlive the frame.
+
+### Rules
+
+1. **Two frames, then reused.** Memory allocated in frame F is valid through the end of frame F+1. Do not keep a pointer, span or container from it longer: copy what must stay into memory you own.
+2. **A container lives as long as its frame's memory.** Destroy a container on `Resource()`, or stop using it, by the end of the next frame, and grow it only in the frame that made it.
+3. **Joined units may grow a frame container.** A joined unit on a worker that grows a frame container takes the new buffer from its own thread's arena, which stays valid exactly as long. Keep one writer at a time, as for any container.
+4. **CPU memory only.** Copy frame data into a GPU upload ring when you record the upload. An upload that runs later never reads from frame memory.
+5. **No frame loop, no frame memory.** A tool or a test without the application's frame loop uses a `ScratchScope` or an `Arena` it owns. Before the first frame, Debug and DebugFast assert ("frame memory needs a running frame loop; use a ScratchScope or an Arena you own"). Tests use `Memory::Testing::SimulatedFrame` (`Memory/Testing/SimulatedFrame.h`): it starts the next frame and gives the test thread, and the units it forks, the right to allocate, as a frame does.
+6. **Thread exit.** While the frame loop runs, a thread that exits with frame memory of the current or the last frame stops at an assert in Debug and DebugFast. The application stops the frame loop before the job pool's threads exit.
+
+### Retention
+
+- A thread's even-frame arena resets at the thread's first allocation in each new even frame, and its odd-frame arena the same way, so nothing walks the threads at the start of a frame. A thread that never allocates frame memory has no arenas.
+- A block more than twice the largest need of at least the last 1024 resets of that arena is released, so a one-frame spike on a worker is returned within about 2050 further resets of that arena (about 4100 frames for a thread that allocates in every frame), while a steady large user keeps its block. `HighWaterBytes` and `Shrinks` in the arena's stats entry show both.
+
+:::tip[Cost]
+
+an allocation is a read of the frame index, a thread-local lookup and the arena's bump. The thread's first allocation in a frame adds the arena's reset. The Debug and DebugFast checks add a read of the thread's frame-joined bit per allocation and the `Arena` fills.
 
 :::

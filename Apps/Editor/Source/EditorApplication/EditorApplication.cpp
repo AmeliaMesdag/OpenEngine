@@ -1,8 +1,8 @@
 #include "EditorApplication/EditorApplication.h"
 #include "Editor/BuildExporters/SteamDeckBuildExporter.h"
 #include "Editor/BuildExporters/WebBuildExporter.h"
-#include "Editor/Application/BuildConfigStatus.h"
 #include "Editor/Application/EditorVersion.h"
+#include "Editor/Application/MainWindowTitle.h"
 #include "Editor/Registries/BuiltInStatusBarItems.h"
 #include "EditorPanelIds.h"
 #include "EditorPanelManager.h"
@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "UI/Layout/DockingHitTest.h"
+#include "UI/Layout/ElementOverrideHelpers.h"
 #include "UI/Layout/EditorDockConfigParser.h"
 #include "UI/Interaction/ContextMenuManipulator.h"
 #include "UI/Interaction/DragDrop/DragDropManager.h"
@@ -99,7 +100,6 @@
 #include "Startup/EditorCommandLine.h"
 #include "Startup/EditorPathPolicy.h"
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 
 #include "ExternalScriptEditorLauncher.h"
@@ -885,6 +885,14 @@ static bool BeginWindowRenderFrame(EditorApplication::EditorWindowContext* ctx,
         return false;
     }
 
+    const auto width = static_cast<uint32_t>(std::max(ctx->width, 0));
+    const auto height = static_cast<uint32_t>(std::max(ctx->height, 0));
+    uint32_t swapchainWidth = 0;
+    uint32_t swapchainHeight = 0;
+    dev->GetWindowTargetSize(ctx->renderCtx->GetWindowTarget(), swapchainWidth, swapchainHeight);
+    if (ctx->swapchainResize.TakeRecreate(width, height, swapchainWidth, swapchainHeight))
+        ctx->renderCtx->RecreateWindowTargetSwapchain(width, height);
+
     if (!dev->BeginFrame())
     {
         // BeginFrame returns false on two acquire conditions:
@@ -1031,7 +1039,7 @@ static void BindGameViewRG(EditorApplication::EditorWindowContext* ctx,
     {
         ctx->ui->RemoveExternalTexture("game_main");
         if (viewport)
-            ctx->ui->ClearElementBackgroundTexture(*viewport);
+            viewport->Style().Reset(Style::BackgroundImage);
         gvPanel->SetNoCameraOverlayVisible(!ctx->gameView->HadCameraThisFrame());
         return;
     }
@@ -1054,28 +1062,7 @@ static void BindGameViewRG(EditorApplication::EditorWindowContext* ctx,
         ctx->ui->SetExternalTexture("game_main", physical, texW, texH, space);
     }
     if (bindViewportBackground && viewport)
-    {
-        // Rebind only when the binding actually changes — the unconditional
-        // Reset/Set cycle dirtied the viewport element every rendered frame
-        // (StyleOverrides::Reset erases a present override), keeping the UI
-        // tree perpetually dirty via sibling-combinator invalidation. Same
-        // fix as SceneViewRenderCoordinator::BindRG.
-        const auto currentBg = viewport->Overrides().Get(Style::BackgroundImage);
-        const bool alreadyBound = currentBg.has_value() &&
-                                  currentBg->Kind == BackgroundImageSource::SourceKind::ResourceName &&
-                                  currentBg->Value == "game_main" &&
-                                  !viewport->HasBackgroundImageTextureOverride();
-        if (!alreadyBound)
-        {
-            ctx->ui->ClearElementBackgroundTexture(*viewport);
-            viewport->Styles()
-                .SetBackgroundResourceName("game_main")
-                .SetBackgroundRepeat(BackgroundRepeat::NoRepeat)
-                .SetBackgroundSizeCover()
-                .SetBackgroundPositionPercent(50.0f, 50.0f)
-                .ResetBackgroundTint();
-        }
-    }
+        UI::Layout::BindViewportTexture(*viewport, "game_main");
     gvPanel->SetNoCameraOverlayVisible(!ctx->gameView->HadCameraThisFrame());
 }
 
@@ -1762,6 +1749,131 @@ void EditorApplication::ConfigureFromCommandLine(const GameEngine::Editor::Start
                                                                         args.sessionLabel);
 }
 
+void EditorApplication::BeginMainWindowAndDevice(JobSystem::JobChannel& startupChannel)
+{
+    const auto tWindow = std::chrono::high_resolution_clock::now();
+    auto mainCtx = std::make_unique<EditorWindowContext>();
+    WindowDescriptor mainDesc{};
+    mainDesc.role = WindowRole::Main;
+    mainDesc.capabilities.worldRender = true;
+    mainDesc.capabilities.uiOnly = false;
+    mainDesc.capabilities.thumbnails = true;
+    mainDesc.capabilities.dockingHost = true;
+    mainDesc.title = GetConfig().Name;
+    ApplyWindowDescriptor(*mainCtx, mainDesc, m_NextWindowId++);
+
+    int windowWidth = static_cast<int>(GetConfig().WindowWidth);
+    int windowHeight = static_cast<int>(GetConfig().WindowHeight);
+
+    // Only the work-area size feeds the initial window bounds; the window opens
+    // maximized on the default monitor, so its origin is the OS's to pick.
+    int workW = 0;
+    int workH = 0;
+    {
+        int workOriginX = 0;
+        int workOriginY = 0;
+        Platform::GetPrimaryMonitorWorkArea(workOriginX, workOriginY, workW, workH);
+    }
+    const std::filesystem::path startupSettingsRoot = ResolveStartupProjectSettingsRoot(GetConfig());
+    // The main window always opens on the default monitor: rendering.hdr.targetDisplay
+    // gates whether HDR engages there, it does not place the window. The saved HDR mode
+    // itself reaches the swapchain below, via ConfigureStartupDeviceDesc.
+    // The window size is the larger of the configured size and the work area.
+    windowWidth = std::max(windowWidth, static_cast<int>(workW));
+    windowHeight = std::max(windowHeight, static_cast<int>(workH));
+
+    mainCtx->width = windowWidth;
+    mainCtx->height = windowHeight;
+    mainCtx->title = GetConfig().Name;
+    mainCtx->window = std::make_unique<Platform::Window>();
+    // Create hidden; show after first rendered frame to avoid white-screen flash.
+    // The first platform event poll triggers ~1.8s of OS/driver window-show processing.
+    // By keeping the window hidden until after the first render, the user sees a
+    // fully rendered editor instead of a blank window.
+    if (!mainCtx->window->Create({.Title = mainCtx->title,
+                                  .Width = mainCtx->width,
+                                  .Height = mainCtx->height,
+                                  .StartHidden = true,
+                                  .StartMaximized = true}))
+    {
+        Logger::Log::Error("Editor: Failed to create main window");
+        return;
+    }
+    {
+        const auto monitors = Platform::EnumerateMonitors();
+        Logger::Log::Info("Editor: detected {} monitor(s)", monitors.size());
+        for (const auto& monitor : monitors)
+        {
+            Logger::Log::Info("Editor: monitor[{}] '{}' primary={} pos={}x{} size={}x{} work={}x{}+{}+{} refresh={:.1f}Hz hdrAvailable={} hdrActive={}",
+                              monitor.index,
+                              monitor.name,
+                              monitor.primary ? "true" : "false",
+                              monitor.x,
+                              monitor.y,
+                              monitor.width,
+                              monitor.height,
+                              monitor.workWidth,
+                              monitor.workHeight,
+                              monitor.workX,
+                              monitor.workY,
+                              monitor.refreshRate,
+                              monitor.hdrAvailable ? "true" : "false",
+                              monitor.hdrActive ? "true" : "false");
+        }
+    }
+
+    // Linux: load window icon at runtime via GLFW. Windows/macOS rely on
+    // embedded resources or bundle icons.
+#if !defined(_WIN32) && !defined(__APPLE__)
+    {
+        const auto iconPath = ApplicationPaths::GetExecutableDirectory() / "AppIcon.png";
+        Vector<uint8> iconBytes;
+        if (ReadFileBytesShared(iconPath, iconBytes))
+        {
+            const Image::Image8 icon = Image::Decode8(iconBytes, iconPath.string(), Image::DecodeChannels::Rgba);
+            if (icon.Valid)
+                mainCtx->window->SetIcon(icon.Pixels.data(), static_cast<int>(icon.Width),
+                                         static_cast<int>(icon.Height));
+        }
+    }
+#endif
+    Logger::Log::Info("[Startup] Window creation: {:.1f}ms",
+                      std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tWindow).count());
+
+    DeviceDesc desc{};
+    desc.preferredAPI = LoadPreferredGraphicsApi();
+    desc.enableSwapchain = true;
+    desc.persistPipelineCache = true;
+    desc.applicationName = GetConfig().Name;
+    if (Engine::Renderer::ShouldEnableVkValidation())
+    {
+        desc.enableDebugLayer = true;
+    }
+    {
+        auto prefs = Editor::OpenEditorPreferences();
+        std::string err;
+        prefs.Load(&err);
+        bool vsync = true;
+        prefs.TryGetBool("performance.vsync", vsync);
+        // GE_VSYNC overrides the saved preference (diagnostics / forced runs).
+        if (const char* vsyncEnv = std::getenv("GE_VSYNC"))
+        {
+            if (vsyncEnv[0] != '\0')
+                vsync = (vsyncEnv[0] != '0');
+        }
+        desc.vsync = vsync;
+    }
+    const int initialMonitorIndex = mainCtx->window ? mainCtx->window->GetActiveMonitorIndex() : -1;
+    Editor::HdrOutputController::ConfigureStartupDeviceDesc(desc, startupSettingsRoot, initialMonitorIndex);
+
+    // The device needs neither the window nor the engine's later startup work, so it is
+    // created on a job while they run. Ownership is centralized in RenderDeviceContext so
+    // shutdown ordering is consistent.
+    mainCtx->renderCtx = std::make_unique<GameEngine::Engine::Renderer::RenderDeviceContext>();
+    mainCtx->renderCtx->BeginDeviceCreation(startupChannel, desc);
+    m_StartupMainWindow = std::move(mainCtx);
+}
+
 bool EditorApplication::Initialize()
 {
     const auto tEditorStart = std::chrono::high_resolution_clock::now();
@@ -1784,6 +1896,8 @@ bool EditorApplication::Initialize()
     // VCS providers all live in engine-package modules (git-vcs, svn-vcs,
     // diversion-vcs, lore-vcs); the first workspace detection is gated on
     // their load pass (EditorVersionControlService::NotifyProvidersReady).
+    EngineCore::GetInstance().SetStartupJobsHook([this](JobSystem::JobChannel& startupChannel)
+                                                  { BeginMainWindowAndDevice(startupChannel); });
     if (!Application::Initialize())
     {
         return false;
@@ -1969,46 +2083,6 @@ bool EditorApplication::Initialize()
     {
         auto& am = EngineCore::GetInstance().GetAssetManager();
 
-        // One-time migration: if a previous version's global editor AssetDatabase
-        // is left behind under <userCacheRoot>/Editor, clear it. The entries it
-        // contains are now stale (GUIDs are derived from canonical paths under the
-        // editor mount and don't need persisting).
-        //
-        // Guarded by a sentinel file so we don't repeatedly fight a future engine
-        // version that legitimately writes new state to the same directory.
-        // After a successful clear (or if the dir already didn't exist), drop a
-        // sentinel and skip the cleanup forever after.
-        {
-            namespace fs = std::filesystem;
-            const auto global = GameEngine::Editor::GetEditorGlobalPaths();
-            if (!global.userCacheRoot.empty())
-            {
-                const fs::path editorCacheRoot = (global.userCacheRoot / "Editor").lexically_normal();
-                const fs::path sentinel = (editorCacheRoot / ".legacy-cleared").lexically_normal();
-                std::error_code ec;
-                if (!fs::exists(sentinel, ec))
-                {
-                    if (fs::exists(editorCacheRoot, ec))
-                    {
-                        const auto removed = fs::remove_all(editorCacheRoot, ec);
-                        if (ec)
-                        {
-                            Logger::Log::Warning("Editor: failed to clear legacy editor AssetDatabase at '{}': {}",
-                                                 editorCacheRoot.string(), ec.message());
-                        }
-                        else if (removed > 0)
-                        {
-                            Logger::Log::Info("Editor: cleared legacy editor AssetDatabase at '{}' ({} entries)",
-                                              editorCacheRoot.string(), removed);
-                        }
-                    }
-                    // Drop sentinel so future startups skip this entire block.
-                    fs::create_directories(editorCacheRoot, ec);
-                    std::ofstream(sentinel) << "Editor mount migrated to derived identity. Safe to delete.\n";
-                }
-            }
-        }
-
         (void)RegisterEditorAssetSource(am, editorAssetsRoot, "startup");
 
         // Mount packages declared by the startup project (project source is
@@ -2120,96 +2194,13 @@ bool EditorApplication::Initialize()
     m_GameViewPointerLock = std::make_unique<Editor::GameViewPointerLock>();
     Logger::Log::Info("[Startup] InputSystem config: {:.1f}ms", MsSince(tPhase));
 
-    // Create main window (using Platform::Window)
-    tPhase = std::chrono::high_resolution_clock::now();
-    auto mainCtx = std::make_unique<EditorWindowContext>();
-    WindowDescriptor mainDesc{};
-    mainDesc.role = WindowRole::Main;
-    mainDesc.capabilities.worldRender = true;
-    mainDesc.capabilities.uiOnly = false;
-    mainDesc.capabilities.thumbnails = true;
-    mainDesc.capabilities.dockingHost = true;
-    mainDesc.title = GetConfig().Name;
-    ApplyWindowDescriptor(*mainCtx, mainDesc, m_NextWindowId++);
-
-    // Determine window size: if config has default 1280x720, use 80% of the primary monitor's
-    // work area instead. This makes the Editor open at a more usable size on high-res displays
-    // (especially Mac Retina screens) while respecting explicit user overrides.
-    int windowWidth = static_cast<int>(GetConfig().WindowWidth);
-    int windowHeight = static_cast<int>(GetConfig().WindowHeight);
-
-    // Only the work-area size feeds the initial window bounds; the window opens
-    // maximized on the default monitor, so its origin is the OS's to pick.
-    int workW = 0;
-    int workH = 0;
+    // BeginMainWindowAndDevice created the window inside Application::Initialize and
+    // started the device; the device is joined below, before its first use.
+    std::unique_ptr<EditorWindowContext> mainCtx = std::move(m_StartupMainWindow);
+    if (!mainCtx)
     {
-        int workOriginX = 0;
-        int workOriginY = 0;
-        Platform::GetPrimaryMonitorWorkArea(workOriginX, workOriginY, workW, workH);
-    }
-    const std::filesystem::path startupSettingsRoot = ResolveStartupProjectSettingsRoot(GetConfig());
-    // The main window always opens on the default monitor: rendering.hdr.targetDisplay
-    // gates whether HDR engages there, it does not place the window. The saved HDR mode
-    // itself reaches the swapchain below, via ConfigureStartupDeviceDesc.
-    // Use 80% of the work area, clamped to a reasonable minimum
-    windowWidth = std::max(windowWidth, static_cast<int>(workW));
-    windowHeight = std::max(windowHeight, static_cast<int>(workH));
-
-    mainCtx->width = windowWidth;
-    mainCtx->height = windowHeight;
-    mainCtx->title = GetConfig().Name;
-    mainCtx->window = std::make_unique<Platform::Window>();
-    // Create hidden; show after first rendered frame to avoid white-screen flash.
-    // The first platform event poll triggers ~1.8s of OS/driver window-show processing.
-    // By keeping the window hidden until after the first render, the user sees a
-    // fully rendered editor instead of a blank window.
-    if (!mainCtx->window->Create({.Title = mainCtx->title,
-                                  .Width = mainCtx->width,
-                                  .Height = mainCtx->height,
-                                  .StartHidden = true,
-                                  .StartMaximized = true}))
-    {
-        Logger::Log::Error("Editor: Failed to create main window");
         return false;
     }
-    {
-        const auto monitors = Platform::EnumerateMonitors();
-        Logger::Log::Info("Editor: detected {} monitor(s)", monitors.size());
-        for (const auto& monitor : monitors)
-        {
-            Logger::Log::Info("Editor: monitor[{}] '{}' primary={} pos={}x{} size={}x{} work={}x{}+{}+{} refresh={:.1f}Hz hdrAvailable={} hdrActive={}",
-                              monitor.index,
-                              monitor.name,
-                              monitor.primary ? "true" : "false",
-                              monitor.x,
-                              monitor.y,
-                              monitor.width,
-                              monitor.height,
-                              monitor.workWidth,
-                              monitor.workHeight,
-                              monitor.workX,
-                              monitor.workY,
-                              monitor.refreshRate,
-                              monitor.hdrAvailable ? "true" : "false",
-                              monitor.hdrActive ? "true" : "false");
-        }
-    }
-
-    // Linux: load window icon at runtime via GLFW. Windows/macOS rely on
-    // embedded resources or bundle icons.
-#if !defined(_WIN32) && !defined(__APPLE__)
-    {
-        const auto iconPath = ApplicationPaths::GetExecutableDirectory() / "AppIcon.png";
-        Vector<uint8> iconBytes;
-        if (ReadFileBytesShared(iconPath, iconBytes))
-        {
-            const Image::Image8 icon = Image::Decode8(iconBytes, iconPath.string(), Image::DecodeChannels::Rgba);
-            if (icon.Valid)
-                mainCtx->window->SetIcon(icon.Pixels.data(), static_cast<int>(icon.Width),
-                                         static_cast<int>(icon.Height));
-        }
-    }
-#endif
 
     // Expose the main editor window through EditorContext so panels/controllers
     // (e.g., the Assets browser) can show native context menus at cursor position.
@@ -2219,7 +2210,7 @@ bool EditorApplication::Initialize()
         m_EditorContext->ThumbnailHostWindowId = mainCtx->windowId;
     }
 
-    Logger::Log::Info("[Startup] Window creation: {:.1f}ms", MsSince(tPhase));
+    tPhase = std::chrono::high_resolution_clock::now();
 
     // Per-window input routing to UIManager and the shared Application InputSystem
     EditorWindowContext* mainCtxRaw = mainCtx.get();
@@ -2369,19 +2360,19 @@ bool EditorApplication::Initialize()
     Logger::Log::Info("[Startup] Input routing setup: {:.1f}ms", MsSince(tPhase));
 
     // Pre-load UI assets (CSS + layout + all CSS @imports) on a background thread while
-    // the main thread proceeds to Vulkan device creation. Both are independent: CSS/XML
-    // parsing is CPU-bound, Vulkan init is GPU-driver-bound.
+    // the main thread joins the device creation and creates the swapchain. Both are
+    // independent: CSS/XML parsing is CPU-bound, Vulkan init is GPU-driver-bound.
     m_LayoutPath = std::filesystem::path("UI") / "layout.uxml";
     m_StylePath = std::filesystem::path("UI") / "theme.css";
     {
         auto tPreload = std::chrono::high_resolution_clock::now();
         auto& am = EngineCore::GetInstance().GetAssetManager();
-        // Resolve the 2 primary GUIDs on the main thread (fast, needed before Vulkan).
+        // Resolve the 2 primary GUIDs on the main thread (fast, needed before the swapchain).
         RefreshEditorUiAssetRefs(am, m_LayoutPath, m_StylePath, m_LayoutGuid, m_StyleGuid, "early-ui-preload");
 
         // Dispatch all GUID resolution + LoadAsset calls as a compute job (CPU work: the
         // lambda only DISPATCHES async loads) so the main thread can proceed immediately
-        // to Vulkan device creation. On web the lambda runs inline instead, as it does
+        // to the device join. On web the lambda runs inline instead, as it does
         // where no thread of its own may be started (Platform::SupportsTransientThreads):
         // inline costs microseconds there, and the browser main thread must not wait on
         // a job at shutdown.
@@ -2445,41 +2436,9 @@ bool EditorApplication::Initialize()
         Logger::Log::Info("[Startup] UI pre-load dispatched to background: {:.1f}ms", MsSince(tPreload));
     }
 
-    // Create a device and swapchain for this window (PoC: one device per window).
-    // Ownership is centralized in RenderDeviceContext so shutdown ordering is consistent.
+    // Join the device creation that BeginMainWindowAndDevice started, then create the
+    // swapchain and RenderServices on this thread.
     tPhase = std::chrono::high_resolution_clock::now();
-    DeviceDesc desc{};
-    desc.preferredAPI = LoadPreferredGraphicsApi();
-    desc.enableSwapchain = true;
-    desc.persistPipelineCache = true;
-    desc.applicationName = GetConfig().Name;
-    if (Engine::Renderer::ShouldEnableVkValidation())
-    {
-        desc.enableDebugLayer = true;
-    }
-    {
-        auto prefs = Editor::OpenEditorPreferences();
-        std::string err;
-        prefs.Load(&err);
-        bool vsync = true;
-        prefs.TryGetBool("performance.vsync", vsync);
-        // GE_VSYNC overrides the saved preference (diagnostics / forced runs).
-        if (const char* vsyncEnv = std::getenv("GE_VSYNC"))
-        {
-            if (vsyncEnv[0] != '\0')
-                vsync = (vsyncEnv[0] != '0');
-        }
-        desc.vsync = vsync;
-    }
-    const int initialMonitorIndex = mainCtx->window ? mainCtx->window->GetActiveMonitorIndex() : -1;
-    Editor::HdrOutputController::ConfigureStartupDeviceDesc(desc, startupSettingsRoot, initialMonitorIndex);
-
-    mainCtx->renderCtx = std::make_unique<GameEngine::Engine::Renderer::RenderDeviceContext>();
-    if (!mainCtx->renderCtx)
-    {
-        Logger::Log::Error("Editor: Failed to allocate RenderDeviceContext (main window)");
-        return false;
-    }
 
     // The swapchain starts at the window's real framebuffer size, not at the
     // size that was requested: a maximized or HiDPI window is larger than the
@@ -2498,7 +2457,6 @@ bool EditorApplication::Initialize()
     }
 
     GameEngine::Engine::Renderer::RenderDeviceContext::InitParams renderInit{};
-    renderInit.deviceDesc = desc;
     renderInit.windowHandle = mainCtx->window->GetNativeHandle();
     renderInit.width = static_cast<uint32>(mainCtx->width);
     renderInit.height = static_cast<uint32>(mainCtx->height);
@@ -2762,7 +2720,7 @@ bool EditorApplication::Initialize()
         }
     }
 
-    // Attach native OS menu to the main window (does not consume UI content space)
+    // Attach the main window's platform menu backend.
     if (m_EnableNativeToolbar)
     {
         auto* main = m_Windows[0].get();
@@ -2832,7 +2790,6 @@ bool EditorApplication::Initialize()
                 cfg.HoverDelaySeconds      = s.GetHoverDelaySeconds();
                 cfg.HoverResetDelaySeconds = s.GetHoverResetDelaySeconds();
                 cfg.MiddleMouseShow        = s.GetMiddleMouseShow();
-                cfg.ArrowColor             = s.GetArrowColor();
                 return cfg;
             });
         }
@@ -4083,15 +4040,7 @@ bool EditorApplication::Initialize()
             {
                 if (auto* dock = dynamic_cast<DockspaceElement*>(el))
                 {
-                    dock->SetOnPostRebuild([this]() {
-                        // Re-mount the lock icon on every inspector tab — both Inspector and Inspector 2
-                        // (and any future instances) need their tab chrome restored after a rebuild.
-                        for (const auto& panel : m_PanelStorage)
-                        {
-                            if (auto* ip = dynamic_cast<InspectorPanel*>(panel.get()))
-                                ip->PostAction([ip]() { ip->EnsureInspectorTabLockMounted(); });
-                        }
-                    });
+                    dock->SetOnPostRebuild([this]() { MountInspectorTabLocks(); });
                     dock->SetOnTabContextMenu([this, main](const std::string& panelId, float x, float y) {
                         ShowTabContextMenu(panelId, x, y, main->window.get());
                     });
@@ -5666,7 +5615,8 @@ void EditorApplication::WireNativeScriptingForProject(const std::filesystem::pat
                                    module.PackageName);
                 continue;
             }
-            if (module.UsesManagedNativeCache && !RetainPackageNativeCache(module.CacheDir))
+            if (module.UsesManagedNativeCache &&
+                !RetainPackageNativeCache(module.CacheDir, EngineCore::GetInstance().GetStartupChannel()))
             {
                 Logger::Log::Error("Editor: cannot lease native cache '{}' for package '{}'; module skipped",
                                    module.CacheDir.string(), module.PackageName);
@@ -5874,53 +5824,37 @@ void EditorApplication::RefreshMainWindowTitle()
     if (!workspaceRoot.empty())
         workspaceRoot = workspaceRoot.lexically_normal();
 
-    std::optional<std::filesystem::path> scenePath;
-    std::optional<std::string> sceneDisplayName;
-    if (m_SceneEditor)
-    {
-        scenePath = m_SceneEditor->GetActiveScenePath();
-        if (scenePath.has_value() && !scenePath->empty())
-            scenePath = scenePath->lexically_normal();
-        sceneDisplayName = m_SceneEditor->GetActiveSceneDisplayName();
-    }
-
-    std::string title = "Open Engine Editor " + Editor::EditorVersionText();
+    std::string project;
     if (!workspaceRoot.empty())
     {
-        std::string folderName = workspaceRoot.filename().string();
-        if (folderName.empty())
-            folderName = workspaceRoot.string();
-        title += " - ";
-        title += folderName;
+        project = workspaceRoot.filename().string();
+        if (project.empty())
+            project = workspaceRoot.string();
     }
+    std::string scene;
+    bool sceneDirty = false;
     if (m_SceneEditor)
     {
-        title += " - ";
+        sceneDirty = m_SceneEditor->IsSceneDirty();
+        const std::optional<std::string> sceneDisplayName = m_SceneEditor->GetActiveSceneDisplayName();
+        const std::optional<std::filesystem::path> scenePath = m_SceneEditor->GetActiveScenePath();
         if (sceneDisplayName.has_value() && !sceneDisplayName->empty())
-            title += *sceneDisplayName;
+            scene = *sceneDisplayName;
         else if (scenePath.has_value() && !scenePath->empty())
-            title += scenePath->filename().string();
+            scene = scenePath->lexically_normal().filename().string();
         else
-            title += "Untitled";
-        if (m_SceneEditor->IsSceneDirty())
-            title += " *";
+            scene = "Untitled";
     }
+    // The session names the worktree or the launcher's label; the editor version and the build
+    // configuration are the status bar's (EditorBuildStatus).
+    const std::optional<std::string> session = Editor::Startup::FormatSessionChromeSuffix(m_SessionDescriptor);
+    Editor::MainWindowTitle title = Editor::MainWindowTitle::Format(scene, sceneDirty, project, session.value_or(std::string()));
 
-    // Session provenance, appended after the scene so it can never truncate or displace
-    // it. Compact by design — the full descriptor is on get_editor_state. Worktree, not
-    // branch, is the identity here: a `git switch` after launch leaves this binary built
-    // from the branch named, not the one checked out now. Build configuration is
-    // deliberately absent — the bottom-bar build tag owns that display.
-    if (const std::optional<std::string> session = Editor::Startup::FormatSessionChromeSuffix(m_SessionDescriptor))
+    if (m_EditorToolbar)
+        m_EditorToolbar->SetCaption(std::move(title.Caption));
+    if (title.WindowTitle != m_LastMainWindowTitle)
     {
-        title += "  [";
-        title += *session;
-        title += ']';
-    }
-
-    if (title != m_LastMainWindowTitle)
-    {
-        m_LastMainWindowTitle = std::move(title);
+        m_LastMainWindowTitle = std::move(title.WindowTitle);
         m_Windows[0]->window->SetTitle(m_LastMainWindowTitle);
     }
 
@@ -6399,8 +6333,8 @@ void EditorApplication::Update(float64 deltaTime)
             sceneDisplayName = m_SceneEditor->GetActiveSceneDisplayName();
         }
 
-        // An empty last-title is the "never computed" state, since RefreshMainWindowTitle
-        // always stores a non-empty string.
+        // An empty last-title is the "never computed" state. A window with no scene, no project
+        // and no session keeps an empty title and recomputes it each frame, with no SetTitle call.
         bool shouldRefreshTitle = m_LastMainWindowTitle.empty();
         if (activeScenePath != m_LastTitleScenePath)
         {
@@ -6428,8 +6362,8 @@ void EditorApplication::Update(float64 deltaTime)
     if (!m_IsShuttingDown && !m_Windows.empty() && m_Windows[0] && m_Windows[0]->ui)
         m_StatusBarItems.Update(std::chrono::duration<double>(deltaTime), m_Windows[0]->ui->GetRootElement());
 
-    // Bottom-bar status refresh, 1 Hz. Both labels are looked up by id here rather than cached
-    // so a UI rebuild can never leave a dangling pointer.
+    // Bottom-bar status refresh, 1 Hz. The validation badge is looked up by id here rather than
+    // cached so a UI rebuild can never leave a dangling pointer.
     m_FooterStatusAccum += deltaTime;
     if (m_FooterStatusAccum >= 1.0 && !m_IsShuttingDown)
     {
@@ -6449,25 +6383,6 @@ void EditorApplication::Update(float64 deltaTime)
                 {
                     m_ValidationBadgeErrors = errors;
                     label->SetText(errors > 0 ? "VK validation: " + std::to_string(errors) : "");
-                }
-            }
-        }
-
-        // Build-configuration tag. The name comes from the build (GE_BUILD_CONFIG) and never
-        // changes, so the id lookup is gated on the tree-structure generation: only a rebuild
-        // that recreated the label (layout hot reload, window bootstrap) can have dropped the
-        // text, and any such rebuild bumps the generation. A quiet tree costs one integer
-        // compare here, not a tree walk.
-        if (!m_Windows.empty() && m_Windows[0] && m_Windows[0]->ui)
-        {
-            const uint64_t treeGen = m_Windows[0]->ui->GetTreeStructureGeneration();
-            if (treeGen != m_BuildConfigTagTreeGeneration)
-            {
-                if (UIElement* root = m_Windows[0]->ui->GetRootElement())
-                {
-                    if (auto* label = dynamic_cast<Label*>(root->FindById("BuildConfigStatus"_sid)))
-                        label->SetText(Editor::BuildConfigStatusText());
-                    m_BuildConfigTagTreeGeneration = treeGen;
                 }
             }
         }
@@ -6702,16 +6617,9 @@ void EditorApplication::Update(float64 deltaTime)
         }
     }
 
-    // Toolbar items refresh: script items (managed snapshot updates) and
-    // native package items (EditorMenuRegistry — packages load at project
-    // open, after the toolbar first builds). Consume BOTH dirty flags even
-    // when one already triggered the rebuild.
-    {
-        const bool scriptDirty = Editor::ScriptMenuRegistry::Get().ConsumeToolbarDirty();
-        const bool nativeDirty = Editor::EditorMenuRegistry::Get().ConsumeDirty();
-        if (m_EditorToolbar && (scriptDirty || nativeDirty))
-            m_EditorToolbar->Refresh();
-    }
+    // Script and package menu items register after the toolbar first builds.
+    if (m_EditorToolbar && !m_Windows.empty() && m_Windows[0] && m_Windows[0]->ui)
+        m_EditorToolbar->Update(m_Windows[0]->ui->GetRootElement());
 
     // UI hot reload is handled by UIManager/UIHotReload via AssetManager-driven
     // asset reload events (UILayout/UIStyle). No EditorApplication-specific
@@ -7801,7 +7709,8 @@ bool EditorApplication::ResizeUiReplayWindow(std::uint32_t windowIndex,
         return false;
     }
 
-    // Best-effort resize. The framebuffer-size callback (OnFramebufferResized) drives swapchain recreation.
+    // Best-effort resize. The framebuffer-size callback (OnFramebufferResized) marks the swapchain
+    // for recreation at the next frame.
     if (!m_Windows[windowIndex]->window->GetGLFWHandle())
     {
         if (outError)
@@ -7924,8 +7833,8 @@ void EditorApplication::Render()
             }
         }
 
-        // Ensure framebuffer is valid before rendering; resize handling is driven by
-        // Platform::Window framebuffer-size callback (OnFramebufferResized).
+        // Ensure framebuffer is valid before rendering. BeginWindowRenderFrame recreates the swapchain
+        // after a resize that the framebuffer-size callback (OnFramebufferResized) marks.
         int fbW = 0, fbH = 0;
         ctx->window->GetFramebufferSize(fbW, fbH);
         if (fbW <= 0 || fbH <= 0)
@@ -9061,9 +8970,7 @@ void EditorApplication::OnFramebufferResized(EditorWindowContext* ctx, int width
     if (width <= 0 || height <= 0)
         return;
 
-    // Some OS operations (e.g., native menu/toolbar updates) can trigger framebuffer callbacks
-    // even when the framebuffer dimensions are unchanged. Avoid recreating the swapchain and
-    // forcing an immediate render in that case, which can cause visible flicker.
+    // A native frame update can repeat the current size. That callback marks nothing.
     if (width == prevW && height == prevH)
         return;
 
@@ -9095,8 +9002,8 @@ void EditorApplication::OnFramebufferResized(EditorWindowContext* ctx, int width
             // is crossing displays, before GLFW has settled on the new active monitor.
             // On MoltenVK, rendering into one of those transient swapchains can poison
             // the in-flight frame and report VK_ERROR_DEVICE_LOST. Keep deferring monitor
-            // and content-scale transitions, but let ordinary same-monitor resize fall
-            // through to the immediate render path below to avoid stretched UI.
+            // and content-scale transitions, but let an ordinary same-monitor resize fall
+            // through to the resize mark below.
             m_HdrOutput->QueueUpdate(ctx, targetMonitor, true, true);
             ctx->pendingSwapchainResize = true;
             ctx->pendingWidth = width;
@@ -9107,23 +9014,10 @@ void EditorApplication::OnFramebufferResized(EditorWindowContext* ctx, int width
     }
 #endif
 
-    // Recreate swapchain and render immediately to prevent content stretching during live resize.
-    // Without this, macOS displays the old framebuffer content scaled to the new window
-    // size until the next frame is rendered in the main loop.
-    Rendering::IDevice* dev = (ctx->renderCtx) ? ctx->renderCtx->GetDevice() : nullptr;
-    if (dev)
-    {
-        if (ctx->renderCtx)
-        {
-            ctx->renderCtx->RecreateWindowTargetSwapchain(static_cast<uint32_t>(width),
-                                                          static_cast<uint32_t>(height));
-        }
-    }
-
-    RefreshWorldRenderForPassiveFrame(ctx);
-
-    // Immediately render a frame to prevent content stretching during live resize.
-    RenderSingle(ctx);
+    // The next frame recreates the swapchain at the latest size. A resize can arrive inside
+    // Update or inside a frame (a window message sent by a native call), so it never renders
+    // here. During a live resize the window's refresh handler ticks a whole frame next.
+    ctx->swapchainResize.Mark();
 }
 
 void EditorApplication::OnFilesDropped(EditorWindowContext* ctx, const std::vector<std::filesystem::path>& paths)
@@ -9203,6 +9097,13 @@ void EditorApplication::ApplyInspectorToggleAlign(const std::string& value)
     for (auto& p : m_PanelStorage)
         if (auto* ip = dynamic_cast<InspectorPanel*>(p.get()))
             InspectorPanel::ApplyToggleAlign(ip, value);
+}
+
+void EditorApplication::MountInspectorTabLocks()
+{
+    for (const auto& panel : m_PanelStorage)
+        if (auto* ip = dynamic_cast<InspectorPanel*>(panel.get()))
+            ip->EnsureInspectorTabLockMounted();
 }
 
 void EditorApplication::ShowTabContextMenu(const std::string& panelId, float x, float y, Platform::Window* window)

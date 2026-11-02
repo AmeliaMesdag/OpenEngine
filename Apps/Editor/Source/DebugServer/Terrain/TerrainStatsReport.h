@@ -6,7 +6,7 @@
 
 namespace GameEngine::TerrainECS
 {
-struct HeightPageStreamCounts;
+struct PageStreamCounts;
 }
 
 namespace GameEngine::Editor
@@ -25,6 +25,6 @@ nlohmann::json DescribeTerrainSplitThreshold(float targetPixelError, float appli
 // The planet page table part: `published` says whether the GPU draws the planet's pages; per face, the pages of
 // each level that have a table entry, and the level a lambda-0 sample at each finest-pinned-level page's center
 // resolves to (row-major, `pinnedPagesX` a row; the level count where no level has an entry).
-nlohmann::json DescribePlanetPageTable(const TerrainECS::HeightPageStreamCounts& stream);
+nlohmann::json DescribePlanetPageTable(const TerrainECS::PageStreamCounts& stream);
 
 } // namespace GameEngine::Editor

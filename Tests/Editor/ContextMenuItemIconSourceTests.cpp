@@ -55,7 +55,7 @@ BackgroundImageSource ShownIconSource(const std::string& iconPath)
         const UIElement* icon = FindFirstWithClass(*manager.GetRootElement(), "context-menu-item-icon");
         if (icon)
         {
-            if (const auto image = icon->Overrides().Get(Style::BackgroundImage))
+            if (const auto image = icon->Style().Get(Style::BackgroundImage))
                 source = *image;
         }
     }

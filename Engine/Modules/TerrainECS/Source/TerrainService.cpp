@@ -8,7 +8,7 @@
 #include "Terrain/CDLODSelection.h"
 #include "TerrainECS/RawHeightmap.h"
 #include "TerrainECS/TerrainSizingPlan.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/HeightPageStoreLoader.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
@@ -378,9 +378,9 @@ SurfaceHeightQuery TerrainService::SurfaceQuery(const Components::Terrain& terra
     if (const TiledTerrainData* tiled =
             GetTiledTerrainData(TiledTerrainHandle{terrain.TiledTerrainHandle, terrain.TiledTerrainGeneration}))
     {
-        if (m_HeightPages)
+        if (m_TerrainPages)
         {
-            SurfaceHeightQuery paged = m_HeightPages->SurfaceQuery(
+            SurfaceHeightQuery paged = m_TerrainPages->SurfaceQuery(
                 TerrainHandle{tiled->GlobalGpuHandleIndex, tiled->GlobalGpuHandleGeneration});
             if (paged.IsValid())
                 return paged;
@@ -424,33 +424,34 @@ bool TerrainService::FetchFinestHeightPage(const Components::Terrain& terrain, c
 {
     const TiledTerrainData* tiled =
         GetTiledTerrainData(TiledTerrainHandle{terrain.TiledTerrainHandle, terrain.TiledTerrainGeneration});
-    if (!tiled || !m_HeightPages)
+    if (!tiled || !m_TerrainPages)
         return false;
-    return m_HeightPages->FetchFinestPage(TerrainHandle{tiled->GlobalGpuHandleIndex, tiled->GlobalGpuHandleGeneration},
-                                          worldPoint);
+    return m_TerrainPages->FetchFinestPage(TerrainHandle{tiled->GlobalGpuHandleIndex, tiled->GlobalGpuHandleGeneration},
+                                           worldPoint);
 }
 
 std::span<const PageStreaming::PageAddress> TerrainService::FinestWindowPages(const Components::Terrain& terrain)
 {
     const TiledTerrainData* tiled =
         GetTiledTerrainData(TiledTerrainHandle{terrain.TiledTerrainHandle, terrain.TiledTerrainGeneration});
-    if (!tiled || !m_HeightPages)
+    if (!tiled || !m_TerrainPages)
         return {};
-    return m_HeightPages->CpuWindowPages(TerrainHandle{tiled->GlobalGpuHandleIndex, tiled->GlobalGpuHandleGeneration});
+    return m_TerrainPages->CpuWindowPages(TerrainHandle{tiled->GlobalGpuHandleIndex, tiled->GlobalGpuHandleGeneration});
 }
 
-TerrainHeightPages& TerrainService::GetHeightPages()
+TerrainPages& TerrainService::GetTerrainPages()
 {
-    if (!m_HeightPages)
+    if (!m_TerrainPages)
     {
         HeightPageProfile profile = PlatformHeightPageProfile();
         if (const char* overrideSlots = std::getenv("GE_TERRAIN_PAGE_SLOTS"))
             profile.Slots = std::max(1u, static_cast<uint32>(std::strtoul(overrideSlots, nullptr, 10)));
         // No reader threads: the residency reads cooked pages on Background jobs, as it evaluates
         // generated ones.
-        m_HeightPages = std::make_unique<TerrainHeightPages>(&EngineCore::GetInstance().GetJobSystem(), nullptr, profile);
+        m_TerrainPages = std::make_unique<TerrainPages>(&EngineCore::GetInstance().GetJobSystem(), nullptr, profile,
+                                                        PlatformSurfacePageProfile());
     }
-    return *m_HeightPages;
+    return *m_TerrainPages;
 }
 
 HeightPageStoreLoader& TerrainService::GetHeightPageStores()

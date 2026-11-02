@@ -208,9 +208,10 @@ void OceanGPUQuery::PollCompleted(IDevice* device)
         OceanSurfaceSample& sample = samples[i];
         sample.Valid = true;
         sample.Source = OceanQuerySource::GPUQuery;
-        std::memcpy(sample.PositionWS, mapped[i].Position, sizeof(float32) * 3u);
-        std::memcpy(sample.NormalWS, mapped[i].Normal, sizeof(float32) * 3u);
-        std::memcpy(sample.DisplacementWS, mapped[i].Displacement, sizeof(float32) * 3u);
+        sample.PositionWS = Mathematics::Vector3(mapped[i].Position.x, mapped[i].Position.y, mapped[i].Position.z);
+        sample.NormalWS = Mathematics::Vector3(mapped[i].Normal.x, mapped[i].Normal.y, mapped[i].Normal.z);
+        sample.DisplacementWS =
+            Mathematics::Vector3(mapped[i].Displacement.x, mapped[i].Displacement.y, mapped[i].Displacement.z);
         sample.Height = sample.PositionWS[1];
     }
     m_Readback.Unmap(device);

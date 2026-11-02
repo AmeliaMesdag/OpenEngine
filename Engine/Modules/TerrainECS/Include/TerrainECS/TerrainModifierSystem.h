@@ -1,8 +1,9 @@
 #pragma once
 
 #include "Mathematics/Interpolation.h"
-#include "TerrainECS/TerrainColorMapBaker.h"
-#include "TerrainECS/TerrainSurfacePageDriver.h"
+#include "TerrainECS/AreaFlatten/AreaReferenceSurfaceCache.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMapBaker.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePageDriver.h"
 #include "TerrainECS/BakeWarningLatch.h"
 #include "TerrainECS/TerrainService.h"
 #include "PageStreaming/PageSampleRect.h"
@@ -45,6 +46,7 @@ enum class PageFieldKind : uint8;
 
 namespace GameEngine::TerrainECS
 {
+class AreaReferenceSurface;
 struct BakeBandRegion;
 struct BakeStoreSnapshot;
 struct TerrainColorGroundWrite;
@@ -152,8 +154,8 @@ struct ModifierFlattenParams
     // PLANAR bake: a true world-space target Y, or — when UseVolumeHeight is set
     // — an offset from the volume's per-sample reference height, itself a world
     // Y (the volume entity's for circle/rectangle volumes, the route's own Y at
-    // the nearest station for a SplinePath volume, the curve's Y at the closest
-    // point for a SplineArea one). Either way the resolved target is a world Y,
+    // the nearest station for a SplinePath volume, the area's reference surface
+    // for a closed SplineArea one). Either way the resolved target is a world Y,
     // which the bake converts with NormalizedHeightForWorldY.
     //
     // SPHERE bake: read radially instead (FillSphereFlattenEffect) — a planet has
@@ -367,6 +369,10 @@ struct ResolvedModifier
 
     // Source entity, used to match modifiers across bakes for region diffing.
     ECS::EntityHandle Entity{};
+    // The equal-priority bake order: tagged modifiers first, by the FNV-1a hash of their
+    // SceneEntityTag, then by Entity.id. Never the query's archetype order.
+    uint64 SceneIdHash = 0;
+    bool HasSceneId = false;
 
     Type ModType;
     Components::TerrainModifierShape Shape;
@@ -469,6 +475,11 @@ struct ResolvedModifier
     // weight, reference height, world AABB — stays on ResolvedSpline's analytic
     // curve for both spline shapes.
     const RoutePolyline* Route = nullptr;
+
+    // A closed SplineArea volume's reference surface, owned by the modifier
+    // system's AreaReferenceSurfaceCache and valid until the next gather. Non-null
+    // for exactly the areas whose flatten grades to the volume's height.
+    const AreaReferenceSurface* AreaSurface = nullptr;
 
     // ---- Zone change tracking (non-union: applies only to zones) ----
     // DataVersion mirrors the store payload's version; the region diff folds it
@@ -705,6 +716,10 @@ public:
     // whose edits live in SplineService rather than in any ECS column.
     static uint64 GetGatherCountForTests();
 
+    // Test seam: the closed areas' reference surfaces built since construction. A
+    // gather whose areas' inputs did not change builds none.
+    uint32 GetAreaSurfaceBuildCountForTests() const { return m_AreaSurfaces.GetBuildCountForTests(); }
+
     // Test seams for the spread settle renormalize (Fix 2). GetSplatRenormalizeTexelCount
     // is a monotonic count of procedural-splat texels the band-spread flush regenerated;
     // the settle-spike bound oracle asserts the per-frame delta never exceeds the budget
@@ -803,12 +818,20 @@ private:
                                    const std::vector<ResolvedModifier>& modifiers,
                                    int32 minX, int32 minZ, int32 maxX, int32 maxZ);
 
-    // ComposeTiledGroundBlock's composition under `modifiers`: the normalized height of every
-    // sample of a block of the terrain's global tile lattice, row-major.
-    static bool ComposeLatticeBlock(const TiledTerrainData& tiled, float32 heightScale, float32 terrainOriginY,
-                                    const std::vector<ResolvedModifier>& modifiers, int64 firstLatticeX,
-                                    int64 firstLatticeZ, uint32 countX, uint32 countZ,
-                                    std::vector<float32>& outNormalized);
+    // Where BuildLatticeBlock takes a tile's heights from.
+    enum class LatticeBlockSource : uint8
+    {
+        Compose,    // compose the base and `modifiers` for every tile
+        BakedTiles, // read each tile the bake applied the modifiers to; compose the others
+    };
+
+    // The normalized height under `modifiers` of each sample of a block of the tile lattice, row-major;
+    // `outComposedSamples` counts the samples composed, not read. BakedTiles is exact only while the
+    // tiles hold these modifiers and their CPU heights are current (no GPU bake writes them).
+    static bool BuildLatticeBlock(const TiledTerrainData& tiled, float32 heightScale, float32 terrainOriginY,
+                                  const std::vector<ResolvedModifier>& modifiers, int64 firstLatticeX,
+                                  int64 firstLatticeZ, uint32 countX, uint32 countZ, LatticeBlockSource source,
+                                  std::vector<float32>& outNormalized, uint64& outComposedSamples);
 
     // Applies every splat effect (surface rules, paint) to `splatmap` in stack order, clamped like
     // ApplyHeightModifiers. The rules measure `heightfield` (normalized: meters need `heightScale`) on the
@@ -853,9 +876,10 @@ private:
     // height modifiers reach, recomputed only over `heightDirty` when the rect still holds it
     // (TerrainModifierPageOverlay.cpp). Builds nothing for a terrain with no overlay cap (one that
     // keeps its height texture) and refuses an overlay over the cap (TiledTerrainData::PageOverlayByteCap).
+    // `readBakedTiles`: the tiles' CPU heights are current, so the overlay reads them, not composes.
     void BakeHeightPageOverlay(TiledTerrainData& tiled, float32 heightScale, float32 terrainOriginY,
                                const std::vector<ResolvedModifier>& modifiers, bool fullBake,
-                               const DirtyUnion& heightDirty);
+                               const DirtyUnion& heightDirty, bool readBakedTiles);
 
     // Publishes the level-0 rect a bake of `tiled` changed on its surface (TiledTerrainData::
     // SurfaceChanged): every sample on a full bake, else the samples the height and splat dirt reach.
@@ -952,11 +976,9 @@ private:
                                 const std::vector<ResolvedModifier>& modifiers,
                                 std::vector<TileCoord>& outBakedTiles);
 
-    // The height a flatten effect levels toward when it asks for the volume's
-    // reference: the route's own Y at the nearest station for a SplinePath
-    // volume, the curve's own Y at the closest XZ point for a SplineArea one (so
-    // a sloped road flattens to its own profile either way), and the entity's Y
-    // for every other shape. Only called when a flatten effect is present.
+    // The height a flatten levels toward under UseVolumeHeight: the route's Y at the nearest station
+    // for a SplinePath volume, the area's reference surface for a closed SplineArea one, the curve's Y
+    // at the closest XZ point for an open spline, and the entity's Y for every other shape.
     //
     // `routeSample` is the caller's already-computed polyline scan, non-null
     // exactly when mod.Route is: the SplinePath answer IS that sample's Height,
@@ -1203,6 +1225,11 @@ private:
     // Resampled routes, same lifetime and same reason as the two above:
     // ResolvedModifier::Route points into this.
     std::deque<RoutePolyline> m_RoutePolylines;
+
+    // The closed areas' reference surfaces, kept across gathers and rebuilt when
+    // an area's rim or a road at one of its openings changes.
+    // ResolvedModifier::AreaSurface points into this.
+    AreaReferenceSurfaceCache m_AreaSurfaces;
 
     // Entities already warned about a Shape::Spline with no SplineComponent to
     // resolve it against — a scene-authoring error that cannot fix itself, so it

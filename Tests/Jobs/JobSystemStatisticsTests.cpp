@@ -894,21 +894,24 @@ TEST(PublishCountScopeTest, OtherThreadsPublishesAreNotCounted) {
     EXPECT_EQ(pool.GetPublishedJobCount() - publishedBefore, 3u);
 }
 
-// A worker's Wait participates, so on a one-worker pool the body it waits for
-// runs inline on that worker, and so does the nested job that body waits for:
-// the body's publish happens on the scope's thread and counts with the
-// scope's own.
+// Every Wait runs its counter's tagged jobs, so the test thread waits on
+// `outer` only after the body ends: the one worker runs the body, its own Wait
+// is the only consumer of `mine`, and the nested publish counts in the scope.
 TEST(PublishCountScopeTest, ABodyTheThreadsOwnWaitRunsInlineCountsItsPublishes) {
     WorkStealingThreadPool pool(1);
     std::atomic<uint32> counted{0};
     std::atomic<int> ran{0};
+    std::atomic<bool> ranInline{false};
+    std::atomic<bool> bodyEnded{false};
     JobCounter outer;
-    pool.Run([&pool, &counted, &ran] {
+    pool.Run([&pool, &counted, &ran, &ranInline, &bodyEnded] {
+        const std::thread::id scopeThread = std::this_thread::get_id();
         uint32 published = 0;
         {
             WorkStealingThreadPool::PublishCountScope scope(published);
             JobCounter mine;
-            pool.Run([&pool, &ran] {
+            pool.Run([&pool, &ran, &ranInline, scopeThread] {
+                ranInline.store(std::this_thread::get_id() == scopeThread);
                 JobCounter nested;
                 pool.Run([&ran] { ran.fetch_add(1); }, nested);
                 pool.Wait(nested);
@@ -916,9 +919,12 @@ TEST(PublishCountScopeTest, ABodyTheThreadsOwnWaitRunsInlineCountsItsPublishes) 
             pool.Wait(mine);
         }
         counted.store(published);
+        bodyEnded.store(true);
     }, outer);
+    EXPECT_TRUE(WaitUntil([&bodyEnded] { return bodyEnded.load(); }));
     pool.Wait(outer);
     EXPECT_EQ(ran.load(), 1);
+    EXPECT_TRUE(ranInline.load());
     EXPECT_EQ(counted.load(), 2u);
 }
 

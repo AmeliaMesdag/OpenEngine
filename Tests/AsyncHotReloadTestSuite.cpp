@@ -51,6 +51,10 @@ class AsyncHotReloadTestSuite : public ::testing::Test
         EngineCore::GetInstance().Shutdown();
         Logger::Log::Info("=== Async Hot-Reload Test Suite Complete ===");
     }
+
+    // The swap and the end of an overdue run execute on the main-thread queue.
+    // A test that waits for a run to end pumps this queue on each wait step.
+    static void PumpMainThreadTasks() { (void)EngineCore::GetInstance().GetScriptManager().ProcessMainThreadTasks(); }
 };
 
 /**
@@ -189,19 +193,26 @@ TEST_F(AsyncHotReloadTestSuite, ProgressTracking)
     // Monitor progress
     std::vector<float> progressValues;
 
-    while (!scriptManager.IsAsyncHotReloadInProgress())
+    // One time limit bounds both waits. The run can end before the first check.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (!scriptManager.IsAsyncHotReloadInProgress() &&
+           future.wait_for(std::chrono::seconds(0)) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    while (scriptManager.IsAsyncHotReloadInProgress())
+    while (scriptManager.IsAsyncHotReloadInProgress() && std::chrono::steady_clock::now() < deadline)
     {
         float progress = scriptManager.GetAsyncHotReloadProgress();
         progressValues.push_back(progress);
+        PumpMainThreadTasks();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
+    ASSERT_EQ(future.wait_until(deadline), std::future_status::ready) << "the hot reload did not end within 60 s";
     auto stats = future.get();
+    EXPECT_FALSE(scriptManager.IsAsyncHotReloadInProgress()) << "the hot reload still reports in progress after it ended";
 
     // Verify progress tracking worked
     if (progressValues.size() > 1)
@@ -315,6 +326,7 @@ TEST_F(AsyncHotReloadTestSuite, PerformanceComparison)
     while (scriptManager.IsAsyncHotReloadInProgress())
     {
         // Simulate rendering/update work
+        PumpMainThreadTasks();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     auto mainThreadWorkEnd = std::chrono::high_resolution_clock::now();
@@ -379,6 +391,10 @@ TEST_F(AsyncHotReloadTestSuite, MemoryLeakDetection)
     for (int i = 0; i < cycles; ++i)
     {
         auto future = scriptManager.RecompileAndReloadAsync(assemblyPath);
+        while (future.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout)
+        {
+            PumpMainThreadTasks();
+        }
         auto stats = future.get();
 
         // Brief pause between cycles

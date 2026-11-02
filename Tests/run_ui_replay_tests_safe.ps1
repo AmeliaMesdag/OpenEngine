@@ -87,6 +87,8 @@ $defaultScenarios = @(
   'repro_sceneview_rmb_drag.json',
   # Inspector editing stability: create primitives and edit transform values.
   'repro_inspector_edit_primitives.json',
+  'repro_toolbar_build_activation_preserves_tabs.json',
+  'repro_toolbar_mixer_activation_preserves_tabs.json',
   # Assets ListView mode: wheel scroll virtualization + header horizontal sync.
   'repro_assets_listview_wheel_scroll_delay.json',
   # Assets ListView mode: horizontal scrollbar drag (narrow panel) must not crop/blank rows.

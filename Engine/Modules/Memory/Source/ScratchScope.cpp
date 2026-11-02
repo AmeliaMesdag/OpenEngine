@@ -12,6 +12,7 @@
 #include "Memory/ScratchScope.h"
 
 #include "Memory/StatsRecord.h"
+#include "RetentionWindow.h"
 #include "Types/FalseSharing.h"
 
 #include <algorithm>
@@ -22,21 +23,6 @@
 #include <memory>
 #include <vector>
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <pthread.h>
-#elif defined(__linux__)
-#include <sys/syscall.h>
-#include <unistd.h>
-#endif
-
 namespace GameEngine::Memory
 {
 namespace Detail
@@ -46,35 +32,16 @@ namespace
 
 /// Open-scope frames per chunk of the thread's frame storage.
 constexpr std::uint32_t kFramesPerChunk = 64;
-/// Outermost closes per hysteresis window: a retained block is released only when it exceeds
-/// twice the largest outermost need of at least the last this many closes.
-constexpr std::uint32_t kScratchTrimWindowCloses = 1024;
 /// Outermost closes between two publications of the stats and two hysteresis checks; divides
-/// `kScratchTrimWindowCloses`. The closes between pay the reset alone (the pre-registered
-/// fallback of the allocator design's ScratchBench rule (a)).
+/// the hysteresis window. The closes between pay the reset alone (the pre-registered fallback
+/// of the allocator design's ScratchBench rule (a)).
 constexpr std::uint32_t kBookkeepingCloses = 64;
-static_assert(kScratchTrimWindowCloses % kBookkeepingCloses == 0);
+static_assert(RetentionWindow::kResetsPerWindow % kBookkeepingCloses == 0);
 #if GE_DEBUG_INSTRUMENTATION
 /// Resources handed out round-robin in Debug and DebugFast, skipping those open scopes hold, so a
 /// container that outlived its scope holds a closed resource until the ring comes back round.
 constexpr std::size_t kQuarantineResources = 256;
 #endif
-
-/// The calling thread's id as the OS names it, the id `Platform::GetThreadName` takes.
-std::uint64_t CurrentOsThreadId()
-{
-#if defined(_WIN32)
-    return static_cast<std::uint64_t>(::GetCurrentThreadId());
-#elif defined(__APPLE__)
-    std::uint64_t id = 0;
-    pthread_threadid_np(nullptr, &id);
-    return id;
-#elif defined(__linux__)
-    return static_cast<std::uint64_t>(::syscall(SYS_gettid));
-#else
-    return 0;
-#endif
-}
 
 } // namespace
 
@@ -154,7 +121,7 @@ void FreeSideList(ScratchFrame& frame)
 class ScratchThread
 {
   public:
-    explicit ScratchThread(std::uint64_t osThreadId) : m_Arena(ScratchArenaTag{}, "Memory.Scratch", osThreadId)
+    ScratchThread() : m_Arena(ThreadArenaTag{}, "Memory.Scratch", StatsKind::Scratch)
     {
         InitializeFrames(m_FirstFrames, 0);
     }
@@ -212,7 +179,7 @@ class ScratchThread
             if (m_ClosesSinceBookkeeping + 1 == kBookkeepingCloses || !m_Arena.TryResetOneBlock(peak))
                 return false;
             ++m_ClosesSinceBookkeeping;
-            m_WindowPeak = std::max(m_WindowPeak, peak);
+            m_Retention.Take(peak);
         }
 #if GE_DEBUG_INSTRUMENTATION
         static_cast<ScratchResource&>(resource).Closed = true;
@@ -312,7 +279,7 @@ class ScratchThread
     /// the largest outermost need of the window.
     void CloseOutermost()
     {
-        m_WindowPeak = std::max(m_WindowPeak, m_Arena.PeakBytesSinceReset());
+        m_Retention.Take(m_Arena.PeakBytesSinceReset());
         const bool bookkeeping = m_ClosesSinceBookkeeping == kBookkeepingCloses;
         m_Arena.ResetPublishing(bookkeeping);
         if (!bookkeeping)
@@ -320,31 +287,17 @@ class ScratchThread
         m_ClosesSinceBookkeeping = 0;
         Detail::StatsRecord& record = m_Arena.m_Record;
         // The window peak covers every close since the last bookkeeping, unpublished ones too.
-        if (m_WindowPeak > record.HighWaterBytes.load(std::memory_order_relaxed))
-            record.HighWaterBytes.store(m_WindowPeak, std::memory_order_relaxed);
-        const std::size_t need = std::max(m_WindowPeak, m_PreviousWindowPeak);
-        m_ClosesInWindow += kBookkeepingCloses;
-        if (m_ClosesInWindow == kScratchTrimWindowCloses)
-        {
-            m_PreviousWindowPeak = m_WindowPeak;
-            m_WindowPeak = 0;
-            m_ClosesInWindow = 0;
-        }
-        const std::size_t retained = m_Arena.BytesReserved();
-        if (retained <= kArenaFirstBlockBytes || retained <= 2 * need)
-            return;
-        m_Arena.ReleaseBlocks(std::max(need, kArenaFirstBlockBytes));
-        record.Shrinks.store(record.Shrinks.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+        if (m_Retention.WindowPeak() > record.HighWaterBytes.load(std::memory_order_relaxed))
+            record.HighWaterBytes.store(m_Retention.WindowPeak(), std::memory_order_relaxed);
+        m_Arena.TrimRetained(m_Retention.Advance(kBookkeepingCloses));
     }
 
     [[maybe_unused]] char m_LeadingSeparation[kFalseSharingSeparation];
     Arena m_Arena;
     std::uint32_t m_OpenDepth = 0;
-    std::uint32_t m_ClosesInWindow = 0;
     std::uint32_t m_ClosesSinceBookkeeping = 0;
     /// The largest outermost need of the current and the previous hysteresis window.
-    std::size_t m_WindowPeak = 0;
-    std::size_t m_PreviousWindowPeak = 0;
+    RetentionWindow m_Retention;
     /// The frames of depths 0 to `kFramesPerChunk - 1`, reached without an indirection.
     FrameChunk m_FirstFrames;
     /// The deeper frames' chunks. Never shrinks before thread exit, so a frame's address is
@@ -409,7 +362,7 @@ ScratchThread* RegisterScratchThread()
         return nullptr;
     // Naming the sentinel registers its destructor with this thread.
     [[maybe_unused]] ScratchExitSentinel& sentinel = t_ScratchExit;
-    slot.Thread = new ScratchThread(CurrentOsThreadId());
+    slot.Thread = new ScratchThread();
     return slot.Thread;
 }
 

@@ -46,11 +46,11 @@ void ApplyBackground(UIManager* ui, bool enabled, uint32_t argb)
     {
         char color[8];
         WriteHexColor(color, argb);
-        root->Overrides().SetCustom(backgroundVar, color);
+        root->Style().SetCustom(backgroundVar, color);
     }
     else
     {
-        root->Overrides().SetCustom(backgroundVar, "transparent");
+        root->Style().SetCustom(backgroundVar, "transparent");
     }
     ui->MarkStyleDirtyAll();
 }
@@ -65,9 +65,9 @@ void ApplyShadow(UIManager* ui, bool enabled)
 
     const StringId shadowVar = HashStringId("--ui_info_card_shadow");
     if (enabled)
-        root->Overrides().SetCustom(shadowVar, "var(--popup-shadow, 0 -1px 24px rgba(0, 0, 0, 0.25))");
+        root->Style().SetCustom(shadowVar, "var(--popup-shadow, 0 -1px 24px rgba(0, 0, 0, 0.25))");
     else
-        root->Overrides().SetCustom(shadowVar, "none");
+        root->Style().SetCustom(shadowVar, "none");
     ui->MarkStyleDirtyAll();
 }
 
@@ -81,16 +81,16 @@ void ApplyOutline(UIManager* ui, bool enabled, uint32_t argb)
 
     char color[8];
     WriteHexColor(color, argb);
-    root->Overrides().SetCustom(HashStringId("--ui_info_card_outline_color"), color);
+    root->Style().SetCustom(HashStringId("--ui_info_card_outline_color"), color);
     if (enabled)
     {
-        root->Overrides().SetCustom(HashStringId("--ui_info_card_outline_width"), "1px");
-        root->Overrides().SetCustom(HashStringId("--ui_info_card_outline_style"), "solid");
+        root->Style().SetCustom(HashStringId("--ui_info_card_outline_width"), "1px");
+        root->Style().SetCustom(HashStringId("--ui_info_card_outline_style"), "solid");
     }
     else
     {
-        root->Overrides().SetCustom(HashStringId("--ui_info_card_outline_width"), "0px");
-        root->Overrides().SetCustom(HashStringId("--ui_info_card_outline_style"), "none");
+        root->Style().SetCustom(HashStringId("--ui_info_card_outline_width"), "0px");
+        root->Style().SetCustom(HashStringId("--ui_info_card_outline_style"), "none");
     }
     ui->MarkStyleDirtyAll();
 }

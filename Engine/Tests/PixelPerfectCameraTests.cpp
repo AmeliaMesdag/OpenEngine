@@ -3,7 +3,6 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Rendering/Camera/CameraPixelGrid.h"
 #include <gtest/gtest.h>
-#include <array>
 #include <cmath>
 #include <limits>
 
@@ -14,16 +13,16 @@ using namespace GameEngine::Engine::Renderer;
 TEST(PixelPerfectCamera, OrthoDisplayGridTracksCompensatedRasterAcrossPanning)
 {
     CameraData camera{};
-    for (int i = 0; i < 16; i += 5) camera.view[i] = camera.proj[i] = 1;
-    camera.proj[0] = camera.proj[5] = 0.02f;
+    camera.view = camera.proj = Mathematics::Matrix4x4::Identity();
+    camera.proj[0][0] = camera.proj[1][1] = 0.02f;
     constexpr uint32_t width = 161, height = 91;
     for (float pan : {-1.25f, -0.35f, 0.0f, 0.25f, 0.4f, 1.75f})
     {
-        camera.view[12] = pan;
-        camera.view[13] = -pan;
-        std::array<float, 4> uv{};
+        camera.view[3][0] = pan;
+        camera.view[3][1] = -pan;
+        Mathematics::Vector4 uv;
         const auto snapped = StabilizeCameraToPixelGrid(camera, width, height, 10, uv);
-        const std::array<float, 4> grid{1.0f / width, 1.0f / height, -uv[2] / uv[0], -uv[3] / uv[1]};
+        const Mathematics::Vector4 grid{1.0f / width, 1.0f / height, -uv[2] / uv[0], -uv[3] / uv[1]};
         for (int axis = 0; axis < 2; ++axis)
         {
             const float size = float(axis == 0 ? width : height);
@@ -38,11 +37,11 @@ TEST(PixelPerfectCamera, OrthoDisplayGridTracksCompensatedRasterAcrossPanning)
                 EXPECT_NEAR(texel, cell + 1.5f, tolerance);
             }
         }
-        const float rasterU = snapped.viewProj[12] * 0.5f + 0.5f;
+        const float rasterU = snapped.viewProj[3][0] * 0.5f + 0.5f;
         const float displayU = (rasterU - 0.5f * (1 - uv[0]) - uv[2]) / uv[0];
         const float cell = std::floor((displayU - grid[2]) / grid[0]);
         const float displayCenter = (cell + 0.5f) * grid[0] + grid[2];
-        const float worldSample = ((displayCenter - 0.5f) * 2.0f) / camera.proj[0] - camera.view[12];
+        const float worldSample = ((displayCenter - 0.5f) * 2.0f) / camera.proj[0][0] - camera.view[3][0];
         EXPECT_NEAR(worldSample, 0.0f, 2e-5f);
     }
 }
@@ -79,7 +78,7 @@ TEST(PixelPerfectCamera, ActiveCameraSnapsInScreenAxesAndPreservesTransform)
             {
                 const float original = view.Data()[12 + axis];
                 const float snapped = std::round(original * 10.0f) / 10.0f;
-                EXPECT_NEAR(actual->viewProj[12 + axis], snapped * actual->proj[axis * 5], 1e-5f);
+                EXPECT_NEAR(actual->viewProj[3][axis], snapped * actual->proj[axis][axis], 1e-5f);
                 const float fraction = axis == 0 ? state.FracX : state.FracY;
                 EXPECT_NEAR(fraction, (snapped - original) * 10.0f, 1e-5f);
             }
@@ -108,6 +107,7 @@ TEST(PixelPerfectCamera, DisabledPixelSnapPreservesProjectionAndZeroCompensation
     ASSERT_NE(actual, nullptr);
     EXPECT_FLOAT_EQ(state.FracX, 0.0f);
     EXPECT_FLOAT_EQ(state.FracY, 0.0f);
-    for (int element = 0; element < 16; ++element)
-        EXPECT_FLOAT_EQ(actual->viewProj[element], expected.viewProj[element]);
+    for (int column = 0; column < 4; ++column)
+        for (int row = 0; row < 4; ++row)
+            EXPECT_FLOAT_EQ(actual->viewProj[column][row], expected.viewProj[column][row]);
 }

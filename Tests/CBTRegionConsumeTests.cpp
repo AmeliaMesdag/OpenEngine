@@ -18,7 +18,7 @@
 #include "CBTTerrainECS/Systems/CBTUpdateSystem.h"
 #include "CBTTerrainECS/Systems/RegisterCBTSystems.h"
 #include "Components/Terrain/Terrain.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/SystemScheduling.h"
 #include "ECS/World.h"
@@ -26,7 +26,7 @@
 #include "Scene/SceneSchemaRegistry.h"
 #include "SplineECS/Systems/RegisterSplineSystems.h"
 #include "TerrainECS/PageLevelRule.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "TerrainECS/TerrainService.h"
 #include "TerrainECS/Systems/RegisterTerrainSystems.h"
@@ -782,7 +782,8 @@ TEST(CBTRegionConsume, APagedTerrainEditReachesTheClassifyAsTheRectItsPagesPubli
     request.Terrain = globalHandle.Index;
     request.TerrainGeneration = globalHandle.Generation;
 
-    TerrainHeightPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords});
+    TerrainPages pages(nullptr, nullptr, HeightPageProfile{64, kDesktopHeightPages.DenseTableWords},
+                       kDesktopSurfacePages);
     const Mathematics::Vector3 camera{128.0f, 10.0f, 128.0f};
     const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, 11.0f);
     pages.Update(1, 1.0f / 60.0f, false, 2);

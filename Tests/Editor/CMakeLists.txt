@@ -66,6 +66,8 @@ set(EDITOR_TEST_SOURCES
 	DefaultSceneEntitiesTests.cpp
 	NewSceneSeedTests.cpp
 	SceneViewExposureTests.cpp
+	# The Exposure settings page, which a Match test opens.
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/SceneViewExposureSettingsPage.cpp
 	TerrainZoneStrokeCommandTests.cpp
 	SphereSculptStrokeCommandTests.cpp
 	SceneBackupZonePayloadFlushTests.cpp
@@ -93,6 +95,7 @@ set(EDITOR_TEST_SOURCES
 	SceneSwapOrderingTests.cpp
 	SkeletonRuntimeUndoTests.cpp
 	SplineToolTests.cpp
+	SplineJunctionMarkerTests.cpp
 	# Draped spline display polylines (centerline + width envelope) against the
 	# shared conform ray. The drape TU shares CenterSample/HoldSurfaceAcrossGaps
 	# and the world-length scaling with the placement leaf TUs below;
@@ -161,6 +164,7 @@ set(EDITOR_TEST_SOURCES
 	# generated entity is and selects its owner. Leaf TUs over World and the UI
 	# element tree.
 	GeneratedEntityGuardTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Hierarchy/HierarchyDataProvider.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Hierarchy/HierarchyReparentRules.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/GeneratedEntityNotice.cpp
 	# The Hierarchy's Create Empty Parent over a selection: placement under the common
@@ -182,9 +186,14 @@ set(EDITOR_TEST_SOURCES
 	# Bake action, over the reflection-driven row builder it composes.
 	NavigationSurfaceInspectorTests.cpp
 	SplineRecipeInspectorTests.cpp
+	# The paving inspector: its sections, picture rows, members, junctions, notices, header badge and ground note.
+	SplinePavingInspectorTests.cpp
 	NavigationBakedDataSaveTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/Navigation/NavigationSurfaceInspector.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/SplineRecipe/SplineRecipeInspector.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/SplineRecipe/Paving/SplinePavingInspector.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/SplineRecipe/Paving/SplinePavingSettingRows.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/Controls/SplineJunctionList/SplineJunctionList.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/Spline/SplineExtrudeInspector.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/SplineFence/SplineFenceInspector.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/SplineFence/SplineFencePartRow.cpp
@@ -270,6 +279,18 @@ set(EDITOR_TEST_SOURCES
 	EditorStartupTests.cpp
 	EditorCommandLineTests.cpp
 	EditorSessionDescriptorTests.cpp
+	# The menu bar's heading order and the contributed menu paths.
+	EditorMenuBarBuilderTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Modules/EditorToolbar/EditorMenuBarBuilder.cpp
+	# The caption row and the window title of the main window.
+	MainWindowTitleTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Application/MainWindowTitle.cpp
+	# The status bar's left corner: the build configuration and the editor version. Its layout file is
+	# staged below; the version reads the generated build commit.
+	EditorBuildStatusTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/Controls/EditorBuildStatus.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Application/BuildConfigStatus.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Application/EditorVersion.cpp
 	MainThreadHangWatchdogTests.cpp
 	OpenSceneResolutionTests.cpp
 	# The `path` parameter of open_asset/select_asset: resolved through the asset
@@ -594,6 +615,9 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/CreatePrefab/CreatePrefabCommand.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/CreatePrefab/CreatePrefabDialog.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabBar.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabOverridesList/DiscardStaleOverrideCommand.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabOverridesList/PrefabOverridesList.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabOverridesList/PrefabOverridesListModel.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/UnpackPrefabCommand.cpp
 	# The prefab instance in the Hierarchy and the Scene View pick (PrefabHierarchyTests).
 	PrefabHierarchyTests.cpp
@@ -601,6 +625,8 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabHierarchyRows.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabInstanceDescriptions.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabRemovedComponents.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/ApplyRevert/ApplyPrefabOverrideCommand.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/ApplyRevert/PrefabOverrideMenu.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Prefabs/PrefabThumbnailHandler.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Picking/PickRootResolver.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewFraming.cpp
@@ -647,6 +673,7 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SplineTool/SplineStrokeCapture.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SplineTool/SplineTool.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SplineTool/SplineSceneGizmo.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SplineTool/SplineJunctionMarkers.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UndoRedo/Spline/SplinePointEdits.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UndoRedo/Spline/SplineNetworkRecordCommand.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewTransformTool.cpp
@@ -800,6 +827,10 @@ set(EDITOR_TEST_SOURCES
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/ViewOverlayHost.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Scene/SceneLoadProgressOverlay.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/RenderPipeline/RenderPipelineStandInNotice.cpp
+	# The Scene View's exposure notice: when it shows, what it says, and its Match game camera and
+	# Dismiss buttons (SceneViewExposureTests holds what Match gives the Scene View).
+	SceneViewExposureHintTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/SceneView/SceneViewExposureHintOverlay.cpp
 	# The load-then-continue helper the drops and inspectors use.
 	AsyncAssetHelpersTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Assets/AsyncAssetHelpers.cpp
@@ -1016,12 +1047,18 @@ set(EDITOR_TEST_SOURCES
 	# so it skips where no Vulkan device is available.
 	RenderGraphTickRegistryTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/RenderGraphTickRegistry.cpp
+	# Staging viewports: each shows its own pooled view through its own texture name.
+	StagingViewportTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/Controls/StagingViewport.cpp
 	# Inspector graph parameter rows: schema/keys, not typeId special cases.
 	# Leaf TU — InspectorPanel.cpp stays out of EditorTests.
 	GraphInspectorRowsTests.cpp
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Graph/GraphInspectorRows.cpp
 	# The reference fields show the object a GUID names: name, glyph, tooltip, missing state.
 	ReferenceFieldTests.cpp
+	# A window resize recreates the swapchain once per frame, and only at a new size.
+	WindowSwapchainResizeTests.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Display/WindowSwapchainResize.cpp
 	# The missing-asset tracker rescans when the asset manager reports changed files.
 	MissingAssetTrackerTests.cpp
 	# Suites above leave the engine running; this shuts it down before the process exits.
@@ -1561,6 +1598,7 @@ add_executable(BuildSceneListTests
 target_include_directories(BuildSceneListTests PRIVATE
 	${CMAKE_SOURCE_DIR}/Apps/Editor/Include
 	${CMAKE_SOURCE_DIR}/Tests
+	${CMAKE_SOURCE_DIR}/Engine/Tests
 )
 target_link_libraries(BuildSceneListTests PRIVATE
 	Engine
@@ -1811,6 +1849,71 @@ add_test(NAME PanelAssetLoadWithdrawalTests
 	COMMAND "${CMAKE_COMMAND}"
 		-DTEST_EXE=$<TARGET_FILE:PanelAssetLoadWithdrawalTests>
 		-DTEST_WORKING_DIR=$<TARGET_FILE_DIR:PanelAssetLoadWithdrawalTests>
+		-P "${CMAKE_SOURCE_DIR}/cmake/RunTestExecutable.cmake"
+)
+
+# The animation panels across a layout reconcile: a reconcile that replaces elements must
+# leave the panel holding no freed element and every replaced control wired once. Its own
+# target because it initializes the engine and mounts an editor asset source for the process.
+add_executable(AnimationPanelReconcileTests
+	AnimationPanelReconcileTests.cpp
+	${CMAKE_SOURCE_DIR}/Tests/EngineShutdownTestEnvironment.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/Animation/AnimationWindowPanel.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/Animation/ElementInstanceLedger.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/CurvesGraphView.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/DopeSheetView.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/LaneClipEditorView.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/TimelineBarElement.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/SequencerModelSerialization.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/TimeComposite/TimeCompositeView.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/TimeComposite/TimeCompositeTimelineBridge.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/ConfirmActionModal.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/RenameLayoutModal.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Panels/SaveSceneChangesModal.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Assets/AssetCreation.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Assets/EntityMaterialTextureAssign.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Shortcuts/EditorShortcuts.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/AssetField.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/EditorSearchBars.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/InspectorSection.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Source/UI/ToolbarDragDrop.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Modules/EditorContextMenu/ContextMenuBackendPolicy.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Modules/EditorContextMenu/UIContextMenu.cpp
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Modules/EditorContextMenu/InterceptableContextMenu.cpp
+	AnimationPanelLeafStubs.cpp
+)
+target_include_directories(AnimationPanelReconcileTests PRIVATE
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Include
+	${CMAKE_SOURCE_DIR}/Apps/Editor/Modules
+	${CMAKE_SOURCE_DIR}/Tests
+	${CMAKE_SOURCE_DIR}/Engine/Tests
+)
+target_link_libraries(AnimationPanelReconcileTests PRIVATE
+	Engine
+	EditorSDK
+	GTest::gtest
+	GTest::gtest_main
+)
+set_target_properties(AnimationPanelReconcileTests PROPERTIES
+	CXX_STANDARD 20
+	CXX_STANDARD_REQUIRED ON
+	VCPKG_APPLOCAL_DEPS OFF
+)
+if(MSVC)
+	target_compile_options(AnimationPanelReconcileTests PRIVATE /bigobj /wd4100)
+endif()
+ge_set_output_tests(AnimationPanelReconcileTests)
+ge_stage_runtime_dependencies(AnimationPanelReconcileTests)
+ge_stage_test_asset(AnimationPanelReconcileTests
+	"${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/panels/AnimationWindowPanel.uxml"
+	"Assets/UI/panels/AnimationWindowPanel.uxml")
+ge_stage_test_asset(AnimationPanelReconcileTests
+	"${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/panels/AnimationWindowPanel.css"
+	"Assets/UI/panels/AnimationWindowPanel.css")
+add_test(NAME AnimationPanelReconcileTests
+	COMMAND "${CMAKE_COMMAND}"
+		-DTEST_EXE=$<TARGET_FILE:AnimationPanelReconcileTests>
+		-DTEST_WORKING_DIR=$<TARGET_FILE_DIR:AnimationPanelReconcileTests>
 		-P "${CMAKE_SOURCE_DIR}/cmake/RunTestExecutable.cmake"
 )
 
@@ -2084,15 +2187,35 @@ if(TARGET EditorTests)
 	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/InspectorNotice/InspectorNotice.uxml"
 	    "Assets/UI/controls/InspectorNotice/InspectorNotice.uxml")
 
+	# EditorBuildStatus builds its two labels from its layout, read from the same install-assets root.
+	ge_stage_test_asset(EditorTests
+	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/EditorBuildStatus/EditorBuildStatus.uxml"
+	    "Assets/UI/controls/EditorBuildStatus/EditorBuildStatus.uxml")
+	# EditorVersion.cpp reads the generated Editor/BuildCommit.h; BuildConfigStatus.cpp the configuration name.
+	add_dependencies(EditorTests EditorBuildCommit)
+	target_include_directories(EditorTests PRIVATE "$<TARGET_PROPERTY:EditorBuildCommit,BINARY_DIR>/generated")
+	target_compile_definitions(EditorTests PRIVATE GE_BUILD_CONFIG="$<CONFIG>")
+
 	# CreatePrefabDialog builds its fields from its layout, read from the same install-assets root.
 	ge_stage_test_asset(EditorTests
 	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/CreatePrefabDialog/CreatePrefabDialog.uxml"
 	    "Assets/UI/controls/CreatePrefabDialog/CreatePrefabDialog.uxml")
 
+	# StagingViewport binds its image from its layout, read from the same install-assets root.
+	ge_stage_test_asset(EditorTests
+	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/StagingViewport/StagingViewport.uxml"
+	    "Assets/UI/controls/StagingViewport/StagingViewport.uxml")
+
 	# PrefabBar builds its two lines from its layout, read from the same install-assets root.
 	ge_stage_test_asset(EditorTests
 	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/PrefabBar/PrefabBar.uxml"
 	    "Assets/UI/controls/PrefabBar/PrefabBar.uxml")
+	# The Overrides list builds its frame, groups and rows from these layouts.
+	foreach(_layout PrefabOverridesList PrefabOverrideGroup PrefabOverrideRow)
+	    ge_stage_test_asset(EditorTests
+	        "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/PrefabOverridesList/${_layout}.uxml"
+	        "Assets/UI/controls/PrefabOverridesList/${_layout}.uxml")
+	endforeach()
 	# The reference fields build their parts from this layout.
 	ge_stage_test_asset(EditorTests
 	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/ReferenceField/ReferenceField.uxml"
@@ -2154,6 +2277,14 @@ if(TARGET EditorTests)
 	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/EntityMemberList/EntityMemberRow.uxml"
 	    "Assets/UI/controls/EntityMemberList/EntityMemberRow.uxml")
 
+	# SplineJunctionList builds the paving's junction list and each row from its layouts.
+	ge_stage_test_asset(EditorTests
+	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/SplineJunctionList/SplineJunctionList.uxml"
+	    "Assets/UI/controls/SplineJunctionList/SplineJunctionList.uxml")
+	ge_stage_test_asset(EditorTests
+	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/SplineJunctionList/SplineJunctionRow.uxml"
+	    "Assets/UI/controls/SplineJunctionList/SplineJunctionRow.uxml")
+
 	# SplineFencePartRow builds each fence part row from its layout, read from the same root.
 	ge_stage_test_asset(EditorTests
 	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/inspectors/SplineFencePartRow/SplineFencePartRow.uxml"
@@ -2188,6 +2319,11 @@ if(TARGET EditorTests)
 	        "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/ScriptPackagesList/${_layout}.uxml"
 	        "Assets/UI/controls/ScriptPackagesList/${_layout}.uxml")
 	endforeach()
+
+	# LoadControlLayoutTests reads the settings group break layout from the same root.
+	ge_stage_test_asset(EditorTests
+	    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/SettingsSectionBreak/SettingsSectionBreak.uxml"
+	    "Assets/UI/controls/SettingsSectionBreak/SettingsSectionBreak.uxml")
 
 	# The Log list builds each row from its layout, read from the same root.
 	ge_stage_test_asset(EditorTests

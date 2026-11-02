@@ -497,12 +497,9 @@ HeadlessViewStatus HeadlessViewFixture::Up()
 
     m_Camera = m_Services->Views().AllocateCamera("HeadlessView.Cam");
     Rendering::CameraData cd{};
-    for (int i = 0; i < 16; i += 5)
-    {
-        cd.view[i] = 1.0f;
-        cd.proj[i] = 1.0f;
-        cd.viewProj[i] = 1.0f;
-    }
+    cd.view = Mathematics::Matrix4x4::Identity();
+    cd.proj = Mathematics::Matrix4x4::Identity();
+    cd.viewProj = Mathematics::Matrix4x4::Identity();
     m_Services->Views().SetCameraData(m_Camera, cd);
     m_View = m_Services->Views().AllocateView("HeadlessView", m_Camera);
     m_Services->Views().SetViewRenderLayerMask(m_View, GameEngine::Rendering::RenderLayerMask::Default());
@@ -760,8 +757,7 @@ HeadlessViewStatus HeadlessViewFixture::Render(const HeadlessViewDesc& desc)
 
     Rendering::ViewClearConfig clear{};
     clear.clearColor = true;
-    for (int i = 0; i < 4; ++i)
-        clear.clearColorValue[i] = desc.ClearLinear[i];
+    clear.clearColorValue = desc.ClearLinear;
     clear.clearDepth = true;
     clear.clearDepthValue = 0.0f; // reverse-Z far
     m_Services->Views().SetViewClearConfig(m_View, clear);

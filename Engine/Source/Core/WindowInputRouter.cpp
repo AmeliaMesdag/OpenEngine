@@ -321,7 +321,7 @@ void WindowInputRouter::RouteMouseButton(const WindowInputRouterConfig& config, 
     {
         // The click's mask is live platform state, and it is the only report of
         // a modifier that was already held when this window took focus.
-        ui->SyncModifierKeys(mods);
+        ui->ReconcileModifierKeys(mods);
         consumed = ui->OnMouseButton(button, pressed) && pressed;
     }
 
@@ -355,11 +355,9 @@ void WindowInputRouter::RouteScroll(const WindowInputRouterConfig& config, float
     UIManager* ui = config.getUi ? config.getUi() : nullptr;
     if (ui)
     {
-        // The platform callback supplies a live query of the OS modifier state,
-        // not an event mask, so it outranks the key events this UI tracked: a
-        // modifier whose release the window never saw (Cmd+Space to Spotlight,
-        // a browser page losing the key-up) would otherwise turn every later
-        // plain wheel into the item resize gesture (Ctrl/Cmd + wheel by default).
+        // The wheel's mask is live platform state. It releases a modifier whose
+        // key-up the window never saw (Cmd+Space, a lost browser key-up), so a
+        // plain wheel does not become the item resize gesture (Ctrl/Cmd + wheel).
         ui->ReconcileModifierKeys(mods);
     }
 

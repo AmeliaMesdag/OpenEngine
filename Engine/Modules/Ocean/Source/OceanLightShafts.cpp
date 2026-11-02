@@ -36,18 +36,18 @@ constexpr uint32_t kLightShaftsFragmentStage = kShaderStageFragment;
 // std140 mirror of OceanReflectedCausticsParams in ocean_lightshafts.frag.
 struct alignas(16) OceanReflectedCausticsParamsGPU
 {
-    float InvViewProj[16]{};
-    float CameraPos[4]{};
-    float Time[4]{};      // x time
-    float SunDirection[4]{}; // xyz toward sun
-    float Ocean[4]{};        // x seaLevel, y causticsAvailable, z surface displacement bound, w minimum reflected rise
-    float Caustics[4]{};     // x scale, y average, z strength, w pad
-    float ReflectedCaustics[4]{}; // x strength, y height, z falloff, w pad
-    float FFTParams[4]{};    // x legacy waveMode, y fftCascadeCount, z shapeWeight, w maxVertical
-    float LocalFFT[4]{};     // x = ready local FFT stream bit mask, yzw pad
-    float LocalFFTMaskCascadeOriginScale[kMaxOceanLodCascades * 4]{};
-    float LocalFFTMaskCascadeMeta[4]{}; // x lod count
-    float Gerstner[4]{};     // legacy ABI pad
+    Mathematics::Matrix4x4 InvViewProj;
+    Mathematics::Vector4 CameraPos;
+    Mathematics::Vector4 Time;      // x time
+    Mathematics::Vector4 SunDirection; // xyz toward sun
+    Mathematics::Vector4 Ocean;        // x seaLevel, y causticsAvailable, z surface displacement bound, w minimum reflected rise
+    Mathematics::Vector4 Caustics;     // x scale, y average, z strength, w pad
+    Mathematics::Vector4 ReflectedCaustics; // x strength, y height, z falloff, w pad
+    Mathematics::Vector4 FFTParams;    // x waveMode, y fftCascadeCount, z shapeWeight, w maxVertical
+    Mathematics::Vector4 LocalFFT;     // x = ready local FFT stream bit mask, yzw pad
+    Mathematics::Vector4 LocalFFTMaskCascadeOriginScale[kMaxOceanLodCascades];
+    Mathematics::Vector4 LocalFFTMaskCascadeMeta; // x lod count
+    Mathematics::Vector4 Gerstner;     // pad
     float Waves[128]{};      // legacy ABI pad
 };
 static_assert(sizeof(OceanReflectedCausticsParamsGPU) == 848,
@@ -81,14 +81,15 @@ namespace
 // is host-coherent (often write-combined), so a single memcpy-sized store
 // beats field-by-field writes there.
 void FillReflectedCausticsParams(OceanReflectedCausticsParamsGPU& out,
-                                 const float invViewProj[16], const float cameraPos[4],
+                                 const Mathematics::Matrix4x4& invViewProj,
+                                 const Mathematics::Vector3& cameraPos,
                                  const OceanParamsGPU& params,
                                  const OceanUnderwaterSettings& settings, bool causticsAvailable,
                                  float surfaceDisplacementBound, uint32_t localFFTReadyMask,
                                  const OceanCascadeLayoutGPU* localFFTMaskLayout)
 {
     OceanReflectedCausticsParamsGPU u{};
-    std::memcpy(u.InvViewProj, invViewProj, sizeof(float) * 16);
+    u.InvViewProj = invViewProj;
     u.CameraPos[0] = cameraPos[0];
     u.CameraPos[1] = cameraPos[1];
     u.CameraPos[2] = cameraPos[2];
@@ -117,8 +118,7 @@ void FillReflectedCausticsParams(OceanReflectedCausticsParamsGPU& out,
             std::min<uint32_t>(localFFTMaskLayout->LodCount, kMaxOceanLodCascades);
         for (uint32_t i = 0; i < lodCount; ++i)
         {
-            std::memcpy(u.LocalFFTMaskCascadeOriginScale + i * 4u,
-                        localFFTMaskLayout->CascadeOriginScale[i], sizeof(float) * 4u);
+            u.LocalFFTMaskCascadeOriginScale[i] = localFFTMaskLayout->CascadeOriginScale[i];
         }
         u.LocalFFTMaskCascadeMeta[0] = static_cast<float>(lodCount);
     }
@@ -334,8 +334,7 @@ bool OceanLightShafts::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d
     if (!camera)
         return false;
 
-    Mathematics::Matrix4x4 vp{};
-    std::memcpy(vp.Data(), camera->viewProj, sizeof(float) * 16);
+    Mathematics::Matrix4x4 vp = camera->viewProj;
     const Mathematics::Matrix4x4 invVp = Mathematics::Inverse(vp);
 
     const bool causticsAvailable = caustics.IsValid() && causticsSampler.IsValid() &&
@@ -373,7 +372,8 @@ bool OceanLightShafts::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d
     const auto paramsAlloc = d.Frame.AllocUpload<OceanReflectedCausticsParamsGPU>();
     if (!paramsAlloc.Valid())
         return false;
-    FillReflectedCausticsParams(*paramsAlloc.Ptr, invVp.Data(), camera->cameraPos, params,
+    const Mathematics::Vector3 cameraPos(camera->cameraPos.x, camera->cameraPos.y, camera->cameraPos.z);
+    FillReflectedCausticsParams(*paramsAlloc.Ptr, invVp, cameraPos, params,
                                 settings, causticsAvailable, surfaceDisplacementBound,
                                 validLocalFFTMask,
                                 shape.LocalFFTMaskLayout);

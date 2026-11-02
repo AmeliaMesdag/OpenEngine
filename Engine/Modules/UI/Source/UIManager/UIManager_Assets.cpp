@@ -74,7 +74,8 @@ static std::unique_ptr<UIElement> CloneElement(const UITemplateNode& src)
     std::string innerText;
     if (const std::string* t = src.FindAttribute("text"))
         innerText = *t;
-    ElementFactoryRegistry::Instance().ApplyAttributes(*out, src.Attributes, innerText);
+    ElementFactoryRegistry::Instance().ApplyAttributes(*out, src.Attributes, innerText, src.SourceFileName(),
+                                                       src.SourceLine);
 
     // Recurse
     for (const auto& child : src.Children)
@@ -1641,24 +1642,6 @@ void UIManager::RemoveExternalTexture(const std::string& name)
     if (s_Log && s_Budget-- > 0)
     {
         Logger::Log::Warning("[UI GeoInvalidate] RemoveExternalTexture('{}')", name);
-    }
-}
-
-void UIManager::ClearElementBackgroundTexture(UIElement& el)
-{
-    el.Styles().ResetBackgroundImage();
-
-    static const bool s_Log = []() -> bool
-    {
-        const char* e = std::getenv("GE_UI_GEOM_INVALIDATE_LOG");
-        return (e && e[0] == '1');
-    }();
-    static int s_Budget = 24;
-    if (s_Log && s_Budget-- > 0)
-    {
-        Logger::Log::Warning("[UI GeoInvalidate] ClearElementBackgroundTexture(tag='{}' id='{}')",
-                             UIAttributeAccess::GetDebugTypeName(el),
-                             el.GetId().empty() ? "<no-id>" : el.GetId().c_str());
     }
 }
 

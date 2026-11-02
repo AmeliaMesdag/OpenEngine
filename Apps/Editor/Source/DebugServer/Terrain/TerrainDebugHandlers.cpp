@@ -1,8 +1,10 @@
 #include "DebugServer/Terrain/TerrainDebugHandlers.h"
 
 #include "AssetCore/GUID.h"
+#include "CBTTerrain/CBTLayout.h"
 #include "CBTTerrain/CBTPoolHealth.h"
 #include "CBTTerrain/CBTTreeAudit.h"
+#include "CBTTerrain/CBTUpdateRestGate.h"
 #include "CBTTerrainECS/CBTRenderFeature.h"
 #include "CBTTerrainECS/TerrainProvisioning.h"
 #include "DebugServer/DebugServerReply.h"
@@ -23,7 +25,7 @@
 #include "Terrain/TerrainBrushTool.h"
 #include "SceneView/SceneViewController.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "TerrainECS/TerrainRenderPublication.h"
 #include "TerrainECS/TerrainService.h"
@@ -57,6 +59,47 @@ std::string EntityNameFromWorld(ECS::World* world, ECS::EntityHandle entity)
     if (name)
         return std::string(name->View());
     return {};
+}
+
+json RefusalJson(ECS::World& world, const TerrainECS::GpuHeightBakeRefusal& refusal)
+{
+    if (refusal.Reason == TerrainECS::GpuHeightBakeRefusalReason::None)
+        return nullptr;
+    json out = {{"reason", TerrainECS::GpuHeightBakeRefusalName(refusal.Reason)}};
+    if (refusal.Entity.IsValid())
+    {
+        out["entity"] = refusal.Entity.id;
+        out["entityName"] = EntityNameFromWorld(&world, refusal.Entity);
+    }
+    return out;
+}
+
+// The last height bake of every tiled terrain: the path, the first refusal (a reason on the terrain
+// itself, else the first modifier the GPU bake cannot compute) and the modifier refusal on its own.
+json HeightBakeReports()
+{
+    json reports = json::array();
+    auto* world = EngineCore::GetInstance().GetPrimaryWorld();
+    auto* terrainService = TerrainECS::TerrainService::TryGet();
+    if (!world || !terrainService)
+        return reports;
+    world->Query<ECS::Read<Components::Terrain>>().Each(
+        [&](ECS::EntityHandle entity, const Components::Terrain& terrain)
+        {
+            const auto* tiled = terrainService->GetTiledTerrainData(
+                TerrainECS::TiledTerrainHandle{terrain.TiledTerrainHandle, terrain.TiledTerrainGeneration});
+            if (!tiled)
+                return;
+            const TerrainECS::TerrainHeightBakeReport& report = tiled->HeightBakeReport;
+            reports.push_back({{"terrain", entity.id},
+                               {"terrainName", EntityNameFromWorld(world, entity)},
+                               {"path", TerrainECS::TerrainHeightBakePathName(report.Path)},
+                               {"firstRefusal", RefusalJson(*world, report.FirstRefusal())},
+                               {"modifierRefusal", RefusalJson(*world, report.ModifierRefusal)},
+                               {"otherModifierRefusals", report.OtherModifierRefusals},
+                               {"pageOverlayComposedSamples", report.PageOverlayComposedSamples}});
+        });
+    return reports;
 }
 
 json HeightStats(const Terrain::HeightfieldData& hf)
@@ -304,8 +347,7 @@ Mathematics::Vector3 FirstWorldCorner(const CBTTerrain::CBTTreeSnapshot& snapsho
         if (slot >= snapshot.PoolSize || snapshot.HeapIds[slot] == CBTTerrain::kFreeSlotHeapID)
             continue;
         const CBTTerrain::CBTVertexData& v = snapshot.Vertices[slot];
-        if (v.DeepTag[0] == 0u)
-            return Mathematics::Vector3(v.Corner0[0], v.Corner0[1], v.Corner0[2]);
+        return Mathematics::Vector3(v.Corner0[0], v.Corner0[1], v.Corner0[2]);
     }
     return Mathematics::Vector3{};
 }
@@ -331,8 +373,6 @@ json CornerHeightAudit(const CBTTerrain::CBTTreeSnapshot& snapshot,
         if (slot >= snapshot.PoolSize || snapshot.HeapIds[slot] == CBTTerrain::kFreeSlotHeapID)
             continue;
         const CBTTerrain::CBTVertexData& v = snapshot.Vertices[slot];
-        if (v.DeepTag[0] != 0u)
-            continue; // (sector, local) storage, not a world corner
         const float* corners[3] = {v.Corner0, v.Corner1, v.Corner2};
         for (uint32_t k = 0; k < 3u; ++k, ++cursor)
         {
@@ -371,6 +411,17 @@ json CornerHeightAudit(const CBTTerrain::CBTTreeSnapshot& snapshot,
     return json{{"sampled", errors.size()}, {"unsampled", unsampled}, {"maxAbsErrM", worstErr},
                 {"p99AbsErrM", p99},         {"over1m", overOneMetre},         {"over2m", overTwoMetres},
                 {"worst", std::move(worstRows)}};
+}
+
+// How far a stop's planar keep step search has come, in the words get_terrain_stats documents.
+const char* KeepSettlePhase(const CBTTerrain::CBTTessellationStats& stats)
+{
+    if (stats.OffFrustumKeepFloor == CBTTerrain::kKeepFloorArriving)
+        return "moving";
+    if (stats.OffFrustumKeepFloor == CBTTerrain::kKeepFloorProbing)
+        return "probing";
+    return CBTTerrain::CBTKeepSearchOpen(stats.OffFrustumKeepStep, stats.OffFrustumKeepFloor) ? "searching"
+                                                                                              : "settled";
 }
 
 } // namespace
@@ -808,7 +859,8 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
         auto* cbt = rs ? rs->GetFeature<CBTTerrainECS::CBTRenderFeature>() : nullptr;
         if (!cbt)
             return json{{"active", false},
-                        {"note", "no CBTRenderFeature — no active CBT terrain in this scene"}};
+                        {"note", "no CBTRenderFeature — no active CBT terrain in this scene"},
+                        {"heightBake", HeightBakeReports()}};
 
         const auto& domain = cbt->GetDomainConfig();
         const bool spherical = domain.DomainMode == CBTTerrain::kDomainSpherical;
@@ -831,6 +883,7 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
             {"rendering", publication == TerrainECS::TerrainPublicationState::Published},
             {"diagnosis", TerrainECS::TerrainPublicationDescription(publication)}
         };
+        out["heightBake"] = HeightBakeReports();
         out["active"] = cbt->IsActive();
         out["initialized"] = cbt->IsInitialized();
         out["domain"] = spherical ? "spherical" : "planar";
@@ -852,7 +905,7 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
         out["heapArm"] = cbt->UsesNarrowHeap() ? "narrow" : "wide";
         out["subdivCeiling"] = CBTTerrainECS::SubdivCapFor(
             spherical ? Components::TerrainDomain::Spherical : Components::TerrainDomain::Planar,
-            cbt->GetClassify().DeepDecode != 0u, cbt->UsesNarrowHeap());
+            cbt->UsesNarrowHeap());
         out["nearFieldGate"] = cbt->GetClassify().NearFieldGate != 0u; // the round-8e fix state
         out["editRetess"] = cbt->GetClassify().EditRetessEnabled != 0u;
         // Whether the planar pool-pressure controller is armed (GE_CBT_POOL_PRESSURE). Without it a
@@ -897,13 +950,14 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
             }
         }
 
-        // Each height page stream's wanted pages per level and how many of them are resident.
+        // Each page stream's wanted pages per level and how many of them are resident: the height streams,
+        // the planets, then the surface streams.
         if (auto* heightService = TerrainECS::TerrainService::TryGet())
         {
-            std::vector<TerrainECS::HeightPageStreamCounts> streams;
-            heightService->GetHeightPages().StreamCounts(streams);
+            std::vector<TerrainECS::PageStreamCounts> streams;
+            heightService->GetTerrainPages().StreamCounts(streams);
             json pageStreams = json::array();
-            for (const TerrainECS::HeightPageStreamCounts& stream : streams)
+            for (const TerrainECS::PageStreamCounts& stream : streams)
             {
                 json levels = json::array();
                 uint32 wanted = 0;
@@ -918,6 +972,7 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
                 }
                 json entry = {{"label", stream.Label},
                               {"planet", stream.Planet},
+                              {"surface", stream.Surface},
                               {"wanted", wanted},
                               {"resident", resident},
                               {"levels", std::move(levels)}};
@@ -926,6 +981,7 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
                 pageStreams.push_back(std::move(entry));
             }
             out["pageStreams"] = std::move(pageStreams);
+            out["pageVisits"] = heightService->GetTerrainPages().Residency().PageVisitsThisFrame();
         }
 
         if (!cbt->IsInitialized())
@@ -956,6 +1012,12 @@ void RegisterTerrainDebugHandlers(EditorDebugServer& server, EditorApplication& 
         // Planar off-frustum keep step: 0 keeps the whole off-frustum field at depth; higher steps
         // narrow the band of off-frustum geometry kept while the pool is under pressure.
         out["offFrustumKeepStep"] = st.OffFrustumKeepStep;
+        // The stop's keep search: its phase, the lowest step it can still take, and the merge candidates
+        // that prove early that a step does not fit.
+        const bool keepStepRuns = cbt->RunsOffFrustumKeepStep();
+        out["settlePhase"] = keepStepRuns ? json(KeepSettlePhase(st)) : json(nullptr);
+        out["keepFloor"] = keepStepRuns && st.OffFrustumKeepFloor >= 0 ? json(st.OffFrustumKeepFloor) : json(nullptr);
+        out["mergeCandidates"] = st.MergeCandidates;
 
         // Interpret the numbers so the answer is legible without knowing the internals.
         // CBTPoolHealth.h owns the classification and the reasoning behind it.

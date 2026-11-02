@@ -50,8 +50,8 @@ bool ServesABake(const NavigationSurface& surface, Pathfinding::NavMapHandle map
     return map.IsValid() && surface.MapHoldsBake;
 }
 
-// The mesh tiles a surface that has not finished baking has left to bake. A grid bakes whole in one
-// update, so it has none to count.
+// The mesh tiles a surface that has not finished baking has left to bake. A grid bakes as one job, so
+// it has none to count.
 uint32 PendingTilesOf(const NavigationSurface& surface)
 {
     if (IsBaked(surface) || surface.Mode != Components::NavigationSurfaceMode::Mesh)

@@ -469,13 +469,13 @@ CameraData SceneReflectionProbeEnvironmentSource::MakeFaceCamera(uint32_t face) 
     const Matrix4x4 viewProj = proj * view;
 
     CameraData out{};
-    std::memcpy(out.view, view.Data(), sizeof(float) * 16u);
-    std::memcpy(out.proj, proj.Data(), sizeof(float) * 16u);
-    std::memcpy(out.viewProj, viewProj.Data(), sizeof(float) * 16u);
-    out.cameraPos[0] = eye.x;
-    out.cameraPos[1] = eye.y;
-    out.cameraPos[2] = eye.z;
-    out.cameraPos[3] = 0.0f;
+    out.view = view;
+    out.proj = proj;
+    out.viewProj = viewProj;
+    out.cameraPos.x = eye.x;
+    out.cameraPos.y = eye.y;
+    out.cameraPos.z = eye.z;
+    out.cameraPos.w = 0.0f;
     return out;
 }
 
@@ -621,10 +621,7 @@ bool SceneReflectionProbeEnvironmentSource::DeclareFaceCapture(
 
     Rendering::ViewClearConfig clear{};
     clear.clearColor = !hasSkyFace;
-    clear.clearColorValue[0] = 0.0f;
-    clear.clearColorValue[1] = 0.0f;
-    clear.clearColorValue[2] = 0.0f;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue = ColorLinear(0.0f, 0.0f, 0.0f, 1.0f);
     clear.clearDepth = true;
     clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
     m_Services->Views().SetViewClearConfig(m_ViewId, clear);

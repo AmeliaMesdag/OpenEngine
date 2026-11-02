@@ -11,6 +11,7 @@ using GameEngine::Mathematics::PointInPolygon;
 using GameEngine::Mathematics::Ray3D;
 using GameEngine::Mathematics::Vector2;
 using GameEngine::Mathematics::Vector3;
+using GameEngine::Mathematics::Vector4;
 
 namespace
 {
@@ -295,4 +296,46 @@ TEST(GeometryTests, DistanceToSegmentOnThePlaneIsToTheNearestPointOfTheSegment)
     const Vector2 b(4.0f, 0.0f);
     EXPECT_FLOAT_EQ(DistanceToSegment(Vector2(2.0f, 3.0f), a, b), 3.0f);
     EXPECT_FLOAT_EQ(DistanceToSegment(Vector2(7.0f, 4.0f), a, b), 5.0f) << "past the end, to the end";
+}
+
+TEST(GeometryTests, LerpBlendsTheEndpointsAndDoesNotClamp)
+{
+    using GameEngine::Mathematics::Lerp;
+    const Vector3 a(1.0f, -2.0f, 3.0f);
+    const Vector3 b(5.0f, 2.0f, -1.0f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, 0.0f).x, 1.0f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, 1.0f).z, -1.0f);
+    const Vector3 middle = Lerp(a, b, 0.5f);
+    EXPECT_FLOAT_EQ(middle.x, 3.0f);
+    EXPECT_FLOAT_EQ(middle.y, 0.0f);
+    EXPECT_FLOAT_EQ(middle.z, 1.0f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, 1.5f).y, 4.0f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, -0.5f).z, 5.0f);
+}
+
+TEST(GeometryTests, LerpOnThePlaneBlendsTheEndpointsAndDoesNotClamp)
+{
+    using GameEngine::Mathematics::Lerp;
+    const Vector2 a(1.0f, -2.0f);
+    const Vector2 b(5.0f, 2.0f);
+    EXPECT_EQ(Lerp(a, b, 0.0f), a);
+    EXPECT_EQ(Lerp(a, b, 1.0f), b);
+    EXPECT_EQ(Lerp(a, b, 0.5f), Vector2(3.0f, 0.0f));
+    EXPECT_EQ(Lerp(a, b, 1.5f), Vector2(7.0f, 4.0f));
+    EXPECT_EQ(Lerp(a, b, -0.5f), Vector2(-1.0f, -4.0f));
+}
+
+TEST(GeometryTests, LerpOfFourComponentsBlendsEveryComponentAndDoesNotClamp)
+{
+    using GameEngine::Mathematics::Lerp;
+    const Vector4 a(1.0f, -2.0f, 3.0f, 0.0f);
+    const Vector4 b(5.0f, 2.0f, -1.0f, 1.0f);
+    const Vector4 middle = Lerp(a, b, 0.5f);
+    EXPECT_FLOAT_EQ(middle.x, 3.0f);
+    EXPECT_FLOAT_EQ(middle.y, 0.0f);
+    EXPECT_FLOAT_EQ(middle.z, 1.0f);
+    EXPECT_FLOAT_EQ(middle.w, 0.5f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, 0.0f).w, 0.0f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, 1.0f).x, 5.0f);
+    EXPECT_FLOAT_EQ(Lerp(a, b, 1.5f).w, 1.5f);
 }

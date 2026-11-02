@@ -390,3 +390,29 @@ TEST(UITextureRegistryDeviceRebuild, BandSlotAllocationRestartsAtOneAfterRebuild
         << "post-heal band slot numbering does not restart at 1 as it does on a "
            "fresh registry";
 }
+
+// The heal frees every slot. A reservation from before the rebuild ends with it,
+// so it cannot write the texture that takes its slot after the rebuild.
+TEST(UITextureRegistryDeviceRebuild, PreRebuildReservationNeverWritesItsSlot)
+{
+    ScopedEnvVar forcedLoss("GE_VK_FORCE_DEVICE_LOST", "2");
+    auto dev = MakeHeadlessDevice();
+    if (!dev)
+        GTEST_SKIP() << "no Vulkan device available";
+
+    UI::UITextureRegistry registry(dev.get());
+    const auto stale = registry.ReserveSlot();
+    ASSERT_TRUE(stale.IsValid());
+    if (!DriveRebuild(*dev))
+        GTEST_SKIP() << "injected loss did not produce a rebuild on this adapter";
+
+    const TextureHandle registeredTex = CreatePixelTexture(*dev, "UIDevRebuild_Registered");
+    const TextureHandle staleTex = CreatePixelTexture(*dev, "UIDevRebuild_Stale");
+    ASSERT_TRUE(registeredTex.IsValid() && staleTex.IsValid());
+    const uint32_t registered = registry.Register(registeredTex);
+    ASSERT_EQ(registered, stale.Index()) << "the slot was not reused, so this pin would prove nothing";
+
+    registry.UpdateSlot(stale, staleTex);
+    EXPECT_EQ(registry.GetTextureHandlesForSlots({registered})[0].id, registeredTex.id)
+        << "a reservation from before the rebuild wrote the slot's next owner";
+}

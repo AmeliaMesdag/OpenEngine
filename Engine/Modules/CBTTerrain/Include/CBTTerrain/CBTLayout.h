@@ -64,11 +64,9 @@ inline constexpr uint32_t kDefaultBaseDepth = 1u; // log2(kRootHalfedgeCount)
 // CBT terrain wholesale (CBTRenderFeature), so there is no reduced-precision planet path to
 // fall back to. Mirrored in cbt_layout.glsl as CBT_MAX_NUM_SUBDIV and locked to it by the
 // CBTLayout.GlslMaxDecodeSubdivMatchesCpp test (no compile-time channel from GLSL to C++).
-// This is the FP32-WORLD-STORE cap: the spherical deep (sector, local) store lifts its cap
-// to DeepDecode::kDeepDecodeSubdiv (50) via the flag-coupled provisioning derivation
-// (TerrainProvisioning SubdivCapFor, decode-precision arc S2b) — never lift THIS constant
-// without a storage representation that carries the depth (design §1: the store error is
-// radius-bound, ~0.25 m at Earth, and crosses 25% of the facet at numSubdiv ~46).
+// This is the fp32 WORLD-store cap. The sphere's (sector, local) store on the wide arm has its
+// own cap, DeepDecode::kDeepDecodeSubdiv (50). Do not lift THIS constant without a store that
+// carries the depth (the store error is ~0.25 m at Earth and crosses 25% of the facet at ~46).
 inline constexpr uint32_t kMaxDecodeSubdiv = 40u;
 
 // The cap on the NARROW-HEAP arm (GE_CBT_HEAP32 — targets with no 64-bit integers at all;
@@ -264,10 +262,9 @@ struct CBTBisectorData
 // pinned. The cure appends a per-corner integer SECTOR anchor on the engine's
 // 1024 m world-sector grid (the same representation instanced meshes use —
 // camera_relative.glsl GE_ClipFromSectorLocal / Components::WorldSectorCoord):
-//   DeepTag[0] == 0 (legacy, the dark-ship default): Corner*.xyz is the fp32
-//     WORLD position exactly as before; the sector tail is written zero and never
-//     read. Byte-identical to the pre-S2a pipeline.
-//   DeepTag[0] == 1 (GE_CBT_DEEP_DECODE, spherical only): Corner*.xyz is the fp32
+//   DeepTag[0] == 0 (planar, and the sphere on the narrow arm): Corner*.xyz is the
+//     fp32 WORLD position; the sector tail is written zero and never read.
+//   DeepTag[0] == 1 (the sphere on the wide arm): Corner*.xyz is the fp32
 //     SECTOR-LOCAL offset (|component| <= 512 + relief spill, ULP ~6e-5 m at any
 //     radius) and Sector<k> packs corner k's ivec3 sector as 3 x 16-bit
 //     two's-complement lanes (range +/-32767 sectors ~ +/-3.36e7 m — 5x Earth
@@ -275,9 +272,8 @@ struct CBTBisectorData
 //     reconstruct rel = float(sector - originSector) * 1024 + local (exact
 //     integer delta — the GE_ClipFromSectorLocal math verbatim).
 // Corner*.w / Meta keep their meaning in BOTH modes (uv + normalmap index), so
-// every UV consumer is mode-blind. 4 x vec4 + 4 x uvec2 = 96 bytes std430
-// (was 64 — +32 MiB at the 1M pool, paid in both modes: the struct is compiled
-// into every kernel, so a flag-conditional stride would need dual pipelines).
+// every UV consumer is mode-blind. 4 x vec4 + 4 x uvec2 = 96 bytes std430 in both
+// modes: every kernel compiles the struct, so one stride serves every domain and arm.
 struct CBTVertexData
 {
     float Corner0[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // xyz = world position (m) or sector-local offset (DeepTag), w = uv.x
@@ -287,7 +283,7 @@ struct CBTVertexData
     uint32_t Sector0[2] = {0u, 0u}; // corner 0 sector: x = (sx & 0xFFFF) | (sy << 16), y = (sz & 0xFFFF)
     uint32_t Sector1[2] = {0u, 0u};
     uint32_t Sector2[2] = {0u, 0u};
-    uint32_t DeepTag[2] = {0u, 0u}; // x: 0 = world corners (legacy), 1 = (sector, local); y reserved 0
+    uint32_t DeepTag[2] = {0u, 0u}; // x: 0 = world corners, 1 = (sector, local); y reserved 0
 };
 
 // Pack one signed sector component into a 16-bit two's-complement lane / recover it.
@@ -402,8 +398,8 @@ struct CBTFrameParams
     // sculpt-sampling chokepoints, so a flatten renders as an exact circle at any planet radius
     // instead of the store-texel staircase (design §3.a). x = flatten count, y = transient brush
     // dab count (S3 — dabs occupy slots [x, x+y); integers as float, x+y <=
-    // kMaxSphereAnalyticModifiers — exact under 2^23); z = the page-table ring's words per slot
-    // (kCBTPageRingWordsLane, wide arm, exact under 2^24; written by CBTResources::UploadFrameParams,
+    // kMaxSphereAnalyticModifiers — exact under 2^23); z = the first word of this frame's page-table
+    // ring slot (kCBTPageRingBaseLane, wide arm, exact under 2^24; written by CBTResources::UploadFrameParams,
     // not by the caller); w reserved 0. Both 0 (the
     // GE_TERRAIN_ANALYTIC_MODIFIERS-off dark-ship) skips every analytic branch, byte-identical.
     float AnalyticParams[4] = {};
@@ -479,7 +475,16 @@ inline constexpr uint32_t kRestLatchDeadbandDivisor = 1024u;
 // CBT_WQ_UNRESOLVED_PAGE_SAMPLES). A drawn planet's pinned levels are resident, so a count above 0 is a
 // pinning defect. Kernel_Reset clears it.
 inline constexpr uint32_t kWQUnresolvedPageSamples = 17u;
-inline constexpr uint32_t kWQCounterSlots = 18u;
+// The rest's keep floor (cbt_layout.glsl CBT_WQ_OFF_FRUSTUM_KEEP_FLOOR): one past the highest keep step proven not
+// to fit under the keep ceiling, or a phase below 0: kKeepFloorArriving after an update that moved,
+// kKeepFloorProbing while the first step down has no measured tree.
+inline constexpr uint32_t kWQOffFrustumKeepFloor = 18u;
+inline constexpr int32_t kKeepFloorArriving = -1;
+inline constexpr int32_t kKeepFloorProbing = -2;
+// The leaves the planar criterion wants to merge, counted only at rest (cbt_layout.glsl
+// CBT_WQ_MERGE_CANDIDATE_COUNTER): live minus this count is Kernel_Reset's early proof that a keep step does not fit.
+inline constexpr uint32_t kWQMergeCandidateCounter = 19u;
+inline constexpr uint32_t kWQCounterSlots = 20u;
 
 // Payload lanes — 3 ALIASED physical lanes over the 6 logical queues (slot-diet r2).
 // The six work queues never all hold live data at once: each is written by one kernel
@@ -748,10 +753,8 @@ inline constexpr uint32_t kCBTAtlasCoarseBinding = 19; // CombinedImageSampler r
 // narrow-heap kernels do not declare it). Device-local; Kernel_HeightRangeBuild writes it from
 // the bound height texture whenever the heights may have changed, Classify reads it.
 inline constexpr uint32_t kCBTHeightRangeBinding = 21; // StorageBuffer: uint[kCBTHeightRangeEntries]
-// Binding 22: the paged height resolve's page table (cbt_page.glsl), a host-visible ring of equal
-// slots, one per frame slot, written whole from the terrain's table when its version changes (the
-// binding-17 ring discipline). A slot holds at least kCBTPageTableMinRingWords words and grows to
-// the bound terrain's table (CBTResources::ProvisionPageTableWords). Words, mirror cbt_layout.glsl
+// Binding 22: the paged height resolve's page table (cbt_page.glsl): TerrainPageFeature's page-table
+// ring, one slot per frame in flight, shared with the grass placement. Words, mirror cbt_layout.glsl
 // CBT_PAGE_*:
 //   [0, 4)   CBTPageField (level-0 samples X, Z, level count, cache slots per row)
 //   [4]      the cache's slot count
@@ -760,9 +763,8 @@ inline constexpr uint32_t kCBTHeightRangeBinding = 21; // StorageBuffer: uint[kC
 //   then one arrival fade per cache slot (float bits), then the table's words (TerrainECS PageTable:
 //   the entries level-major and row-major for a dense table; the tiers, the dense levels, the floor
 //   directory and the block pools for a tiered one).
-// The ring's words per slot are not in the table: they ride the frame's own params
-// (CBTFrameParams::AnalyticParams[kCBTPageRingWordsLane], written by UploadFrameParams), so a frame
-// finds its slot without reading a slot another frame's upload may be rewriting.
+// The slot's first word rides the frame's own params (CBTFrameParams::AnalyticParams[kCBTPageRingBaseLane],
+// written by UploadFrameParams), so a frame finds its slot without reading another frame's.
 // Binding 23: the page cache texture ring (R32_FLOAT, one per field shared by every terrain),
 // rebound per frame slot like binding 18. Both are wide-arm only: the narrow arm's VertexEval
 // already binds the WebGPU per-stage storage-buffer limit, so it keeps the unified and atlas
@@ -772,8 +774,13 @@ inline constexpr uint32_t kCBTPageCacheBinding = 23; // CombinedImageSampler rin
 inline constexpr uint32_t kCBTPageMaxLevels = 32u;   // mirror PageStreaming::kPageStoreMaxLevels
 inline constexpr uint32_t kCBTPageHeaderWords = 8u;
 inline constexpr uint32_t kCBTPageFadeOffsetWords = kCBTPageHeaderWords + 4u * kCBTPageMaxLevels;
-inline constexpr uint32_t kCBTPageRingWordsLane = 2u; // AnalyticParams lane carrying the ring's words per slot
-inline constexpr uint32_t kCBTPageTableMinRingWords = 1u << 18; // 1 MiB per frame slot; slots grow in these steps
+inline constexpr uint32_t kCBTPageRingBaseLane = 2u; // AnalyticParams lane carrying the slot's first word
+// The surface planes a paged planar terrain has (CBTSurfaceParams::SurfacePagedPlanes, mirror cbt_surface.glsl
+// CBT_SURF_PLANE_*). The fragment reads the pages only when both splat and normal are there.
+inline constexpr uint32_t kCBTSurfacePlaneSplat = 1u;
+inline constexpr uint32_t kCBTSurfacePlaneNormal = 2u;
+inline constexpr uint32_t kCBTSurfacePlaneGrass = 4u;
+inline constexpr uint32_t kCBTSurfacePlaneColor = 8u;
 // Binding 24: the prefiltered height chain the terrain draw reads (wide arm only; the narrow-heap
 // kernels do not declare it). Device-local; Kernel_HeightChainBuild writes it beside the height-range
 // pyramid, and the vertex modifier reads it on the graphics set 2 (gCbtChain).
@@ -1120,13 +1127,14 @@ struct CBTSurfaceParams
     float SphereAnalytic[kMaxSphereAnalyticModifiers * kSphereAnalyticFloatsPerModifier] = {};
     // The planet's height pages in the fragment (cbt_planet_page.glsl): one anchor per cube face, the
     // eye planet-local and relative to the render origin, and PlanetPaged 1 when the fragment shades
-    // from the pages (gPageTable, gPageCache).
+    // from the pages (gPageTable, gPageCache). A planar terrain whose surface is paged: the first word of
+    // its surface table in the page-table slot, and its kCBTSurfacePlane* bits (0: the surface textures).
     CBTPlanetPageAnchor PageAnchors[kCubeFaceCount6] = {};
     Mathematics::Vector4 PageEye;
     Mathematics::Vector4 PageEyeRelative;
     uint32_t PlanetPaged = 0u;
-    uint32_t PlanetPagePad0 = 0u; // scalars, not an array: a std140 array strides 16 B a scalar
-    uint32_t PlanetPagePad1 = 0u;
+    uint32_t SurfacePageBase = 0u; // scalars, not an array: a std140 array strides 16 B a scalar
+    uint32_t SurfacePagedPlanes = 0u;
     uint32_t PlanetPagePad2 = 0u;
 };
 static_assert(sizeof(CBTSurfaceParams) == 1024,
@@ -1224,13 +1232,6 @@ struct CBTPushConstants
     // as the interior of a wholly-horizon-invisible root region (CBTInstance::RegionFreeToBase /
     // FarFieldReseedDetector). 0 in the normal update.
     uint32_t RegionFreeMask = 0u;
-    // Earth-scale (sector, local) storage A/B (decode-precision arc S2a). 1 = spherical VertexEval
-    // decodes each corner via the df64 path (cbt_deep_decode.glsl, the GLSL twin of CBTDeepDecode.h)
-    // and stores (sector anchor, fp32 local offset) with DeepTag = 1; 0 (default) = the fp32 world
-    // store, byte-identical to the pre-S2a pipeline. Only VertexEval reads it — every CONSUMER
-    // branches on the per-slot DeepTag instead, so mixed-mode pools degrade gracefully. Driven from
-    // GE_CBT_DEEP_DECODE by CBTUpdateSystem (default OFF — the dark-ship).
-    uint32_t DeepDecode = 0u;
     // Planar pool-pressure scale (Kernel_Reset / Kernel_Classify). 1 = on; 0 holds the scale at 1x —
     // the A/B arm the pinned-regime oracles use. Mirrors CBTClassifyDesc::PoolPressure.
     uint32_t PoolPressure = 1u;
@@ -1269,7 +1270,7 @@ static_assert(offsetof(CBTBisectorData, PropagationID) == 16, "hot-field-front l
 static_assert(offsetof(CBTBisectorData, Indices) == 20, "indices[3] tail");
 static_assert(sizeof(CBTVertexData) == 96,
               "CBTVertexData must be 4 x vec4 + 4 x uvec2 (96B std430 — S2a (sector, local) tail)");
-static_assert(offsetof(CBTVertexData, Meta) == 48, "legacy corner/meta offsets must not move (dark-ship)");
+static_assert(offsetof(CBTVertexData, Meta) == 48, "corner/meta offsets must not move");
 static_assert(offsetof(CBTVertexData, Sector0) == 64 && offsetof(CBTVertexData, DeepTag) == 88,
               "sector tail is appended after the legacy 64B block (uvec2-aligned)");
 static_assert(sizeof(CBTFrameParams) == 1920,
@@ -1291,11 +1292,11 @@ static_assert(kDefaultBisectorPoolSize % 32u == 0u, "pool size must be a multipl
 static_assert(kDefaultBaseDepth == CBTLog2(kRootHalfedgeCount), "baseDepth = log2(halfedges)");
 static_assert(kRootHalfedgeCount == 2u, "C2 conforming base = 2 twin triangles");
 static_assert(kDefaultBaseDepth == 1u, "log2(2) = 1");
-static_assert(sizeof(CBTPushConstants) == 96,
-              "push constants must stay 96B (10 u32 + 4 f32 dirty-rect + 1 u32 sphere sculpt enable + "
+static_assert(sizeof(CBTPushConstants) == 92,
+              "push constants must stay 92B (10 u32 + 4 f32 dirty-rect + 1 u32 sphere sculpt enable + "
               "1 u32 vertex-eval gate + 1 u32 edit-retess enable + 1 u32 near-field gate + 1 u32 "
-              "region-free mask + 1 u32 deep-decode (S2a) + 1 u32 pool-pressure + 2 u32 height-chain "
-              "region + 1 u32 settle; GLSL mirror; <= 128B policy)");
+              "region-free mask + 1 u32 pool-pressure + 2 u32 height-chain region + 1 u32 settle; "
+              "GLSL mirror; <= 128B policy)");
 
 // u32 sum-tree derivation sanity for the default 2^20 pool (1M pool bump).
 static_assert(kDefaultBitfieldWords == 32768u, "1M / 32 = 32768 u32 bitfield words");

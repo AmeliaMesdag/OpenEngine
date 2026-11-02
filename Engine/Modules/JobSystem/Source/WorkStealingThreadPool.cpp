@@ -1933,6 +1933,12 @@ bool WorkStealingThreadPool::TryStealTask(size_t thiefId, UniquePtr<TaskBase>& t
 }
 
 void WorkStealingThreadPool::ExecuteTaskOptimized(UniquePtr<TaskBase> task, JobContext context) {
+#if GE_DEBUG_INSTRUMENTATION
+    // A queued body can outlive its publisher's frame, so it, the callbacks and the graph release here run with the
+    // frame-joined bit clear, on inline pools too. A callback fired elsewhere (a cancel, OnComplete on a finished task)
+    // keeps its thread's bit; Run closures and ParallelFor helper units set their publisher's bit again inside.
+    const GameEngine::Memory::Detail::FrameJoinedScope notFrameJoined(false);
+#endif
     TaskId taskId = task->GetTaskId();
 
     // Capability bits (slice 6: construction-time flags on TaskBase — these

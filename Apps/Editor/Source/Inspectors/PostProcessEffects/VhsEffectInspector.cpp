@@ -320,7 +320,7 @@ void RegisterVhsEffectInspector()
             if (label)
                 label->AddClass("inspector-label-no-drag");
             UIElement* controls = InspectorUI::AddFieldContainer(row);
-            controls->Overrides()
+            controls->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(5.0f));
@@ -344,7 +344,7 @@ void RegisterVhsEffectInspector()
                         || icon == "vhs-fast-forward-icon")
                     {
                         raw->AddClass("vhs-transport-seek-button");
-                        raw->Overrides()
+                        raw->Style()
                             .Set(Style::Width, StyleLength::Px(24.0f))
                             .Set(Style::MinWidth, StyleLength::Px(24.0f));
                     }
@@ -359,7 +359,7 @@ void RegisterVhsEffectInspector()
                 {
                     raw->SetText(buttonText ? buttonText : "");
                     raw->AddClass("vhs-transport-seek-button");
-                    raw->Overrides()
+                    raw->Style()
                         .Set(Style::Width, StyleLength::Px(32.0f))
                         .Set(Style::MinWidth, StyleLength::Px(32.0f));
                 }
@@ -430,7 +430,7 @@ void RegisterVhsEffectInspector()
             if (label)
                 label->AddClass("inspector-label-no-drag");
             UIElement* field = InspectorUI::AddFieldContainer(row);
-            field->Overrides()
+            field->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -444,7 +444,7 @@ void RegisterVhsEffectInspector()
             Label* rgbRaw = rgb.get();
             rgbRaw->AddClass("inspector-text");
             rgbRaw->SetText(FormatRgb(effect->DateBurnColor));
-            rgbRaw->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+            rgbRaw->Style().Set(Style::Cursor, CursorStyle::Pointer);
             field->AddChild(std::move(rgb));
 
             auto refresh = [swatchRaw, rgbRaw, world, entity]()
@@ -738,7 +738,7 @@ void RegisterVhsEffectInspector()
             if (label)
                 label->AddClass("inspector-label-no-drag");
             UIElement* field = InspectorUI::AddFieldContainer(row);
-            field->Overrides()
+            field->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
                 .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -752,7 +752,7 @@ void RegisterVhsEffectInspector()
             Label* rgbRaw = rgb.get();
             rgbRaw->AddClass("inspector-text");
             rgbRaw->SetText(FormatRgb(effect->OverlayColor));
-            rgbRaw->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+            rgbRaw->Style().Set(Style::Cursor, CursorStyle::Pointer);
             field->AddChild(std::move(rgb));
 
             auto refresh = [swatchRaw, rgbRaw, world, entity]()

@@ -76,6 +76,7 @@ class MaskField : public Field<uint32>, public DismissablePopup
     void BuildPopup();
     UIElement* AddActionRow(const char* text, bool on);
     void UpdatePopupPlacement();
+    void RemoveOptionRows();
     void RebuildOptionRows();
     void Refresh();
     void ApplyBits(uint32 bits, bool on);
@@ -94,6 +95,7 @@ class MaskField : public Field<uint32>, public DismissablePopup
     ScrollView* m_OptionList = nullptr;
     UIElement* m_EverythingRow = nullptr;
     UIElement* m_NothingRow = nullptr;
+    // Empty, or one row for each entry of m_Options in the same order.
     std::vector<Checkbox*> m_OptionRows;
     // Set while Refresh writes the rows, so their change callbacks do not read the write as a click.
     bool m_Refreshing = false;

@@ -2,7 +2,7 @@
 
 #include "TerrainECS/PageLevelRule.h"
 #include "PageStreaming/CpuPageDirectory.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
 #include "Mathematics/Rect.h"
 #include "Mathematics/Vector3.h"
@@ -217,7 +217,7 @@ SurfaceHeightTerrain FindSurfaceHeightTerrain(ECS::World& world, const Mathemati
 SurfaceHeightQuery ResolveSurfaceHeightQuery(ECS::World& world, const Mathematics::Vector3& point);
 
 /// Keeps a CPU window of finest height pages around `center` at the next height-page Update, for
-/// every paged terrain (TerrainHeightPages::RequestReaderWindow): a reader that needs the finest
+/// every paged terrain (TerrainPages::RequestReaderWindow): a reader that needs the finest
 /// height away from every camera and body (a navigation bake waiting on a page) asks on each frame
 /// it waits.
 void RequestSurfaceHeightWindow(const Mathematics::Vector3& center);

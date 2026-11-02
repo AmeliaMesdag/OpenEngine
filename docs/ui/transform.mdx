@@ -49,7 +49,7 @@ A declaration with any function the engine does not support (the 3D ones such as
 
 ## Set it from code
 
-A transform that changes every frame, such as a needle following a value, is set as a style override. Changing a transform every frame is cheap: only that element is updated, not its children or the rest of the UI. Switching between `none` and a transform updates the element and its children only.
+A transform that changes every frame, such as a needle following a value, is set from code through the element's `Style()`. Changing a transform every frame is cheap: only that element is updated, not its children or the rest of the UI. Switching between `none` and a transform updates the element and its children only.
 
 :::::tabs
 ::::tab[C++]
@@ -60,7 +60,7 @@ A transform that changes every frame, such as a needle following a value, is set
 void UpdateSpeedo(GameEngine::UIElement& needle, float speed)
 {
     using namespace GameEngine;
-    needle.Overrides().Set(Style::Transform, TransformValue{}.Rotate(speed * 2.7f - 135.0f));
+    needle.Style().Set(Style::Transform, TransformValue{}.Rotate(speed * 2.7f - 135.0f));
 }
 ```
 
@@ -68,7 +68,7 @@ void UpdateSpeedo(GameEngine::UIElement& needle, float speed)
 ::::tab[C#]
 
 :::caution[C# binding pending]
-No managed call sets a transform yet; tracked as [OpenEngine issue #33](https://github.com/Game-Crafters-Guild/OpenEngine/issues/33). The native call is `UIElement::Overrides().Set(Style::Transform, ...)`. Until then, a script toggles a class whose rule carries the transform (`Ui.Element.AddClass` and `RemoveClass`), and a `transition` on the rule animates it.
+No managed call sets a transform yet; tracked as [OpenEngine issue #33](https://github.com/Game-Crafters-Guild/OpenEngine/issues/33). The native call is `UIElement::Style().Set(Style::Transform, ...)`. Until then, a script toggles a class whose rule carries the transform (`Ui.Element.AddClass` and `RemoveClass`), and a `transition` on the rule animates it.
 :::
 
 ::::

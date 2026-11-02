@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -395,6 +396,209 @@ std::string ReadText(const std::filesystem::path& path)
 {
     std::ifstream file(path, std::ios::binary);
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+// Gives `entity` the name `text`.
+void Rename(ECS::World& world, ECS::EntityHandle entity, std::string_view text)
+{
+    Components::Name* name = world.GetComponentForWrite<Components::Name>(entity);
+    ASSERT_NE(name, nullptr);
+    *name = Components::Name{};
+    text.copy(name->value, sizeof(name->value) - 1);
+}
+
+std::string NameOf(const ECS::World& world, ECS::EntityHandle entity)
+{
+    const auto* name = world.GetComponent<Components::Name>(entity);
+    return name ? std::string(name->View()) : std::string("(no Name)");
+}
+
+// The name the directory of `file` holds for it, matched without case.
+std::string NameOnDisk(const std::filesystem::path& file)
+{
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(file.parent_path()))
+        if (EqualsIgnoreCase(entry.path().filename().string(), file.filename().string()))
+            return entry.path().filename().string();
+    return std::string();
+}
+
+// The overrides DescribePrefabInstance reports on `entity` of the instance at `root`.
+std::vector<Scene::PrefabOverride> OverridesOf(ECS::World& world, ECS::EntityHandle root, ECS::EntityHandle entity)
+{
+    std::vector<Scene::PrefabInstanceEntity> entities;
+    EXPECT_TRUE(Scene::DescribePrefabInstance(world, root, entities));
+    return FindDescribed(entities, entity).Overrides;
+}
+
+// Design 4.4 item 3, 2.6 and 4.11: Apply writes the field into the prefab file, under the file's own
+// name, and every other instance in the world shows it; the applier has no override left, and an
+// instance with its own override keeps it. Writing the text from before (the undo) gives the
+// instances the old value back.
+TEST_F(PrefabLibraryTests, AnApplyWritesTheFieldIntoThePrefabAndTheOtherInstancesFollowItAndItsUndo)
+{
+    const std::filesystem::path file = Write("Crate.prefab", kCratePrefab);
+    const GUID crate = Register(file);
+    ECS::World world;
+    const ECS::EntityHandle first = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    const ECS::EntityHandle second = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    const ECS::EntityHandle third = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    ASSERT_TRUE(first.IsValid() && second.IsValid() && third.IsValid()) << Log();
+    const ECS::EntityHandle firstLid = FindChild(world, first);
+    const ECS::EntityHandle secondLid = FindChild(world, second);
+    const ECS::EntityHandle thirdLid = FindChild(world, third);
+    Rename(world, firstLid, "Top");
+    Rename(world, thirdLid, "Mine");
+    const std::vector<Scene::PrefabOverride> before = OverridesOf(world, first, firstLid);
+    ASSERT_EQ(before.size(), 1u);
+
+    std::vector<Scene::PrefabFileEdit> edits;
+    std::string error;
+    ASSERT_TRUE(Scene::ApplyPrefabOverrides(world, std::vector<Scene::PrefabOverrideTarget>{{firstLid, before[0]}},
+                                            edits, error))
+        << error;
+    EXPECT_NE(ReadText(file).find("Name.value = \"Top\""), std::string::npos) << ReadText(file);
+    EXPECT_EQ(ReadText(file).find("Name.value = \"Lid\""), std::string::npos) << ReadText(file);
+    EXPECT_EQ(NameOnDisk(file), "Crate.prefab");
+    EXPECT_EQ(NameOf(world, secondLid), "Top");
+    EXPECT_EQ(NameOf(world, thirdLid), "Mine");
+    EXPECT_EQ(OverridesOf(world, third, thirdLid).size(), 1u);
+    EXPECT_TRUE(OverridesOf(world, first, firstLid).empty());
+    EXPECT_TRUE(OverridesOf(world, second, secondLid).empty());
+
+    ASSERT_TRUE(Scene::WritePrefabFileText(world, edits.at(0).File, edits.at(0).Before, error)) << error;
+    EXPECT_EQ(ReadText(file), std::string(kCratePrefab));
+    EXPECT_EQ(NameOnDisk(file), "Crate.prefab");
+    EXPECT_EQ(NameOf(world, secondLid), "Lid");
+    EXPECT_EQ(NameOf(world, thirdLid), "Mine");
+    // The applier holds the prefab's value, so it follows too; the editor's Apply step restores it.
+    EXPECT_EQ(NameOf(world, firstLid), "Lid");
+}
+
+// Design 4.4 item 3: Revert gives the field the prefab's value and the override is gone; a stale
+// override is refused with the design's words, and nothing changes.
+TEST_F(PrefabLibraryTests, ARevertGivesTheFieldThePrefabValueAndAStaleOverrideIsRefused)
+{
+    const GUID crate = Register(Write("Crate.prefab", kCratePrefab));
+    ECS::World world;
+    const ECS::EntityHandle root = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    ASSERT_TRUE(root.IsValid()) << Log();
+    const ECS::EntityHandle lid = FindChild(world, root);
+    Rename(world, lid, "Top");
+
+    std::string error;
+    const Scene::PrefabOverride stale{Scene::PrefabOverrideKind::Field, "Name", "nickname"};
+    EXPECT_FALSE(Scene::RevertPrefabOverride(world, lid, stale, error));
+    EXPECT_EQ(error, "Name Nickname is not in the prefab.");
+    EXPECT_EQ(NameOf(world, lid), "Top");
+
+    const std::vector<Scene::PrefabOverride> overrides = OverridesOf(world, root, lid);
+    ASSERT_EQ(overrides.size(), 1u);
+    ASSERT_TRUE(Scene::RevertPrefabOverride(world, lid, overrides[0], error)) << error;
+    EXPECT_EQ(NameOf(world, lid), "Lid");
+    EXPECT_TRUE(OverridesOf(world, root, lid).empty());
+}
+
+// Design 2.2: every prefab entity has a name, so the removal of Name does not apply to the prefab.
+TEST_F(PrefabLibraryTests, AnApplyOfARemovedNameIsRefusedAndTheFileStaysAsItWas)
+{
+    const std::filesystem::path file = Write("Crate.prefab", kCratePrefab);
+    const GUID crate = Register(file);
+    ECS::World world;
+    const ECS::EntityHandle root = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    ASSERT_TRUE(root.IsValid()) << Log();
+    const ECS::EntityHandle lid = FindChild(world, root);
+    world.RemoveComponentImmediate<Components::Name>(lid);
+    const std::vector<Scene::PrefabOverride> overrides = OverridesOf(world, root, lid);
+    ASSERT_EQ(overrides.size(), 1u);
+    ASSERT_EQ(overrides[0].Kind, Scene::PrefabOverrideKind::RemovedComponent);
+
+    std::vector<Scene::PrefabFileEdit> edits;
+    std::string error;
+    EXPECT_FALSE(
+        Scene::ApplyPrefabOverrides(world, std::vector<Scene::PrefabOverrideTarget>{{lid, overrides[0]}}, edits, error));
+    EXPECT_EQ(error, "Every prefab entity has a name, so the prefab cannot remove Name. Use Revert to restore the name.");
+    EXPECT_EQ(ReadText(file), std::string(kCratePrefab));
+}
+
+// Design 4.4 item 4: an added component's Apply adds it to the prefab and every instance; a removed
+// component's Revert brings it back with the prefab's values, and its Apply removes it in the prefab
+// and every instance.
+TEST_F(PrefabLibraryTests, AddedAndRemovedComponentsApplyToThePrefabAndRevertOnTheInstance)
+{
+    const std::filesystem::path file = Write("Crate.prefab", kCratePrefab);
+    const GUID crate = Register(file);
+    ECS::World world;
+    const ECS::EntityHandle first = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    const ECS::EntityHandle second = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    ASSERT_TRUE(first.IsValid() && second.IsValid()) << Log();
+    const ECS::EntityHandle firstHandle = FindChild(world, FindChild(world, first));
+    const ECS::EntityHandle secondHandle = FindChild(world, FindChild(world, second));
+    ASSERT_FALSE(world.HasComponent<Components::Transform>(secondHandle));
+
+    world.AddComponentImmediate(firstHandle, Components::Transform{});
+    std::vector<Scene::PrefabOverride> overrides = OverridesOf(world, first, firstHandle);
+    ASSERT_EQ(overrides.size(), 1u);
+    ASSERT_EQ(overrides[0].Kind, Scene::PrefabOverrideKind::AddedComponent);
+    std::vector<Scene::PrefabFileEdit> edits;
+    std::string error;
+    ASSERT_TRUE(Scene::ApplyPrefabOverrides(world, std::vector<Scene::PrefabOverrideTarget>{{firstHandle, overrides[0]}},
+                                            edits, error))
+        << error;
+    EXPECT_TRUE(world.HasComponent<Components::Transform>(secondHandle));
+    EXPECT_TRUE(OverridesOf(world, first, firstHandle).empty());
+    EXPECT_TRUE(OverridesOf(world, second, secondHandle).empty());
+
+    world.RemoveComponentImmediate<Components::Transform>(firstHandle);
+    overrides = OverridesOf(world, first, firstHandle);
+    ASSERT_EQ(overrides.size(), 1u);
+    ASSERT_EQ(overrides[0].Kind, Scene::PrefabOverrideKind::RemovedComponent);
+    ASSERT_TRUE(Scene::RevertPrefabOverride(world, firstHandle, overrides[0], error)) << error;
+    EXPECT_TRUE(world.HasComponent<Components::Transform>(firstHandle));
+    EXPECT_TRUE(OverridesOf(world, first, firstHandle).empty());
+
+    world.RemoveComponentImmediate<Components::Transform>(firstHandle);
+    const std::vector<Scene::PrefabOverrideTarget> targets = {{firstHandle, OverridesOf(world, first, firstHandle)[0]}};
+    ASSERT_TRUE(Scene::ApplyPrefabOverrides(world, targets, edits, error)) << error;
+    EXPECT_EQ(ReadText(file), std::string(kCratePrefab));
+    EXPECT_FALSE(world.HasComponent<Components::Transform>(secondHandle));
+    EXPECT_TRUE(OverridesOf(world, second, secondHandle).empty());
+}
+
+// Design 4.4 item 5: Apply all writes the prefab file once and rebuilds it once. The lid's removed Transform
+// takes a line out of the section above the handle's, so the handle's section still has to be found.
+TEST_F(PrefabLibraryTests, ApplyingOverridesOfTwoEntitiesWritesTheirPrefabFileOnce)
+{
+    const std::filesystem::path file = Write("Crate.prefab", kCratePrefab);
+    const GUID crate = Register(file);
+    ECS::World world;
+    const ECS::EntityHandle first = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    const ECS::EntityHandle second = Scene::PlacePrefab(world, crate, Components::Transform{}, {});
+    ASSERT_TRUE(first.IsValid() && second.IsValid()) << Log();
+    const ECS::EntityHandle firstLid = FindChild(world, first);
+    const ECS::EntityHandle firstHandle = FindChild(world, firstLid);
+    const ECS::EntityHandle secondLid = FindChild(world, second);
+    const ECS::EntityHandle secondHandle = FindChild(world, secondLid);
+    Rename(world, firstLid, "Top");
+    world.RemoveComponentImmediate<Components::Transform>(firstLid);
+    Rename(world, firstHandle, "Grip");
+    std::vector<Scene::PrefabOverrideTarget> targets;
+    for (const ECS::EntityHandle entity : {firstLid, firstHandle})
+        for (const Scene::PrefabOverride& prefabOverride : OverridesOf(world, first, entity))
+            targets.push_back({entity, prefabOverride});
+    ASSERT_EQ(targets.size(), 3u);
+    const std::uint64_t generationBefore = m_Library->FindByGuid(crate)->Generation;
+
+    std::vector<Scene::PrefabFileEdit> edits;
+    std::string error;
+    ASSERT_TRUE(Scene::ApplyPrefabOverrides(world, targets, edits, error)) << error;
+    ASSERT_EQ(edits.size(), 1u);
+    EXPECT_EQ(edits[0].Before, std::string(kCratePrefab));
+    EXPECT_EQ(m_Library->FindByGuid(crate)->Generation, generationBefore + 1);
+    EXPECT_EQ(NameOf(world, secondLid), "Top");
+    EXPECT_EQ(NameOf(world, secondHandle), "Grip");
+    EXPECT_FALSE(world.HasComponent<Components::Transform>(secondLid));
+    EXPECT_TRUE(OverridesOf(world, first, firstLid).empty());
+    EXPECT_TRUE(OverridesOf(world, first, firstHandle).empty());
 }
 
 // Design 4.2: Create Prefab writes the subtree as a file (an outgoing entity field cleared, an inner

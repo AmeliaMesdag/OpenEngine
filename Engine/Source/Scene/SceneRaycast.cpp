@@ -14,6 +14,7 @@
 #include "ECS/ECSTemplates.h"
 #include "ECS/Entity.h"
 #include "Engine/Rendering/MeshGPURegistry.h"
+#include "Engine/Rendering/ModelRenderSetup.h"
 #include "Engine/Rendering/PrimitiveGenerator.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Mathematics/Geometry.h"
@@ -79,26 +80,14 @@ const Mesh* ResolveCpuMesh(const GUID& guid,
     return &modelAsset->GetMesh(submesh);
 }
 
-const Mesh* ResolveRegisteredCpuMesh(const Components::MeshRenderer& mr,
-                                     const GUID* guid,
-                                     PickableKind& outKind)
+const Mesh* ResolveRegisteredCpuMesh(const Components::MeshRenderer& mr, PickableKind& outKind)
 {
     auto* renderServices = EngineCore::GetInstance().GetRenderServices();
     if (!renderServices)
         return nullptr;
 
-    const Rendering::MeshGPURegistry& registry = renderServices->GetMeshGPURegistry();
-    const Rendering::MeshGPUEntry* entry = nullptr;
-
-    if (mr.meshGpuHandleId != 0u)
-    {
-        entry = registry.Find(Rendering::MeshGPUHandle(mr.meshGpuHandleId));
-    }
-    if (!entry && guid && !guid->IsNull())
-    {
-        entry = registry.FindByKey(Rendering::MeshGPUKey{*guid, mr.meshId});
-    }
-
+    const Rendering::MeshGPUEntry* entry =
+        Engine::Renderer::FindRendererMeshEntry(renderServices->GetMeshGPURegistry(), mr);
     if (!entry || !entry->cpuMesh)
         return nullptr;
 
@@ -226,7 +215,7 @@ bool TestEntityHit(const Mathematics::Ray3D& ray,
     if (ExtractGuid(mr, guid))
         meshPtr = ResolveCpuMesh(guid, mr.meshId, kind);
     if (!meshPtr)
-        meshPtr = ResolveRegisteredCpuMesh(mr, guid.IsNull() ? nullptr : &guid, kind);
+        meshPtr = ResolveRegisteredCpuMesh(mr, kind);
     if (!meshPtr || meshPtr->Indices.empty() || meshPtr->Vertices.empty())
     {
         return options.IncludeBoundsFallback

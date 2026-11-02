@@ -180,7 +180,8 @@ TEST(SplineStrip, AWallFacesOutwardOnEverySide)
     const auto stations = StraightStations(4u, 2.0f, 0.5f);
 
     SplineStripParams params;
-    params.GenerateCaps = false; // side faces only, so "outward" means lateral
+    params.CapStart = false;
+    params.CapEnd = false; // side faces only, so "outward" means lateral
     const SplineStripMesh mesh = BuildSplineStrip(profile, stations, params);
 
     ASSERT_TRUE(mesh.IsValid());
@@ -364,7 +365,8 @@ TEST(SplineStrip, EveryRingVertexOfAClosedProfileIsReferencedByTheStitch)
     // orphaned vertex per ring — never indexed, only wasting a vertex-buffer
     // column on every ring of every wall.
     SplineStripParams params;
-    params.GenerateCaps = false;
+    params.CapStart = false;
+    params.CapEnd = false;
     const SplineStripMesh wall =
         BuildSplineStrip(WallProfile(1.0f, 2.0f), StraightStations(3u, 1.0f, 0.5f), params);
 
@@ -376,6 +378,23 @@ TEST(SplineStrip, EveryRingVertexOfAClosedProfileIsReferencedByTheStitch)
         referenced[index] = true;
     for (size_t v = 0; v < referenced.size(); ++v)
         EXPECT_TRUE(referenced[v]) << "vertex " << v << " is orphaned";
+}
+
+// Each end caps on its own: a run that meets another sweep at one end leaves only that end open.
+TEST(SplineStrip, OnlyTheEndsAskedForAreCapped)
+{
+    const auto stations = StraightStations(3u, 1.0f, 0.5f);
+    SplineStripParams startOnly;
+    startOnly.CapEnd = false;
+    const SplineStripMesh both = BuildSplineStrip(WallProfile(1.0f, 2.0f), stations, {});
+    const SplineStripMesh start = BuildSplineStrip(WallProfile(1.0f, 2.0f), stations, startOnly);
+
+    ASSERT_TRUE(start.IsValid());
+    const size_t rings = static_cast<size_t>(start.RingCount) * start.RingVertexCount;
+    const size_t capVertices = (both.Vertices.size() - rings) / 2u;
+    EXPECT_EQ(start.Vertices.size(), rings + capVertices);
+    for (size_t i = rings; i < start.Vertices.size(); ++i)
+        EXPECT_LT(start.Vertices[i].Normal.z, -0.99f) << "the cap left is not the start's";
 }
 
 TEST(SplineStrip, CapUVsTileAtTheSidesDensityOnTheScaledCrossSection)
@@ -916,6 +935,36 @@ TEST(SplineStripBuilder, OnlyGroundedPointsTakeTheGroundOffset)
         }
     }
     EXPECT_GT(moved, 0u);
+}
+
+// RiseScale scales the heights above zero only: at 0.5 a crown's apex stands at half its rise and at 0
+// on the level of its edges; the edges and the shoulders below them do not move.
+TEST(SplineStripBuilder, RiseScaleLowersOnlyTheProfileAboveZero)
+{
+    SplineProfileParams params;
+    params.Shape = SplineProfileShape::Crown;
+    params.Width = 4.0f;
+    params.CrownRise = 0.12f;
+    const SplineProfile crown = BuildProfile(params);
+
+    for (const float32 rise : {0.5f, 0.0f})
+    {
+        const std::vector<SplineStripStation> whole = StraightStations(3u, 1.0f, crown.NominalHalfWidth);
+        std::vector<SplineStripStation> eased = whole;
+        for (SplineStripStation& station : eased)
+            station.RiseScale = rise;
+        const SplineStripMesh before = BuildSplineStrip(crown, whole, {});
+        const SplineStripMesh after = BuildSplineStrip(crown, eased, {});
+        ASSERT_EQ(before.Vertices.size(), after.Vertices.size());
+        for (size_t v = 0; v < before.Vertices.size(); ++v)
+        {
+            const V3& a = before.Vertices[v].Position;
+            const V3& b = after.Vertices[v].Position;
+            EXPECT_FLOAT_EQ(b.x, a.x);
+            EXPECT_FLOAT_EQ(b.z, a.z);
+            EXPECT_NEAR(b.y, a.y > 0.0f ? a.y * rise : a.y, 1.0e-6f) << "vertex " << v << " at rise " << rise;
+        }
+    }
 }
 
 // ---- V on the side faces --------------------------------------------------

@@ -5,6 +5,7 @@
 #include "Logger/Logger.h"
 #include "Mathematics/Geometry.h"
 #include "Mathematics/Interpolation.h"
+#include "Types/DisjointSets.h"
 
 #include <algorithm>
 #include <array>
@@ -85,31 +86,18 @@ struct UvIslandMap {
     Vector<double> IslandArea;          // summed source-triangle 3D area per island
 };
 
-// Per vertex, the representative vertex of its connected component in the
-// triangle list `indices` (a vertex no triangle references is its own root).
+// Per vertex, the smallest vertex of its connected component in the triangle
+// list `indices` (a vertex no triangle references is its own root).
 Vector<uint32> ConnectedComponentRoots(const Vector<uint32>& indices, size_t vertexCount) {
-    Vector<uint32> parent(vertexCount);
-    for (size_t v = 0; v < vertexCount; ++v)
-        parent[v] = static_cast<uint32>(v);
-    // Iterative find with path halving — kit meshes can chain long components.
-    const auto find = [&parent](uint32 v) {
-        while (parent[v] != v) {
-            parent[v] = parent[parent[v]];
-            v = parent[v];
-        }
-        return v;
-    };
+    DisjointSets components(vertexCount);
     for (size_t first = 0; first + 2 < indices.size(); first += 3) {
-        const uint32 root = find(indices[first]);
-        for (size_t corner = 1; corner < 3; ++corner) {
-            const uint32 other = find(indices[first + corner]);
-            if (other != root)
-                parent[other] = root;
-        }
+        components.Join(indices[first], indices[first + 1]);
+        components.Join(indices[first], indices[first + 2]);
     }
-    for (size_t v = 0; v < vertexCount; ++v)
-        parent[v] = find(static_cast<uint32>(v));
-    return parent;
+    Vector<uint32> roots(vertexCount);
+    for (size_t vertex = 0; vertex < vertexCount; ++vertex)
+        roots[vertex] = components.Find(static_cast<uint32>(vertex));
+    return roots;
 }
 
 UvIslandMap BuildUvIslandMap(const Mesh& mesh) {

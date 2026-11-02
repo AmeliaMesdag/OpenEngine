@@ -38,7 +38,7 @@ namespace GameEngine.Scripting
         Owns = 3,
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 96)]
+    [StructLayout(LayoutKind.Explicit, Size = 124)]
     [BuiltInComponent("GameEngine::Components::SplineExtrude")]
     public partial struct SplineExtrude : IComponent
     {
@@ -143,6 +143,18 @@ namespace GameEngine.Scripting
         public AssetGuid Material;
 
         [FieldOffset(88)]
+        public float VergeWidth;
+
+        [FieldOffset(92)]
+        public float VergeHeight;
+
+        [FieldOffset(96)]
+        public AssetGuid VergeMaterial;
+
+        [FieldOffset(112)]
+        public bool Verge;
+
+        [FieldOffset(116)]
         private SplineGroundAuthority m_GroundAuthority;
         public SplineGroundAuthority GroundAuthority
         {
@@ -152,14 +164,14 @@ namespace GameEngine.Scripting
                 : throw new ArgumentOutOfRangeException(nameof(value), value, "SplineExtrude.GroundAuthority is Auto, None, Grades or Owns.");
         }
 
-        [FieldOffset(92)]
+        [FieldOffset(120)]
         public bool CastShadows;
 
-        [FieldOffset(93)]
+        [FieldOffset(121)]
         public bool ReceiveShadows;
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 3)]
+    [StructLayout(LayoutKind.Explicit, Size = 5)]
     [BuiltInComponent("GameEngine::Components::SplineGroundProvisioned")]
     public partial struct SplineGroundProvisioned : IComponent
     {
@@ -179,5 +191,11 @@ namespace GameEngine.Scripting
 
         [FieldOffset(2)]
         public bool Volume;
+
+        [FieldOffset(3)]
+        public bool Grass;
+
+        [FieldOffset(4)]
+        public bool Paint;
     }
 }

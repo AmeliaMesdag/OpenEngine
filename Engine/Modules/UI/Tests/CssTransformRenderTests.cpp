@@ -185,8 +185,8 @@ TEST(CssTransformRender, AnOverrideRewritesTheSlotAndChildrenFollow)
     const uint32_t slot = rotclip->m_TransformSlotIdx;
     ASSERT_NE(slot, UI::kNoTransform);
 
-    rotclip->Overrides().Set(Style::Transform, TransformValue{}.Rotate(0.0f));
-    bar->Overrides().Set(Style::Transform, TransformValue{}.Rotate(0.0f));
+    rotclip->Style().Set(Style::Transform, TransformValue{}.Rotate(0.0f));
+    bar->Style().Set(Style::Transform, TransformValue{}.Rotate(0.0f));
     fx.Settle();
     EXPECT_EQ(rotclip->m_TransformSlotIdx, slot) << "same slot, rewritten in place";
 
@@ -228,7 +228,7 @@ TEST(CssTransformRender, SwitchingToAndFromNoneIsAPerElementUpdate)
         EXPECT_GT(drained, 0u) << what << ": the drain did the update";
     };
 
-    slide->Overrides().Set(Style::Transform, TransformValue{});
+    slide->Style().Set(Style::Transform, TransformValue{});
     settleProfiled();
     expectNoFullRegen("translate to none");
     EXPECT_EQ(slide->m_TransformSlotIdx, UI::kNoTransform) << "slot released";
@@ -237,10 +237,10 @@ TEST(CssTransformRender, SwitchingToAndFromNoneIsAPerElementUpdate)
     ExpectAt(px, 75, 500, kGreen, "back at its layout position");
     ExpectAt(px, 175, 500, kBlack, "and not translated");
 
-    slide->Overrides().Set(Style::Transform,
+    slide->Style().Set(Style::Transform,
                            TransformValue{}.Translate(StyleLength::Percent(-40.0f), StyleLength::Px(0.0f)));
     // A container: its own clip and its transformed child move to the new space.
-    disc->Overrides().Set(Style::Transform, TransformValue{}.Translate(StyleLength::Px(-100.0f), StyleLength::Px(0.0f)));
+    disc->Style().Set(Style::Transform, TransformValue{}.Translate(StyleLength::Px(-100.0f), StyleLength::Px(0.0f)));
     settleProfiled();
     expectNoFullRegen("none to translate");
     EXPECT_NE(slide->m_TransformSlotIdx, UI::kNoTransform);

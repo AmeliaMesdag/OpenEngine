@@ -2,7 +2,7 @@
 
 #include "EngineLogCapture.h"
 #include "PagedTiledTerrain.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
 #include "JobSystem/WorkStealingThreadPool.h"
 #include "Logger/Logger.h"
@@ -11,10 +11,14 @@
 #include "PhysicsECS/PhysicsEntityEventCallbacks.h"
 #include "PhysicsECS/PhysicsScriptApi.h"
 #include "PhysicsECS/PhysicsWorldService.h"
+#include "PhysicsECS/Components/BoxColliderShape.h"
+#include "PhysicsECS/Components/CapsuleColliderShape.h"
 #include "PhysicsECS/Components/HeightFieldColliderShape.h"
 #include "PhysicsECS/Components/KinematicBody.h"
 #include "PhysicsECS/Components/PhysicsBody.h"
 #include "PhysicsECS/Components/PhysicsCollider.h"
+#include "PhysicsECS/Components/PhysicsColliderOwner.h"
+#include "PhysicsECS/Components/PlaneColliderShape.h"
 #include "PhysicsECS/Components/SphereColliderShape.h"
 #include "PhysicsECS/Systems/PhysicsInitSystem.h"
 #include "PhysicsECS/Systems/PhysicsStepSystem.h"
@@ -44,6 +48,7 @@
 #include "JobSystem/WorkStealingThreadPool.h"
 #include "ECSModules/Rendering/Systems/TransformHierarchySystem.h"
 #include "Scene/SceneIO.h"
+#include "Memory/AllocationCountScope.h"
 
 #include <algorithm>
 #include <array>
@@ -51,6 +56,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1907,10 +1913,6 @@ TEST(Physics, AWorldWithoutABackendHandsOutABuilderThatFailsEveryBuild)
     EXPECT_NE(moved.GetHeightFieldShapeBuilder(), nullptr);
 }
 
-// A terrain edit that lands while the collider is disabled must still reach
-// the collider once it is re-enabled. Regression test for the gather
-// advancing lastBuiltVersion for a collider that addCollider then drops —
-// which would resurrect the pre-edit shape forever.
 // One engine frame for the body switch: the lifecycle windows swap (which is where
 // GetDisabled<PhysicsBody> is built), then the init system runs.
 static void RunPhysicsInitFrame(GameEngine::ECS::World& world, GameEngine::PhysicsECS::PhysicsInitSystem& init)
@@ -2085,6 +2087,299 @@ TEST(Physics, BodySwitchedOffDuringAPauseIsReleasedOnResume)
     EXPECT_FALSE(pw.IsBodyValid(built));
 }
 
+// Frames the init-system tests run before they look at a body: enough for every body to build.
+static constexpr int kInitSettleFrames = 3;
+// Frames an init-system allocation test measures once every body has settled.
+static constexpr int kInitMeasuredFrames = 20;
+
+// True where an AllocationCountScope sees Engine's allocations. PhysicsInitSystem runs in
+// Engine, and on Windows each image has its own operator new: a Release Engine.dll carries
+// no allocation hook, so a zero count there would hold whatever the system does.
+#if defined(_WIN32) && !GE_DEBUG_INSTRUMENTATION
+static constexpr bool kEngineAllocationsCounted = false;
+#else
+static constexpr bool kEngineAllocationsCounted = true;
+#endif
+
+// A body with a collider and no shape yet; the caller adds the shape.
+static GameEngine::ECS::EntityHandle CreateBodyWithCollider(GameEngine::ECS::World& world,
+                                                            GameEngine::Physics::MotionType motionType)
+{
+    const GameEngine::ECS::EntityHandle e = world.CreateEntity();
+    world.AddComponentImmediate(e, GameEngine::Components::Transform{});
+    world.AddComponentImmediate(e, GameEngine::Components::WorldTransform{});
+    GameEngine::Components::PhysicsBody body{};
+    body.motionType = motionType;
+    world.AddComponentImmediate(e, body);
+    world.AddComponentImmediate(e, GameEngine::Components::PhysicsCollider{});
+    return e;
+}
+
+// Allocations the init system makes over kInitMeasuredFrames frames on this thread.
+static std::uint64_t CountInitFrameAllocations(GameEngine::ECS::World& world,
+                                               GameEngine::PhysicsECS::PhysicsInitSystem& init)
+{
+    const GameEngine::Memory::AllocationCountScope probe(GameEngine::Memory::CountWindow::ThisThread);
+    for (int frame = 0; frame < kInitMeasuredFrames; ++frame)
+        init.Update(world, 1.0f / 60.0f);
+    return probe.Count();
+}
+
+// One body per collider gather: a body that already exists gives the init system nothing to
+// build, so its frame allocates nothing; a body added later is still built on its first frame.
+TEST(Physics, InitSystemSteadyStateAllocatesNothingAndStillBuildsNewBodies)
+{
+    using namespace GameEngine;
+    using namespace GameEngine::PhysicsECS;
+    using GameEngine::Components::BoxColliderShape;
+    using GameEngine::Components::CapsuleColliderShape;
+    using GameEngine::Components::PhysicsBody;
+    using GameEngine::Components::PlaneColliderShape;
+    using GameEngine::Components::SphereColliderShape;
+
+    if (!kEngineAllocationsCounted)
+        GTEST_SKIP() << "Engine.dll counts its allocations only in Debug and DebugFast";
+
+    ScopedPhysicsWorldService svc(SmallDeterministicSettings());
+    ScopedHeightFieldProvider noTerrain(nullptr);
+    auto& pw = PhysicsWorldService::Get();
+
+    ECS::World world;
+    RegisterPhysicsWorldHooks(world);
+    std::vector<ECS::EntityHandle> bodies;
+    bodies.push_back(CreateBodyWithCollider(world, Physics::MotionType::Dynamic));
+    world.AddComponentImmediate(bodies.back(), SphereColliderShape{});
+    bodies.push_back(CreateBodyWithCollider(world, Physics::MotionType::Dynamic));
+    world.AddComponentImmediate(bodies.back(), BoxColliderShape{});
+    bodies.push_back(CreateBodyWithCollider(world, Physics::MotionType::Dynamic));
+    world.AddComponentImmediate(bodies.back(), CapsuleColliderShape{});
+    bodies.push_back(CreateBodyWithCollider(world, Physics::MotionType::Static));
+    world.AddComponentImmediate(bodies.back(), PlaneColliderShape{});
+
+    PhysicsInitSystem init;
+    for (int frame = 0; frame < kInitSettleFrames; ++frame)
+        RunPhysicsInitFrame(world, init);
+    for (const ECS::EntityHandle e : bodies)
+        ASSERT_TRUE(world.GetComponent<PhysicsBody>(e)->initialized);
+
+    const std::uint64_t allocations = CountInitFrameAllocations(world, init);
+    std::printf("[Alloc] PhysicsInitSystem steady state, %zu bodies, %d frames: %llu allocations\n",
+                bodies.size(), kInitMeasuredFrames, static_cast<unsigned long long>(allocations));
+    EXPECT_EQ(allocations, 0u) << "every body is built, so a frame has nothing to gather";
+
+    const ECS::EntityHandle added = CreateBodyWithCollider(world, Physics::MotionType::Dynamic);
+    world.AddComponentImmediate(added, SphereColliderShape{});
+    std::uint64_t buildAllocations = 0;
+    {
+        const Memory::AllocationCountScope probe(Memory::CountWindow::ThisThread);
+        RunPhysicsInitFrame(world, init);
+        buildAllocations = probe.Count();
+    }
+    EXPECT_GT(buildAllocations, 0u) << "the probe must see the frame that builds a body";
+    EXPECT_TRUE(world.GetComponent<PhysicsBody>(added)->initialized);
+    EXPECT_TRUE(pw.IsBodyValid(world.GetComponent<PhysicsBody>(added)->body));
+}
+
+// A body that still says it is built but whose backend body is gone is built again on the
+// next frame, even when every other body is built and the frame would otherwise do nothing.
+TEST(Physics, InitSystemRebuildsABuiltBodyWhoseBackendBodyIsGone)
+{
+    using namespace GameEngine;
+    using namespace GameEngine::PhysicsECS;
+    using GameEngine::Components::PhysicsBody;
+    using GameEngine::Components::SphereColliderShape;
+
+    ScopedPhysicsWorldService svc(SmallDeterministicSettings());
+    ScopedHeightFieldProvider noTerrain(nullptr);
+    auto& pw = PhysicsWorldService::Get();
+
+    ECS::World world;
+    RegisterPhysicsWorldHooks(world);
+    const ECS::EntityHandle a = CreateBodyWithCollider(world, Physics::MotionType::Dynamic);
+    world.AddComponentImmediate(a, SphereColliderShape{});
+    const ECS::EntityHandle b = CreateBodyWithCollider(world, Physics::MotionType::Dynamic);
+    world.AddComponentImmediate(b, SphereColliderShape{});
+
+    PhysicsInitSystem init;
+    for (int frame = 0; frame < kInitSettleFrames; ++frame)
+        RunPhysicsInitFrame(world, init);
+    const Physics::BodyHandle dead = world.GetComponent<PhysicsBody>(a)->body;
+    ASSERT_TRUE(pw.IsBodyValid(dead));
+    pw.DestroyBody(dead);
+    ASSERT_TRUE(world.GetComponent<PhysicsBody>(a)->initialized);
+
+    RunPhysicsInitFrame(world, init);
+    EXPECT_TRUE(pw.IsBodyValid(world.GetComponent<PhysicsBody>(a)->body));
+    EXPECT_EQ(pw.GetBodyCount(), 2u);
+}
+
+// A body with no collider is not work again until a collider is added: the frames beside it allocate nothing, and the frame after the collider
+// arrives builds it.
+TEST(Physics, InitSystemSkipsABodyWithNoColliderUntilOneIsAdded)
+{
+    using namespace GameEngine;
+    using namespace GameEngine::PhysicsECS;
+    using GameEngine::Components::PhysicsBody;
+    using GameEngine::Components::SphereColliderShape;
+
+    if (!kEngineAllocationsCounted)
+        GTEST_SKIP() << "Engine.dll counts its allocations only in Debug and DebugFast";
+
+    ScopedPhysicsWorldService svc(SmallDeterministicSettings());
+    ScopedHeightFieldProvider noTerrain(nullptr);
+    auto& pw = PhysicsWorldService::Get();
+
+    ECS::World world;
+    RegisterPhysicsWorldHooks(world);
+    for (int i = 0; i < 2; ++i)
+        world.AddComponentImmediate(CreateBodyWithCollider(world, Physics::MotionType::Dynamic),
+                                    SphereColliderShape{});
+    const ECS::EntityHandle bare = world.CreateEntity();
+    world.AddComponentImmediate(bare, GameEngine::Components::Transform{});
+    world.AddComponentImmediate(bare, GameEngine::Components::WorldTransform{});
+    world.AddComponentImmediate(bare, PhysicsBody{});
+
+    PhysicsInitSystem init;
+    for (int frame = 0; frame < kInitSettleFrames; ++frame)
+        RunPhysicsInitFrame(world, init);
+    ASSERT_EQ(pw.GetBodyCount(), 2u);
+    ASSERT_FALSE(world.GetComponent<PhysicsBody>(bare)->initialized);
+
+    const std::uint64_t allocations = CountInitFrameAllocations(world, init);
+    std::printf("[Alloc] PhysicsInitSystem beside a body with no collider, %d frames: %llu allocations\n",
+                kInitMeasuredFrames, static_cast<unsigned long long>(allocations));
+    EXPECT_EQ(allocations, 0u) << "a body with no collider gives the frame nothing to build";
+
+    world.AddComponentImmediate(bare, GameEngine::Components::PhysicsCollider{});
+    world.AddComponentImmediate(bare, SphereColliderShape{});
+    std::uint64_t buildAllocations = 0;
+    {
+        const Memory::AllocationCountScope probe(Memory::CountWindow::ThisThread);
+        RunPhysicsInitFrame(world, init);
+        buildAllocations = probe.Count();
+    }
+    EXPECT_GT(buildAllocations, 0u) << "the probe must see the frame that builds a body";
+    EXPECT_TRUE(world.GetComponent<PhysicsBody>(bare)->initialized);
+    EXPECT_TRUE(pw.IsBodyValid(world.GetComponent<PhysicsBody>(bare)->body));
+}
+
+// A body whose shape the backend refuses (a sphere of radius 0) is built on the frame after
+// the shape is edited to a valid one, with no structural change to wake it.
+TEST(Physics, InitSystemBuildsABodyOnTheFrameAfterItsRefusedShapeIsFixed)
+{
+    using namespace GameEngine;
+    using namespace GameEngine::PhysicsECS;
+    using GameEngine::Components::PhysicsBody;
+    using GameEngine::Components::SphereColliderShape;
+
+    ScopedPhysicsWorldService svc(SmallDeterministicSettings());
+    ScopedHeightFieldProvider noTerrain(nullptr);
+    auto& pw = PhysicsWorldService::Get();
+
+    ECS::World world;
+    RegisterPhysicsWorldHooks(world);
+    world.AddComponentImmediate(CreateBodyWithCollider(world, Physics::MotionType::Dynamic),
+                                SphereColliderShape{});
+    const ECS::EntityHandle refused = CreateBodyWithCollider(world, Physics::MotionType::Dynamic);
+    world.AddComponentImmediate(refused, SphereColliderShape{0.0f});
+
+    PhysicsInitSystem init;
+    for (int frame = 0; frame < kInitSettleFrames; ++frame)
+        RunPhysicsInitFrame(world, init);
+    ASSERT_EQ(pw.GetBodyCount(), 1u);
+    ASSERT_FALSE(world.GetComponent<PhysicsBody>(refused)->initialized);
+
+    world.GetComponentForWrite<SphereColliderShape>(refused)->radius = 0.5f;
+    RunPhysicsInitFrame(world, init);
+    EXPECT_TRUE(world.GetComponent<PhysicsBody>(refused)->initialized);
+    EXPECT_TRUE(pw.IsBodyValid(world.GetComponent<PhysicsBody>(refused)->body));
+}
+
+// Writes a uniform scale into the body's world matrix, as the transform system would.
+static void SetUniformWorldScale(GameEngine::ECS::World& world, GameEngine::ECS::EntityHandle e, GameEngine::float32 scale)
+{
+    GameEngine::Components::WorldTransform* wt = world.GetComponentForWrite<GameEngine::Components::WorldTransform>(e);
+    wt->matrix[0] = scale;
+    wt->matrix[5] = scale;
+    wt->matrix[10] = scale;
+}
+
+// A body the backend refuses for its scale (0) is built on the frame after the scale is fixed
+// and a rebuild is asked for through PhysicsBody, as the editor's transform and inspector edits
+// do, with no structural change to wake it.
+TEST(Physics, InitSystemBuildsABodyOnTheFrameAfterItsRefusedScaleIsFixed)
+{
+    using namespace GameEngine;
+    using namespace GameEngine::PhysicsECS;
+    using GameEngine::Components::PhysicsBody;
+    using GameEngine::Components::SphereColliderShape;
+
+    ScopedPhysicsWorldService svc(SmallDeterministicSettings());
+    ScopedHeightFieldProvider noTerrain(nullptr);
+    auto& pw = PhysicsWorldService::Get();
+
+    ECS::World world;
+    RegisterPhysicsWorldHooks(world);
+    world.AddComponentImmediate(CreateBodyWithCollider(world, Physics::MotionType::Dynamic),
+                                SphereColliderShape{});
+    const ECS::EntityHandle flat = CreateBodyWithCollider(world, Physics::MotionType::Dynamic);
+    world.AddComponentImmediate(flat, SphereColliderShape{});
+    SetUniformWorldScale(world, flat, 0.0f);
+
+    PhysicsInitSystem init;
+    for (int frame = 0; frame < kInitSettleFrames; ++frame)
+        RunPhysicsInitFrame(world, init);
+    ASSERT_EQ(pw.GetBodyCount(), 1u);
+    ASSERT_FALSE(world.GetComponent<PhysicsBody>(flat)->initialized);
+
+    SetUniformWorldScale(world, flat, 1.0f);
+    world.GetComponentForWrite<PhysicsBody>(flat)->initialized = false;
+    RunPhysicsInitFrame(world, init);
+    EXPECT_TRUE(world.GetComponent<PhysicsBody>(flat)->initialized);
+    EXPECT_TRUE(pw.IsBodyValid(world.GetComponent<PhysicsBody>(flat)->body));
+}
+
+// A body with no collider is built on the frame after an existing collider's owner is pointed
+// at it, with no structural change to wake it.
+TEST(Physics, InitSystemBuildsABodyOnTheFrameAfterAColliderIsRetargetedToIt)
+{
+    using namespace GameEngine;
+    using namespace GameEngine::PhysicsECS;
+    using GameEngine::Components::PhysicsBody;
+    using GameEngine::Components::PhysicsColliderOwner;
+    using GameEngine::Components::SphereColliderShape;
+
+    ScopedPhysicsWorldService svc(SmallDeterministicSettings());
+    ScopedHeightFieldProvider noTerrain(nullptr);
+    auto& pw = PhysicsWorldService::Get();
+
+    ECS::World world;
+    RegisterPhysicsWorldHooks(world);
+    const ECS::EntityHandle bare = world.CreateEntity();
+    world.AddComponentImmediate(bare, GameEngine::Components::Transform{});
+    world.AddComponentImmediate(bare, GameEngine::Components::WorldTransform{});
+    world.AddComponentImmediate(bare, PhysicsBody{});
+    // Its owner names no body, so it belongs to its own entity, which has no PhysicsBody.
+    const ECS::EntityHandle collider = world.CreateEntity();
+    world.AddComponentImmediate(collider, GameEngine::Components::Transform{});
+    world.AddComponentImmediate(collider, GameEngine::Components::PhysicsCollider{});
+    world.AddComponentImmediate(collider, SphereColliderShape{});
+    world.AddComponentImmediate(collider, PhysicsColliderOwner{});
+
+    PhysicsInitSystem init;
+    for (int frame = 0; frame < kInitSettleFrames; ++frame)
+        RunPhysicsInitFrame(world, init);
+    ASSERT_EQ(pw.GetBodyCount(), 0u);
+    ASSERT_FALSE(world.GetComponent<PhysicsBody>(bare)->initialized);
+
+    world.GetComponentForWrite<PhysicsColliderOwner>(collider)->body = bare;
+    RunPhysicsInitFrame(world, init);
+    EXPECT_TRUE(world.GetComponent<PhysicsBody>(bare)->initialized);
+    EXPECT_TRUE(pw.IsBodyValid(world.GetComponent<PhysicsBody>(bare)->body));
+}
+
+// A terrain edit made while the collider is disabled reaches the body when the collider is enabled
+// again. The gather skips a disabled collider, so its lastBuiltVersion keeps the version before the edit.
 TEST(Physics, HeightFieldColliderDisabledDuringEditRebuildsOnReenable)
 {
     using namespace GameEngine;
@@ -2860,7 +3155,7 @@ public:
     // One frame of the height pages alone: the windows the next TerrainPhysicsSystem update reads.
     void StreamPages(GameEngine::ECS::World& world, const GameEngine::Mathematics::Vector3& camera)
     {
-        PagedTE::TerrainHeightPages& pages = PagedTE::TerrainService::Get().GetHeightPages();
+        PagedTE::TerrainPages& pages = PagedTE::TerrainService::Get().GetTerrainPages();
         pages.GatherBodyWindows(world);
         pages.Request(Paged.Request, {&camera, 1}, View());
         pages.Update(m_Frame++, 1.0f / 60.0f, false, 2);

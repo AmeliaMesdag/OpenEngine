@@ -13,10 +13,41 @@
 #include <cassert>
 #include <cstring>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 namespace GameEngine::Memory
 {
 namespace
 {
+
+/// The calling thread's id as the OS names it, the id `Platform::GetThreadName` takes.
+std::uint64_t CurrentOsThreadId()
+{
+#if defined(_WIN32)
+    return static_cast<std::uint64_t>(::GetCurrentThreadId());
+#elif defined(__APPLE__)
+    std::uint64_t id = 0;
+    pthread_threadid_np(nullptr, &id);
+    return id;
+#elif defined(__linux__)
+    return static_cast<std::uint64_t>(::syscall(SYS_gettid));
+#else
+    return 0;
+#endif
+}
 
 /// Block bytes are aligned to the false-sharing separation, so a block never shares a line
 /// with another allocation and every alignment up to it costs no padding at a block's start.
@@ -63,11 +94,11 @@ Arena::Arena(std::string_view statsName, std::size_t firstBlockBytes)
     Detail::RegisterStats(m_Record, statsName, StatsKind::Arena, Residency::Cpu);
 }
 
-Arena::Arena(Detail::ScratchArenaTag, std::string_view statsName, std::uint64_t threadId)
+Arena::Arena(Detail::ThreadArenaTag, std::string_view statsName, StatsKind kind)
     : m_FirstBlockBytes(kArenaFirstBlockBytes)
 {
-    m_Record.ThreadId = threadId;
-    Detail::RegisterStats(m_Record, statsName, StatsKind::Scratch, Residency::Cpu);
+    m_Record.ThreadId = CurrentOsThreadId();
+    Detail::RegisterStats(m_Record, statsName, kind, Residency::Cpu);
 }
 
 Arena::~Arena()
@@ -318,6 +349,15 @@ void Arena::ReleaseBlocks(std::size_t firstBlockBytes)
     m_PeakSinceReset = 0;
     m_FirstBlockBytes = RoundUpToBlockAlignment(firstBlockBytes);
     PublishStats();
+}
+
+void Arena::TrimRetained(std::size_t need)
+{
+    const std::size_t retained = BytesReserved();
+    if (retained <= kArenaFirstBlockBytes || retained <= 2 * need)
+        return;
+    ReleaseBlocks(std::max(need, kArenaFirstBlockBytes));
+    m_Record.Shrinks.store(m_Record.Shrinks.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
 }
 
 std::size_t Arena::BytesUsed() const

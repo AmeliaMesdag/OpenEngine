@@ -96,6 +96,10 @@ struct RunBlock
     const ParallelForOptions::UnitAdmission* Admission = nullptr;
     WorkStealingThreadPool* Pool = nullptr;
     JobPriority HelperClass = JobPriority::Normal;
+#if GE_DEBUG_INSTRUMENTATION
+    // The forking thread's frame-joined bit, which every helper runs with.
+    bool FrameJoined = false;
+#endif
 };
 static_assert(sizeof(RunBlock) <= kTaskSlabSize, "a ParallelFor run block fits one task slab");
 static_assert(alignof(RunBlock) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__, "a task slab is default-aligned");
@@ -226,6 +230,12 @@ class ClaimHelper
 
     void operator()()
     {
+#if GE_DEBUG_INSTRUMENTATION
+        // Everything a helper runs, its units and the run's admission hooks,
+        // runs with the forking thread's frame-joined bit; the caller's own
+        // units already have it.
+        const GameEngine::Memory::Detail::FrameJoinedScope frameJoined(m_Block->FrameJoined);
+#endif
         std::atomic<uint32>* const unstarted = m_Unstarted;
         GiveBackUnstartedCount();
         RunBlock& block = *m_Block;
@@ -479,6 +489,9 @@ bool WorkStealingThreadPool::RunParallelFor(WorkStealingThreadPool* pool, bool (
     block->Admission = options.Admission;
     block->Pool = pool;
     block->HelperClass = helperClass;
+#if GE_DEBUG_INSTRUMENTATION
+    block->FrameJoined = GameEngine::Memory::Detail::IsFrameJoined();
+#endif
     // The caller's reference and one per helper, counted before any helper
     // can run and drop its own.
     block->References.store(static_cast<uint32>(helpers + 1), std::memory_order_relaxed);

@@ -5,6 +5,7 @@ project(Pathfinding LANGUAGES CXX)
 add_library(Pathfinding OBJECT
     Source/PathBuffer.cpp
     Source/GridMap.cpp
+    Source/GridRegions.cpp
     Source/AStarSolver.cpp
     Source/AStarSolverPool.cpp
     Source/HexGridHelpers.cpp
@@ -77,12 +78,13 @@ if(BUILD_TESTING)
         Tests/PathSmootherTests.cpp
     )
     # CMake contributes an OBJECT library's .obj files only for DIRECT link
-    # dependencies, so Pathfinding's own PUBLIC OBJECT deps must be named again
-    # here or their definitions never reach the exe.
+    # dependencies, so Pathfinding's own PUBLIC OBJECT deps (and JobSystem's
+    # Memory) must be named again here or their definitions never reach the exe.
     target_link_libraries(PathfindingTests PRIVATE
         Pathfinding
         Logger
         JobSystem
+        Memory
         AssetCore
         FileSystemObjects
         GTest::gtest

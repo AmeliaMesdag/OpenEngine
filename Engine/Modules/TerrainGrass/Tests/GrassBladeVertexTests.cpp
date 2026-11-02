@@ -415,7 +415,7 @@ TEST(GrassBladeVertex, ThePlacementResolvesTheGroundColourAtTheBladesRootAndTheV
     ASSERT_FALSE(placement.empty()) << "cannot read terrain_grass_place.comp";
     ASSERT_FALSE(vertex.empty()) << "cannot read terrain_grass_vertex_modifier.glsl";
 
-    const std::regex call(R"(GrassRootGroundColor\(\s*stp\s*,\s*([^,]+),([^;]+)\)\s*\)\s*;)");
+    const std::regex call(R"(GrassRootGroundColor\(\s*stp\s*,\s*([^,]+),([^;]+),\s*root\s*\)\s*\)\s*;)");
     std::vector<std::pair<std::string, std::string>> arguments;
     for (auto it = std::sregex_iterator(placement.begin(), placement.end(), call); it != std::sregex_iterator();
          ++it)

@@ -8443,6 +8443,46 @@ TEST(SceneIO, OrphanedOverrideAndUnknownRemovalAreLoadReportRows)
         << report.skips[2].message;
     EXPECT_FALSE(report.skips[2].preserved);
     EXPECT_EQ(EntityName(world, FindByTag(world, "inst.lid")), "Lid");
+    // Only the line whose address names no entity is an orphaned override, with its address and field.
+    EXPECT_EQ(report.skips[0].kind, Scene::SceneLoadSkipKind::OrphanedOverride);
+    EXPECT_EQ(report.skips[0].address, "ghost");
+    EXPECT_EQ(report.skips[0].component, "Name");
+    EXPECT_EQ(report.skips[0].field, "value");
+    EXPECT_EQ(report.skips[1].kind, Scene::SceneLoadSkipKind::Unapplied);
+    EXPECT_EQ(report.skips[2].kind, Scene::SceneLoadSkipKind::Unapplied);
+    EXPECT_TRUE(report.skips[1].address.empty());
+}
+
+// An override line under a child that the same instance removes is its own kind of load-report row: the
+// prefab has the child, so the line is not an orphaned override.
+TEST(SceneIO, OverrideUnderARemovedChildIsNotAnOrphanedOverride)
+{
+    ECS::World world;
+    Scene::SceneLoadDegradation report;
+    const std::string error = LoadPrefabSceneError({{"removed.prefab", kOverrideKindsPrefab}}, "removed.scene",
+                                                   "[scene name=\"S\" version=1]\n"
+                                                   "[resource id=\"p\" path=\"removed.prefab\"]\n"
+                                                   "[prefab id=\"inst\" source=\"p\"]\n"
+                                                   "-entity lid\n"
+                                                   "lid/DebugMarker.value = 2\n"
+                                                   "lid.handle/Name.value = \"Grip\"\n"
+                                                   "ghost/Name.value = \"Ghost\"\n",
+                                                   world, &report);
+    ASSERT_EQ(error, "");
+    ASSERT_EQ(report.skips.size(), 3u);
+    EXPECT_FALSE(FindByTag(world, "inst.lid").IsValid());
+    EXPECT_EQ(report.skips[0].kind, Scene::SceneLoadSkipKind::UnderRemovedEntity);
+    EXPECT_EQ(report.skips[0].address, "lid");
+    EXPECT_EQ(report.skips[1].kind, Scene::SceneLoadSkipKind::UnderRemovedEntity);
+    EXPECT_EQ(report.skips[1].address, "lid.handle");
+    EXPECT_NE(report.skips[1].message.find("a child that this instance removes"), std::string::npos)
+        << report.skips[1].message;
+    EXPECT_EQ(report.skips[2].kind, Scene::SceneLoadSkipKind::OrphanedOverride);
+    EXPECT_EQ(report.skips[2].address, "ghost");
+    // The save guard counts only the orphaned override: the lines under the removed child agree with the instance.
+    EXPECT_FALSE(Scene::SkipIsOutstanding(world, report.skips[0]));
+    EXPECT_FALSE(Scene::SkipIsOutstanding(world, report.skips[1]));
+    EXPECT_EQ(Scene::OutstandingSkipCount(world, report), 1u);
 }
 
 // A component line after a doubled separator and a removed entity whose address holds the separator

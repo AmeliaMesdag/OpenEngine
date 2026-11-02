@@ -46,6 +46,7 @@
 #include "Logger/Logger.h"
 #include "Editor/Settings/CurveEditorSettings.h"
 #include "Editor/Settings/SettingsStore.h"
+#include "Editor/Settings/SettingsSectionBreak.h"
 #include "Editor/Settings/SettingsTextFieldRow.h"
 #include "Editor/Vcs/EditorVcsProviderRegistry.h"
 #include "VCSIntegration/IVCSIntegration.h"
@@ -168,7 +169,7 @@ void SettingsPanel::UpdateSwatchStyle(UIElement* swatch, uint32_t colorRgb)
     constexpr uint32_t kSwatchBorderColor = 0xFF555555u;
 
     const uint32_t swatchArgb = 0xFF000000u | (colorRgb & 0x00FFFFFFu);
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kSwatchSize))
         .Set(Style::Height, StyleLength::Px(kSwatchSize))
         .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{kSwatchBorderRadius, kSwatchBorderRadius, kSwatchBorderRadius, kSwatchBorderRadius})
@@ -2059,7 +2060,7 @@ namespace
         std::snprintf(shadow, sizeof(shadow), "%.1fpx %.1fpx %.1fpx rgba(0, 0, 0, %.3f)",
                       g_PopupShadow.offsetX, g_PopupShadow.offsetY,
                       std::max(0.0f, g_PopupShadow.blur), opacity);
-        root->Overrides().SetCustom(HashStringId("--popup-shadow"), shadow);
+        root->Style().SetCustom(HashStringId("--popup-shadow"), shadow);
 
         auto optOut = [root](bool enabled, const char* cls) {
             if (enabled)
@@ -2358,7 +2359,7 @@ void SettingsPanel::ApplySavedValueBoxHeightStyle(UIManager* ui)
 
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%.0fpx", heightPx);
-    root->Overrides().SetCustom(HashStringId("--value_box_height"), buf);
+    root->Style().SetCustom(HashStringId("--value_box_height"), buf);
     ui->MarkStyleDirtyAll();
 }
 
@@ -2490,10 +2491,10 @@ bool ApplyScriptLineHeightStyle(UIManager* ui, const ScriptLineHeightApply& appl
 
     auto setCustom = [root](StringId name, const std::string& value)
     {
-        const std::string* existing = root->Overrides().FindCustom(name);
+        const std::string* existing = root->Style().FindCustom(name);
         if (existing && *existing == value)
             return false;
-        root->Overrides().SetCustom(name, value);
+        root->Style().SetCustom(name, value);
         return true;
     };
 
@@ -3099,7 +3100,7 @@ void SettingsPanel::OnPostLayout()
     {
         if (!row || !isVisible)
             continue;
-        row->Overrides().Set(Style::Display, isVisible() ? DisplayMode::Flex : DisplayMode::None);
+        row->Style().Set(Style::Display, isVisible() ? DisplayMode::Flex : DisplayMode::None);
     }
 
 
@@ -3869,7 +3870,7 @@ void SettingsPanel::CreateUIColorsContent()
                                           (m_UIAssetIconTint >> 16) & 0xFF,
                                           (m_UIAssetIconTint >> 8) & 0xFF,
                                           m_UIAssetIconTint & 0xFF);
-                            root->Overrides().SetCustom(
+                            root->Style().SetCustom(
                                 HashStringId("--ui_asset_icon_tint"),
                                 std::string(hex));
                             m_UIManager->MarkStyleDirtySubtree(root);
@@ -3890,7 +3891,7 @@ void SettingsPanel::CreateUIColorsContent()
                                           (m_UIAssetIconTint >> 16) & 0xFF,
                                           (m_UIAssetIconTint >> 8) & 0xFF,
                                           m_UIAssetIconTint & 0xFF);
-                            root->Overrides().SetCustom(
+                            root->Style().SetCustom(
                                 HashStringId("--ui_asset_icon_tint"),
                                 std::string(hex));
                             m_UIManager->MarkStyleDirtySubtree(root);
@@ -3911,7 +3912,7 @@ void SettingsPanel::CreateUIColorsContent()
                                           (m_UIAssetIconTint >> 16) & 0xFF,
                                           (m_UIAssetIconTint >> 8) & 0xFF,
                                           m_UIAssetIconTint & 0xFF);
-                            root->Overrides().SetCustom(
+                            root->Style().SetCustom(
                                 HashStringId("--ui_asset_icon_tint"),
                                 std::string(hex));
                             m_UIManager->MarkStyleDirtySubtree(root);
@@ -3948,7 +3949,7 @@ void SettingsPanel::CreateUIColorsContent()
                                   (m_UIAssetIconTint >> 16) & 0xFF,
                                   (m_UIAssetIconTint >> 8) & 0xFF,
                                   m_UIAssetIconTint & 0xFF);
-                    root->Overrides().SetCustom(
+                    root->Style().SetCustom(
                         HashStringId("--ui_asset_icon_tint"),
                         std::string(hex));
                     m_UIManager->MarkStyleDirtySubtree(root);
@@ -4033,7 +4034,7 @@ void SettingsPanel::CreateUIColorsContent()
                                           (m_UISmartFolderIconTint >> 16) & 0xFF,
                                           (m_UISmartFolderIconTint >> 8) & 0xFF,
                                           m_UISmartFolderIconTint & 0xFF);
-                            root->Overrides().SetCustom(
+                            root->Style().SetCustom(
                                 HashStringId("--ui_smartfolder_icon_tint"),
                                 std::string(hex));
                             m_UIManager->MarkStyleDirtySubtree(root);
@@ -4054,7 +4055,7 @@ void SettingsPanel::CreateUIColorsContent()
                                           (m_UISmartFolderIconTint >> 16) & 0xFF,
                                           (m_UISmartFolderIconTint >> 8) & 0xFF,
                                           m_UISmartFolderIconTint & 0xFF);
-                            root->Overrides().SetCustom(
+                            root->Style().SetCustom(
                                 HashStringId("--ui_smartfolder_icon_tint"),
                                 std::string(hex));
                             m_UIManager->MarkStyleDirtySubtree(root);
@@ -4075,7 +4076,7 @@ void SettingsPanel::CreateUIColorsContent()
                                           (m_UISmartFolderIconTint >> 16) & 0xFF,
                                           (m_UISmartFolderIconTint >> 8) & 0xFF,
                                           m_UISmartFolderIconTint & 0xFF);
-                            root->Overrides().SetCustom(
+                            root->Style().SetCustom(
                                 HashStringId("--ui_smartfolder_icon_tint"),
                                 std::string(hex));
                             m_UIManager->MarkStyleDirtySubtree(root);
@@ -4112,7 +4113,7 @@ void SettingsPanel::CreateUIColorsContent()
                                   (m_UISmartFolderIconTint >> 16) & 0xFF,
                                   (m_UISmartFolderIconTint >> 8) & 0xFF,
                                   m_UISmartFolderIconTint & 0xFF);
-                    root->Overrides().SetCustom(
+                    root->Style().SetCustom(
                         HashStringId("--ui_smartfolder_icon_tint"),
                         std::string(hex));
                     m_UIManager->MarkStyleDirtySubtree(root);
@@ -4153,7 +4154,7 @@ void SettingsPanel::CreateUIColorsContent()
 
                     if (m_UIScrollbarColorSwatch)
                     {
-                        m_UIScrollbarColorSwatch->Overrides()
+                        m_UIScrollbarColorSwatch->Style()
                             .Set(Style::Width, StyleLength::Px(16.0f))
                             .Set(Style::Height, StyleLength::Px(16.0f))
                             .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{2, 2, 2, 2})
@@ -4170,7 +4171,7 @@ void SettingsPanel::CreateUIColorsContent()
 
                     if (m_UIScrollbarColorSwatch)
                     {
-                        m_UIScrollbarColorSwatch->Overrides()
+                        m_UIScrollbarColorSwatch->Style()
                             .Set(Style::BackgroundColor, m_UIScrollbarColor);
                     }
                 },
@@ -4182,7 +4183,7 @@ void SettingsPanel::CreateUIColorsContent()
 
                     if (m_UIScrollbarColorSwatch)
                     {
-                        m_UIScrollbarColorSwatch->Overrides()
+                        m_UIScrollbarColorSwatch->Style()
                             .Set(Style::BackgroundColor, m_UIScrollbarColor);
                     }
                 });
@@ -4192,7 +4193,7 @@ void SettingsPanel::CreateUIColorsContent()
         auto swatch = std::make_unique<UIElement>();
         swatch->SetId("settings-scrollbar-color-swatch");
         m_UIScrollbarColorSwatch = swatch.get();
-        swatch->Overrides()
+        swatch->Style()
             .Set(Style::Width, StyleLength::Px(16.0f))
             .Set(Style::Height, StyleLength::Px(16.0f))
             .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{2, 2, 2, 2})
@@ -4212,7 +4213,7 @@ void SettingsPanel::CreateUIColorsContent()
             ApplyScrollbarColorToUI();
             if (m_UIScrollbarColorSwatch)
             {
-                m_UIScrollbarColorSwatch->Overrides()
+                m_UIScrollbarColorSwatch->Style()
                     .Set(Style::BackgroundColor, m_UIScrollbarColor);
             }
         });
@@ -4305,7 +4306,7 @@ void SettingsPanel::CreateUIAppearanceContent()
                 return;
             char buf[16];
             std::snprintf(buf, sizeof(buf), "%.0fpx", v);
-            root->Overrides().SetCustom(HashStringId("--value_box_height"), buf);
+            root->Style().SetCustom(HashStringId("--value_box_height"), buf);
             ui->MarkStyleDirtyAll();
         };
         cfg.onValueChanged = applyHeight;
@@ -4489,7 +4490,7 @@ void SettingsPanel::CreateUIAppearanceContent()
         auto header = std::make_unique<Label>();
         header->SetText("Popup Shadows");
         header->AddClass("settings-section-header");
-        header->Overrides()
+        header->Style()
             .Set(Style::MarginTop, StyleLength::Px(10.0f))
             .Set(Style::MarginBottom, StyleLength::Px(4.0f));
         m_ContentBody->AddContent(std::move(header));
@@ -4709,7 +4710,7 @@ void SettingsPanel::CreateUIFontSizesContent()
     auto updateCssVar = [](UIElement* root, const std::string& varName, int valuePx) {
         if (!root)
             return;
-        root->Overrides().SetCustom(HashStringId(varName), FormatPxValue(static_cast<float>(valuePx)));
+        root->Style().SetCustom(HashStringId(varName), FormatPxValue(static_cast<float>(valuePx)));
     };
     
     // Helper to update spacing CSS variables proportionally based on base font size
@@ -8749,25 +8750,6 @@ void AddSettingsTextFieldRow(const Editor::SettingsTextFieldRowConfig& config, S
         contentBody->AddContent(std::move(row.Refusal));
 }
 
-// Subsection break above a field, for pages whose rows fall into named groups.
-void AppendSettingsSectionBreak(const Editor::SettingsFieldDescriptor& field,
-                                ScrollView* contentBody)
-{
-    if (!field.SectionHeader.empty())
-    {
-        auto header = std::make_unique<Label>();
-        header->SetText(field.SectionHeader);
-        header->AddClass("settings-subsection-header");
-        contentBody->AddContent(std::move(header));
-    }
-    if (!field.SectionDescription.empty())
-    {
-        auto description = std::make_unique<Label>();
-        description->SetText(field.SectionDescription);
-        description->AddClass("settings-description");
-        contentBody->AddContent(std::move(description));
-    }
-}
 } // namespace
 
 void SettingsPanel::CreateRegistrySettingsContent(const Editor::SettingsCategoryDescriptor& descriptor)
@@ -8797,7 +8779,8 @@ void SettingsPanel::CreateRegistrySettingsContent(const Editor::SettingsCategory
 
     for (const SettingsFieldDescriptor& field : page.Fields)
     {
-        AppendSettingsSectionBreak(field, m_ContentBody);
+        if (!field.SectionHeader.empty() || !field.SectionDescription.empty())
+            m_ContentBody->AddContent(std::make_unique<Editor::SettingsSectionBreak>(field));
 
         if (const auto* toggle = std::get_if<SettingsFieldDescriptor::ToggleField>(&field.Control))
         {
@@ -8880,7 +8863,7 @@ void SettingsPanel::CreateRegistrySettingsContent(const Editor::SettingsCategory
             {
                 // Seed from the condition so a hidden row never flashes before
                 // the first post-layout poll.
-                row->Overrides().Set(Style::Display,
+                row->Style().Set(Style::Display,
                                      button->IsVisible() ? DisplayMode::Flex : DisplayMode::None);
                 m_RegistryButtonRows.push_back({row.get(), button->IsVisible});
             }
@@ -9074,16 +9057,16 @@ void SettingsPanel::CreateGizmoSettingsContent()
             if (m_GizmoThicknessSection)
             {
                 if (enabled)
-                    m_GizmoThicknessSection->Overrides().Set(Style::Display, DisplayMode::None);
+                    m_GizmoThicknessSection->Style().Set(Style::Display, DisplayMode::None);
                 else
-                    m_GizmoThicknessSection->Overrides().Reset(Style::Display);
+                    m_GizmoThicknessSection->Style().Reset(Style::Display);
             }
             if (m_GizmoConstantSizeSection)
             {
                 if (enabled)
-                    m_GizmoConstantSizeSection->Overrides().Reset(Style::Display);
+                    m_GizmoConstantSizeSection->Style().Reset(Style::Display);
                 else
-                    m_GizmoConstantSizeSection->Overrides().Set(Style::Display, DisplayMode::None);
+                    m_GizmoConstantSizeSection->Style().Set(Style::Display, DisplayMode::None);
             }
         };
         CreateSettingsToggleRow(config, m_ContentBody);
@@ -9143,7 +9126,7 @@ void SettingsPanel::CreateGizmoSettingsContent()
         auto sectionContainer = std::make_unique<UIElement>();
         if (constantSizeEnabled)
         {
-            sectionContainer->Overrides().Set(Style::Display, DisplayMode::None);
+            sectionContainer->Style().Set(Style::Display, DisplayMode::None);
         }
         m_GizmoThicknessSection = sectionContainer.get();
 
@@ -9217,7 +9200,7 @@ void SettingsPanel::CreateGizmoSettingsContent()
         auto sectionContainer = std::make_unique<UIElement>();
         if (!constantSizeEnabled)
         {
-            sectionContainer->Overrides().Set(Style::Display, DisplayMode::None);
+            sectionContainer->Style().Set(Style::Display, DisplayMode::None);
         }
         m_GizmoConstantSizeSection = sectionContainer.get();
 
@@ -9530,7 +9513,7 @@ void SettingsPanel::CreateAnimationSettingsContent()
         auto swatch = std::make_unique<UIElement>();
         swatch->AddClass("settings-color-swatch");
         UIElement* swatchPtr = swatch.get();
-        swatch->Overrides()
+        swatch->Style()
             .Set(Style::Width, StyleLength::Px(16.0f))
             .Set(Style::Height, StyleLength::Px(16.0f))
             .Set(Style::FlexShrink, 0.0f)
@@ -9552,19 +9535,19 @@ void SettingsPanel::CreateAnimationSettingsContent()
                 [settingPtr, swatchPtr, fieldPtr, setHexField, onSave](uint32_t argb) {
                     *settingPtr = argb;
                     onSave();
-                    if (swatchPtr) swatchPtr->Overrides().Set(Style::BackgroundColor, argb);
+                    if (swatchPtr) swatchPtr->Style().Set(Style::BackgroundColor, argb);
                     setHexField(fieldPtr, argb);
                 },
                 [settingPtr, swatchPtr, original, fieldPtr, setHexField]() {
                     *settingPtr = original;
                     AnimationWindowSettings::Get().NotifyChanged();
-                    if (swatchPtr) swatchPtr->Overrides().Set(Style::BackgroundColor, original);
+                    if (swatchPtr) swatchPtr->Style().Set(Style::BackgroundColor, original);
                     setHexField(fieldPtr, original);
                 },
                 [settingPtr, swatchPtr, fieldPtr, setHexField](uint32_t argb) {
                     *settingPtr = argb;
                     AnimationWindowSettings::Get().NotifyChanged();
-                    if (swatchPtr) swatchPtr->Overrides().Set(Style::BackgroundColor, argb);
+                    if (swatchPtr) swatchPtr->Style().Set(Style::BackgroundColor, argb);
                     setHexField(fieldPtr, argb);
                 });
             e.Stop();
@@ -9581,7 +9564,7 @@ void SettingsPanel::CreateAnimationSettingsContent()
                     uint32_t rgb = static_cast<uint32_t>(std::stoul(hex, nullptr, 16));
                     *settingPtr = 0xFF000000u | rgb;
                     onSave();
-                    if (swatchPtr) swatchPtr->Overrides().Set(Style::BackgroundColor, *settingPtr);
+                    if (swatchPtr) swatchPtr->Style().Set(Style::BackgroundColor, *settingPtr);
                 } catch (...) {}
             }
         });
@@ -9590,7 +9573,7 @@ void SettingsPanel::CreateAnimationSettingsContent()
         AddDoubleClickReset(labelPtr, [settingPtr, swatchPtr, fieldPtr, defaultArgb, setHexField, onSave]() {
             *settingPtr = defaultArgb;
             onSave();
-            if (swatchPtr) swatchPtr->Overrides().Set(Style::BackgroundColor, defaultArgb);
+            if (swatchPtr) swatchPtr->Style().Set(Style::BackgroundColor, defaultArgb);
             setHexField(fieldPtr, defaultArgb);
         });
         return section;
@@ -10442,9 +10425,9 @@ void SettingsPanel::CreateHDROutputSettingsContent()
             if (!row)
                 continue;
             if (visible)
-                row->Overrides().Set(Style::Display, DisplayMode::Flex);
+                row->Style().Set(Style::Display, DisplayMode::Flex);
             else
-                row->Overrides().Set(Style::Display, DisplayMode::None);
+                row->Style().Set(Style::Display, DisplayMode::None);
             row->MarkDirty(UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
         }
         if (contentBody)
@@ -10453,7 +10436,7 @@ void SettingsPanel::CreateHDROutputSettingsContent()
     auto addHdrDependentRow = [this, hdrDependentRows, hdrEnabled](std::unique_ptr<UIElement> row) {
         UIElement* rowPtr = row.get();
         hdrDependentRows->push_back(rowPtr);
-        rowPtr->Overrides().Set(Style::Display, hdrEnabled ? DisplayMode::Flex : DisplayMode::None);
+        rowPtr->Style().Set(Style::Display, hdrEnabled ? DisplayMode::Flex : DisplayMode::None);
         m_ContentBody->AddContent(std::move(row));
     };
 
@@ -11204,7 +11187,7 @@ void ShowShortcutConflictModal(UIElement* host,
     auto overlay = std::make_unique<UIElement>();
     UIElement* overlayRaw = overlay.get();
     overlay->SetOverlayLayer(OverlayLayer::BlockingDialog);
-    overlay->Overrides()
+    overlay->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionTop, StyleLength::Px(0.0f))
@@ -11219,7 +11202,7 @@ void ShowShortcutConflictModal(UIElement* host,
 
     auto window = std::make_unique<UIElement>();
     window->AddClass("shortcut-conflict-window");
-    window->Overrides()
+    window->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::BackgroundColor, (uint32_t)0xFF252526)
@@ -11234,7 +11217,7 @@ void ShowShortcutConflictModal(UIElement* host,
     {
         auto header = std::make_unique<UIElement>();
         header->AddClass("shortcut-conflict-header");
-        header->Overrides()
+        header->Style()
             .Set(Style::PaddingTop, StyleLength::Px(16.0f))
             .Set(Style::PaddingRight, StyleLength::Px(20.0f))
             .Set(Style::PaddingBottom, StyleLength::Px(14.0f))
@@ -11244,7 +11227,7 @@ void ShowShortcutConflictModal(UIElement* host,
             .Set(Style::BorderBottomColor, (uint32_t)0xFF2E2E2E);
         auto titleLabel = std::make_unique<Label>();
         titleLabel->SetText(title);
-        titleLabel->Overrides()
+        titleLabel->Style()
             .Set(Style::Color, (uint32_t)0xFFEDEDED)
             .Set(Style::FontSize, StyleLength::Px(16.0f))
             .Set(Style::FontWeight, 600);
@@ -11256,14 +11239,14 @@ void ShowShortcutConflictModal(UIElement* host,
     {
         auto content = std::make_unique<UIElement>();
         content->AddClass("shortcut-conflict-body");
-        content->Overrides()
+        content->Style()
             .Set(Style::PaddingTop, StyleLength::Px(20.0f))
             .Set(Style::PaddingRight, StyleLength::Px(20.0f))
             .Set(Style::PaddingBottom, StyleLength::Px(20.0f))
             .Set(Style::PaddingLeft, StyleLength::Px(20.0f));
         auto msg = std::make_unique<Label>();
         msg->SetText(message);
-        msg->Overrides()
+        msg->Style()
             .Set(Style::Color, (uint32_t)0xFFCFCFCF)
             .Set(Style::FontSize, StyleLength::Px(13.0f));
         content->AddChild(std::move(msg));
@@ -11294,7 +11277,7 @@ void ShowShortcutConflictModal(UIElement* host,
     {
         auto footer = std::make_unique<UIElement>();
         footer->AddClass("shortcut-conflict-footer");
-        footer->Overrides()
+        footer->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::JustifyContent, JustifyContent::FlexEnd)
@@ -11462,7 +11445,7 @@ void SettingsPanel::CreateTagsSettingsContent()
     const bool hasProject = !EngineCore::GetInstance().GetWorkspaceRoot().empty();
 
     auto container = std::make_unique<UIElement>();
-    container->Overrides().Set(Style::MarginLeft, StyleLength::Px(16.0f));
+    container->Style().Set(Style::MarginLeft, StyleLength::Px(16.0f));
 
     // Section header with right-click context menu (Reset to defaults)
     {
@@ -11573,7 +11556,7 @@ void SettingsPanel::CreateTagsSettingsContent()
         auto row = std::make_unique<UIElement>();
         row->AddClass("settings-row");
         row->AddClass("settings-tag-row");
-        row->Overrides()
+        row->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::AlignItems, AlignItems::Center)
@@ -11582,7 +11565,7 @@ void SettingsPanel::CreateTagsSettingsContent()
         auto swatch = std::make_unique<UIElement>();
         std::string bgColor = tags[tagIndex].Color.empty() ? "#444" : tags[tagIndex].Color;
         const uint32_t swatchArgb = TagHexToArgb(bgColor);
-        swatch->Overrides()
+        swatch->Style()
             .Set(Style::Width, StyleLength::Px(20.0f)).Set(Style::Height, StyleLength::Px(20.0f)).Set(Style::MinWidth, StyleLength::Px(20.0f)).Set(Style::MinHeight, StyleLength::Px(20.0f))
             .Set(Style::BorderRadius, CornerRadiiTLTRBRBL{4.0f, 4.0f, 4.0f, 4.0f}).Set(Style::BorderWidth, Box4{1.0f, 1.0f, 1.0f, 1.0f}).Set(Style::BorderColor, BorderColorsTRBL{0xFF555555u, 0xFF555555u, 0xFF555555u, 0xFF555555u})
             .Set(Style::BackgroundColor, (uint32_t)swatchArgb).Set(Style::FlexShrink, 0.0f).Set(Style::Cursor, CursorStyle::Pointer);
@@ -11636,7 +11619,7 @@ void SettingsPanel::CreateTagsSettingsContent()
         delBtn->AddClass("secondary");
         delBtn->AddClass("icon-button");
         delBtn->AddClass("trash-icon");
-        delBtn->Overrides().Set(Style::FlexShrink, 0.0f);
+        delBtn->Style().Set(Style::FlexShrink, 0.0f);
         delBtn->RegisterEventHandler(kEventButtonClick, [this, tagIndex, hasProject](UIEvent&) {
             if (!hasProject) return;
             this->PostAction([this, tagIndex]() {
@@ -11748,7 +11731,7 @@ void SettingsPanel::CreateTagsSettingsContent()
     {
         auto row = std::make_unique<UIElement>();
         row->AddClass("settings-row");
-        row->Overrides()
+        row->Style()
             .Set(Style::Display, DisplayMode::Flex).Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::AlignItems, AlignItems::Center).Set(Style::Gap, StyleLength::Px(8.0f)).Set(Style::MarginTop, StyleLength::Px(12.0f));
 
@@ -11788,7 +11771,7 @@ void SettingsPanel::CreateTagsSettingsContent()
     if (!hasProject)
     {
         auto noProject = MakeSettingsInfoCard("Open a project to add or edit tags.");
-        noProject->Overrides().Set(Style::Color, (uint32_t)0xFF888888u).Set(Style::MarginTop, StyleLength::Px(8.0f));
+        noProject->Style().Set(Style::Color, (uint32_t)0xFF888888u).Set(Style::MarginTop, StyleLength::Px(8.0f));
         container->AddChild(std::move(noProject));
     }
 
@@ -12018,7 +12001,7 @@ void SettingsPanel::CreateScriptSettingsContent()
         auto swatch = std::make_unique<UIElement>();
         swatch->AddClass("settings-color-swatch");
         UIElement* swatchPtr = swatch.get();
-        swatch->Overrides()
+        swatch->Style()
             .Set(Style::Width, StyleLength::Px(16.0f))
             .Set(Style::Height, StyleLength::Px(16.0f))
             .Set(Style::FlexShrink, 0.0f)
@@ -12039,18 +12022,18 @@ void SettingsPanel::CreateScriptSettingsContent()
                     *settingPtr = argb;
                     SyntaxHighlightSettings::Get().Save();
                     if (swatchPtr)
-                        swatchPtr->Overrides().Set(Style::BackgroundColor, argb);
+                        swatchPtr->Style().Set(Style::BackgroundColor, argb);
                     setHexField(fieldRaw, argb);
                 },
                 [settingPtr, swatchPtr, original, fieldRaw, setHexField]() {
                     *settingPtr = original;
                     if (swatchPtr)
-                        swatchPtr->Overrides().Set(Style::BackgroundColor, original);
+                        swatchPtr->Style().Set(Style::BackgroundColor, original);
                     setHexField(fieldRaw, original);
                 },
                 [swatchPtr, fieldRaw, setHexField](uint32_t argb) {
                     if (swatchPtr)
-                        swatchPtr->Overrides().Set(Style::BackgroundColor, argb);
+                        swatchPtr->Style().Set(Style::BackgroundColor, argb);
                     setHexField(fieldRaw, argb);
                 });
             e.Stop();
@@ -12068,7 +12051,7 @@ void SettingsPanel::CreateScriptSettingsContent()
                     *settingPtr = 0xFF000000u | rgb;
                     SyntaxHighlightSettings::Get().Save();
                     if (swatchPtr)
-                        swatchPtr->Overrides().Set(Style::BackgroundColor, *settingPtr);
+                        swatchPtr->Style().Set(Style::BackgroundColor, *settingPtr);
                 } catch (...) {}
             }
         });
@@ -12078,7 +12061,7 @@ void SettingsPanel::CreateScriptSettingsContent()
             *settingPtr = defaultArgb;
             SyntaxHighlightSettings::Get().Save();
             if (swatchPtr)
-                swatchPtr->Overrides().Set(Style::BackgroundColor, defaultArgb);
+                swatchPtr->Style().Set(Style::BackgroundColor, defaultArgb);
             setHexField(fieldRaw, defaultArgb);
         });
         return section;
@@ -12114,12 +12097,9 @@ void SettingsPanel::CreateShortcutsSettingsContent()
     using Editor::ShortcutBinding;
     using Editor::ShortcutCatalogEntry;
 
-    auto header = std::make_unique<Label>();
-    header->AddClass("settings-placeholder");
-    header->SetText(
+    m_ContentBody->AddContent(MakeSettingsInfoCard(
         "Click a shortcut to rebind (up to two modifiers + one key). "
-        "Press Esc to cancel. For Scroll bindings, click then scroll the wheel.");
-    m_ContentBody->AddContent(std::move(header));
+        "Press Esc to cancel. For Scroll bindings, click then scroll the wheel."));
 
     Input::InputSystem* input = nullptr;
     if (auto* engine = &EngineCore::GetInstance())
@@ -12205,7 +12185,7 @@ void SettingsPanel::CreateShortcutsSettingsContent()
 
         auto groupRows = std::make_unique<UIElement>();
         groupRows->AddClass("shortcut-group-rows");
-        groupRows->Overrides().Set(Style::Gap, StyleLength::Px(static_cast<float>(shortcutRowGap)));
+        groupRows->Style().Set(Style::Gap, StyleLength::Px(static_cast<float>(shortcutRowGap)));
 
         for (const ShortcutCatalogEntry* entry : byGroup[group])
         {
@@ -12219,7 +12199,7 @@ void SettingsPanel::CreateShortcutsSettingsContent()
 
             auto trailing = std::make_unique<UIElement>();
             trailing->AddClass("shortcut-controls");
-            trailing->Overrides()
+            trailing->Style()
                 .Set(Style::Display, DisplayMode::Flex)
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center);
@@ -12235,12 +12215,12 @@ void SettingsPanel::CreateShortcutsSettingsContent()
                 bindingLabel->AddClass("shortcut-capture-button");
                 bindingLabel->AddClass("readonly");
                 bindingLabel->SetText(FormatShortcutBinding(entry->defaultKey, entry->defaultMods));
-                bindingLabel->Overrides()
+                bindingLabel->Style()
                     .Set(Style::MinWidth, StyleLength::Px(96.0f));
                 trailing->AddChild(std::move(bindingLabel));
 
                 auto spacer = std::make_unique<UIElement>();
-                spacer->Overrides()
+                spacer->Style()
                     .Set(Style::MarginLeft, StyleLength::Px(6.0f))
                     .Set(Style::Width, StyleLength::Px(24.0f));
                 trailing->AddChild(std::move(spacer));
@@ -12293,10 +12273,10 @@ void SettingsPanel::CreateShortcutsSettingsContent()
                     button->AddClass("shortcut-capture-button");
                     button->AddClass("small");
                     button->SetText(FormatShortcutBinding(slotChord.key, slotChord.mods));
-                    button->Overrides()
+                    button->Style()
                         .Set(Style::MinWidth, StyleLength::Px(96.0f));
                     if (slotIdx > 0)
-                        button->Overrides().Set(Style::MarginLeft, StyleLength::Px(6.0f));
+                        button->Style().Set(Style::MarginLeft, StyleLength::Px(6.0f));
                     if (!isDefault)
                         button->AddClass("modified");
 
@@ -12477,7 +12457,7 @@ void SettingsPanel::CreateShortcutsSettingsContent()
                         removeButton->AddClass("icon-button");
                         removeButton->AddClass("shortcut-remove-button");
                         removeButton->SetText("×");
-                        removeButton->Overrides()
+                        removeButton->Style()
                             .Set(Style::MarginLeft, StyleLength::Px(2.0f));
                         removeButton->RegisterEventHandler(kEventButtonClick, [bindings, capturedIdx, persistAndApply](UIEvent&)
                         {
@@ -12496,7 +12476,7 @@ void SettingsPanel::CreateShortcutsSettingsContent()
                 resetButton->AddClass("icon-button");
                 resetButton->AddClass("shortcut-reset-button");
                 resetButton->SetText("");
-                resetButton->Overrides()
+                resetButton->Style()
                     .Set(Style::MarginLeft, StyleLength::Px(6.0f));
 
                 resetButton->RegisterEventHandler(kEventButtonClick, [entryPtr, persistAndApply](UIEvent&)
@@ -12538,7 +12518,7 @@ void SettingsPanel::CreateUserSettingsContent()
     {
         auto row = std::make_unique<UIElement>();
         row->AddClass("settings-row");
-        row->Overrides()
+        row->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::AlignItems, AlignItems::Center)
@@ -12620,7 +12600,7 @@ void SettingsPanel::UpdateTreePaneHeight()
     // full-height CSS and visually cut the category tree in half.
     if (m_CurrentLayoutMode == LayoutMode::Horizontal)
     {
-        m_TreePane->Overrides()
+        m_TreePane->Style()
             .Reset(Style::Height)
             .Reset(Style::MinHeight)
             .Reset(Style::MaxHeight);
@@ -12648,7 +12628,7 @@ void SettingsPanel::UpdateTreePaneHeight()
         height = std::clamp(autoHeight, kMinTreeHeight, maxHeight);
     }
 
-    m_TreePane->Overrides()
+    m_TreePane->Style()
         .Set(Style::Height, StyleLength::Px(height))
         .Set(Style::MinHeight, StyleLength::Px(height))
         .Set(Style::MaxHeight, StyleLength::Px(height));
@@ -12983,7 +12963,7 @@ void SettingsPanel::ApplySearchFilterToContent(const std::string& searchText)
         if (!parent || parent->GetChildren().empty())
             continue;
         auto container = std::make_unique<UIElement>();
-        container->Overrides().Set(Style::Display, DisplayMode::Flex).Set(Style::FlexDir, FlexDirection::Row);
+        container->Style().Set(Style::Display, DisplayMode::Flex).Set(Style::FlexDir, FlexDirection::Row);
         container->AddClass("settings-search-word-highlight");
         if (!pr.before.empty())
         {
@@ -13201,7 +13181,7 @@ void SettingsPanel::ShowSearchResults(const std::string& query)
         // No results message
         auto noResults = MakeSettingsInfoCard("No settings found matching \"" + query + "\"");
         {
-            noResults->Overrides()
+            noResults->Style()
                 .Set(Style::PaddingTop, StyleLength::Px(20.0f))
                 .Set(Style::PaddingRight, StyleLength::Px(20.0f))
                 .Set(Style::PaddingBottom, StyleLength::Px(20.0f))
@@ -13604,7 +13584,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
     auto overlay = std::make_unique<UIElement>();
     UIElement* overlayRaw = overlay.get();
     overlay->SetOverlayLayer(OverlayLayer::BlockingDialog);
-    overlay->Overrides()
+    overlay->Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionLeft, StyleLength::Px(0.0f))
         .Set(Style::PositionTop, StyleLength::Px(0.0f))
@@ -13618,7 +13598,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
         .Set(Style::PointerEvents, true);
 
     auto window = std::make_unique<UIElement>();
-    window->Overrides()
+    window->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::BackgroundColor, (uint32_t)0xFF252526)
@@ -13632,7 +13612,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
     // Header
     {
         auto header = std::make_unique<UIElement>();
-        header->Overrides()
+        header->Style()
             .Set(Style::PaddingTop, StyleLength::Px(16.0f))
             .Set(Style::PaddingRight, StyleLength::Px(20.0f))
             .Set(Style::PaddingBottom, StyleLength::Px(14.0f))
@@ -13642,7 +13622,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
             .Set(Style::BorderBottomColor, (uint32_t)0xFF2E2E2E);
         auto titleLabel = std::make_unique<Label>();
         titleLabel->SetText("Import Settings");
-        titleLabel->Overrides()
+        titleLabel->Style()
             .Set(Style::Color, (uint32_t)0xFFEDEDED)
             .Set(Style::FontSize, StyleLength::Px(16.0f))
             .Set(Style::FontWeight, 600);
@@ -13652,7 +13632,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
 
     // Scrollable checkbox list
     auto listScroll = std::make_unique<ScrollView>();
-    listScroll->Overrides()
+    listScroll->Style()
         .Set(Style::MaxHeight, StyleLength::Px(280.0f))
         .Set(Style::PaddingTop, StyleLength::Px(8.0f))
         .Set(Style::PaddingBottom, StyleLength::Px(8.0f))
@@ -13668,7 +13648,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
         const auto& group = kExportGroups[pg.index];
 
         auto row = std::make_unique<UIElement>();
-        row->Overrides()
+        row->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::AlignItems, AlignItems::Center)
@@ -13701,7 +13681,7 @@ void SettingsPanel::ShowImportUserSettingsModal(const std::filesystem::path& imp
 
     {
         auto footer = std::make_unique<UIElement>();
-        footer->Overrides()
+        footer->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::JustifyContent, JustifyContent::FlexEnd)

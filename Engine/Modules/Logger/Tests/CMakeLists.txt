@@ -25,6 +25,7 @@ add_executable(LoggerAsyncTests
     FileSinkOpenFailureTests.cpp
     LoggerCrashFlushTests.cpp
     RingBufferSinkQueryTests.cpp
+    StdLibraryHardeningTests.cpp
 )
 
 target_link_libraries(LoggerAsyncTests
@@ -38,6 +39,7 @@ target_include_directories(LoggerAsyncTests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../Source
+        ${CMAKE_SOURCE_DIR}/Tests  # DeathTestChild.h
 )
 
 ge_set_output_tests(LoggerAsyncTests)

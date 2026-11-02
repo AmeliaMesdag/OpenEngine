@@ -6,6 +6,7 @@
 #include "ECS/Query.h"
 #include "ECS/World.h"
 #include "Mathematics/Interpolation.h"
+#include "Mathematics/Vector3.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,22 +31,8 @@ struct ExtractedWindVolume
     bool ValidSpatial = true;
 };
 
-void Normalize3(float& x, float& y, float& z)
-{
-    const float len2 = x * x + y * y + z * z;
-    if (len2 <= 1e-10f)
-    {
-        x = 1.0f;
-        y = 0.0f;
-        z = 0.0f;
-        return;
-    }
-
-    const float invLen = 1.0f / std::sqrt(len2);
-    x *= invLen;
-    y *= invLen;
-    z *= invLen;
-}
+// A wind volume direction of zero length blows along +X.
+constexpr Mathematics::Vector3 kFallbackWindDirection(1.0f, 0.0f, 0.0f);
 
 float SpatialWeight(const ExtractedWindVolume& vol, float worldX, float worldY, float worldZ)
 {
@@ -206,15 +193,14 @@ ResolvedWind WindVolumeResolver::ResolveAt(ECS::World& world,
         if (influence <= 0.0f)
             continue;
 
-        float dirX = volume.Volume.DirectionX;
-        float dirY = volume.Volume.DirectionY;
-        float dirZ = volume.Volume.DirectionZ;
-        Normalize3(dirX, dirY, dirZ);
+        const Mathematics::Vector3 dir =
+            Mathematics::Vector3(volume.Volume.DirectionX, volume.Volume.DirectionY, volume.Volume.DirectionZ)
+                .NormalizeOr(kFallbackWindDirection);
 
         const ResolvedWind target{
-            dirX * std::max(volume.Volume.Speed, 0.0f),
-            dirY * std::max(volume.Volume.Speed, 0.0f),
-            dirZ * std::max(volume.Volume.Speed, 0.0f),
+            dir.x * std::max(volume.Volume.Speed, 0.0f),
+            dir.y * std::max(volume.Volume.Speed, 0.0f),
+            dir.z * std::max(volume.Volume.Speed, 0.0f),
             std::max(volume.Volume.Turbulence, 0.0f),
             std::max(volume.Volume.GustFrequency, 0.0f),
             std::max(volume.Volume.GustScale, 0.001f),
@@ -277,12 +263,13 @@ void WindVolumeResolver::ExtractGPU(ECS::World& world, std::vector<Rendering::Wi
         gpu.AxisXExtent[3] = std::max(v.HalfExtents[0], 0.001f);
         gpu.AxisYExtent[3] = std::max(v.HalfExtents[1], 0.001f);
         gpu.AxisZExtent[3] = std::max(v.HalfExtents[2], 0.001f);
-        float x = v.Volume.DirectionX, y = v.Volume.DirectionY, z = v.Volume.DirectionZ;
-        Normalize3(x, y, z);
+        const Mathematics::Vector3 direction =
+            Mathematics::Vector3(v.Volume.DirectionX, v.Volume.DirectionY, v.Volume.DirectionZ)
+                .NormalizeOr(kFallbackWindDirection);
         const float speed = std::max(v.Volume.Speed, 0.0f);
-        gpu.VelocityWeight[0] = x * speed;
-        gpu.VelocityWeight[1] = y * speed;
-        gpu.VelocityWeight[2] = z * speed;
+        gpu.VelocityWeight[0] = direction.x * speed;
+        gpu.VelocityWeight[1] = direction.y * speed;
+        gpu.VelocityWeight[2] = direction.z * speed;
         gpu.VelocityWeight[3] = Math::Clamp01(v.Volume.Weight);
         gpu.Gust[0] = std::max(v.Volume.Turbulence, 0.0f);
         gpu.Gust[1] = std::max(v.Volume.GustFrequency, 0.0f);

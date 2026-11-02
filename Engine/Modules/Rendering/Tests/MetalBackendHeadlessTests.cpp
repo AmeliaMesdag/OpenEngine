@@ -12,6 +12,7 @@
 #include "Rendering/Utils/TextureUploadHelpers.h"
 
 #include "Mathematics/HalfFloat.h"
+#include "Memory/AllocationCountScope.h"
 
 #include "../Source/Metal/MetalArgumentBufferLayout.h"
 #include "../Source/Metal/MetalDevice.h"
@@ -2974,6 +2975,279 @@ TEST(MetalDescriptorSets, TransientSetsInOneComputeEncoderReadTheirOwnTables)
 TEST(MetalDescriptorSets, PersistentSetsInOneComputeEncoderReadTheirOwnTables)
 {
     ExpectSetsInOneComputeEncoderReadTheirOwnTables(false);
+}
+
+namespace
+{
+constexpr size_t kBindingBufferSize = 256;
+
+// Set 0: a uniform buffer at binding 0 and a storage buffer at binding 1.
+DescriptorSetLayoutDesc MakeUniformStorageLayout()
+{
+    DescriptorSetLayoutDesc layout{};
+    DescriptorBinding uniform{};
+    uniform.binding = 0;
+    uniform.type = DescriptorType::UniformBuffer;
+    uniform.shaderStages = kShaderStageCompute;
+    layout.bindings.push_back(uniform);
+    DescriptorBinding storage{};
+    storage.binding = 1;
+    storage.type = DescriptorType::StorageBuffer;
+    storage.shaderStages = kShaderStageCompute;
+    layout.bindings.push_back(storage);
+    return layout;
+}
+
+// A compute pipeline over MakeUniformStorageLayout. The residency tests only bind sets with it and never dispatch.
+PipelineHandle CreateUniformStoragePipeline(IDevice& device, const DescriptorSetLayoutDesc& layout)
+{
+    static const char* kComp = R"(
+#version 450
+layout(local_size_x = 1) in;
+layout(set = 0, binding = 0) uniform In { uint value; } uIn;
+layout(set = 0, binding = 1, std430) buffer Out { uint values[]; } uOut;
+void main()
+{
+    uOut.values[0] = uIn.value;
+}
+)";
+    std::vector<uint8_t> compSpv = CompileGlsl(kComp, shaderc_compute_shader, "uniform-storage.comp");
+    if (compSpv.empty())
+    {
+        return {};
+    }
+    PipelineDesc pipelineDesc{};
+    pipelineDesc.type = PipelineType::Compute;
+    pipelineDesc.computeShader = compSpv;
+    pipelineDesc.descriptorSetLayouts = {layout};
+    pipelineDesc.debugName = "MetalEncoderResidents";
+    return device.CreatePipeline(pipelineDesc);
+}
+
+BufferHandle CreateBindingBuffer(IDevice& device, uint32_t usage)
+{
+    BufferDesc bufferDesc{};
+    bufferDesc.size = kBindingBufferSize;
+    bufferDesc.usage = usage;
+    return device.CreateBuffer(bufferDesc);
+}
+
+// A persistent set over MakeUniformStorageLayout.
+DescriptorSetHandle CreateUniformStorageSet(IDevice& device, const DescriptorSetLayoutDesc& layout,
+                                            BufferHandle uniform, BufferHandle storage)
+{
+    DescriptorSetDesc setDesc{};
+    setDesc.layout = layout;
+    DescriptorSetHandle set = device.CreateDescriptorSet(setDesc);
+    if (set.IsValid())
+    {
+        device.UpdateBufferBinding(set, 0, uniform, 0, kBindingBufferSize);
+        device.UpdateStorageBufferBinding(set, 1, storage, 0, kBindingBufferSize);
+    }
+    return set;
+}
+
+struct DeclaredResident
+{
+    MTL::Resource* Resource = nullptr;
+    MTL::ResourceUsage Usage = 0;
+
+    bool operator==(const DeclaredResident&) const = default;
+};
+
+// Replaces useResources:count:usage: of the compute encoder class while it lives, and records each
+// declared resource instead. The driver then does no work, and the records fill a reserved buffer.
+class ComputeResidencyRecorder
+{
+  public:
+    explicit ComputeResidencyRecorder(MTL::Device* device)
+    {
+        NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+        MTL::CommandQueue* queue = device->newCommandQueue();
+        MTL::ComputeCommandEncoder* encoder = queue->commandBuffer()->computeCommandEncoder();
+        m_Method = class_getInstanceMethod(object_getClass(reinterpret_cast<id>(encoder)),
+                                           sel_registerName("useResources:count:usage:"));
+        encoder->endEncoding();
+        queue->release();
+        pool->release();
+        if (m_Method != nullptr)
+        {
+            m_Records.reserve(kCapacity);
+            s_Active = this;
+            m_Original = method_setImplementation(m_Method, reinterpret_cast<IMP>(&Record));
+        }
+    }
+
+    ~ComputeResidencyRecorder()
+    {
+        if (m_Method != nullptr)
+        {
+            method_setImplementation(m_Method, m_Original);
+            s_Active = nullptr;
+        }
+    }
+
+    ComputeResidencyRecorder(const ComputeResidencyRecorder&) = delete;
+    ComputeResidencyRecorder& operator=(const ComputeResidencyRecorder&) = delete;
+
+    bool IsArmed() const { return m_Method != nullptr; }
+    const std::vector<DeclaredResident>& Records() const { return m_Records; }
+    void Clear() { m_Records.clear(); }
+
+  private:
+    static constexpr size_t kCapacity = 64;
+
+    static void Record(id, SEL, MTL::Resource* const* resources, NS::UInteger count, MTL::ResourceUsage usage)
+    {
+        for (NS::UInteger i = 0; i < count && s_Active->m_Records.size() < kCapacity; ++i)
+        {
+            s_Active->m_Records.push_back({resources[i], usage});
+        }
+    }
+
+    static inline ComputeResidencyRecorder* s_Active = nullptr;
+    Method m_Method = nullptr;
+    IMP m_Original = nullptr;
+    std::vector<DeclaredResident> m_Records;
+};
+} // namespace
+
+// The renderer binds the same persistent sets on a new encoder in every pass of every frame. Once one
+// encoder has used the command list's resident map, a bind on a later encoder must not allocate.
+TEST(MetalDescriptorSets, BindingSetsOnANewComputeEncoderAllocatesNothingOnceWarm)
+{
+    auto device = CreateHeadlessMetalDevice();
+    if (!device)
+    {
+        GTEST_SKIP() << "Metal backend unavailable";
+    }
+    const DescriptorSetLayoutDesc layout = MakeUniformStorageLayout();
+    PipelineHandle pipeline = CreateUniformStoragePipeline(*device, layout);
+    ASSERT_TRUE(pipeline.IsValid());
+
+    constexpr uint32_t kSets = 8;
+    std::vector<BufferHandle> buffers;
+    std::vector<DescriptorSetHandle> sets;
+    ASSERT_TRUE(device->BeginFrame());
+    while (sets.size() < kSets)
+    {
+        buffers.push_back(CreateBindingBuffer(*device, static_cast<uint32_t>(BufferUsage::Uniform)));
+        buffers.push_back(CreateBindingBuffer(*device, static_cast<uint32_t>(BufferUsage::Storage)));
+        ASSERT_TRUE(buffers[buffers.size() - 2].IsValid() && buffers.back().IsValid());
+        sets.push_back(CreateUniformStorageSet(*device, layout, buffers[buffers.size() - 2], buffers.back()));
+        ASSERT_TRUE(sets.back().IsValid());
+    }
+
+    ComputeResidencyRecorder recorder(static_cast<MetalDevice&>(*device).GetMTLDevice());
+    ASSERT_TRUE(recorder.IsArmed());
+    auto cl = device->CreateCommandList(IDevice::QueueType::Graphics);
+    cl->Begin();
+    // Cycle 0 fills the map and the scratch lists for the first time.
+    constexpr uint32_t kCycles = 4;
+    for (uint32_t cycle = 0; cycle < kCycles; ++cycle)
+    {
+        cl->SetPipeline(pipeline);
+        recorder.Clear();
+        uint64_t allocations = 0;
+        {
+            const GameEngine::Memory::AllocationCountScope scope(GameEngine::Memory::CountWindow::ThisThread);
+            for (DescriptorSetHandle set : sets)
+            {
+                cl->BindDescriptorSet(0, set, pipeline);
+            }
+            allocations = scope.Count();
+        }
+        EXPECT_EQ(recorder.Records().size(), 2 * kSets) << "cycle " << cycle << ": each resident is declared once";
+        if (cycle > 0)
+        {
+            EXPECT_EQ(allocations, 0u) << "cycle " << cycle << ": binding " << kSets << " sets allocated "
+                                       << allocations << " times";
+        }
+        // A blit ends the compute encoder, so the next SetPipeline opens a new one.
+        cl->CopyBuffer(buffers[1], buffers[3], kBindingBufferSize);
+    }
+    cl->End();
+    device->ExecuteCommandLists({cl.get()});
+    device->FinalizeFrame();
+    device->WaitForIdle();
+
+    for (DescriptorSetHandle set : sets)
+    {
+        device->DestroyDescriptorSet(set);
+    }
+    for (BufferHandle buffer : buffers)
+    {
+        device->DestroyBuffer(buffer);
+    }
+    device->Shutdown();
+}
+
+// An encoder declares a bound resource when a set first uses it, and again with the union of the usages
+// when a set needs more. A known usage declares nothing. A new encoder declares every resident again.
+TEST(MetalDescriptorSets, EncoderDeclaresAResidentOnlyWhenItIsNewOrItsUsageGrows)
+{
+    auto device = CreateHeadlessMetalDevice();
+    if (!device)
+    {
+        GTEST_SKIP() << "Metal backend unavailable";
+    }
+    auto& metalDevice = static_cast<MetalDevice&>(*device);
+    const DescriptorSetLayoutDesc layout = MakeUniformStorageLayout();
+    PipelineHandle pipeline = CreateUniformStoragePipeline(*device, layout);
+    ASSERT_TRUE(pipeline.IsValid());
+
+    ASSERT_TRUE(device->BeginFrame());
+    BufferHandle shared = CreateBindingBuffer(
+        *device, static_cast<uint32_t>(BufferUsage::Uniform) | static_cast<uint32_t>(BufferUsage::Storage));
+    BufferHandle storage = CreateBindingBuffer(*device, static_cast<uint32_t>(BufferUsage::Storage));
+    BufferHandle uniform = CreateBindingBuffer(*device, static_cast<uint32_t>(BufferUsage::Uniform));
+    ASSERT_TRUE(shared.IsValid() && storage.IsValid() && uniform.IsValid());
+    DescriptorSetHandle readsShared = CreateUniformStorageSet(*device, layout, shared, storage);
+    DescriptorSetHandle writesShared = CreateUniformStorageSet(*device, layout, uniform, shared);
+    ASSERT_TRUE(readsShared.IsValid() && writesShared.IsValid());
+
+    ComputeResidencyRecorder recorder(metalDevice.GetMTLDevice());
+    ASSERT_TRUE(recorder.IsArmed());
+    auto cl = device->CreateCommandList(IDevice::QueueType::Graphics);
+    cl->Begin();
+    // The test clears the records after SetPipeline, because a new encoder can declare device-address buffers first.
+    cl->SetPipeline(pipeline);
+    recorder.Clear();
+    cl->BindDescriptorSet(0, readsShared, pipeline);
+    cl->BindDescriptorSet(0, writesShared, pipeline);
+    cl->BindDescriptorSet(0, readsShared, pipeline);
+    std::vector<DeclaredResident> declared = recorder.Records();
+    cl->CopyBuffer(uniform, storage, kBindingBufferSize);
+    cl->SetPipeline(pipeline);
+    recorder.Clear();
+    cl->BindDescriptorSet(0, readsShared, pipeline);
+    declared.insert(declared.end(), recorder.Records().begin(), recorder.Records().end());
+    cl->End();
+    device->ExecuteCommandLists({cl.get()});
+    device->FinalizeFrame();
+    device->WaitForIdle();
+
+    MTL::Resource* sharedResource = metalDevice.GetMetalBuffer(shared)->buffer;
+    MTL::Resource* storageResource = metalDevice.GetMetalBuffer(storage)->buffer;
+    MTL::Resource* uniformResource = metalDevice.GetMetalBuffer(uniform)->buffer;
+    const MTL::ResourceUsage read = MTL::ResourceUsageRead;
+    const MTL::ResourceUsage readWrite = MTL::ResourceUsageRead | MTL::ResourceUsageWrite;
+    const std::vector<DeclaredResident> expected = {
+        {sharedResource, read},       // first encoder, readsShared
+        {storageResource, readWrite},
+        {uniformResource, read},      // writesShared: the uniform is new and the shared buffer gains Write
+        {sharedResource, readWrite},
+        {sharedResource, read},       // readsShared again declares nothing; a new encoder declares again
+        {storageResource, readWrite},
+    };
+    EXPECT_EQ(declared, expected);
+
+    device->DestroyDescriptorSet(writesShared);
+    device->DestroyDescriptorSet(readsShared);
+    device->DestroyBuffer(uniform);
+    device->DestroyBuffer(storage);
+    device->DestroyBuffer(shared);
+    device->Shutdown();
 }
 
 // The render-pass form of the test above: two draws in one pass, each with its

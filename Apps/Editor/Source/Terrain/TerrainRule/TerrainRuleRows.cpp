@@ -268,7 +268,7 @@ Button* AddPrimaryAddButton(UIElement* parent, const std::string& text, const ch
     Button* raw = button.get();
     raw->SetText(text);
     raw->AddClass("inspector-add-component-button");
-    raw->Overrides()
+    raw->Style()
         .Set(Style::Width, StyleLength::Px(kAddButtonWidthPx))
         .Set(Style::MaxWidth, StyleLength::Percent(100.0f))
         .Set(Style::AlignSelf, AlignItems::Center)
@@ -335,7 +335,7 @@ void AddMaterialThumbnail(UIElement* field, IThumbnailProvider* thumbnails,
         return;
 
     auto thumbnail = std::make_unique<UIElement>();
-    thumbnail->Overrides()
+    thumbnail->Style()
         .Set(Style::Width, StyleLength::Px(kMaterialThumbnailSizePx))
         .Set(Style::Height, StyleLength::Px(kMaterialThumbnailSizePx))
         .Set(Style::MinWidth, StyleLength::Px(kMaterialThumbnailSizePx))
@@ -501,7 +501,7 @@ void AddConditionRows(const InspectorContext& ctx, UIElement* parent,
 
     auto profile = std::make_unique<Editor::TerrainRuleWeightProfileStrip>();
     auto* profileRaw = profile.get();
-    profileRaw->Overrides()
+    profileRaw->Style()
         .Set(Style::Height, StyleLength::Px(kProfileStripHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(kProfileStripHeightPx))
         .Set(Style::FlexGrow, 1.0f)
@@ -806,7 +806,7 @@ void AddRuleRow(const InspectorContext& ctx, UIElement* parent, const RulesEffec
         InspectorUI::AddLabel(row, "Material",
                  "The material this rule writes where its conditions are met.");
         UIElement* field = InspectorUI::AddFieldContainer(row);
-        field->Overrides()
+        field->Style()
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::AlignItems, AlignItems::Center)
             .Set(Style::Gap, StyleLength::Px(kMaterialThumbnailGapPx));
@@ -824,7 +824,7 @@ void AddRuleRow(const InspectorContext& ctx, UIElement* parent, const RulesEffec
         Dropdown* dd = dropdown.get();
         dd->SetOptions(options, selected);
         dd->AddClass("inspector-dropdown");
-        dd->Overrides()
+        dd->Style()
             .Set(Style::FlexGrow, 1.0f)
             .Set(Style::FlexShrink, 1.0f)
             .Set(Style::FlexBasis, StyleLength::Px(0.0f))

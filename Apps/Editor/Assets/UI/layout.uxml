@@ -1,4 +1,5 @@
 <UIElement id="root" class="dock-root">
+  <EditorTitleBar id="EditorTitleBar" />
   <!-- Instantiated by the UI factory (EditorTopToolbar.cpp); the control loads
        its own controls/EditorTopToolbar.uxml and .css. The authored id must
        match the ctor-assigned id: hot-reload layout reconciliation matches by
@@ -108,9 +109,7 @@
     </DockConfig>
   </dockspace>
   <UIElement class="editor-bottom-toolbar">
-    <UIElement class="bottom-toolbar-side">
-      <Label id="BuildConfigStatus" class="bottom-toolbar-build-config" />
-    </UIElement>
+    <EditorBuildStatus id="EditorBuildStatus" class="bottom-toolbar-side" />
     <LayoutPresetToolbar id="LayoutButtonContainer" class="bottom-toolbar-center" />
     <UIElement class="bottom-toolbar-side bottom-toolbar-side-right">
       <UIElement id="StatusBarItems" class="bottom-toolbar-status-items" />

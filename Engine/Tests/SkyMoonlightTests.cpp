@@ -58,7 +58,7 @@ struct NightRig
 
     // The light's colour as the sky's own bodies give it, rebuilt from the rendered sun and moon with
     // the handover the frame used and `moonScale` on the moon.
-    void ExpectedColour(float moonScale, float out[3]) const
+    ColorLinear ExpectedColour(float moonScale) const
     {
         const Rendering::SkySystemConfig config{};
         Rendering::SkySystemState state{};
@@ -68,9 +68,9 @@ struct NightRig
             state.moonDirWS[c] = Settings().moonDirWS[c];
         }
         state.primaryMoonBlend = Rendering::PrimaryMoonBlend(config, state.sunDirWS[1]);
-        const float white[3] = {1.0f, 1.0f, 1.0f};
-        Rendering::MixLinkedLightGroundColor(
-            Rendering::EvaluateBodyGroundColors(Rendering::ScatteringAtmosphere(), config, state, white), moonScale, out);
+        return Rendering::MixLinkedLightGroundColor(
+            Rendering::EvaluateBodyGroundColors(Rendering::ScatteringAtmosphere(), config, state, ColorLinear(1.0f, 1.0f, 1.0f)),
+            moonScale);
     }
 };
 } // namespace
@@ -85,10 +85,10 @@ TEST(SkyMoonlight, TheDefaultIsARealFullMoon)
                  Components::kDefaultMoonlightIlluminanceLux);
     rig.RunAt(kMidnightHours);
     const Rendering::SkySystemConfig config{};
-    float expected[3];
-    rig.ExpectedColour(config.moonLightIlluminanceScale, expected);
-    for (int c = 0; c < 3; ++c)
-        EXPECT_EQ(rig.Light().Color[c], expected[c]) << "channel " << c;
+    const ColorLinear expected = rig.ExpectedColour(config.moonLightIlluminanceScale);
+    EXPECT_EQ(rig.Light().Color[0], expected.r);
+    EXPECT_EQ(rig.Light().Color[1], expected.g);
+    EXPECT_EQ(rig.Light().Color[2], expected.b);
     EXPECT_NEAR(Components::kDefaultMoonlightIlluminanceLux, 0.25f, 1e-4f);
 
     const float clearSun =
@@ -170,10 +170,12 @@ TEST(SkyMoonlight, TheNightGlowIsTheSkysOwn)
     base.RunAt(kMidnightHours);
     bright.RunAt(kMidnightHours);
     const Components::SkyEnvironment defaults{};
-    for (int c = 0; c < 3; ++c)
+    const float* midnight = defaults.NightSkyHorizonColorKeys.Midnight;
+    for (const Rendering::SkySettings* settings : {&base.Settings(), &bright.Settings()})
     {
-        EXPECT_EQ(base.Settings().nightSkyHorizonColor[c], defaults.NightSkyHorizonColorKeys.Midnight[c]) << c;
-        EXPECT_EQ(bright.Settings().nightSkyHorizonColor[c], defaults.NightSkyHorizonColorKeys.Midnight[c]) << c;
+        EXPECT_EQ(settings->nightSkyHorizonColor.r, midnight[0]);
+        EXPECT_EQ(settings->nightSkyHorizonColor.g, midnight[1]);
+        EXPECT_EQ(settings->nightSkyHorizonColor.b, midnight[2]);
     }
 }
 

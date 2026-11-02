@@ -62,7 +62,8 @@ void AddGrassRegionDarkenGroundRow(const InspectorContext& ctx, const Components
         "the color map under its blades. 100% leaves it alone, 0% keeps the soil out of the volume, "
         "for a path through a field. Applies at the next bake.",
         {}, [arm](bool previewing) { previewing ? arm->Arm() : arm->Release(); });
-    if (base.Known && base.GroundDarkening <= 0.0f)
+    // A row at 0% keeps the soil out on any terrain, so the terrain's 0% takes nothing from it.
+    if (base.Known && base.GroundDarkening <= 0.0f && effect.GroundDarkeningScale > 0.0f)
         ctx.Parent->AddChild(std::make_unique<EditorUI::InspectorNotice>(
             "Darken Ground on the terrain is 0%, so this row has no effect. Set Darken Ground in "
             "the terrain's Grass settings."));

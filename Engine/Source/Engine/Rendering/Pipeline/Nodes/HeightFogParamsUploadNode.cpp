@@ -54,19 +54,19 @@ void HeightFogParamsUploadNode::DeclareForView(ViewDeclare& d)
 
     if (pp.HeightFogTrackDirectionalLight)
     {
-        const float fallbackDir[3] = {pp.HeightFogSunDirX, pp.HeightFogSunDirY, pp.HeightFogSunDirZ};
-        const float fallbackColor[3] = {pp.HeightFogSunColorR, pp.HeightFogSunColorG,
-                                        pp.HeightFogSunColorB};
-        const ResolvedFogSun sun = ResolveHeightFogSunLighting(
-            d.Services, d.View.id, pp.HeightFogTrackDirectionalLight != 0,
-            pp.HeightFogSunIntensityScale, fallbackDir, fallbackColor, pp.HeightFogSunIntensity);
-        ubo.sunDirX = sun.direction[0];
-        ubo.sunDirY = sun.direction[1];
-        ubo.sunDirZ = sun.direction[2];
-        ubo.sunColorR = sun.color[0];
-        ubo.sunColorG = sun.color[1];
-        ubo.sunColorB = sun.color[2];
-        ubo.sunIntensity = sun.intensity;
+        const ResolvedFogSun fallback{
+            Mathematics::Vector3(pp.HeightFogSunDirX, pp.HeightFogSunDirY, pp.HeightFogSunDirZ),
+            ColorLinear(pp.HeightFogSunColorR, pp.HeightFogSunColorG, pp.HeightFogSunColorB),
+            pp.HeightFogSunIntensity};
+        const ResolvedFogSun sun = ResolveFogSunLighting(
+            d.Services, d.View.id, pp.HeightFogTrackDirectionalLight != 0, pp.HeightFogSunIntensityScale, fallback);
+        ubo.sunDirX = sun.Direction.x;
+        ubo.sunDirY = sun.Direction.y;
+        ubo.sunDirZ = sun.Direction.z;
+        ubo.sunColorR = sun.Color.r;
+        ubo.sunColorG = sun.Color.g;
+        ubo.sunColorB = sun.Color.b;
+        ubo.sunIntensity = sun.Intensity;
     }
 
     *alloc.Ptr = ubo;

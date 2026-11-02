@@ -127,6 +127,15 @@ function(_ge_sdk_generate_config output_path)
         set(_platform_libs "")
     endif()
 
+    # libEngine.so's own dependencies (FFmpeg, GLFW, ...) are staged beside the Editor, the SDK's
+    # parent folder, and are not on the system. GNU ld resolves a shared library's DT_NEEDED
+    # entries when it links an executable against it, so the Player's link searches there.
+    set(_engine_dependency_link_lines "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(_engine_dependency_link_lines
+            "target_link_options(GameEngine::Engine INTERFACE \"LINKER:-rpath-link,\${_GE_SDK_DIR}/..\")\n")
+    endif()
+
     # Build the definitions lines
     set(_def_lines "")
     foreach(_def IN LISTS _public_defs)
@@ -305,11 +314,9 @@ else()
     message(FATAL_ERROR \"GameEngine SDK: '\${_GE_SELECTED_CONFIG}' (from '\${_GE_LIB_DIR}') is not one of the engine's configurations (Debug, DebugFast, Release, RelWithDebInfo, MinSizeRel), so the value of GE_DEBUG_INSTRUMENTATION its libs were built with is unknown — and engine classes lay out differently under the two values. Stage libs built in one of those configurations.\")
 endif()
 
-# Explicit ship-lib list. Engine is the ONLY engine-built library a shipped game
-# links: it is a shared library and every engine module lives inside it. The SDK
-# lib dir also stages editor-only artifacts (EditorSDK import lib for native
-# Editor-kind package modules, engine runtime DLLs for cross-flavor packaging) —
-# globbing the directory used to link those into every shipped game.
+# Engine is the only engine-built library a shipped game links: every engine module lives in it.
+# The SDK lib folder also holds editor-only files (the EditorSDK import library, runtime DLLs for
+# cross-flavor packaging), so a glob of that folder would link them into every game.
 if(WIN32)
     set(_GE_SHIP_LIB_NAMES \"Engine.lib\")
 elseif(APPLE)
@@ -348,7 +355,7 @@ if(MSVC)
 else()
     target_link_libraries(GameEngine::Engine INTERFACE \${_GE_ENGINE_LIBS})
 endif()
-
+${_engine_dependency_link_lines}
 # The optional vcpkg tree's libraries (see GAMEENGINE_VCPKG_INSTALLED above): every
 # library in it, rather than re-finding individual packages (which requires exact
 # name matching and can create broken targets without the vcpkg toolchain).

@@ -853,30 +853,7 @@ void ModelThumbnailHandler::ResetForProjectSwitch()
     {
         WindowState& ws = winPair.second;
         for (RenderLane& lane : ws.lanes)
-        {
-            lane.inFlightSlot = kMaxResidentSlots;
-            lane.inFlightFrame = 0;
-
-            // Teardown ECS-spawned model/material and clear the lane's world.
-            TeardownSpawnedModel(lane);
-            TeardownSpawnedMaterial(lane);
-            if (lane.world)
-                lane.world->Clear();
-            lane.orbitRootEntity = ECS::EntityHandle::Invalid();
-            lane.keyLightEntity = ECS::EntityHandle::Invalid();
-            lane.ambientLightEntity = ECS::EntityHandle::Invalid();
-            lane.isSpawnedMaterial = false;
-            lane.spawnedMaterialGuid = GUID{};
-            lane.spawnedMaterialShapeGuid = GUID{};
-            lane.primitiveEntity = ECS::EntityHandle::Invalid();
-            lane.isSpawnedLensFlare = false;
-            lane.spawnedLensFlareGuid = GUID{};
-            lane.lensFlareEntity = ECS::EntityHandle::Invalid();
-
-            // Ensure persistent submissions don't keep re-rendering after a switch.
-            if (lane.viewId != 0 && m_RenderServices)
-                m_RenderServices->GetWorldDrawBuilder().ClearView(lane.viewId);
-        }
+            ResetLane(lane);
     }
     ReleaseAllModelImports();
 
@@ -1068,28 +1045,56 @@ void ModelThumbnailHandler::RequeuePending(WindowState& ws, const PendingThumbRe
 }
 
 // ---------------------------------------------------------------------------
-// Preview size / resolution configuration
+// Preview staging view and thumbnail resolution
 // ---------------------------------------------------------------------------
 
-void ModelThumbnailHandler::SetPreviewSize(uint32_t widthPx, uint32_t heightPx)
+void ModelThumbnailHandler::ResetLane(RenderLane& lane)
 {
-    // Round up to a sensible minimum so tiny/zero panel sizes don't produce degenerate RTs.
-    constexpr uint32_t kMinPreviewDim = 32u;
-    constexpr uint32_t kMaxPreviewDim = 4096u;
-    uint32_t w = (widthPx == 0 && heightPx == 0) ? 0u : std::clamp(widthPx, kMinPreviewDim, kMaxPreviewDim);
-    uint32_t h = (widthPx == 0 && heightPx == 0) ? 0u : std::clamp(heightPx, kMinPreviewDim, kMaxPreviewDim);
+    lane.inFlightSlot = kMaxResidentSlots;
+    lane.inFlightFrame = 0;
 
-    // Avoid churning RTs on every sub-pixel layout shift. Accept if dims differ by
-    // more than a small threshold or become zero.
-    const bool sizeChanged = (w != s_PreviewWidthPx) || (h != s_PreviewHeightPx);
-    if (!sizeChanged)
+    // Teardown ECS-spawned model/material and clear the lane's world.
+    TeardownSpawnedModel(lane);
+    TeardownSpawnedMaterial(lane);
+    if (lane.world)
+        lane.world->Clear();
+    lane.orbitRootEntity = ECS::EntityHandle::Invalid();
+    lane.keyLightEntity = ECS::EntityHandle::Invalid();
+    lane.ambientLightEntity = ECS::EntityHandle::Invalid();
+    lane.isSpawnedMaterial = false;
+    lane.spawnedMaterialGuid = GUID{};
+    lane.spawnedMaterialShapeGuid = GUID{};
+    lane.primitiveEntity = ECS::EntityHandle::Invalid();
+    lane.isSpawnedLensFlare = false;
+    lane.spawnedLensFlareGuid = GUID{};
+    lane.lensFlareEntity = ECS::EntityHandle::Invalid();
+
+    // Ensure persistent submissions don't keep re-rendering after a switch.
+    if (lane.viewId != 0 && m_RenderServices)
+        m_RenderServices->GetWorldDrawBuilder().ClearView(lane.viewId);
+}
+
+void ModelThumbnailHandler::SetPreviewStagingView(uint64_t windowId, Engine::Renderer::StagingView* view)
+{
+    if (s_Instance)
+        s_Instance->BindPreviewStagingView(windowId, view);
+}
+
+void ModelThumbnailHandler::BindPreviewStagingView(uint64_t windowId, Engine::Renderer::StagingView* view)
+{
+    WindowState& ws = GetOrCreateWindowState(windowId);
+    RenderLane& lane = ws.lanes[kPreviewLane];
+    // The control keeps one view object across a hide and a show; a new pool entry has a new world.
+    ECS::World* world = view && view->IsAlive() ? &view->World() : nullptr;
+    if (ws.previewView == view && lane.world == world)
         return;
-
-    // The focused slot's device texture is recreated lazily in TickRender when
-    // its cached dims don't match the desired dims; the per-dispatch
-    // intermediates are sized from the slot.
-    s_PreviewWidthPx = w;
-    s_PreviewHeightPx = h;
+    // The old view is still alive here: its owner detaches before it releases the view.
+    ResetLane(lane);
+    ws.previewView = view;
+    ws.previewShownSlot = kMaxResidentSlots;
+    ws.previewShownGuid = GUID{};
+    lane.world = world;
+    lane.viewId = world ? view->ViewId() : 0;
 }
 
 void ModelThumbnailHandler::SetThumbnailResolution(int px)
@@ -1326,10 +1331,16 @@ ModelThumbnailHandler::WindowState& ModelThumbnailHandler::GetOrCreateWindowStat
     WindowState ws{};
     ws.slots.resize(kMaxResidentSlots);
 
-    // Each lane gets its own tiny ECS world, isolated from the editor's
-    // primary world and from the other lanes.
-    for (RenderLane& lane : ws.lanes)
-        lane.world = ModelThumbnailShared::MakeThumbnailWorld();
+    // Each queue lane gets its own tiny ECS world, isolated from the editor's
+    // primary world and from the other lanes. The preview lane takes the
+    // staging view's world when the Asset Preview attaches one.
+    ws.lanes[kPreviewLane].isPreviewLane = true;
+    for (size_t laneIdx = kFirstQueueLane; laneIdx < kRenderLaneCount; ++laneIdx)
+    {
+        RenderLane& lane = ws.lanes[laneIdx];
+        lane.ownedWorld = ModelThumbnailShared::MakeThumbnailWorld();
+        lane.world = lane.ownedWorld.get();
+    }
 
     auto [ins, _] = m_Windows.emplace(windowId, std::move(ws));
     return ins->second;
@@ -1338,31 +1349,6 @@ ModelThumbnailHandler::WindowState& ModelThumbnailHandler::GetOrCreateWindowStat
 // ---------------------------------------------------------------------------
 // Slot management / texture creation
 // ---------------------------------------------------------------------------
-
-void ModelThumbnailHandler::ComputeDesiredSlotDims(const Slot& slot, const GUID& guid,
-                                                   bool listStatic, bool isMaterial,
-                                                   bool isLensFlare,
-                                                   uint32_t& outW, uint32_t& outH)
-{
-    // The focused (non-list) slot tracks the live preview size so the Asset
-    // View panel can be non-square; all other slots use the square fallback.
-    outW = static_cast<uint32_t>(s_ThumbnailResolutionPx);
-    outH = static_cast<uint32_t>(s_ThumbnailResolutionPx);
-    const bool isMaterialFocus =
-        isMaterial && !s_MaterialOrbitFocusGuid.IsNull() && guid == s_MaterialOrbitFocusGuid &&
-        slot.previewIblEnabled == s_MaterialOrbitFocusIblEnabled;
-    const bool isModelFocus =
-        !isMaterial && !isLensFlare && !listStatic && !s_OrbitFocusGuid.IsNull() &&
-        guid == s_OrbitFocusGuid;
-    const bool isLensFlareFocus =
-        isLensFlare && !s_LensFlareFocusGuid.IsNull() && guid == s_LensFlareFocusGuid;
-    if ((isMaterialFocus || isModelFocus || isLensFlareFocus) &&
-        s_PreviewWidthPx > 0 && s_PreviewHeightPx > 0)
-    {
-        outW = s_PreviewWidthPx;
-        outH = s_PreviewHeightPx;
-    }
-}
 
 void ModelThumbnailHandler::EnsureSlotDeviceTexture(Slot& slot, size_t slotIdx)
 {
@@ -1377,8 +1363,10 @@ void ModelThumbnailHandler::EnsureSlotDeviceTexture(Slot& slot, size_t slotIdx)
     uint32_t desiredW = slot.texWidth;
     uint32_t desiredH = slot.texHeight;
     if (desiredW == 0 || desiredH == 0)
-        ComputeDesiredSlotDims(slot, slot.guid, slot.listStaticThumb, slot.isMaterial,
-                               slot.isLensFlare, desiredW, desiredH);
+    {
+        desiredW = static_cast<uint32_t>(s_ThumbnailResolutionPx);
+        desiredH = desiredW;
+    }
 
     Rendering::TextureDesc td{};
     td.width = desiredW;
@@ -1495,8 +1483,10 @@ size_t ModelThumbnailHandler::AcquireSlotForGuid(WindowState& ws, const GUID& gu
     // between this acquire and the first dispatch, and the focused slot must
     // get its preview-size target from the acquire-time focus state.
     if (!slot.deviceTex.IsValid())
-        ComputeDesiredSlotDims(
-            slot, guid, listStatic, isMaterial, isLensFlare, slot.texWidth, slot.texHeight);
+    {
+        slot.texWidth = static_cast<uint32_t>(s_ThumbnailResolutionPx);
+        slot.texHeight = slot.texWidth;
+    }
 
     slot.guid = guid;
     slot.framingBoundsValid = false;
@@ -2052,39 +2042,6 @@ std::string ModelThumbnailHandler::GetOrRequestMaterial(
     if (onReady)
         onReady(engineId);
     return engineId;
-}
-
-std::string ModelThumbnailHandler::RequestLiveMaterialPreview(uint64_t windowId,
-                                                              const GUID& materialGuid,
-                                                              uint32_t widthPx,
-                                                              uint32_t heightPx,
-                                                              bool previewIblEnabled)
-{
-    if (windowId == 0 || materialGuid.IsNull() || !m_AssetManager)
-        return {};
-
-    SetPreviewSize(widthPx, heightPx);
-    s_MaterialOrbitFocusGuid = materialGuid;
-    s_MaterialOrbitFocusIblEnabled = previewIblEnabled;
-    s_OrbitFocusGuid = GUID{};
-
-    WindowState& ws = GetOrCreateWindowState(windowId);
-    const size_t slotIdx = AcquireSlotForGuid(ws, materialGuid, false, true,
-                                              previewIblEnabled);
-    if (slotIdx >= ws.slots.size())
-        return {};
-
-    Slot& slot = ws.slots[slotIdx];
-
-    if (!m_AssetManager->GetAsset(materialGuid) && !m_AssetManager->IsLoadSuppressed(materialGuid))
-        m_AssetManager->LoadAsset(materialGuid, AssetLoadResultCallback{}, AssetLoadPriority::High);
-
-    // The material is now the focused preview: the preview lane renders it
-    // while it is not ready, and again for every request once it is.
-    if (slot.ready)
-        slot.needsOrbitRerender = true;
-
-    return MakeMaterialEngineThumbnailId(materialGuid, previewIblEnabled);
 }
 
 } // namespace GameEngine

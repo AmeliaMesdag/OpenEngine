@@ -53,6 +53,28 @@
 	color: var(--ui_color_text_bright);
 }
 
+/* A disabled field (its row inactive) draws as a disabled dropdown does (controls/Dropdown.css): no
+ * plate, its value on the row's value column, and no picker button that never opens. Its text takes
+ * the disabled label's color (theme/inspector.css). */
+.asset-field:disabled,
+.asset-field:disabled:hover,
+.asset-field.dropdown-asset-field:disabled,
+.asset-field.dropdown-asset-field:disabled:hover {
+	border-color: transparent;
+	background-color: transparent;
+	padding-left: 0px;
+	cursor: default;
+}
+
+.asset-field:disabled .asset-field-name,
+.asset-field:disabled .asset-field-name.empty {
+	color: var(--ui_color_text_disabled);
+}
+
+.asset-field:disabled .asset-field-pick {
+	display: none;
+}
+
 /* ---- Type icon ---- */
 .asset-field-icon {
 	width: var(--asset-field-em);

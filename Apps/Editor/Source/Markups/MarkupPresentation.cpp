@@ -240,7 +240,7 @@ std::unique_ptr<UIElement> BuildMarkupEntryMarker(const MarkupECS::MarkupEntry& 
     if (entry.Kind == MarkupECS::MarkupEntryKind::StatusChange)
     {
         if (const std::optional<uint32_t> argb = MarkupTagArgb(entry.Status))
-            marker->Overrides().Set(Style::BackgroundColor, *argb);
+            marker->Style().Set(Style::BackgroundColor, *argb);
     }
     return marker;
 }
@@ -253,7 +253,7 @@ std::unique_ptr<UIElement> BuildMarkupEntryColorSwatch(const MarkupECS::MarkupEn
     swatch->AddClass("markup-entry-marker");
     swatch->AddClass("markup-entry-status");
     swatch->AddClass("markup-entry-color");
-    swatch->Overrides().Set(Style::BackgroundColor, entry.ColorArgb);
+    swatch->Style().Set(Style::BackgroundColor, entry.ColorArgb);
     return swatch;
 }
 
@@ -326,15 +326,15 @@ bool MarkupVolumeContains(const MarkupWorldVolume& volume, const Mathematics::Ve
 
 float MarkupFrameTanHalfFov(const SceneViewController* view)
 {
-    float projection[16];
+    Mathematics::Matrix4x4 projection;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     // An orthographic projection's w row is (0, 0, 0, 1); a perspective one's has no w term.
-    if (!view || !view->GetLastFrameProjection(projection, width, height) || projection[15] != 0.0f ||
-        projection[0] == 0.0f || projection[5] == 0.0f)
+    if (!view || !view->GetLastFrameProjection(projection, width, height) || projection[3][3] != 0.0f ||
+        projection[0][0] == 0.0f || projection[1][1] == 0.0f)
         return kMarkupDefaultTanHalfFov;
     // The diagonal holds the cotangents of the half fields of view; the larger is the narrower.
-    return 1.0f / std::max(std::abs(projection[0]), std::abs(projection[5]));
+    return 1.0f / std::max(std::abs(projection[0][0]), std::abs(projection[1][1]));
 }
 
 float MarkupFrameDistance(const MarkupWorldVolume& volume, float tanHalfFov)

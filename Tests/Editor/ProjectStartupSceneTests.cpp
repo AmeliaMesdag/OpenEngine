@@ -5,6 +5,7 @@
 
 #include "Editor/Settings/SettingsStore.h"
 #include "JobSystem/WorkStealingThreadPool.h"
+#include "LogCapture.h"
 #include "Projects/ProjectAcquisition.h"
 #include "ScopedEditorUserDataRoot.h"
 #include "Projects/ProjectCatalog.h"
@@ -17,11 +18,13 @@
 #include <iterator>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 using GameEngine::Editor::FindNewProjectStartupScene;
 using GameEngine::Editor::kProjectStartupSceneKey;
 using GameEngine::Editor::ProjectStartupSceneCandidates;
+using GameEngine::Editor::ReadProjectStartupScene;
 using GameEngine::Editor::ResolveProjectStartupScene;
 
 namespace
@@ -91,6 +94,47 @@ TEST(ProjectStartupScene, AnotherProjectsRecentSceneIsNotThisProjectsStartupScen
     // Nor does a named scene that walks out of the project's Assets folder.
     candidates.StartupScene = "../../Breakout/Assets/Scenes/Breakout.scene";
     EXPECT_FALSE(ResolveProjectStartupScene(root / "Pong", candidates).has_value());
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(ProjectStartupScene, ProjectSettingsNameTheStartupSceneWithTheTopLevelKey)
+{
+    const fs::path root = MakeScratchRoot("ge_startup_flat_key");
+    const fs::path settingsPath = root / ".Editor" / "ProjectSettings.json";
+    WriteFile(settingsPath, R"({ "project.startupScene": "Scenes/Main.scene" })");
+    GameEngine::Editor::SettingsStore settings(settingsPath);
+    ASSERT_TRUE(settings.Load());
+
+    std::vector<std::string> lines;
+    {
+        GameEngine::TestLog::ScopedLogCapture capture(&lines, Logger::LogLevel::Warning);
+        EXPECT_EQ(ReadProjectStartupScene(settings), "Scenes/Main.scene");
+    }
+    EXPECT_TRUE(lines.empty());
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST(ProjectStartupScene, ANestedProjectObjectIsRefusedWithTheKeyToUse)
+{
+    const fs::path root = MakeScratchRoot("ge_startup_nested_key");
+    const fs::path settingsPath = root / ".Editor" / "ProjectSettings.json";
+    WriteFile(settingsPath, R"({ "project": { "startupScene": "Scenes/Main.scene" } })");
+    GameEngine::Editor::SettingsStore settings(settingsPath);
+    ASSERT_TRUE(settings.Load());
+
+    std::vector<std::string> lines;
+    {
+        GameEngine::TestLog::ScopedLogCapture capture(&lines, Logger::LogLevel::Warning);
+        EXPECT_EQ(ReadProjectStartupScene(settings), "");
+    }
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_NE(lines[0].find(settingsPath.string()), std::string::npos) << lines[0];
+    EXPECT_NE(lines[0].find(R"("project": { "startupScene" })"), std::string::npos) << lines[0];
+    EXPECT_NE(lines[0].find(R"(use the top-level key "project.startupScene")"), std::string::npos) << lines[0];
 
     std::error_code ec;
     fs::remove_all(root, ec);

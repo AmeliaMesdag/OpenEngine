@@ -14,6 +14,7 @@
 #include "UI/Controls/Dropdown.h"             // enum name dropdown (scanner-detected enum fields)
 #include "UI/Controls/Label.h"                // the entity header's badge text
 #include "UI/Controls/Slider.h"               // compact ocean planar reflection strength slider
+#include "UI/Interaction/ContextMenuManipulator.h" // the override menu of a field row
 #include "UI/StyleProperties.h"               // Style::* for the Color swatch drawer
 #include "UI/UIManager.h"                      // GetFocusedElementId for the live-refresh focus skip
 
@@ -567,7 +568,7 @@ bool EmitPlanarReflectionControlsRow(UIElement* parent,
     UIElement* row = InspectorUI::AddRow(parent);
     Label* label = InspectorUI::AddLabel(row, std::string(FieldDisplayName(field)), tooltip);
     UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-    fieldContainer->Overrides()
+    fieldContainer->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(10.0f));
@@ -619,7 +620,7 @@ bool EmitPlanarReflectionControlsRow(UIElement* parent,
     slider->SetMax(1.0f);
     slider->SetShowValueBubble(true);
     slider->SetValueWithoutNotify(strengthValue);
-    slider->Overrides()
+    slider->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::MinWidth, StyleLength::Px(80.0f));
     if (!strengthField->Tooltip.empty())
@@ -671,7 +672,7 @@ void StyleColorSwatch(UIElement* swatch, std::uint32_t argb)
 {
     constexpr float kSize = 20.0f;
     constexpr std::uint32_t kBorder = 0xFF555555u;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kSize))
         .Set(Style::Height, StyleLength::Px(kSize))
         .Set(Style::MinWidth, StyleLength::Px(kSize))
@@ -699,7 +700,7 @@ void EmitColorSwatchRow(UIElement* parent, RefreshPlan* plan, const Snapshot& by
     UIElement* row = InspectorUI::AddRow(parent);
     InspectorUI::AddLabel(row, label, tooltip ? tooltip : "Click the swatch to open the color picker");
     UIElement* fc = InspectorUI::AddFieldContainer(row);
-    fc->Overrides()
+    fc->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -717,7 +718,7 @@ void EmitColorSwatchRow(UIElement* parent, RefreshPlan* plan, const Snapshot& by
     auto rgbLabel = std::make_unique<Label>();
     rgbLabel->AddClass("inspector-text");
     rgbLabel->SetText(buf);
-    rgbLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    rgbLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
     if (tooltip)
         rgbLabel->SetTooltip(tooltip);
     Label* rgbLabelRaw = rgbLabel.get();
@@ -1466,6 +1467,27 @@ void CollectRows(UIElement* parent, std::size_t begin, std::vector<UIElement*>& 
         rows.push_back(children[index].get());
 }
 
+// The menu items of the entries the override answerer gives `target`, each followed by `refresh`.
+std::vector<ContextMenuManipulator::Item> OverrideMenuItems(const OverrideMenuTarget& target,
+                                                            const std::function<void()>& refresh)
+{
+    std::vector<ContextMenuManipulator::Item> items;
+    if (!target.World || !target.World->IsValid(target.Entity))
+        return items;
+    for (OverrideMenuEntry& entry : InspectorRegistry::Get().QueryOverrideMenu(target))
+    {
+        items.push_back({.Path = std::move(entry.Label),
+                         .IconPath = std::move(entry.IconPath),
+                         .OnActivate = [run = std::move(entry.Run), refresh]()
+                         {
+                             run();
+                             if (refresh)
+                                 refresh();
+                         }});
+    }
+    return items;
+}
+
 void SetFieldRowMarks(const std::vector<FieldRows>& fields, const ComponentOverrides& overrides)
 {
     for (const FieldRows& field : fields)
@@ -1488,6 +1510,12 @@ void SetEntityHeaderBadge(UIElement& header, const std::string& text, const std:
 }
 
 } // namespace
+
+void AttachOverrideMenu(UIElement& element, const OverrideMenuTarget& target, std::function<void()> refresh)
+{
+    element.AddManipulator(ContextMenuManipulator::Create([target, refresh = std::move(refresh)]()
+                                                          { return OverrideMenuItems(target, refresh); }));
+}
 
 void UpdateEntityNameOverrideMark(UIElement& header, UIElement& nameField, ECS::World& world, ECS::EntityHandle entity)
 {
@@ -1959,6 +1987,12 @@ static bool RenderFieldRows(const InspectorContext& ctx, ECS::ComponentTypeId ty
     if (marksOverrides)
     {
         SetFieldRowMarks(fieldRows, InspectorRegistry::Get().QueryComponentOverrides(*ctx.World, ctx.Entity, typeId));
+        for (const FieldRows& field : fieldRows)
+        {
+            const OverrideMenuTarget target{ctx.World, ctx.Entity, typeId, field.Field, ctx.Undo, ctx.ChangeNotifications};
+            for (UIElement* row : field.Rows)
+                AttachOverrideMenu(*row, target, ctx.RequestInspectorRefresh);
+        }
         if (ctx.OverrideMarkRefreshCallbacks)
             ctx.OverrideMarkRefreshCallbacks->push_back(
                 [world = ctx.World, entity = ctx.Entity, typeId, fields = std::move(fieldRows)]()

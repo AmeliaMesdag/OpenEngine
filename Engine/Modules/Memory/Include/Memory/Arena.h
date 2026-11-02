@@ -25,8 +25,9 @@ namespace GameEngine::Memory
 namespace Detail
 {
 class ScratchThread;
-/// Selects the constructor of a thread's scratch arena.
-struct ScratchArenaTag
+class FrameArena;
+/// Selects the constructor of an arena that one thread's state owns.
+struct ThreadArenaTag
 {
 };
 } // namespace Detail
@@ -134,16 +135,21 @@ class Arena
     /// A thread's `ScratchScope` state owns one arena through these: a scratch stats record,
     /// the peak its hysteresis reads at the outermost close, a rewind and a reset that leave the
     /// stats for later with inline fast paths for a steady scope's close, and the release of its
-    /// block.
+    /// block. Each of a thread's two `FrameMemory` arenas owns one the same way.
     friend class Detail::ScratchThread;
+    friend class Detail::FrameArena;
 
-    /// Registers as `StatsKind::Scratch` with the thread's OS id.
-    Arena(Detail::ScratchArenaTag, std::string_view statsName, std::uint64_t threadId);
+    /// Registers as `kind` with the OS id of the constructing thread, which owns the arena.
+    Arena(Detail::ThreadArenaTag, std::string_view statsName, StatsKind kind);
     /// The most bytes in use since the last `Reset`, the bytes in use now included.
     std::size_t PeakBytesSinceReset() const;
     /// Frees every block of an empty arena; the next allocation acquires a block of
     /// `firstBlockBytes`, which also becomes the smallest block `Reset` coalesces into.
     void ReleaseBlocks(std::size_t firstBlockBytes);
+    /// The retention rule of a thread's arena, after a `Reset`: when it keeps more than the first
+    /// block and more than twice `need`, releases its blocks down to the larger of the two and
+    /// counts a shrink.
+    void TrimRetained(std::size_t need);
     /// `Rewind`, with the stats stores only when `publishStats`: a nested scratch scope's close
     /// never publishes. The peak since the last `Reset` still takes what it rewinds.
     void RewindPublishing(Marker marker, bool publishStats);

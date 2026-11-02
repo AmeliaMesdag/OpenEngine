@@ -67,27 +67,41 @@ if(BUILD_TESTING)
         # TerrainGrass object library: the stats class deliberately depends on
         # nothing above Rendering, so the suite needs a device and not the render
         # feature's whole TerrainECS/RenderServices closure.
-        # The ground splat SOURCE SELECTION is lifted verbatim out of the shipped shared include and
-        # compiled into this suite as C++ (CBTTerrain/Tests/GlslShim.h), so the tests execute the
-        # shader rather than a copy of it that can drift. A missing or reordered marker is a hard
-        # error in the extraction step: extracting nothing would leave the suite green with no
-        # shader in it. The extractor and the shim live in the CBTTerrain test tree, where this
-        # pattern started; both are generic and this is their second consumer.
-        set(GRASS_ATLAS_SPLAT_GLSL
-            ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TerrainGrass/grass_atlas_splat.glsl)
+        # The ground SOURCE SELECTION and the pixel footprint the surface level is taken from are
+        # lifted verbatim out of the shipped shared include, with the level rule of the terrain's own
+        # surface resolve, and compiled into this suite as C++ (CBTTerrain/Tests/GlslShim.h), so the
+        # tests execute the shaders rather than a copy that can drift. A missing or reordered marker
+        # is a hard error in the extraction step.
+        set(GRASS_SURFACE_PAGES_GLSL
+            ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TerrainGrass/grass_surface_pages.glsl)
+        set(CBT_SURFACE_PAGES_GLSL
+            ${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Shaders/CBT/cbt_surface_pages.glsl)
         set(GRASS_GLSL_SHIM_DIR ${CMAKE_SOURCE_DIR}/Engine/Modules/CBTTerrain/Tests)
-        set(GRASS_SPLAT_SOURCE_HEADER
-            ${CMAKE_CURRENT_BINARY_DIR}/generated/GrassAtlasSplatSourceExtracted.h)
+        set(GRASS_GROUND_SOURCE_HEADER
+            ${CMAKE_CURRENT_BINARY_DIR}/generated/GrassGroundSourceExtracted.h)
         add_custom_command(
-            OUTPUT ${GRASS_SPLAT_SOURCE_HEADER}
-            COMMAND ${CMAKE_COMMAND} -DSRC=${GRASS_ATLAS_SPLAT_GLSL}
-                                     -DOUT=${GRASS_SPLAT_SOURCE_HEADER}
-                                     "-DBEGIN_MARKER=// GE_SHARED_GRASS_SPLAT_SOURCE_BEGIN"
-                                     "-DEND_MARKER=// GE_SHARED_GRASS_SPLAT_SOURCE_END"
+            OUTPUT ${GRASS_GROUND_SOURCE_HEADER}
+            COMMAND ${CMAKE_COMMAND} -DSRC=${GRASS_SURFACE_PAGES_GLSL}
+                                     -DOUT=${GRASS_GROUND_SOURCE_HEADER}
+                                     "-DBEGIN_MARKER=// GE_SHARED_GRASS_GROUND_SOURCE_BEGIN"
+                                     "-DEND_MARKER=// GE_SHARED_GRASS_GROUND_SOURCE_END"
                                      -P ${GRASS_GLSL_SHIM_DIR}/ExtractShaderBlock.cmake
-            DEPENDS ${GRASS_ATLAS_SPLAT_GLSL}
+            DEPENDS ${GRASS_SURFACE_PAGES_GLSL}
                     ${GRASS_GLSL_SHIM_DIR}/ExtractShaderBlock.cmake
-            COMMENT "Extracting the ground splat source selection from grass_atlas_splat.glsl"
+            COMMENT "Extracting the ground source selection and footprint from grass_surface_pages.glsl"
+            VERBATIM)
+        set(CBT_SURFACE_PAGE_LEVEL_HEADER
+            ${CMAKE_CURRENT_BINARY_DIR}/generated/CbtSurfacePageLevelExtracted.h)
+        add_custom_command(
+            OUTPUT ${CBT_SURFACE_PAGE_LEVEL_HEADER}
+            COMMAND ${CMAKE_COMMAND} -DSRC=${CBT_SURFACE_PAGES_GLSL}
+                                     -DOUT=${CBT_SURFACE_PAGE_LEVEL_HEADER}
+                                     "-DBEGIN_MARKER=// GE_SHARED_SURFACE_PAGE_LEVEL_BEGIN"
+                                     "-DEND_MARKER=// GE_SHARED_SURFACE_PAGE_LEVEL_END"
+                                     -P ${GRASS_GLSL_SHIM_DIR}/ExtractShaderBlock.cmake
+            DEPENDS ${CBT_SURFACE_PAGES_GLSL}
+                    ${GRASS_GLSL_SHIM_DIR}/ExtractShaderBlock.cmake
+            COMMENT "Extracting the surface page level rule from cbt_surface_pages.glsl"
             VERBATIM)
 
         # Same seam for the wind seed's noise-domain offset, so the suite EXECUTES the shipped
@@ -281,7 +295,8 @@ if(BUILD_TESTING)
             ${GRASS_SRGB_TRANSFER_HEADER}
             ${GRASS_COLOR_DECODE_HEADER}
             ${GRASS_BLADE_SHAPE_HEADER}
-            ${GRASS_SPLAT_SOURCE_HEADER}
+            ${GRASS_GROUND_SOURCE_HEADER}
+            ${CBT_SURFACE_PAGE_LEVEL_HEADER}
             ${GRASS_CANOPY_HEADER}
             ${TERRAIN_COLOR_MAP_HEADER}
             ${GRASS_BLADE_VERTEX_HEADER}
@@ -291,7 +306,7 @@ if(BUILD_TESTING)
             Tests/TerrainColorMapApplyTests.cpp
             Tests/GrassPlacementElisionTests.cpp
             Source/GrassPlacementElisionInputs.cpp
-            Tests/GrassAtlasSplatResolveTests.cpp
+            Tests/GrassSurfaceSourceTests.cpp
             Tests/GrassDrawModeTests.cpp
             Tests/GrassWindSeedTests.cpp
             Tests/GrassBladeVertexTests.cpp

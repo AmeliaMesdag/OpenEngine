@@ -12,6 +12,7 @@
 #include "SceneView/SceneViewPanel.h"
 #include "Scene/SceneThumbnailCapture.h"
 #include "SceneView/SceneViewController.h"
+#include "UI/Layout/ElementOverrideHelpers.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIElement.h"
 #include "UI/UIManager.h"
@@ -95,15 +96,15 @@ void HideHdrTestPatternOverlay(UIElement* viewport)
     UIElement* overlay = FindHdrTestPatternOverlay(viewport);
     if (!overlay)
         return;
-    overlay->Overrides()
+    overlay->Style()
         .Set(Style::Display, DisplayMode::None)
         .Set(Style::PointerEvents, false);
-    overlay->Styles()
-        .ResetBackgroundImage()
-        .ResetBackgroundSize()
-        .ResetBackgroundPosition()
-        .ResetBackgroundRepeat()
-        .ResetBackgroundTint();
+    overlay->Style()
+        .Reset(Style::BackgroundImage)
+        .Reset(Style::BackgroundSize)
+        .Reset(Style::BackgroundPosition)
+        .Reset(Style::BackgroundRepeatProp)
+        .Reset(Style::BackgroundTint);
 }
 } // namespace
 
@@ -127,17 +128,17 @@ SceneViewPanel* SceneViewRenderCoordinator::SyncMountedPanelControllers(EditorWi
     return svPanel;
 }
 
-void SceneViewRenderCoordinator::ForEachController(EditorWindowContext* ctx,
-                                                   const std::function<void(SceneViewController*)>& fn)
+void SceneViewRenderCoordinator::ForEachController(EditorWindowContext* windowContext,
+                                                   FunctionRef<void(SceneViewController*)> visit)
 {
-    if (!ctx || !fn)
+    if (!windowContext)
         return;
-    if (ctx->scene)
-        fn(ctx->scene.get());
-    for (auto& quadScene : ctx->sceneQuadViews)
+    if (windowContext->scene)
+        visit(windowContext->scene.get());
+    for (auto& quadScene : windowContext->sceneQuadViews)
     {
         if (quadScene)
-            fn(quadScene.get());
+            visit(quadScene.get());
     }
 }
 
@@ -611,33 +612,12 @@ void SceneViewRenderCoordinator::BindRG(EditorWindowContext* ctx, Rendering::Ren
         }
         if (!bound)
         {
-            ctx->ui->ClearElementBackgroundTexture(*viewport);
+            viewport->Style().Reset(Style::BackgroundImage);
             continue;
         }
         HideHdrTestPatternOverlay(viewport);
-        // Rebind only when the binding actually changes. The unconditional
-        // Reset/Set cycle here dirtied the viewport element every rendered
-        // frame (StyleOverrides::Reset erases a present override), which —
-        // via the sibling-combinator conservative invalidation in
-        // BuildYogaRecursive — kept the whole UI tree perpetually dirty:
-        // idle frames never converged and pointer-only frames could never
-        // gate. Slot kind reassignment still re-points the element the frame
-        // the name changes.
-        const auto currentBg = viewport->Overrides().Get(Style::BackgroundImage);
-        const bool alreadyBound = currentBg.has_value() &&
-                                  currentBg->Kind == BackgroundImageSource::SourceKind::ResourceName &&
-                                  currentBg->Value == name &&
-                                  !viewport->HasBackgroundImageTextureOverride();
-        if (!alreadyBound)
-        {
-            ctx->ui->ClearElementBackgroundTexture(*viewport);
-            viewport->Styles()
-                .SetBackgroundResourceName(name)
-                .SetBackgroundRepeat(BackgroundRepeat::NoRepeat)
-                .SetBackgroundSizeCover()
-                .SetBackgroundPositionPercent(50.0f, 50.0f)
-                .ResetBackgroundTint();
-        }
+        // A slot kind reassignment re-points the element on the frame the name changes.
+        UI::Layout::BindViewportTexture(*viewport, name);
         boundAnyViewport = true;
     }
 

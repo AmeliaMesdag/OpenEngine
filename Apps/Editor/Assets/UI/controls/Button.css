@@ -375,6 +375,37 @@ button.icon-button.secondary.pressed,
 	border-width: 0px;
 }
 
+/* A button that holds one badge Label (theme/inspector.css): the badge draws the box and the fill, so the
+   button has none. After .button in this file, so one class wins by source order. */
+.badge-button {
+	padding: 0px;
+	min-height: 0px;
+	border-width: 0px;
+	background-color: transparent;
+}
+
+/* The button sets the fill its badge reads (inspector.css): lighter on hover, darker while pressed,
+   as the editor's other buttons do. The button itself stays transparent in every state. The owner
+   sets .hovered on pointer enter and leave (Prefabs/PrefabBar.cpp); Button sets .pressed. */
+.badge-button:hover {
+	background-color: transparent;
+}
+
+.badge-button.hovered {
+	--inspector-badge-fill: var(--ui_color_warning_badge_hover);
+	--inspector-override-badge-fill: var(--ui_color_prefab_background_hover);
+}
+
+.badge-button:active {
+	background-color: transparent;
+}
+
+.badge-button.pressed {
+	background-color: transparent;
+	--inspector-badge-fill: var(--ui_color_warning_badge_pressed);
+	--inspector-override-badge-fill: var(--ui_color_prefab_background_pressed);
+}
+
 /* Scene-view toolbar controls that mount before the panel stylesheet has fully
  * won the cascade. Keep them out of the generic button skin from first paint. */
 .toolbar-spacer-btn,

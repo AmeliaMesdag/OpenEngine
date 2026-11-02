@@ -73,7 +73,7 @@ public:
     uint32 ResidentCount() const { return m_ResidentCount; }
     uint32 SlotCount() const { return static_cast<uint32>(m_Slots.size()); }
     uint32 FreeCount() const { return static_cast<uint32>(m_FreeList.size()); }
-    uint32 QuarantinedCount() const;
+    uint32 QuarantinedCount() const { return m_QuarantinedCount; }
     uint32 FramesInFlight() const { return m_FramesInFlight; }
 
     /// The slot `key` occupies, or kNoResidentSlot; ignores generations.
@@ -109,6 +109,7 @@ private:
     uint32 m_FramesInFlight = 0;
     uint64 m_CurrentFrame = 0;
     uint32 m_ResidentCount = 0;
+    uint32 m_QuarantinedCount = 0; // BeginFrame walks the slots only while one is quarantined
     uint32 m_AssignsThisFrame = 0;
     uint32 m_EvictionsThisFrame = 0;
 };

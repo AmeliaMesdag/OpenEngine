@@ -8,7 +8,7 @@
       <Label class="pmcr-subtitle" text="Select the changes you want to apply back to the scene." />
     </UIElement>
     <UIElement class="pmcr-content">
-      <Label class="pmcr-help" text="One Undo reverts all the applied changes." />
+      <CollapsibleInfoCard text="One Undo reverts all the applied changes." />
       <ScrollView id="pmcr-scroll" class="pmcr-scroll" />
     </UIElement>
     <UIElement class="pmcr-footer">

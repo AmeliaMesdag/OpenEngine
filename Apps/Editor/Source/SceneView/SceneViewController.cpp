@@ -63,6 +63,7 @@
 #include "SceneView/SceneViewFraming.h"
 #include "SceneView/SceneViewOverlayShared.h"
 #include "TerrainECS/TerrainService.h"
+#include "Types/ColorUtils.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2112,6 +2113,12 @@ void SceneViewController::SetHoverEntity(GameEngine::ECS::EntityHandle entity,
     m_MeasureSceneGizmo.SetHovered(m_HoveredEntity);
 }
 
+const std::string& SceneViewController::GetOverlayHoverText() const
+{
+    static const std::string kNone;
+    return m_ShowGizmos ? m_SplineSceneGizmo.GetMarkerHoverText() : kNone;
+}
+
 void SceneViewController::HandleHoverDetection(const Editor::SceneTools::ScenePointerEvent& event)
 {
     using namespace Editor::SceneTools;
@@ -2119,9 +2126,10 @@ void SceneViewController::HandleHoverDetection(const Editor::SceneTools::ScenePo
     if (event.phase != PointerPhase::Move || event.button != PointerButton::None)
         return;
 
-    // Keep measure endpoint hover responsive even when generic scene hover
+    // Keep measure endpoint and junction marker hover responsive even when generic scene hover
     // highlighting is disabled or waiting for a modifier key.
     m_MeasureSceneGizmo.HitTest(event.ray);
+    m_SplineSceneGizmo.UpdateMarkerHover(event.ray);
 
     using GameEngine::Editor::HoverHighlightModifier;
     auto modifierHeld = [&event](HoverHighlightModifier mod)
@@ -2363,10 +2371,9 @@ BuildCameraDataFromPose(
     // View matrix — same double-precision yaw/pitch build as the live Scene
     // View camera, so bookmark previews at planetary coordinates don't inherit
     // the MakeLookAtLH(eye, eye + forward) direction quantization.
-    Matrix4x4 view;
-    Editor::CameraRig::BuildViewMatrixLH(
+    const Matrix4x4 view = Editor::CameraRig::BuildViewMatrixLH(
         Editor::CameraRig::Vec3d{pose.Pos[0], pose.Pos[1], pose.Pos[2]},
-        pose.YawDeg, pose.PitchDeg, view.Data());
+        pose.YawDeg, pose.PitchDeg);
 
     // Projection (match SceneView!)
     const float aspect =
@@ -2384,9 +2391,9 @@ BuildCameraDataFromPose(
     Matrix4x4 viewProj = proj * view;
 
     Rendering::CameraData cam{};
-    memcpy(cam.view, view.Data(), sizeof(float) * 16);
-    memcpy(cam.proj, proj.Data(), sizeof(float) * 16);
-    memcpy(cam.viewProj, viewProj.Data(), sizeof(float) * 16);
+    cam.view = view;
+    cam.proj = proj;
+    cam.viewProj = viewProj;
 
     return cam;
 }
@@ -2428,11 +2435,8 @@ bool SceneViewController::DeclarePreviewTargetsRG(
     {
         Rendering::ViewClearConfig clear{};
         clear.clearColor = true;
-        const uint32_t bg = Editor::SceneViewSettings::Get().GetBackgroundColor();
-        clear.clearColorValue[0] = static_cast<float>((bg >> 16) & 0xFFu) / 255.0f;
-        clear.clearColorValue[1] = static_cast<float>((bg >> 8) & 0xFFu) / 255.0f;
-        clear.clearColorValue[2] = static_cast<float>(bg & 0xFFu) / 255.0f;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue = ColorUtils::UnpackArgb(Editor::SceneViewSettings::Get().GetBackgroundColor());
+        clear.clearColorValue.a = 1.0f;
         clear.clearDepth = true;
         clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
         rs->Views().SetViewClearConfig(m_PreviewViewId, clear);
@@ -3194,10 +3198,9 @@ void SceneViewController::UpdateCamera(float deltaSeconds, bool moveForward, boo
         // (eye+look)-eye in fp32, which quantizes the rotation basis to
         // ULP(|eye|)-sized angular steps at planetary coordinates (~0.22 deg at
         // |eye| 5e4) — the scene-view rotation jitter at planet scale.
-        Matrix4x4 viewM;
-        Editor::CameraRig::BuildViewMatrixLH(
+        const Matrix4x4 viewM = Editor::CameraRig::BuildViewMatrixLH(
             Editor::CameraRig::Vec3d{m_CamPos[0], m_CamPos[1], m_CamPos[2]},
-            m_CamYawDeg, m_CamPitchDeg, viewM.Data());
+            m_CamYawDeg, m_CamPitchDeg);
 
         float nearClip = 0.1f;
         float farClip = 200.0f;
@@ -3221,19 +3224,13 @@ void SceneViewController::UpdateCamera(float deltaSeconds, bool moveForward, boo
         Matrix4x4 viewProjM = projM * viewM;
 
         CameraData cam{};
-        const float* viewSrc = viewM.Data();
-        const float* projSrc = projM.Data();
-        const float* viewProjSrc = viewProjM.Data();
-        for (int i = 0; i < 16; ++i)
-        {
-            cam.view[i] = viewSrc[i];
-            cam.proj[i] = projSrc[i];
-            cam.viewProj[i] = viewProjSrc[i];
-        }
-        cam.cameraPos[0] = static_cast<float>(m_CamPos[0]);
-        cam.cameraPos[1] = static_cast<float>(m_CamPos[1]);
-        cam.cameraPos[2] = static_cast<float>(m_CamPos[2]);
-        cam.cameraPos[3] = m_Is2DMode ? 1.0f : 0.0f;
+        cam.view = viewM;
+        cam.proj = projM;
+        cam.viewProj = viewProjM;
+        cam.cameraPos.x = static_cast<float>(m_CamPos[0]);
+        cam.cameraPos.y = static_cast<float>(m_CamPos[1]);
+        cam.cameraPos.z = static_cast<float>(m_CamPos[2]);
+        cam.cameraPos.w = m_Is2DMode ? 1.0f : 0.0f;
         if (m_RenderServices)
         {
             m_RenderServices->Views().SetCameraData(m_CameraId, cam);
@@ -4064,10 +4061,9 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
 
         // Double-precision view build — identical math to UpdateCamera so both
         // arms produce the same matrices (see the rotation-jitter note there).
-        Matrix4x4 viewM;
-        Editor::CameraRig::BuildViewMatrixLH(
+        const Matrix4x4 viewM = Editor::CameraRig::BuildViewMatrixLH(
             Editor::CameraRig::Vec3d{m_CamPos[0], m_CamPos[1], m_CamPos[2]},
-            m_CamYawDeg, m_CamPitchDeg, viewM.Data());
+            m_CamYawDeg, m_CamPitchDeg);
 
         float nearClip = 0.1f;
         float farClip = 200.0f;
@@ -4091,19 +4087,13 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
         Matrix4x4 viewProjM = projM * viewM;
 
         CameraData cam{};
-        const float* viewSrc = viewM.Data();
-        const float* projSrc = projM.Data();
-        const float* viewProjSrc = viewProjM.Data();
-        for (int i = 0; i < 16; ++i)
-        {
-            cam.view[i] = viewSrc[i];
-            cam.proj[i] = projSrc[i];
-            cam.viewProj[i] = viewProjSrc[i];
-        }
-        cam.cameraPos[0] = static_cast<float>(m_CamPos[0]);
-        cam.cameraPos[1] = static_cast<float>(m_CamPos[1]);
-        cam.cameraPos[2] = static_cast<float>(m_CamPos[2]);
-        cam.cameraPos[3] = m_Is2DMode ? 1.0f : 0.0f;
+        cam.view = viewM;
+        cam.proj = projM;
+        cam.viewProj = viewProjM;
+        cam.cameraPos.x = static_cast<float>(m_CamPos[0]);
+        cam.cameraPos.y = static_cast<float>(m_CamPos[1]);
+        cam.cameraPos.z = static_cast<float>(m_CamPos[2]);
+        cam.cameraPos.w = m_Is2DMode ? 1.0f : 0.0f;
 
         m_FrameCameraData = cam;
         m_FrameCameraViewportW = w;
@@ -4126,18 +4116,12 @@ bool SceneViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& fram
     clear.clearColor = true;
     if (sceneAspect && sceneAspect->letterbox.active)
     {
-        clear.clearColorValue[0] = 0.0f;
-        clear.clearColorValue[1] = 0.0f;
-        clear.clearColorValue[2] = 0.0f;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue = ColorLinear(0.0f, 0.0f, 0.0f, 1.0f);
     }
     else
     {
-        const uint32_t bg = Editor::SceneViewSettings::Get().GetBackgroundColor();
-        clear.clearColorValue[0] = static_cast<float>((bg >> 16) & 0xFFu) / 255.0f;
-        clear.clearColorValue[1] = static_cast<float>((bg >> 8) & 0xFFu) / 255.0f;
-        clear.clearColorValue[2] = static_cast<float>(bg & 0xFFu) / 255.0f;
-        clear.clearColorValue[3] = 1.0f;
+        clear.clearColorValue = ColorUtils::UnpackArgb(Editor::SceneViewSettings::Get().GetBackgroundColor());
+        clear.clearColorValue.a = 1.0f;
     }
     clear.clearDepth = true;
     clear.clearDepthValue = Rendering::ReverseZ::kClearFar;

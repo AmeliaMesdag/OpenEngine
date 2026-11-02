@@ -9,7 +9,6 @@
 #include "Core/DebugMetrics.h"
 #include "Engine/Rendering/ParallaxReliefDepth.h"
 #include "Engine/Rendering/DrawStreamLookupKey.h"
-#include "Engine/Rendering/ForwardDrainOrder.h"
 #include "Engine/Rendering/Material.h"
 #include "Engine/Rendering/MaterialBinder.h"
 #include "Engine/Rendering/MaterialCompiler.h"
@@ -36,7 +35,9 @@
 #include "Engine/Rendering/SkyRenderFeature.h"
 #include "Engine/Rendering/RetargetRenderFeature.h"
 #include "Engine/Rendering/Pipeline/RenderPipeline.h"
+#include "Engine/Rendering/Pipeline/PipelineResourceNames.h"
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
+#include "Engine/Rendering/Pipeline/ViewExposureHistory.h"
 #include "Logger/Logger.h"
 #include "Rendering/Common/Utils.h"
 #include "Rendering/Core/BindlessResourceManager.h"
@@ -62,6 +63,7 @@
 #include "Rendering/Utils/CubeLut/CubeLutFileParser.h"
 #include "Rendering/Utils/CubeLut/CubeLutGpuUpload.h"
 #include "Rendering/Core/NamedPushConstantWriter.h"
+#include "Types/FlatSet.h"
 #include "Types/StringId.h"
 #include "Mathematics/Matrix4x4.h"
 #include "Mathematics/MatrixOps.h"
@@ -84,8 +86,8 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
+#include "ForwardDrainOrder.h"
 #include "RenderServicesDetail.h"
 
 namespace GameEngine
@@ -208,12 +210,11 @@ void LogPropCoverageCensus(const Rendering::GPUScene& gpuScene,
                            const Rendering::CameraData& cam, uint32_t viewId,
                            uint32_t viewportW, uint32_t viewportH, uint32_t worldKey)
 {
-    const float projScaleY = (cam.cameraPos[3] == 1.0f) ? 0.0f : std::abs(cam.proj[5]);
+    const float projScaleY = (cam.cameraPos.w == 1.0f) ? 0.0f : std::abs(cam.proj[1][1]);
     if (projScaleY <= 0.0f || viewportH == 0u)
         return;
 
-    Rendering::Matrix4x4 viewProj;
-    std::memcpy(viewProj.Data(), cam.viewProj, sizeof(cam.viewProj));
+    Rendering::Matrix4x4 viewProj = cam.viewProj;
     Rendering::Vector4 planes[6];
     Rendering::ExtractFrustumPlanes(viewProj, planes);
 
@@ -231,9 +232,9 @@ void LogPropCoverageCensus(const Rendering::GPUScene& gpuScene,
         if (!Rendering::TestSphereFrustum(inst.boundingCenter, inst.boundingRadius, planes))
             continue;
         ++visible;
-        const float dx   = cam.cameraPos[0] - inst.boundingCenter.x;
-        const float dy   = cam.cameraPos[1] - inst.boundingCenter.y;
-        const float dz   = cam.cameraPos[2] - inst.boundingCenter.z;
+        const float dx   = cam.cameraPos.x - inst.boundingCenter.x;
+        const float dy   = cam.cameraPos.y - inst.boundingCenter.y;
+        const float dz   = cam.cameraPos.z - inst.boundingCenter.z;
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         const float covNdc = Rendering::CoverageNdc(inst.boundingRadius, projScaleY, dist);
         // The recommended floor's candidate set (base threshold + the band top).
@@ -291,6 +292,38 @@ std::optional<Rendering::PipelineFormatKey> WorldColorFormatKey(const Rendering:
         return std::nullopt;
     return RenderGraph::DeriveFormatKey(inputs.data(), count, Rendering::TextureFormat{});
 }
+
+// One indirect draw per (color class, pool group): the first key of a group draws it.
+// A key that a draw guard skips still claims its group for this frame.
+bool ClaimConsolidatedDraw(FlatSet<uint64_t>& drawnGroups, const DrawStreamLookupKey& lookup)
+{
+    if (lookup.meshKey == Rendering::MeshPoolGroupPlan::kAbsentGroup)
+        return false; // dead mesh row: its instances reject themselves on the GPU
+    const uint64_t drawKey = (static_cast<uint64_t>(lookup.classKey) << 24) | lookup.meshKey;
+    return drawnGroups.Insert(drawKey);
+}
+
+// The view's ViewParams and ExposureHistory that the pipeline publishes this frame, as the MSAA color
+// resolve's inputs (Pipeline::MsaaResolveViewBuffersFor).
+Passes::MsaaResolveViewBuffers PipelineMsaaResolveViewBuffers(const Pipeline::RenderPipelineInstance* instance,
+                                                              const RenderGraph::RGFrame& frame, ViewId viewId,
+                                                              BufferHandle placeholder)
+{
+    Pipeline::PipelineBufferBindingRG viewParams{};
+    Pipeline::PipelineBufferBindingRG exposureHistory{};
+    if (const Pipeline::PipelineFrameResources* resources = instance ? instance->FrameResourcesFor(&frame) : nullptr)
+        resources->ForEachBufferBinding(
+            viewId,
+            [&viewParams, &exposureHistory](const std::string& name, const Pipeline::PipelineBufferBindingRG& binding)
+            {
+                if (name == Pipeline::Names::Res::ViewParams)
+                    viewParams = binding;
+                else if (name == Pipeline::Names::Res::ExposureHistory)
+                    exposureHistory = binding;
+            });
+    return Pipeline::MsaaResolveViewBuffersFor(viewParams, exposureHistory, placeholder);
+}
+
 } // namespace
 
 ResolvedPassResources RenderServices::BuildPassResourcesRG(
@@ -1493,10 +1526,11 @@ RenderServices::WorldPassRG RenderServices::AddWorldPassImpl(
                     scope != WorldPassDrawScope::TransmissiveOnly)
                 {
                     col.Load = RenderGraph::RGLoadOp::Clear;
-                    col.Clear.Color[0] = view->targets.clearColorValue[0];
-                    col.Clear.Color[1] = view->targets.clearColorValue[1];
-                    col.Clear.Color[2] = view->targets.clearColorValue[2];
-                    col.Clear.Color[3] = view->targets.clearColorValue[3];
+                    const ColorLinear& clearColor = view->targets.clearColorValue;
+                    col.Clear.Color[0] = clearColor.r;
+                    col.Clear.Color[1] = clearColor.g;
+                    col.Clear.Color[2] = clearColor.b;
+                    col.Clear.Color[3] = clearColor.a;
                 }
                 else
                 {
@@ -2081,59 +2115,26 @@ RenderServices::WorldPassRG RenderServices::AddWorldPassImpl(
                 }
             };
 
-            if (runEntityDraws)
+            // The recorders do the lookup, the consolidation and the draw guards.
+            const std::span<const uint32_t> meshGroups = runEntityDraws
+                ? MeshPoolGroupSpanForDraws() : std::span<const uint32_t>{};
+            FlatSet<uint64_t> drawnGroups;
+            if (!meshGroups.empty())
+                drawnGroups.Reserve(entityKeys.size());
+            const auto recordEntity = [&](const WorldDrawBuilder::BatchKey& key)
             {
-                const std::span<const uint32_t> meshGroups = MeshPoolGroupSpanForDraws();
-                // Color-table slices key on the color class whatever their
-                // cascade index: MaterialDependent keeps the depth-class remap
-                // (a Shadow-table concern) out of the resolution.
-                const auto lookupOf = [&](const WorldDrawBuilder::BatchKey& key)
-                {
-                    return ResolveDrawStreamLookupKey(
-                        key, sliceCascadeIndex,
-                        Rendering::MaterialDepthClass::MaterialDependent, meshGroups);
-                };
-                if (meshGroups.empty())
-                {
-                    for (const auto& key : entityKeys)
-                        recordEntityBatch(key, lookupOf(key));
-                }
-                else
-                {
-                    // Draw consolidation: ONE indirect draw per (colorClassId,
-                    // pool group). The first key of a group is its
-                    // representative (keys sort by class then mesh); the
-                    // per-material filters above are class-uniform (blend
-                    // state, transmission, ignoreVertexColor all ride the
-                    // class signature), so evaluating them on the
-                    // representative is exact. Consume-on-attempt: a
-                    // representative skipped by a guard drops its group for
-                    // one frame — the same self-healing semantics as an
-                    // unpopulated range.
-                    std::unordered_set<uint64_t> drawnGroups;
-                    drawnGroups.reserve(entityKeys.size());
-                    for (const auto& key : entityKeys)
-                    {
-                        const DrawStreamLookupKey lookup = lookupOf(key);
-                        if (lookup.meshKey == Rendering::MeshPoolGroupPlan::kAbsentGroup)
-                            continue; // dead mesh row — instances self-reject GPU-side
-                        const uint64_t drawKey =
-                            (static_cast<uint64_t>(lookup.classKey) << 24) | lookup.meshKey;
-                        if (!drawnGroups.insert(drawKey).second)
-                            continue;
-                        recordEntityBatch(key, lookup);
-                    }
-                }
-            }
-            // Forward contributors (ocean surface, terrain, grass, fog) drain in
-            // depth-writing-before-blended order so opaque content emitted after a
-            // blended producer cannot overwrite its depthWrite-off pixels — see
-            // ForwardDrainOrder.h for the emission-order hazard this closes.
-            if (scope != WorldPassDrawScope::TransmissiveOnly)
-            {
-                for (uint32_t i : ForwardDrainOrderOpaqueFirst(fwdCommands))
-                    recordContributor(fwdCommands[i]);
-            }
+                // Color-table slices key on the color class whatever their cascade index.
+                const DrawStreamLookupKey lookup = ResolveDrawStreamLookupKey(
+                    key, sliceCascadeIndex,
+                    Rendering::MaterialDepthClass::MaterialDependent, meshGroups);
+                if (meshGroups.empty() || ClaimConsolidatedDraw(drawnGroups, lookup))
+                    recordEntityBatch(key, lookup);
+            };
+            DrainWorldForwardOpaqueFirst(
+                runEntityDraws ? entityKeys : std::span<const WorldDrawBuilder::BatchKey>{},
+                scope != WorldPassDrawScope::TransmissiveOnly
+                    ? std::span<const DrawCommand>(fwdCommands) : std::span<const DrawCommand>{},
+                recordEntity, recordContributor);
 
             if (DrawAttributionEnabled())
                 LogDrawAttribution("color", viewId, entityKeys.size(), attribDrawsIssued,
@@ -2145,8 +2146,12 @@ RenderServices::WorldPassRG RenderServices::AddWorldPassImpl(
         });
 
     if (canResolveColor && result.Pass.IsValid())
+    {
+        const Rendering::Passes::MsaaResolveViewBuffers resolveView = PipelineMsaaResolveViewBuffers(
+            m_FrameOrchestrator.PipelineInstanceForFrame(frame), frame, viewId, m_DefaultPlaceholderBuffer);
         Rendering::Passes::AddMsaaColorResolvePassRG(frame, targets.Color, targets.Resolve, targets.BloomSampleDelta,
-                                                     (passName + ".ColorResolve").c_str());
+                                                     resolveView, (passName + ".ColorResolve").c_str());
+    }
     return result;
 }
 
@@ -2542,8 +2547,12 @@ Rendering::RenderGraph::RGPass RenderServices::AddForwardCommandPassForView(
         });
 
     if (canResolveColor && drawPass.IsValid())
+    {
+        const Rendering::Passes::MsaaResolveViewBuffers resolveView = PipelineMsaaResolveViewBuffers(
+            m_FrameOrchestrator.PipelineInstanceForFrame(frame), frame, viewId, m_DefaultPlaceholderBuffer);
         Rendering::Passes::AddMsaaColorResolvePassRG(frame, targets.Color, targets.Resolve, targets.BloomSampleDelta,
-                                                     (debugName + ".ColorResolve").c_str());
+                                                     resolveView, (debugName + ".ColorResolve").c_str());
+    }
     return drawPass;
 }
 

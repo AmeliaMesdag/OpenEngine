@@ -86,9 +86,11 @@ void FillCaptureUbo(const SkySettings& s, uint32_t face, CaptureSkyUbo& ubo)
         ubo.cameraUpWS[i] = f.up[i];
         ubo.cameraForwardWS[i] = f.forward[i];
         ubo.sunDirectionWS[i] = s.scatteringSunDir[i];
-        ubo.sunColor[i] = s.primarySunColor[i];
         ubo.moonDirectionWS[i] = s.moonDirWS[i];
     }
+    ubo.sunColor[0] = s.primarySunColor.r;
+    ubo.sunColor[1] = s.primarySunColor.g;
+    ubo.sunColor[2] = s.primarySunColor.b;
     ubo.exposureEV = s.exposureEV;
     // Exclude the sun DISK from the IBL capture. The disc-free capture never reads
     // sunAngularRadius (the sky-view LUT it samples already excludes the disk), but
@@ -109,12 +111,15 @@ void FillCaptureUbo(const SkySettings& s, uint32_t face, CaptureSkyUbo& ubo)
     // Gradient sky: bake the same scene-linear gradient the dome shows (HDRI wins if both set).
     const bool gradientMode =
         s.skyMode == static_cast<uint32_t>(Components::SkyMode::Gradient) && !s.environmentTexture.IsValid();
-    for (int i = 0; i < 3; ++i)
-    {
-        ubo.gradientSkyTop[i]     = s.gradientSkyTopColor[i];
-        ubo.gradientSkyHorizon[i] = s.gradientSkyHorizonColor[i];
-        ubo.gradientSkyBottom[i]  = s.gradientSkyBottomColor[i];
-    }
+    ubo.gradientSkyTop[0] = s.gradientSkyTopColor.r;
+    ubo.gradientSkyTop[1] = s.gradientSkyTopColor.g;
+    ubo.gradientSkyTop[2] = s.gradientSkyTopColor.b;
+    ubo.gradientSkyHorizon[0] = s.gradientSkyHorizonColor.r;
+    ubo.gradientSkyHorizon[1] = s.gradientSkyHorizonColor.g;
+    ubo.gradientSkyHorizon[2] = s.gradientSkyHorizonColor.b;
+    ubo.gradientSkyBottom[0] = s.gradientSkyBottomColor.r;
+    ubo.gradientSkyBottom[1] = s.gradientSkyBottomColor.g;
+    ubo.gradientSkyBottom[2] = s.gradientSkyBottomColor.b;
     ubo.gradientSkyTop[3]     = gradientMode ? 1.0f : -1.0f;
     ubo.gradientSkyHorizon[3] = 0.0f;
     ubo.gradientSkyBottom[3]  = 0.0f;
@@ -126,15 +131,13 @@ void FillCaptureUbo(const SkySettings& s, uint32_t face, CaptureSkyUbo& ubo)
 void FillCaptureAtmosphere(const SkySettings& s, AtmosphereParametersGPU& atmo)
 {
     SkyRenderer::FillDefaultAtmosphere(atmo);
-    for (int i = 0; i < 3; ++i)
-    {
-        atmo.groundAlbedo[i] = s.groundAlbedo[i];
-        atmo.groundNightColor[i] = s.groundNightColor[i];
-        atmo.groundHorizonColor[i] = s.groundHorizonColor[i];
-        atmo.groundHorizonNightColor[i] = s.groundHorizonNightColor[i];
-        atmo.nightSkyHorizonColor[i] = s.nightSkyHorizonColor[i];
-        atmo.belowHorizonDarkColor[i] = s.belowHorizonDarkColor[i];
-    }
+    atmo.groundAlbedo = Mathematics::Vector3(s.groundAlbedo.r, s.groundAlbedo.g, s.groundAlbedo.b);
+    atmo.groundNightColor = Mathematics::Vector3(s.groundNightColor.r, s.groundNightColor.g, s.groundNightColor.b);
+    atmo.groundHorizonColor = Mathematics::Vector3(s.groundHorizonColor.r, s.groundHorizonColor.g, s.groundHorizonColor.b);
+    atmo.groundHorizonNightColor =
+        Mathematics::Vector3(s.groundHorizonNightColor.r, s.groundHorizonNightColor.g, s.groundHorizonNightColor.b);
+    atmo.nightSkyHorizonColor = Mathematics::Vector3(s.nightSkyHorizonColor.r, s.nightSkyHorizonColor.g, s.nightSkyHorizonColor.b);
+    atmo.belowHorizonDarkColor = Mathematics::Vector3(s.belowHorizonDarkColor.r, s.belowHorizonDarkColor.g, s.belowHorizonDarkColor.b);
     atmo.groundBrightness = s.groundBrightness;
     atmo.groundNightColorStd140Pad = 0.0f;
     atmo.groundHorizonColorStd140Pad = 0.0f;
@@ -235,15 +238,10 @@ float SkyEnvironmentSource::LowerHemisphereDarkness() const
     return Math::Clamp01(GetEffectiveSettings().iblLowerHemisphereDarkness);
 }
 
-void SkyEnvironmentSource::AmbientGradientTint(float outSky[3], float outEquator[3], float outGround[3]) const
+EnvironmentAmbientGradientTint SkyEnvironmentSource::AmbientGradientTint() const
 {
     const SkySettings s = GetEffectiveSettings();
-    for (int i = 0; i < 3; ++i)
-    {
-        outSky[i]     = s.ambientTintSky[i];
-        outEquator[i] = s.ambientTintEquator[i];
-        outGround[i]  = s.ambientTintGround[i];
-    }
+    return {s.ambientTintSky, s.ambientTintEquator, s.ambientTintGround};
 }
 
 uint64_t SkyEnvironmentSource::InputDigest() const
@@ -303,15 +301,15 @@ uint64_t SkyEnvironmentSource::InputDigest() const
     if (s.skyMode == static_cast<uint32_t>(Components::SkyMode::Gradient))
     {
         mix(&s.skyMode, sizeof(s.skyMode));
-        mix(s.gradientSkyTopColor, sizeof(s.gradientSkyTopColor));
-        mix(s.gradientSkyHorizonColor, sizeof(s.gradientSkyHorizonColor));
-        mix(s.gradientSkyBottomColor, sizeof(s.gradientSkyBottomColor));
+        mix(&s.gradientSkyTopColor, sizeof(s.gradientSkyTopColor));
+        mix(&s.gradientSkyHorizonColor, sizeof(s.gradientSkyHorizonColor));
+        mix(&s.gradientSkyBottomColor, sizeof(s.gradientSkyBottomColor));
         mix(&s.exposureEV, sizeof(s.exposureEV));
         return h != 0 ? h : 1;
     }
 
-    mix(s.scatteringSunDir, sizeof(s.scatteringSunDir));
-    mix(s.primarySunColor, sizeof(s.primarySunColor));
+    mix(&s.scatteringSunDir, sizeof(s.scatteringSunDir));
+    mix(&s.primarySunColor, sizeof(s.primarySunColor));
     mix(&s.primarySunIntensity, sizeof(s.primarySunIntensity));
 
     // The full atmosphere block the LUT + composite consume. Hashing the packed

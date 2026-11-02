@@ -2,6 +2,7 @@
 
 #include "Rendering/Sky/SkyRenderer.h" // AtmosphereParametersGPU
 #include "Rendering/Sky/SkySystem.h"   // SkySystemConfig, SkySystemState
+#include "Types/Color.h"
 
 namespace GameEngine {
 namespace Rendering {
@@ -44,10 +45,9 @@ const AtmosphereParametersGPU& ScatteringAtmosphere();
 /// multiplies the per-step transmittance into its in-scatter source term and the sun disc
 /// multiplies the LUT along the view ray — so handing this colour to a sky shader would count the
 /// extinction twice.
-void EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
-                                 const float colorAboveAtmosphere[3],
-                                 float sourceUpDot,
-                                 float outColor[3]);
+ColorLinear EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
+                                        const ColorLinear& colorAboveAtmosphere,
+                                        float sourceUpDot);
 
 /// The factor that lifts a directional light's authored illuminance to the top-of-atmosphere
 /// irradiance the sky's scattering source term takes. The authored value is the GROUND illuminance
@@ -71,9 +71,9 @@ float SkySourceIlluminanceScale(const AtmosphereParametersGPU& atmosphere);
 struct SkyBodyGroundColors
 {
     /// The sun's ground colour: the sun tint extinguished at the sun's elevation, scene-linear.
-    float Sun[3] = {0.0f, 0.0f, 0.0f};
+    ColorLinear Sun{0.0f, 0.0f, 0.0f};
     /// The moon's ground colour: SkySystemConfig::moonColor extinguished at the moon's elevation.
-    float Moon[3] = {0.0f, 0.0f, 0.0f};
+    ColorLinear Moon{0.0f, 0.0f, 0.0f};
     /// The handover weight w in [0, 1]: state.primaryMoonBlend clamped, 0 when the config keeps the
     /// sun primary.
     float MoonBlend = 0.0f;
@@ -87,11 +87,11 @@ struct SkyBodyGroundColors
 SkyBodyGroundColors EvaluateBodyGroundColors(const AtmosphereParametersGPU& atmosphere,
                                              const SkySystemConfig& config,
                                              const SkySystemState& state,
-                                             const float sunTint[3]);
+                                             const ColorLinear& sunTint);
 
 /// Ground-level colour of the PRIMARY light source across the sun/moon handoff (the sky's
 /// primarySunGroundColor): the two bodies' ground colours mixed by colour, (1 - w) x sun + w x moon.
-void MixPrimaryGroundColor(const SkyBodyGroundColors& bodies, float outColor[3]);
+ColorLinear MixPrimaryGroundColor(const SkyBodyGroundColors& bodies);
 
 /// Colour of a directional light that carries both bodies, as the sky drives a linked light: the
 /// two ground colours mixed by the energy each delivers rather than by colour,
@@ -100,7 +100,7 @@ void MixPrimaryGroundColor(const SkyBodyGroundColors& bodies, float outColor[3])
 /// the light's Intensity stays the author's day value. By day (w == 0) this is the sun's ground
 /// colour exactly; at full night (w == 1) the moon's times `moonLightScale`; between, each body
 /// fades by its own share and neither is dimmed twice.
-void MixLinkedLightGroundColor(const SkyBodyGroundColors& bodies, float moonLightScale, float outColor[3]);
+ColorLinear MixLinkedLightGroundColor(const SkyBodyGroundColors& bodies, float moonLightScale);
 
 } // namespace Rendering
 } // namespace GameEngine

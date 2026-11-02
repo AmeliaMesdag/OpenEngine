@@ -23,7 +23,7 @@
 #include "Terrain/TerrainMaterialLibraryMint.h"
 #include "Terrain/TerrainMaterialRecord.h" // kMaxTerrainMaterials — the slot ID domain
 #include "Terrain/TerrainRoleMaterials.h"
-#include "TerrainECS/TerrainGrassAlpha.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassAlpha.h"
 #include "TerrainGrass/GrassPlacementModel.h"       // the fit the Range row reports
 #include "TerrainGrass/TerrainGrassRenderFeature.h" // kMaxInstancesPerView
 #include "TerrainGrass/TerrainGrassClamps.h"
@@ -158,7 +158,7 @@ static void StyleColorSwatch(UIElement* swatch, uint32_t argb)
 {
     if (!swatch)
         return;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kColorSwatchSize))
         .Set(Style::Height, StyleLength::Px(kColorSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kColorSwatchSize))
@@ -213,7 +213,7 @@ static void AddGrassColorSwatch(UIElement* field,
         return;
 
     auto group = std::make_unique<UIElement>();
-    group->Overrides()
+    group->Style()
         .Set(Style::Display, DisplayMode::Flex)
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
@@ -224,14 +224,14 @@ static void AddGrassColorSwatch(UIElement* field,
     UIElement* swatchRaw = swatch.get();
     const uint32_t initialArgb = GetGrassColor(*comp, slot);
     StyleColorSwatch(swatchRaw, initialArgb);
-    swatchRaw->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    swatchRaw->Style().Set(Style::Cursor, CursorStyle::Pointer);
     swatchRaw->SetTooltip(std::string(name) + " " + FormatGrassColor(initialArgb));
     groupRaw->AddChild(std::move(swatch));
 
     auto label = std::make_unique<Label>();
     label->AddClass("inspector-text");
     label->SetText(name);
-    label->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    label->Style().Set(Style::Cursor, CursorStyle::Pointer);
     Label* labelRaw = label.get();
     groupRaw->AddChild(std::move(label));
 
@@ -305,7 +305,7 @@ static void AddGrassColorRow(UIElement* parent,
     UIElement* row = InspectorUI::AddRow(parent);
     InspectorUI::AddLabel(row, rowLabel, tooltip);
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(8.0f));
@@ -376,7 +376,7 @@ static void AddGrassRootColorRow(UIElement* parent,
         "Auto clears it again. Over the Root Fade span the base of the blade also takes the color "
         "of the ground under it.");
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(8.0f));
@@ -422,7 +422,7 @@ static void AddFallbackTintRow(UIElement* parent, uint32_t layer, const std::str
              "No texture bound: the surface shades this layer with a built-in colour plus "
              "procedural variation.");
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(8.0f));

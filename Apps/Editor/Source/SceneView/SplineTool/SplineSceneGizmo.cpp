@@ -230,13 +230,14 @@ void SplineSceneGizmo::Render(GizmoRenderContext& context)
                                  !IsClaimedSpline(*world, selection.Entity);
     const uint64_t cacheEpoch = ++m_CacheEpoch;
 
-    std::vector<Vector3> splineTriBatch;
-    std::vector<Vector3> knotTriBatch;
-    std::vector<Vector3> handleTriBatch;
-    std::vector<Vector3> selectedTriBatch;
-    std::vector<Vector3> hoverKnotTriBatch;
-    std::vector<Vector3> hoverHandleTriBatch;
-    std::vector<Vector3> knotStems;
+    m_Batches.Clear();
+    std::vector<Vector3>& splineTriBatch = m_Batches.Centerline;
+    std::vector<Vector3>& knotTriBatch = m_Batches.Knot;
+    std::vector<Vector3>& handleTriBatch = m_Batches.Handle;
+    std::vector<Vector3>& selectedTriBatch = m_Batches.Selected;
+    std::vector<Vector3>& hoverKnotTriBatch = m_Batches.HoverKnot;
+    std::vector<Vector3>& hoverHandleTriBatch = m_Batches.HoverHandle;
+    std::vector<Vector3>& knotStems = m_Batches.KnotStems;
     const Color knotStemColor(splineColor.r, splineColor.g, splineColor.b, splineColor.a * kKnotStemAlphaScale);
 
     // Width envelope: the spline color at reduced alpha, so the authored width
@@ -247,13 +248,12 @@ void SplineSceneGizmo::Render(GizmoRenderContext& context)
                               splineColor.a * kEnvelopeAlphaScale);
     const Color envelopeFillColor(splineColor.r, splineColor.g, splineColor.b,
                                   splineColor.a * kEnvelopeFillAlphaScale);
-    std::vector<Vector3> envelopeTriBatch;
-    std::vector<Vector3> envelopeFillBatch;
+    std::vector<Vector3>& envelopeTriBatch = m_Batches.Envelope;
+    std::vector<Vector3>& envelopeFillBatch = m_Batches.EnvelopeFill;
     // Conform-ray exclusions, gathered once per pass and only if a drape
     // actually rebuilds this frame.
     std::optional<std::vector<ECS::EntityHandle>> conformIgnore;
-    // Line-pair scratch for drawing a draped centerline as passive lines.
-    std::vector<Vector3> passiveDrapedVerts;
+    std::vector<Vector3>& passiveDrapedVerts = m_Batches.PassiveDraped;
     // The ground revision, read once per pass and only when a spline is
     // actually draped, so a scene with no splines pays no terrain scan.
     std::optional<uint64_t> passSurfaceRevision;
@@ -383,7 +383,8 @@ void SplineSceneGizmo::Render(GizmoRenderContext& context)
             const auto& srcPts = data->Points;
             const uint32 n = static_cast<uint32>(srcPts.size());
             // Build world-space point array for rendering.
-            std::vector<Spline::SplineControlPoint> pts(srcPts.size());
+            std::vector<Spline::SplineControlPoint>& pts = m_WorldPoints;
+            pts.resize(srcPts.size());
             for (uint32 i = 0; i < n; ++i)
             {
                 pts[i] = srcPts[i];
@@ -408,20 +409,6 @@ void SplineSceneGizmo::Render(GizmoRenderContext& context)
                                            /*wantEdges=*/wantEnvelope);
             const bool drawDrapedCenterline =
                 drapeToSurface && drape && drape->Polylines.Center.size() >= 2u;
-
-            if (canBatchThickTriangles)
-            {
-                const uint32 segCount = data->GetSegmentCount();
-                const size_t curveLines = drawDrapedCenterline
-                    ? drape->Polylines.Center.size() - 1u
-                    : (type == Spline::SplineType::Linear
-                           ? static_cast<size_t>(segCount)
-                           : static_cast<size_t>(segCount) * kSegSubdivisions);
-                splineTriBatch.reserve(splineTriBatch.size() + curveLines * 6u);
-                knotTriBatch.reserve(knotTriBatch.size() + static_cast<size_t>(n) * 32u * 6u);
-                if (type == Spline::SplineType::CubicBezier)
-                    handleTriBatch.reserve(handleTriBatch.size() + static_cast<size_t>(n) * 2u * (1u + 32u) * 6u);
-            }
 
             // Draw the spline centerline. With draping on it follows the
             // cached draped polyline (matching the envelope and placed tiles);
@@ -712,6 +699,7 @@ void SplineSceneGizmo::Render(GizmoRenderContext& context)
         FlushTriangleBatch(context, hoverKnotTriBatch, hoverKnotColor);
         FlushTriangleBatch(context, selectedTriBatch, selectedColor);
     }
+    m_JunctionMarkers.Render(context, *world, *m_State);
 
     // Drop cache entries whose spline stopped being rendered in that mode
     // (deleted, disabled, or switched between passive and selected drawing);

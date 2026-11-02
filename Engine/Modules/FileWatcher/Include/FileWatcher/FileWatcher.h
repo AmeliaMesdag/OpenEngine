@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FileWatcher/FileIdentity.h"
+#include "Types/FunctionRef.h"
 #include "Types/Types.h"
 #include <atomic>
 #include <condition_variable>
@@ -81,6 +82,15 @@ class FileWatcher
     bool IsWatching() const
     {
         return m_WatchThread.joinable();
+    }
+
+    /**
+     * @brief True from StartWatching until the watch thread returns.
+     * Once it is false, StopWatching joins without waiting.
+     */
+    bool IsThreadRunning() const
+    {
+        return m_Watching.load();
     }
 
     /**
@@ -201,7 +211,7 @@ class FileWatcher
      *        the extension and excluded-directory filters.
      * @return false when the watcher was asked to stop before the walk finished.
      */
-    bool ForEachWatchedFile(const Function<void(const std::filesystem::directory_entry&)>& visit);
+    bool ForEachWatchedFile(FunctionRef<void(const std::filesystem::directory_entry&)> visit);
 
     /**
      * @brief One polling scan: diffs the tree against the previous scan and
@@ -244,6 +254,7 @@ class FileWatcher
     // Pre-computed normalized absolute watch root (set once in StartWatching, read-only after).
     std::filesystem::path m_NormalizedWatchBase;
     bool m_Recursive;
+    // Set by StartWatching before the thread starts; the thread clears it as it returns.
     std::atomic<bool> m_Watching;
     std::atomic<bool> m_ShouldStop;
     std::thread m_WatchThread;

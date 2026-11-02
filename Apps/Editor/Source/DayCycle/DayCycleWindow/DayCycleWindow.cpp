@@ -31,12 +31,6 @@ namespace
 {
 constexpr const char* kHiddenClass = "hidden";
 
-template <typename T>
-UIElement::WeakRef<T> FindIn(UIElement& root, StringId id)
-{
-    return UIElement::MakeWeakRef(dynamic_cast<T*>(root.FindById(id)));
-}
-
 void ShowWhen(UIElement* element, bool shown)
 {
     if (!element)
@@ -96,20 +90,20 @@ void DayCycleWindow::OnLayoutReconciled()
 
 void DayCycleWindow::BindElements()
 {
-    m_ProfileName = FindIn<Label>(*this, "DayCycleProfileName"_sid);
-    m_VolumeLabel = FindIn<Label>(*this, "DayCycleVolume"_sid);
-    m_AxisHost = FindIn<UIElement>(*this, "DayCycleAxisHost"_sid);
-    m_SaveHost = FindIn<UIElement>(*this, "DayCycleSaveHost"_sid);
-    m_PresetsButton = FindIn<Button>(*this, "DayCyclePresetsButton"_sid);
-    m_PresetsHost = FindIn<UIElement>(*this, "DayCyclePresetsHost"_sid);
-    m_ScrubReadout = FindIn<Label>(*this, "DayCycleScrubReadout"_sid);
+    m_ProfileName = FindById<Label>("DayCycleProfileName"_sid);
+    m_VolumeLabel = FindById<Label>("DayCycleVolume"_sid);
+    m_AxisHost = FindById<UIElement>("DayCycleAxisHost"_sid);
+    m_SaveHost = FindById<UIElement>("DayCycleSaveHost"_sid);
+    m_PresetsButton = FindById<Button>("DayCyclePresetsButton"_sid);
+    m_PresetsHost = FindById<UIElement>("DayCyclePresetsHost"_sid);
+    m_ScrubReadout = FindById<Label>("DayCycleScrubReadout"_sid);
     if (Label* scrubLabel = dynamic_cast<Label*>(FindById("DayCycleScrubLabel"_sid)))
         scrubLabel->SetTooltip("Drag the playhead on the strip or on a track to preview the hour. While the playhead is "
                                "held, Animate Time of Day pauses. Closing the window returns the scene's own time; "
                                "saving the scene keeps its own time.");
-    m_Notice = FindIn<Label>(*this, "DayCycleNotice"_sid);
-    m_DuskCaption = FindIn<Label>(*this, "DayCycleDuskCaption"_sid);
-    m_TracksScroll = FindIn<ScrollView>(*this, "DayCycleTracksScroll"_sid);
+    m_Notice = FindById<Label>("DayCycleNotice"_sid);
+    m_DuskCaption = FindById<Label>("DayCycleDuskCaption"_sid);
+    m_TracksScroll = FindById<ScrollView>("DayCycleTracksScroll"_sid);
     if (Button* presets = m_PresetsButton.Get())
         presets->SetOnClick([this](UIEvent&) {
             m_ShowPresets = !m_ShowPresets;
@@ -128,7 +122,7 @@ void DayCycleWindow::OpenScrub()
     ECS::World* world = m_Services.World ? m_Services.World() : nullptr;
     Engine::Renderer::SkyEnvironmentSystem* sky = m_Services.Sky ? m_Services.Sky() : nullptr;
     if (world && sky)
-        m_Scrub = std::make_unique<DayCycleScrub>(*world, *sky, m_Services.Undo, m_Services.Notifications,
+        m_Scrub = std::make_unique<DayCycleScrub>(*world, m_Services.Sky, m_Services.Undo, m_Services.Notifications,
                                                   m_Services.IsPlaying);
 }
 

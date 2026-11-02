@@ -118,7 +118,7 @@ void RegisterSceneViewExposureSettingsCategory()
         "How the editor's Scene View sets its exposure; the Game View always uses its camera's. Auto meters "
         "the view with the Meter: Lights reads the light falling on the world from the directional lights and "
         "the sky, Picture meters the image like a camera in Auto. Either is clamped to the Auto Min and Max "
-        "EV100, which ship wide open so a night scene stays workable. Fixed holds the Fixed EV100. Only the "
+        "EV100, which ship wide enough that a night scene stays workable. Fixed holds the Fixed EV100. Only the "
         "rows for the selected mode apply; EV Compensation applies in every mode.";
 
     category.Fields.push_back(ModeRow());

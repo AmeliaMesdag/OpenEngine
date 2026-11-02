@@ -129,6 +129,8 @@ public:
 private:
     void BuildUI();
     void RebuildBookmarkRows();
+    // RebuildBookmarkRows, then marks the list, its scroll view and the panel for relayout.
+    void RebuildRowsAndRelayout();
     void CreateBookmarkRow(size_t index, UIElement* container);
     void SetupDragAndDrop(UIElement* row, UIElement* dragHandle, size_t index);
     void SetupDropHandlers(UIElement* container);
@@ -142,6 +144,8 @@ private:
     void NavigateToScene(const std::string& guid);
     void NavigateToEntity(const std::string& scenePath, const std::string& entityId);
     void SelectEntityById(const std::string& entityId);
+    // Selects `entityId` once `drains` deferred drains have run; nothing when the panel is unattached.
+    void SelectEntityAfterDrains(std::string entityId, int drains);
 
     // Drop handler for hierarchy entity drags
     void HandleEntityPayloadDrop(const std::vector<std::uint64_t>& treeIds, int insertIndex);

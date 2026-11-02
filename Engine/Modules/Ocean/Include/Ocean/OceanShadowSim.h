@@ -19,7 +19,7 @@ namespace GameEngine::Ocean
 struct alignas(16) OceanShadowSamplingGPU
 {
     OceanCascadeLayoutGPU Layout{};
-    float Channels[4]{}; // hard scale, soft scale, available, pad
+    Mathematics::Vector4 Channels; // hard scale, soft scale, available, pad
 };
 
 class OceanShadowSim

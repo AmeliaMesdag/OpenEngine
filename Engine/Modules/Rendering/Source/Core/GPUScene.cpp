@@ -484,7 +484,7 @@ void GPUScene::AssertEachRowWrittenOnce(std::span<const InstanceWrite> writes)
 }
 #endif
 
-void GPUScene::UpdateInstances(std::span<const InstanceWrite> writes, const RangeRunner& runRanges)
+void GPUScene::UpdateInstances(std::span<const InstanceWrite> writes, RangeRunner runRanges)
 {
     if (writes.empty())
         return;

@@ -7,6 +7,7 @@
 #include "Engine/Rendering/RenderServices.h"
 #include "Logger/Logger.h"
 #include "Mathematics/Interpolation.h"
+#include "Mathematics/Matrix4x4.h"
 #include "Mathematics/VectorOps.h"
 #include "Ocean/OceanRenderFeature.h"
 #include "Ocean/OceanShader/OceanShaderProgram.h"
@@ -30,11 +31,10 @@ namespace
 {
 struct alignas(16) SprayParamsGPU
 {
-    float ViewProjection[16]{}, View[16]{};
-    float Camera[4]{}, Right[4]{}, Up[4]{}, WindTime[4]{}, Emission[4]{}, Appearance[4]{}, Controls[4]{},
-        Shift[4]{}, Light[4]{}, Viewport[4]{};
+    Mathematics::Matrix4x4 ViewProjection, View;
+    Mathematics::Vector4 Camera, Right, Up, WindTime, Emission, Appearance, Controls, Shift, Light, Viewport;
     OceanCascadeLayoutGPU Layout{};
-    float Interaction[4]{};
+    Mathematics::Vector4 Interaction;
     uint32 ResourceFlags[4]{};
 };
 static_assert(sizeof(SprayParamsGPU) == 448);
@@ -253,15 +253,15 @@ bool OceanSprayGPU::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare &d, O
     if (!upload.Valid())
         return false;
     SprayParamsGPU u{};
-    std::copy_n(camera->viewProj, 16, u.ViewProjection);
-    std::copy_n(camera->view, 16, u.View);
-    std::copy_n(camera->cameraPos, 4, u.Camera);
-    u.Right[0] = camera->view[0];
-    u.Right[1] = camera->view[4];
-    u.Right[2] = camera->view[8];
-    u.Up[0] = camera->view[1];
-    u.Up[1] = camera->view[5];
-    u.Up[2] = camera->view[9];
+    u.ViewProjection = camera->viewProj;
+    u.View = camera->view;
+    u.Camera = camera->cameraPos;
+    u.Right[0] = camera->view[0][0];
+    u.Right[1] = camera->view[1][0];
+    u.Right[2] = camera->view[2][0];
+    u.Up[0] = camera->view[0][1];
+    u.Up[1] = camera->view[1][1];
+    u.Up[2] = camera->view[2][1];
     const float rad = m_WindDegrees * kDegreesToRadians;
     u.WindTime[0] = std::cos(rad) * m_WindSpeed * m_Surface.SprayWindVelocityScale;
     u.WindTime[2] = std::sin(rad) * m_WindSpeed * m_Surface.SprayWindVelocityScale;
@@ -279,14 +279,14 @@ bool OceanSprayGPU::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare &d, O
     u.Controls[2] = reset ? 1.0f : 0.0f;
     u.Controls[3] = Math::Clamp01(m_Surface.SprayEmissionThreshold);
     for (uint32 i = 0; i < 3; ++i)
-    {
         u.Shift[i] = m_Origin[i] - h.Origin[i];
-        u.Light[i] = params.SunColor[i] / Mathematics::Pi;
-    }
+    u.Light[0] = params.SunColor.r / Mathematics::Pi;
+    u.Light[1] = params.SunColor.g / Mathematics::Pi;
+    u.Light[2] = params.SunColor.b / Mathematics::Pi;
     u.Viewport[0] = static_cast<float>(d.RenderWidth);
     u.Viewport[1] = static_cast<float>(d.RenderHeight);
-    u.Viewport[2] = std::abs(camera->proj[14]);
-    u.Viewport[3] = camera->proj[10];
+    u.Viewport[2] = std::abs(camera->proj[3][2]);
+    u.Viewport[3] = camera->proj[2][2];
     u.Layout = ocean.GetFoamSim().GetFoamLayout();
     u.Interaction[0] = m_Surface.SprayGeometryIntersections ? 1.0f : 0.0f;
     u.Interaction[1] = std::max(m_Surface.SprayIntersectionBand, 0.05f);
@@ -510,7 +510,7 @@ bool OceanSprayGPU::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare &d, O
     h.Time = params.Time;
     h.Declared.Frame = frame;
     h.Active = true;
-    std::copy_n(m_Origin, 3, h.Origin);
+    h.Origin = m_Origin;
     return true;
 }
 } // namespace GameEngine::Ocean

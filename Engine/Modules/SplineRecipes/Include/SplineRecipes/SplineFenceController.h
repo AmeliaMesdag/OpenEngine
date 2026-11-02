@@ -4,7 +4,7 @@
 #include "ECS/ECS.h"
 #include "Engine/Rendering/ModelRenderSetup.h"
 #include "Mathematics/Matrix4x4.h"
-#include "SplineRecipes/FenceMitreVariants.h"
+#include "SplineRecipes/FenceMiterVariants.h"
 #include "SplineRecipes/FencePieceReuse.h"
 #include "SplineRecipes/FenceRecipeLayout.h"
 #include "SplineRecipes/SplineChunkCommit.h"
@@ -70,7 +70,7 @@ private:
         uint64 SurfaceRevision = 0;
         // FencePoolContentDigest of the span and crest pools: a reimported
         // piece keeps its handle and bounds, so without this nothing here
-        // changes and its mitred pieces keep drawing the old cut.
+        // changes and its mitered pieces keep drawing the old cut.
         uint64 PoolContent = 0;
 
         bool operator==(const ObservedState&) const = default;
@@ -98,11 +98,11 @@ private:
         std::vector<uint32> RunSpanCounts;
         // The bounds of every mesh the last rebuild resolved, in pool order.
         std::vector<FenceMeshBounds> PartBounds;
-        // The cut variants mitred spans and registered crests draw (fence
+        // The cut variants mitered spans and registered crests draw (fence
         // design section 4c), registered through the chunk commit and released
         // when no piece draws them any more.
-        SplineChunkCommit MitreVariants;
-        FenceMitreCuts MitreCuts;
+        SplineChunkCommit MiterVariants;
+        FenceMiterCuts MiterCuts;
         // The pool content digest and the mesh reload count it was taken at,
         // so it is re-read only after the registry reports a reload.
         uint64 PoolContent = 0;

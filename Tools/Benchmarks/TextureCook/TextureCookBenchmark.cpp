@@ -6,9 +6,13 @@
 //   TextureCookBenchmark --src <image> [--usage color|packed|normal|mask] [--srgb 0|1] [--threads N]
 //                        [--runs N] [--dump <dir>] [--label <name>]
 //   TextureCookBenchmark decode <bc7|bc5|bc4> <width> <height> <payload> <out.rgba>
+//   TextureCookBenchmark cook --src <image> [--usage ...] [--srgb 0|1] [--threads N] [--runs N] [--label <name>]
 //
 // Output: one LEVEL line per level and run (label, run, level, width, height, encode ms) and one
-// CHAIN line per run (decode, mip and encode milliseconds, wall milliseconds). N encode threads are
+// CHAIN line per run (decode, mip and encode milliseconds, wall milliseconds). The cook mode times
+// CookTexture end to end (decode, mips, encode, KTX2) per run, once without the normal-variance
+// companion and once with it, in alternating order: one COOK line per arm and run (label, run, arm,
+// wall ms, payload bytes, companion bytes). N encode threads are
 // the calling thread plus N-1 TextureCookWorkers helpers on a pool of N-1 workers, the decode
 // gate's texture share sized to N-1, as the editor spreads a cook.
 
@@ -17,6 +21,7 @@
 #include "Assets/TextureCookWorkers.h"
 #include "Image/Decode.h"
 #include "JobSystem/WorkStealingThreadPool.h"
+#include "Types/StringUtils.h"
 
 #include <chrono>
 #include <cstdio>
@@ -168,6 +173,45 @@ int RunEncode(const Options& options)
     return 0;
 }
 
+// CookTexture end to end, without and with the companion out parameter, alternating which runs first.
+int RunCook(const Options& options)
+{
+    const std::vector<uint8> sourceBytes = ReadAll(options.Source);
+    if (sourceBytes.empty())
+    {
+        std::fprintf(stderr, "cannot read %s\n", options.Source.c_str());
+        return 2;
+    }
+    const std::string extension = ToLowerAscii(std::filesystem::path(options.Source).extension().string());
+    TextureCookInputs inputs;
+    inputs.Settings.Usage = UsageFor(options.Usage);
+    inputs.ColorSpace = options.Srgb ? TextureColorSpace::SRGB : TextureColorSpace::Linear;
+    const TextureCookOutput output = OutputFor(options.Usage);
+    EncodeThreads threads(options.Threads);
+    for (uint32 run = 0; run < options.Runs; ++run)
+    {
+        for (uint32 slot = 0; slot < 2; ++slot)
+        {
+            const bool withCompanion = ((run + slot) % 2) == 1;
+            std::vector<uint8> cooked;
+            std::vector<uint8> companion;
+            std::string error;
+            const auto start = Clock::now();
+            if (!CookTexture(sourceBytes.data(), sourceBytes.size(), options.Source, extension, inputs, output, cooked,
+                             error, {}, threads.Workers.get(), withCompanion ? &companion : nullptr))
+            {
+                std::fprintf(stderr, "cook: %s\n", error.c_str());
+                return 6;
+            }
+            std::printf("COOK,%s,%u,%s,%.1f,%zu,%zu\n", options.Label.c_str(), run,
+                        withCompanion ? "companion" : "plain", MillisecondsSince(start), cooked.size(),
+                        companion.size());
+            std::fflush(stdout);
+        }
+    }
+    return 0;
+}
+
 // Decodes a dumped payload with the engine's decoder (DirectXTex), for scoring against the level.
 int RunDecode(const std::string& format, uint32 width, uint32 height, const std::string& in, const std::string& out)
 {
@@ -188,8 +232,9 @@ int main(int argc, char** argv)
     if (argc == 7 && std::strcmp(argv[1], "decode") == 0)
         return RunDecode(argv[2], static_cast<uint32>(std::stoul(argv[3])), static_cast<uint32>(std::stoul(argv[4])),
                          argv[5], argv[6]);
+    const bool cook = argc > 1 && std::strcmp(argv[1], "cook") == 0;
     Options options;
-    for (int i = 1; i + 1 < argc; i += 2)
+    for (int i = cook ? 2 : 1; i + 1 < argc; i += 2)
     {
         const std::string key = argv[i];
         const std::string value = argv[i + 1];
@@ -206,5 +251,5 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "no BC encoder compiled in\n");
         return 1;
     }
-    return RunEncode(options);
+    return cook ? RunCook(options) : RunEncode(options);
 }

@@ -123,7 +123,7 @@ void PlayModeEntryModal::Present()
     // Without a measure the full-width fill pulses, so a long compile does not read as stalled.
     const bool indeterminate = snapshot.Fraction <= 0.0f;
     const float fraction = indeterminate ? 1.0f : std::min(snapshot.Fraction, 1.0f);
-    m_ProgressFill->Overrides().Set(Style::Width, StyleLength::Percent(fraction * 100.0f));
+    m_ProgressFill->Style().Set(Style::Width, StyleLength::Percent(fraction * 100.0f));
     const auto sinceEpoch = std::chrono::steady_clock::now().time_since_epoch();
     const bool dim = indeterminate && (sinceEpoch / kPulseHalfPeriod) % 2 == 1;
     if (dim)

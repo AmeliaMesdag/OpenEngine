@@ -209,7 +209,7 @@ class FlareElementPreview : public UIElement
         // Static previews do not participate in hit testing by default. Drag
         // sources and drop targets opt in once when they are constructed, so
         // later visual refreshes cannot accidentally disable interaction.
-        Overrides().Set(Style::PointerEvents, false);
+        Style().Set(Style::PointerEvents, false);
     }
 
     void SetSprite(const GUID& textureGuid,
@@ -335,10 +335,10 @@ public:
     {
         if (!state.Visible)
         {
-            Overrides().Set(Style::BackgroundColor, 0xFF111111u);
+            Style().Set(Style::BackgroundColor, 0xFF111111u);
             return;
         }
-        Overrides().Set(Style::BackgroundColor,
+        Style().Set(Style::BackgroundColor,
                         state.Allowed ? 0xFF245C3Bu : 0xFF5C2424u);
     }
 
@@ -366,7 +366,7 @@ void RenderFlareAtlasSpriteGhost(const UI::Interaction::DragPayload& dragPayload
         auto ownedPreview = std::make_unique<FlareElementPreview>();
         preview = ownedPreview.get();
         preview->SetId(kPreviewId);
-        preview->Overrides()
+        preview->Style()
             .Set(Style::Width, StyleLength::Px(64.0f))
             .Set(Style::Height, StyleLength::Px(64.0f))
             .Set(Style::MinWidth, StyleLength::Px(64.0f))
@@ -382,12 +382,12 @@ void RenderFlareAtlasSpriteGhost(const UI::Interaction::DragPayload& dragPayload
 
     // The typed preview draws the atlas UV rectangle directly. Remove the
     // full-texture background installed from the thumbnail identity string.
-    icon.Styles()
-        .ResetBackgroundImage()
-        .ResetBackgroundSize()
-        .ResetBackgroundPosition()
-        .ResetBackgroundRepeat();
-    icon.Overrides().Reset(Style::BackgroundTint);
+    icon.Style()
+        .Reset(Style::BackgroundImage)
+        .Reset(Style::BackgroundSize)
+        .Reset(Style::BackgroundPosition)
+        .Reset(Style::BackgroundRepeatProp)
+        .Reset(Style::BackgroundTint);
     if (badge)
     {
         badge->SetText("");
@@ -517,7 +517,7 @@ void StyleFlareElementHeaderSwatch(UIElement* swatch, uint32_t argb)
     if (!swatch)
         return;
     constexpr uint32_t borderColor = 0xFF666666u;
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kFlareElementHeaderSwatchSize))
         .Set(Style::Height, StyleLength::Px(kFlareElementHeaderSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kFlareElementHeaderSwatchSize))
@@ -539,7 +539,7 @@ void ConfigureFlareElementPreview(FlareElementPreview* preview,
     if (!preview)
         return;
 
-    preview->Overrides()
+    preview->Style()
         .Set(Style::Width, StyleLength::Px(previewSize))
         .Set(Style::Height, StyleLength::Px(previewSize))
         .Set(Style::MinWidth, StyleLength::Px(previewSize))
@@ -606,7 +606,7 @@ void AddFlareColorPickerRow(UIElement* parent,
     if (rowLabel)
         rowLabel->AddClass("inspector-label-no-drag");
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Row)
         .Set(Style::AlignItems, AlignItems::Center)
         .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -622,7 +622,7 @@ void AddFlareColorPickerRow(UIElement* parent,
     auto valueLabel = std::make_unique<Label>();
     valueLabel->AddClass("inspector-text");
     valueLabel->SetText(FormatFlareColor(value));
-    valueLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+    valueLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
     Label* valueLabelRaw = valueLabel.get();
     field->AddChild(std::move(valueLabel));
 
@@ -875,13 +875,13 @@ void BuildCurveEditor(UIElement* parent,
     auto expanded = std::make_shared<bool>(FlareCurveExpandedStates()[stateKey]);
 
     UIElement* row = InspectorUI::AddRow(parent);
-    row->Overrides().Set(Style::AlignItems, AlignItems::FlexStart);
+    row->Style().Set(Style::AlignItems, AlignItems::FlexStart);
     if (Label* rowLabel = InspectorUI::AddLabel(row, label,
             "Drag keys and tangent handles. Right-click empty space to add a key."))
         rowLabel->AddClass("inspector-label-no-drag");
 
     UIElement* field = InspectorUI::AddFieldContainer(row);
-    field->Overrides()
+    field->Style()
         .Set(Style::FlexDir, FlexDirection::Column)
         .Set(Style::AlignItems, AlignItems::Stretch)
         .Set(Style::Gap, StyleLength::Px(4.0f));
@@ -900,7 +900,7 @@ void BuildCurveEditor(UIElement* parent,
     config.MaxKeys = Math::Curve::Capacity;
     graph->SetConfig(config);
     graph->SetKeys(FlareEditorKeys(*flare, angleCurve));
-    graph->Overrides()
+    graph->Style()
         .Set(Style::FlexGrow, 1.0f)
         .Set(Style::Height, StyleLength::Px(kFlareCurveCompactHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(kFlareCurveCompactHeightPx))
@@ -1069,12 +1069,12 @@ void BuildCurveEditor(UIElement* parent,
         if (value)
         {
             row->AddClass("sky-scalar-curve-expanded");
-            row->Overrides().Set(Style::FlexDir, FlexDirection::Column)
+            row->Style().Set(Style::FlexDir, FlexDirection::Column)
                             .Set(Style::AlignItems, AlignItems::Stretch);
-            field->Overrides().Set(Style::Width, StyleLength::Percent(100.0f))
+            field->Style().Set(Style::Width, StyleLength::Percent(100.0f))
                               .Set(Style::MaxWidth, StyleLength::Percent(100.0f))
                               .Set(Style::AlignSelf, AlignItems::Stretch);
-            graphRaw->Overrides().Set(Style::Width, StyleLength::Percent(100.0f))
+            graphRaw->Style().Set(Style::Width, StyleLength::Percent(100.0f))
                                  .Set(Style::Height, StyleLength::Auto())
                                  .Set(Style::MinHeight, StyleLength::Px(kFlareCurveCompactHeightPx))
                                  .Set(Style::MaxHeight, StyleLength::Auto())
@@ -1083,9 +1083,9 @@ void BuildCurveEditor(UIElement* parent,
         else
         {
             row->RemoveClass("sky-scalar-curve-expanded");
-            row->Overrides().Reset(Style::FlexDir).Set(Style::AlignItems, AlignItems::FlexStart);
-            field->Overrides().Reset(Style::Width).Reset(Style::MaxWidth).Reset(Style::AlignSelf);
-            graphRaw->Overrides().Reset(Style::Width)
+            row->Style().Reset(Style::FlexDir).Set(Style::AlignItems, AlignItems::FlexStart);
+            field->Style().Reset(Style::Width).Reset(Style::MaxWidth).Reset(Style::AlignSelf);
+            graphRaw->Style().Reset(Style::Width)
                                  .Set(Style::Height, StyleLength::Px(kFlareCurveCompactHeightPx))
                                  .Set(Style::MinHeight, StyleLength::Px(kFlareCurveCompactHeightPx))
                                  .Set(Style::MaxHeight, StyleLength::Px(kFlareCurveCompactHeightPx))
@@ -1298,7 +1298,7 @@ void BuildElementSettings(UIElement* parent,
         UIElement* headerSwatchRaw = nullptr;
         if (UIElement* header = elementFoldout->GetHeader())
         {
-            header->Overrides()
+            header->Style()
                 .Set(Style::PaddingTop, StyleLength::Px(2.0f))
                 .Set(Style::PaddingRight, StyleLength::Px(6.0f))
                 .Set(Style::PaddingBottom, StyleLength::Px(2.0f))
@@ -1307,7 +1307,7 @@ void BuildElementSettings(UIElement* parent,
 
             auto accessories = std::make_unique<UIElement>();
             UIElement* accessoriesRaw = accessories.get();
-            accessoriesRaw->Overrides()
+            accessoriesRaw->Style()
                 .Set(Style::Display, DisplayMode::Flex)
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::AlignItems, AlignItems::Center)
@@ -1316,7 +1316,7 @@ void BuildElementSettings(UIElement* parent,
 
             auto summary = std::make_unique<UIElement>();
             UIElement* summaryRaw = summary.get();
-            summaryRaw->Overrides()
+            summaryRaw->Style()
                 .Set(Style::Display, DisplayMode::Flex)
                 .Set(Style::Visibility, !elementFoldout->IsExpanded())
                 .Set(Style::FlexDir, FlexDirection::Row)
@@ -1437,7 +1437,7 @@ void BuildElementSettings(UIElement* parent,
                 {
                     // Preserve the accessory width in both states so opening an
                     // element cannot reflow its header by a few pixels.
-                    summaryRaw->Overrides().Set(Style::Visibility, !expanded);
+                    summaryRaw->Style().Set(Style::Visibility, !expanded);
                 });
         }
         UIElement* content = elementFoldout->GetContentContainer();
@@ -1529,7 +1529,7 @@ void BuildElementSettings(UIElement* parent,
                 previewRow, "Preview",
                 "Drop a sprite from the Atlas Sprites palette below");
             UIElement* previewField = InspectorUI::AddFieldContainer(previewRow);
-            previewField->Overrides()
+            previewField->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::JustifyContent, JustifyContent::FlexEnd);
             auto expandedPreview = std::make_unique<FlareSpriteDropPreview>();
@@ -1537,7 +1537,7 @@ void BuildElementSettings(UIElement* parent,
             expandedPreviewRaw = dropPreview;
             spriteUi->ExpandedPreview = dropPreview;
             ConfigureFlareElementPreview(dropPreview, atlas, e, tintArgb, 80.0f);
-            dropPreview->Overrides()
+            dropPreview->Style()
                 .Set(Style::PointerEvents, true)
                 .Set(Style::Cursor, CursorStyle::Grab);
             dropPreview->SetTooltip("Drop an atlas sprite here");
@@ -1547,7 +1547,7 @@ void BuildElementSettings(UIElement* parent,
 
             auto atlasSprites = MakeFoldout("Atlas Sprites - drag onto Preview", false);
             UIElement* palette = atlasSprites->GetContentContainer();
-            palette->Overrides()
+            palette->Style()
                 .Set(Style::FlexDir, FlexDirection::Row)
                 .Set(Style::FlexWrap, true)
                 .Set(Style::Gap, StyleLength::Px(5.0f))
@@ -1560,7 +1560,7 @@ void BuildElementSettings(UIElement* parent,
                 FlareSpriteDragPreview* palettePreviewRaw = palettePreview.get();
                 ConfigureFlareElementPreview(
                     palettePreviewRaw, atlas, paletteElement, 0xFFFFFFFFu, 34.0f);
-                palettePreviewRaw->Overrides()
+                palettePreviewRaw->Style()
                     .Set(Style::PointerEvents, true)
                     .Set(Style::Cursor, CursorStyle::Grab);
                 palettePreviewRaw->SetTooltip(atlasSprite.Name + " - drag onto Preview");

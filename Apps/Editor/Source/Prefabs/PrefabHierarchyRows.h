@@ -2,10 +2,14 @@
 
 #include "ECS/ECS.h"
 
+#include <functional>
+#include <string>
+
 namespace GameEngine
 {
 class AssetRegistry;
 class IThumbnailProvider;
+class Label;
 }
 
 namespace GameEngine::ECS
@@ -17,6 +21,7 @@ namespace GameEngine::Editor
 {
 
 class EditorChangeNotifications;
+class SceneDocumentManager;
 struct HierarchyRowParts;
 
 /// What a Hierarchy row shows for prefabs: the root of an instance, an entity inside one, or
@@ -57,10 +62,14 @@ PrefabRowState ClassifyPrefabRow(ECS::World& world, ECS::EntityHandle entity, co
 /// The rows read the instance descriptions of PrefabInstanceDescriptions.
 void DecoratePrefabRow(ECS::World& world, ECS::EntityHandle entity, HierarchyRowParts& parts);
 
-/// Registers the prefab instance's editor behavior: the Scene View pick climb, the Hierarchy glyph
-/// and row decoration, the Inspector's prefab bar and override marks, the prefab entries of the
-/// Hierarchy's context menu, Create Prefab on a Hierarchy entity dropped on an Assets folder, and
-/// the `.prefab` tile of the Assets panel in `thumbnails` when there is one. Call once at startup.
-void RegisterPrefabEditor(EditorChangeNotifications& notifications, IThumbnailProvider* thumbnails);
+/// Shows `text` on `label`; an empty `text` hides the label, so it takes no space.
+void SetShownText(Label& label, const std::string& text);
+
+/// Registers the prefab editor: the Scene View pick climb, the Hierarchy glyph, rows and menu, the Inspector's prefab
+/// bar, override marks and override menus (empty while `isInPlayMode` returns true), the drop on an Assets folder and
+/// the `.prefab` tile in `thumbnails` when there is one. The Overrides list reads the load report of the document that
+/// `document` returns, which may be null. Call once at startup.
+void RegisterPrefabEditor(EditorChangeNotifications& notifications, IThumbnailProvider* thumbnails,
+                          std::function<bool()> isInPlayMode, std::function<SceneDocumentManager*()> document);
 
 } // namespace GameEngine::Editor

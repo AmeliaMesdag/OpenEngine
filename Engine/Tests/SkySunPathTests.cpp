@@ -55,7 +55,7 @@ struct SkySunPathHarness
         EXPECT_TRUE(feature && feature->HasActiveSettings());
         if (!feature)
             return {};
-        const float* sun = feature->GetSettings().scatteringSunDir;
+        const Mathematics::Vector3& sun = feature->GetSettings().scatteringSunDir;
         return {sun[0], sun[1], sun[2]};
     }
 };
@@ -262,14 +262,12 @@ TEST(SkySunPath, EachPathReadsOnlyItsOwnFields)
     }
     for (float hours = 0.5f; hours < 24.0f; hours += 1.5f)
     {
-        float sun[3];
         Rendering::SkySettings settings{};
         settings.timeOfDayHours = hours;
         Rendering::SkySystemState state{};
         const Rendering::SolarFrame frame = Rendering::MakeSolarFrame(Components::SkySunPath::PathAngles(sky));
         Rendering::ComputeSimpleSunMoon(settings, Rendering::SkySystemConfig{}, frame, state);
-        std::copy(std::begin(state.sunDirWS), std::end(state.sunDirWS), sun);
-        EXPECT_NEAR(Rendering::SolarHourFromDirection(frame, sun), hours, 1e-3f) << "hour " << hours;
+        EXPECT_NEAR(Rendering::SolarHourFromDirection(frame, state.sunDirWS), hours, 1e-3f) << "hour " << hours;
     }
 }
 
@@ -374,12 +372,10 @@ TEST(SkySunPath, TheSunsShareOfTheDrivenLightEndsAtTheTwilightFloor)
             ASSERT_LT(blend, 1.0f);
             const auto* feature = harness.Services.GetFeature<Engine::Renderer::SkyRenderFeature>();
             ASSERT_NE(feature, nullptr);
-            const float moonColor[3] = {config.moonColor.r, config.moonColor.g, config.moonColor.b};
-            float moonGround[3];
-            Rendering::EvaluateGroundLevelSunColor(Rendering::ScatteringAtmosphere(), moonColor,
-                                                   feature->GetSettings().moonDirWS[1], moonGround);
+            const ColorLinear moonGround = Rendering::EvaluateGroundLevelSunColor(
+                Rendering::ScatteringAtmosphere(), config.moonColor, feature->GetSettings().moonDirWS[1]);
             const float moonTerm = kSunLux * blend * config.moonLightIlluminanceScale *
-                                   ColorUtils::LinearRec709Luminance({moonGround[0], moonGround[1], moonGround[2]});
+                                   ColorUtils::LinearRec709Luminance(moonGround);
             EXPECT_NEAR(sunShare, delivered - moonTerm, delivered * 1e-3f) << "hour " << hour.Hours;
         }
     }

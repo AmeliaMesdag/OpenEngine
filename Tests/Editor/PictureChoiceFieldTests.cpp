@@ -1,7 +1,8 @@
 // The picture choice field (the sky's Seen by row): one tile per choice from its layout file, with the
 // choice's picture class and texts; a left click or an arrow key selects, the callback fires once per
 // change and never for the tile already selected, and a right-click selects nothing. In a narrow
-// inspector the tiles stack, so each keeps its name and its line readable beside its picture.
+// inspector the tiles stack, so each keeps its name and its line readable beside its picture, and
+// the row's label sits at the top of the tiles.
 
 #include <gtest/gtest.h>
 
@@ -180,4 +181,33 @@ TEST(PictureChoiceFieldLayout, InANarrowInspectorEachTileKeepsItsNameAndLine)
         EXPECT_LE(tile->GetLayoutX() + tile->GetLayoutWidth(), fieldRight + kLayoutTolerance)
             << "the tile runs out of the field";
     }
+}
+
+// In an inspector section the row's label sits at the top of the tiles, not at their middle.
+TEST(PictureChoiceFieldLayout, TheRowLabelSitsAtTheTopOfTheTiles)
+{
+    auto section = std::make_unique<UIElement>();
+    section->AddClass("inspector-section");
+    auto body = std::make_unique<UIElement>();
+    body->AddClass("inspector-section-body");
+    PictureChoiceField* field =
+        InspectorUI::AddPictureChoiceRow(body.get(), "Seen by", std::make_unique<PictureChoiceField>(EyeAndCamera(), 0));
+    ASSERT_NE(field, nullptr);
+    section->AddChild(std::move(body));
+
+    InspectorLayoutFixture fixture;
+    fixture.ViewportW = kNarrowInspectorW;
+    fixture.ExtraSheets = {"Assets/UI/theme/core.css", "Assets/UI/controls/PictureChoiceField/PictureChoiceField.css"};
+    if (!fixture.Build(std::move(section)))
+        GTEST_SKIP() << fixture.Diagnostic;
+
+    UIElement* row = InspectorUI::RowOfControl(field);
+    ASSERT_NE(row, nullptr);
+    const UIElement* labelCell = ChildWithClass(*row, "inspector-label-cell");
+    const UIElement* fieldCell = ChildWithClass(*row, "inspector-field");
+    ASSERT_NE(labelCell, nullptr);
+    ASSERT_NE(fieldCell, nullptr);
+    ASSERT_GT(fieldCell->GetLayoutHeight(), 2.0f * labelCell->GetLayoutHeight())
+        << "the tiles are no taller than the label, so the test cannot tell the top from the middle";
+    EXPECT_NEAR(labelCell->GetLayoutY(), fieldCell->GetLayoutY(), kLayoutTolerance);
 }

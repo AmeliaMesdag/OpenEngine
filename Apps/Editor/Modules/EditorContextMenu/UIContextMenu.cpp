@@ -109,7 +109,7 @@ public:
             std::max(1.0f, viewportWidth - 2.0f * kContextMenuViewportMargin);
         const float availableHeight =
             std::max(1.0f, viewportHeight - 2.0f * kContextMenuViewportMargin);
-        Overrides()
+        Style()
             .Set(Style::MinWidth, StyleLength::Px(std::min(kContextMenuMinWidth, availableWidth)))
             .Set(Style::MaxWidth, StyleLength::Px(availableWidth))
             .Set(Style::MaxHeight, StyleLength::Px(availableHeight));
@@ -128,7 +128,7 @@ public:
         // panel renders one frame at the viewport margin before snapping here.
         // Starting at the cursor makes the first frame right; the post-layout
         // pass then only moves the panel when clamping actually demands it.
-        Overrides()
+        Style()
             .Set(Style::PositionLeft, StyleLength::Px(x))
             .Set(Style::PositionTop, StyleLength::Px(y))
             .Set(Style::PositionRight, StyleLength::Auto())
@@ -150,7 +150,7 @@ public:
             // and a submenu must not spend it at the panel default position.
             const float x = parentPanel->GetLayoutX() + parentPanel->GetLayoutWidth() + kSubmenuGap;
             const float y = anchor->GetLayoutY();
-            Overrides()
+            Style()
                 .Set(Style::PositionLeft, StyleLength::Px(x))
                 .Set(Style::PositionTop, StyleLength::Px(y))
                 .Set(Style::PositionRight, StyleLength::Auto())
@@ -207,7 +207,7 @@ public:
             // ghost swallow hover meant for rows beneath it. Bounded so a
             // size that never stops oscillating cannot keep the menu hidden.
             ++m_MeasurePasses;
-            Overrides().Set(Style::Opacity, 0.0f).Set(Style::PointerEvents, false);
+            Style().Set(Style::Opacity, 0.0f).Set(Style::PointerEvents, false);
             MarkDirty(LayoutDirty);
             // The converge loop dispatches OnPostLayout a bounded number of
             // times per frame; when that budget runs out mid-measure, the
@@ -218,7 +218,7 @@ public:
             PostSafeAction([this] { MarkDirty(LayoutDirty); });
             return;
         }
-        Overrides().Set(Style::Opacity, 1.0f).Set(Style::PointerEvents, true);
+        Style().Set(Style::Opacity, 1.0f).Set(Style::PointerEvents, true);
         const bool inputsUnchanged = m_Placed &&
             std::abs(m_LastViewportWidth - viewport.Width) <= 0.5f &&
             std::abs(m_LastViewportHeight - viewport.Height) <= 0.5f &&
@@ -240,7 +240,7 @@ public:
         if (std::abs(m_LastViewportWidth - viewport.Width) > 0.5f ||
             std::abs(m_LastViewportHeight - viewport.Height) > 0.5f)
         {
-            Overrides()
+            Style()
                 .Set(Style::MinWidth,
                      StyleLength::Px(std::min(kContextMenuMinWidth, availableWidth)))
                 .Set(Style::MaxWidth, StyleLength::Px(availableWidth))
@@ -287,7 +287,7 @@ public:
         if (std::abs(m_LastAppliedX - localX) > 0.5f ||
             std::abs(m_LastAppliedY - localY) > 0.5f)
         {
-            Overrides()
+            Style()
                 .Set(Style::PositionLeft, StyleLength::Px(localX))
                 .Set(Style::PositionTop, StyleLength::Px(localY))
                 .Set(Style::PositionRight, StyleLength::Auto())
@@ -665,8 +665,8 @@ UIContextMenu::UIContextMenu() = default;
         menuPanel->AddClass("fit-content");
         menuPanel->AddClass("context-menu-panel");
         menuPanel->AddClass("open");
-        menuPanel->Overrides().Set(Style::PositionLeft, StyleLength::Px(static_cast<float>(x)));
-        menuPanel->Overrides().Set(Style::PositionTop, StyleLength::Px(static_cast<float>(y)));
+        menuPanel->Style().Set(Style::PositionLeft, StyleLength::Px(static_cast<float>(x)));
+        menuPanel->Style().Set(Style::PositionTop, StyleLength::Px(static_cast<float>(y)));
 
         m_RootPanel = panelRaw;
         if (m_SearchEnabled)
@@ -1059,24 +1059,24 @@ UIContextMenu::UIContextMenu() = default;
         // suppression and light an inert row's text.
         if (inSelectionGroup && enabled)
             raw->AddClass(checked ? "row-selected" : "dim-unselected");
-        raw->Overrides().Set(Style::Display, DisplayMode::Flex);
-        raw->Overrides().Set(Style::FlexDir, FlexDirection::Row);
-        raw->Overrides().Set(Style::AlignItems, AlignItems::Center);
+        raw->Style().Set(Style::Display, DisplayMode::Flex);
+        raw->Style().Set(Style::FlexDir, FlexDirection::Row);
+        raw->Style().Set(Style::AlignItems, AlignItems::Center);
 
         // The icon column is reserved on every row, iconed or not, so labels
         // line up down the menu instead of stepping right wherever an icon
         // happens to resolve.
         auto icon = std::make_unique<UIElement>();
         icon->AddClass("context-menu-item-icon");
-        icon->Overrides().Set(Style::PointerEvents, false);
+        icon->Style().Set(Style::PointerEvents, false);
         const std::string& iconPath = item.iconPath;
         if (!iconPath.empty())
         {
-            icon->Overrides()
+            icon->Style()
                 .Set(Style::BackgroundImage, IconImageSource(iconPath))
                 .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
                 .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain})
-                .Set(Style::BackgroundPosition, BackgroundPositionValue{50.0f, true, 50.0f, true});
+                .Set(Style::BackgroundPosition, BackgroundPositionValue::Percent(50.0f, 50.0f));
         }
         raw->AddChild(std::move(icon));
 
@@ -1084,8 +1084,8 @@ UIContextMenu::UIContextMenu() = default;
         // The row carries .dropdown-item and therefore the :hover rule. A
         // child under the cursor becomes the hover target instead, and the
         // row never lights up — so the contents stay out of hit-testing.
-        lbl->Overrides().Set(Style::PointerEvents, false);
-        lbl->Overrides().Set(Style::FlexGrow, 1.0f);
+        lbl->Style().Set(Style::PointerEvents, false);
+        lbl->Style().Set(Style::FlexGrow, 1.0f);
         lbl->SetText(item.title);
         raw->AddChild(std::move(lbl));
 
@@ -1093,7 +1093,7 @@ UIContextMenu::UIContextMenu() = default;
         {
             auto key = std::make_unique<Label>();
             key->AddClass("dropdown-item-shortcut");
-            key->Overrides().Set(Style::PointerEvents, false);
+            key->Style().Set(Style::PointerEvents, false);
             key->SetText(item.shortcut);
             raw->AddChild(std::move(key));
         }
@@ -1120,7 +1120,7 @@ UIContextMenu::UIContextMenu() = default;
             }
             auto swatch = std::make_unique<UIElement>();
             swatch->AddClass("dropdown-item-swatch");
-            swatch->Overrides()
+            swatch->Style()
                 .Set(Style::BackgroundColor, 0xFF000000u | rgb)
                 .Set(Style::PointerEvents, false);
             raw->AddChild(std::move(swatch));
@@ -1140,14 +1140,14 @@ UIContextMenu::UIContextMenu() = default;
             // that says "selectable, not selected".
             auto mark = std::make_unique<UIElement>();
             mark->AddClass(checked ? "dropdown-item-check" : "dropdown-item-check-slot");
-            mark->Overrides().Set(Style::PointerEvents, false);
+            mark->Style().Set(Style::PointerEvents, false);
             raw->AddChild(std::move(mark));
         }
         else if (checked && !item.isSubMenu)
         {
             auto check = std::make_unique<UIElement>();
             check->AddClass("dropdown-item-check");
-            check->Overrides().Set(Style::PointerEvents, false);
+            check->Style().Set(Style::PointerEvents, false);
             raw->AddChild(std::move(check));
         }
 
@@ -1160,7 +1160,7 @@ UIContextMenu::UIContextMenu() = default;
             arrow->SetText("\xE2\x80\xBA"); // U+203A as UTF-8; \u escape trips MSVC C4566
             arrow->AddClass("dropdown-item-arrow");
             arrow->AddClass("dropdown-item-arrow-glyph");
-            arrow->Overrides().Set(Style::PointerEvents, false);
+            arrow->Style().Set(Style::PointerEvents, false);
             raw->AddChild(std::move(arrow));
         }
 

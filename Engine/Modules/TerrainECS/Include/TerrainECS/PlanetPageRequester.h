@@ -49,7 +49,7 @@ public:
     /// (Re)configure for `planet`: its pyramid and pinned levels (FirstPinnedPageLevel on six faces).
     void Configure(const PlanetPageRequestTerrain& planet);
 
-    /// The pinned pages, then each face's quadtree as HeightPageRequester walks it, with the exact
+    /// The pinned pages, then each face's quadtree as PageRequester walks it, with the exact
     /// distance to the page's region between R + its min and R + its max height, and the horizon
     /// on the floor sphere (CBT_CornerOccluded's rule). `cameras` are relative to the planet's center.
     void Build(std::span<const Mathematics::Vector3> cameras, const PageLevelView& view,

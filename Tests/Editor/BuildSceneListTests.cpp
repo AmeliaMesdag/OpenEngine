@@ -7,6 +7,7 @@
 
 #include "Core/Engine.h"
 #include "Editor/Settings/BuildSettingsStore.h"
+#include "LogCapture.h"
 #include "TestTempDir.h"
 
 #include <gtest/gtest.h>
@@ -57,6 +58,20 @@ TEST_F(BuildSceneList, MissingStartupSceneShipsNone)
     WriteProjectSettings(R"({ "project.startupScene": "Scenes/Deleted.scene" })");
 
     EXPECT_TRUE(Editor::LoadEffectiveBuildScenes("Windows").empty());
+}
+
+TEST_F(BuildSceneList, ANestedStartupSceneShipsNoneAndWarnsOnceWithTheKeyToUse)
+{
+    WriteScene("Scenes/Main.scene");
+    WriteProjectSettings(R"({ "project": { "startupScene": "Scenes/Main.scene" } })");
+
+    std::vector<std::string> lines;
+    {
+        TestLog::ScopedLogCapture capture(&lines, Logger::LogLevel::Warning);
+        EXPECT_TRUE(Editor::LoadEffectiveBuildScenes("Windows").empty());
+    }
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_NE(lines[0].find(R"(use the top-level key "project.startupScene")"), std::string::npos) << lines[0];
 }
 
 TEST_F(BuildSceneList, GlobalListWinsOverTheStartupScene)

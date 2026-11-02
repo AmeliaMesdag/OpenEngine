@@ -1,6 +1,7 @@
 #version 450
 
 #include "Includes/tonemap_aces2.glsl"
+#include "Includes/tonemap_look.glsl"
 #include "Includes/cube_lut.glsl"
 #include "Includes/night_tint.glsl"
 
@@ -122,13 +123,7 @@ vec3 TonemapNeutral(vec3 v)
     return mix(v, newPeak * vec3(1.0), g);
 }
 
-// The look values that select an arm by name (Components::Look; Neutral is the default arm).
-const int kLookFilmic = 1;
-
-// The no-look debug arm: identity after exposure, so values above 1.0 survive to the
-// output-range stage (differs from Neutral, which compresses highlights toward white).
-const int kNoLookArm = 3;
-
+// The no-look arm keeps values above 1.0 for the output-range stage. Neutral compresses them toward white.
 vec3 NoLook(vec3 v)
 {
     return max(v, vec3(0.0));
@@ -152,10 +147,10 @@ vec3 ApplyTonemap(vec3 hdr)
 {
     switch (pc.look)
     {
-        case kLookFilmic: return TonemapACES2(hdr, Aces2TargetOutputMax());
-        case 2:           return TonemapAgX(hdr);
-        case kNoLookArm:  return NoLook(hdr);
-        default:          return TonemapNeutral(hdr);
+        case kLookFilmic:       return TonemapACES2(hdr, Aces2TargetOutputMax());
+        case kLookPhotographic: return TonemapAgX(hdr);
+        case kNoLookArm:        return NoLook(hdr);
+        default:                return TonemapNeutral(hdr);
     }
 }
 

@@ -67,6 +67,8 @@ std::string FormatFailure(const NavigationSurface& surface)
     case NavigationBakeFailure::TileBuild:
         return "Failed: tile " + TilePair(surface.BlockingTileX, surface.BlockingTileZ) +
                " did not build (the log says why): raise Cell Size or shrink the bounds";
+    case NavigationBakeFailure::GridBuild:
+        return "Failed: the grid bake failed (the log says why)";
     case NavigationBakeFailure::None:
         break;
     }
@@ -187,6 +189,9 @@ std::string FormatBakeStatus(const NavigationSurface& surface)
         return "Waiting for: terrain height near X " + FormatFixed(surface.BlockingPoint.x, 0) + ", Z " +
                FormatFixed(surface.BlockingPoint.z, 0) + " to load";
     case NavigationBakePhase::Baking:
+        // A grid bakes as one job, so only its size is known until it is published.
+        if (surface.Mode == NavigationSurfaceMode::Grid)
+            return "Baking: " + FormatGroupedInteger(surface.BakeTotal) + " " + Units(surface.Mode);
         return "Baking: " + FormatGroupedInteger(surface.BakeDone) + " of " + FormatGroupedInteger(surface.BakeTotal) +
                " " + Units(surface.Mode);
     case NavigationBakePhase::Baked:
@@ -208,7 +213,7 @@ bool SurfaceBounds(ECS::World& world, ECS::EntityHandle surface, Mathematics::Ve
         component->FitBounds ? PathfindingECS::ResolveNavigationTerrainSource(world, transform) : PathfindingECS::NavigationTerrainSource{};
     // Only a fitted surface with no planar terrain reads the geometry's bounds.
     const PathfindingECS::NavigationStaticGeometry geometry = component->FitBounds && !terrain.Query.IsValid()
-                                                                  ? PathfindingECS::GatherNavigationStaticGeometry(world)
+                                                                  ? PathfindingECS::GatherNavigationStaticGeometry(world, PathfindingECS::FindEngineMeshRegistry())
                                                                   : PathfindingECS::NavigationStaticGeometry{};
     const PathfindingECS::NavigationBounds bounds =
         PathfindingECS::NavigationSurfaceBounds(*component, transform, terrain, geometry);
@@ -228,7 +233,7 @@ bool ListBakeSources(ECS::World& world, ECS::EntityHandle surface, std::vector<B
     const auto* transform = world.GetComponent<Components::WorldTransform>(surface);
     const PathfindingECS::NavigationTerrainSource terrain =
         PathfindingECS::ResolveNavigationTerrainSource(world, transform);
-    const PathfindingECS::NavigationStaticGeometry geometry = PathfindingECS::GatherNavigationStaticGeometry(world);
+    const PathfindingECS::NavigationStaticGeometry geometry = PathfindingECS::GatherNavigationStaticGeometry(world, PathfindingECS::FindEngineMeshRegistry());
     const PathfindingECS::NavigationBounds bounds =
         PathfindingECS::NavigationSurfaceBounds(*component, transform, terrain, geometry);
     // One entry per entity and kind: an entity with several collider shapes is one collider source.

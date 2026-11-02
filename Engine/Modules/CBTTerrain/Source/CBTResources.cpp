@@ -314,11 +314,10 @@ bool CBTResources::Initialize(IDevice& device, const CBTKernelSet& kernelSet, ui
         }
         m_PersistentBytes += bytes;
 
-        // Bindings 22/23: the paged height resolve (wide arm only). The page-table ring is
-        // host-visible and written whole per frame slot when the terrain's table changes; zeroed
-        // so a slot never written reads an empty field (level count 0 resolves to 0).
-        m_PageTable = CreatePageTableRing(kCBTPageTableMinRingWords);
-        m_PageTableSlotWords = kCBTPageTableMinRingWords;
+        // Bindings 22/23: the paged height resolve (wide arm only). Binding 22 holds a zeroed header (level
+        // count 0 resolves to 0) until SetPageTable binds TerrainPageFeature's ring.
+        m_DefaultPageTable = CreateDefaultPageTable();
+        m_PageTable = m_DefaultPageTable;
         TextureDesc pcd{};
         pcd.width = 1;
         pcd.height = 1;
@@ -327,13 +326,12 @@ bool CBTResources::Initialize(IDevice& device, const CBTKernelSet& kernelSet, ui
         pcd.persistent = true;
         pcd.debugName = "CBT.DefaultPageCache";
         m_DefaultPageCache = device.CreateTexture(pcd);
-        if (!m_PageTable.IsValid() || !m_DefaultPageCache.IsValid())
+        if (!m_DefaultPageTable.IsValid() || !m_DefaultPageCache.IsValid())
         {
-            Logger::Log::Error("CBTResources: failed to create the page table ring or the default page cache");
+            Logger::Log::Error("CBTResources: failed to create the default page table or the default page cache");
             Shutdown();
             return false;
         }
-        m_PersistentBytes += PageTableRingBytes(m_PageTableSlotWords);
         for (auto& slot : m_BoundPageCache)
             slot = m_DefaultPageCache;
     }
@@ -583,9 +581,8 @@ void CBTResources::UploadFrameParams(uint32_t frameCounter, const CBTFrameParams
     auto* dst = reinterpret_cast<CBTFrameParams*>(static_cast<uint8_t*>(mapped) +
                                                   static_cast<size_t>(slot) * sizeof(CBTFrameParams));
     std::memcpy(dst, &params, sizeof(CBTFrameParams));
-    // The page table's slot stride travels with the frame that reads it (cbt_layout.glsl
-    // CBT_PageRingBase): ProvisionPageTableWords runs before this upload in the frame.
-    dst->AnalyticParams[kCBTPageRingWordsLane] = static_cast<float>(m_PageTableSlotWords);
+    // The first word of this frame's page tables travels with the frame that reads it (CBT_PageRingBase).
+    dst->AnalyticParams[kCBTPageRingBaseLane] = static_cast<float>(m_PageTableBaseWord);
     for (Mathematics::Vector4& rect : dst->SphereDirty)
         rect = Mathematics::Vector4{};
     for (uint32_t i = 0; i < sphereDirty.Count; ++i)
@@ -871,80 +868,37 @@ void CBTResources::SetPageCacheSource(uint32_t frameCounter, Rendering::TextureH
     ++m_TerrainSourceGeneration;
 }
 
-size_t CBTResources::PageTableRingBytes(uint32_t slotWords)
-{
-    return static_cast<size_t>(kCBTFrameParamsRing) * slotWords * sizeof(uint32_t);
-}
-
-Rendering::BufferHandle CBTResources::CreatePageTableRing(uint32_t slotWords)
+Rendering::BufferHandle CBTResources::CreateDefaultPageTable()
 {
     using namespace Rendering;
     BufferDesc desc{};
-    desc.size = PageTableRingBytes(slotWords);
+    desc.size = kCBTPageHeaderWords * sizeof(uint32_t);
     desc.usage = static_cast<uint32_t>(BufferUsage::Storage);
     desc.memoryUsage = BufferMemoryUsage::Upload;
     desc.persistent = true;
-    desc.debugName = "CBT.PageTable";
-    const BufferHandle ring = m_Device->CreateBuffer(desc);
-    if (!ring.IsValid())
-        return ring;
-    // Zeroed so a slot never written reads an empty field (level count 0 resolves to 0).
-    if (void* mapped = m_Device->MapBuffer(ring))
-    {
-        std::memset(mapped, 0, desc.size);
-        m_Device->UnmapBuffer(ring);
-    }
-    return ring;
+    desc.debugName = "CBT.DefaultPageTable";
+    const BufferHandle table = m_Device->CreateBuffer(desc);
+    if (!table.IsValid())
+        return table;
+    const std::array<uint32_t, kCBTPageHeaderWords> zero{};
+    m_Device->UpdateBuffer(table, 0, sizeof(zero), zero.data());
+    m_PersistentBytes += desc.size;
+    return table;
 }
 
-bool CBTResources::ProvisionPageTableWords(uint32_t words)
+void CBTResources::SetPageTable(Rendering::BufferHandle ring, uint32_t firstWord)
 {
-    if (!m_PageTable.IsValid())
-        return false;
-    if (words <= m_PageTableSlotWords)
-        return true;
-    // Grow in whole steps so a terrain whose table grows a little does not reallocate each time.
-    const uint32_t slotWords =
-        (words + kCBTPageTableMinRingWords - 1u) / kCBTPageTableMinRingWords * kCBTPageTableMinRingWords;
-    // Create first: a refused allocation leaves the previous ring, and the sets that point at it.
-    const Rendering::BufferHandle next = CreatePageTableRing(slotWords);
-    if (!next.IsValid())
-    {
-        Logger::Log::Error("CBTResources: failed to grow the page table ring to {} KiB; the terrain draws from its "
-                           "height texture",
-                           PageTableRingBytes(slotWords) / 1024u);
-        return false;
-    }
-    // The descriptor sets are shared by every frame slot and rewritten in place below. Wait for
-    // their previous graphics users before replacing the ring and its stride, without changing
-    // the device-wide idle state during render-graph declaration.
+    if (!m_DefaultPageTable.IsValid())
+        return;
+    const Rendering::BufferHandle target = ring.IsValid() ? ring : m_DefaultPageTable;
+    m_PageTableBaseWord = ring.IsValid() ? firstWord : 0u;
+    if (target == m_PageTable)
+        return;
+    // The descriptor sets are shared by every frame slot and rewritten in place below. Wait for their
+    // previous graphics users before the binding changes, without changing the device-wide idle state.
     m_Device->WaitGpuSyncToken(m_Device->LastGraphicsSubmissionToken());
-    m_Device->DestroyBuffer(m_PageTable);
-    m_PersistentBytes -= PageTableRingBytes(m_PageTableSlotWords);
-    m_PageTable = next;
-    m_PageTableSlotWords = slotWords;
-    m_PersistentBytes += PageTableRingBytes(slotWords);
+    m_PageTable = target;
     WriteDescriptorSet();
-    Logger::Log::Info("CBTResources: page table ring grown to {} words a frame slot ({} KiB host-visible)", slotWords,
-                      PageTableRingBytes(slotWords) / 1024u);
-    return true;
-}
-
-void CBTResources::UploadPageTable(uint32_t frameCounter, std::span<const uint32_t> words)
-{
-    if (!m_PageTable.IsValid())
-        return;
-    const uint32_t slot = CBTFrameRingSlot(frameCounter);
-    const size_t count = std::min<size_t>(words.size(), m_PageTableSlotWords);
-    void* mapped = m_Device->MapBuffer(m_PageTable);
-    if (!mapped)
-        return;
-    uint32_t* dst = static_cast<uint32_t*>(mapped) + static_cast<size_t>(slot) * m_PageTableSlotWords;
-    if (count > 0u)
-        std::memcpy(dst, words.data(), count * sizeof(uint32_t));
-    else
-        std::memset(dst, 0, kCBTPageHeaderWords * sizeof(uint32_t)); // level count 0: no field
-    m_Device->UnmapBuffer(m_PageTable);
 }
 
 bool CBTResources::RebindTerrainSourcesToDefault()
@@ -1069,9 +1023,11 @@ void CBTResources::Shutdown()
             m_Device->DestroyBuffer(m_DrawLevelParams);
         m_DrawLevelParams = {};
         DestroyNormalChain();
-        if (m_PageTable.IsValid())
-            m_Device->DestroyBuffer(m_PageTable);
+        if (m_DefaultPageTable.IsValid())
+            m_Device->DestroyBuffer(m_DefaultPageTable);
+        m_DefaultPageTable = {};
         m_PageTable = {};
+        m_PageTableBaseWord = 0u;
         if (m_DefaultPageCache.IsValid())
             m_Device->DestroyTexture(m_DefaultPageCache);
         m_DefaultPageCache = {};
@@ -1125,7 +1081,9 @@ void CBTResources::ReprovisionAfterDeviceRebuild()
     m_NormalChainViews = {};
     m_NormalChainMips = 0u;
     m_NormalChainLattice = 0u;
+    m_DefaultPageTable = {};
     m_PageTable = {};
+    m_PageTableBaseWord = 0u;
     m_DefaultPageCache = {};
     m_BoundPageCache = {};
     m_HeightSampler = {};

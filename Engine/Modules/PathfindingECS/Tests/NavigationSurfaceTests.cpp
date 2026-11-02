@@ -1,6 +1,7 @@
 // NavigationSurface: what one surface bakes from (terrain, static collider shapes, mesh renderers
 // as their NavigationSource policy admits them), without a physics world, as mesh tiles or grid
 // cells; how it reports its bake and its sources; how it is listed and saved.
+#include "NavigationSourceCollector.h"
 #include "NavigationTestSurfaces.h"
 
 #include "Components/Navigation/NavigationAgent.h"
@@ -12,6 +13,7 @@
 #include "PathfindingECS/NavigationSurfaceRuntime.h"
 #include "PathfindingECS/Systems/NavigationWorldHooks.h"
 
+#include "Assets/ModelAsset.h"
 #include "Components/Hierarchy.h"
 #include "Components/Rendering/MeshRenderer.h"
 #include "Components/Terrain/Terrain.h"
@@ -20,7 +22,9 @@
 #include "ECS/Component/ComponentRegistry.h"
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
+#include "Engine/Rendering/MeshGPURegistry.h"
 #include "Engine/Rendering/PrimitiveGenerator.h"
+#include "Mathematics/Vector2.h"
 #include "Mathematics/Vector3.h"
 #include "Pathfinding/DetourNavMap.h"
 #include "Pathfinding/GridMap.h"
@@ -41,6 +45,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -80,6 +85,25 @@ std::optional<NavigationSourcePolicy> PolicyListedFor(const std::vector<Navigati
         if (source.Entity == entity.GetHandle() && source.Kind == kind)
             return source.Policy;
     return std::nullopt;
+}
+
+// A level floor of half size `half` metres at y = 0, as a recipe generates a paving chunk.
+Mesh MakeFloorQuad(float32 half)
+{
+    Mesh mesh;
+    const Mathematics::Vector2 corners[] = {{-half, -half}, {half, -half}, {half, half}, {-half, half}};
+    for (const auto& corner : corners)
+    {
+        Vertex vertex{};
+        vertex.Position[0] = corner.x;
+        vertex.Position[2] = corner.y;
+        vertex.Normal[1] = 1.0f;
+        mesh.Vertices.push_back(vertex);
+    }
+    mesh.Indices = {0, 2, 1, 0, 3, 2};
+    mesh.MinBounds[0] = mesh.MinBounds[2] = -half;
+    mesh.MaxBounds[0] = mesh.MaxBounds[2] = half;
+    return mesh;
 }
 
 class NavigationSurfaceTest : public ::testing::Test
@@ -154,6 +178,30 @@ protected:
     {
         entity.Set(Components::NavigationSource{policy});
         world->ProcessCommands();
+    }
+
+    // A renderer with no model that draws a 4 m floor registered under `key`, as a recipe chunk or
+    // an HLOD proxy draws one; `keepCpuMesh` is the registration's retainCpuMesh.
+    ECS::Entity CreateGeneratedFloor(const Rendering::MeshGPUKey& key, bool keepCpuMesh)
+    {
+        auto entity = world->Create();
+        Components::MeshRenderer renderer{};
+        renderer.meshGpuHandleId = static_cast<uint64>(meshes.RegisterSubmesh(key, MakeFloorQuad(2.0f), keepCpuMesh));
+        entity.Set(renderer);
+        entity.Set(Components::Transform{});
+        entity.Set(Placed(0.0f, 0.0f, 0.0f));
+        world->ProcessCommands();
+        return entity;
+    }
+
+    // The policy the gather bakes `entity`'s mesh under, or none when it reads no mesh of it.
+    std::optional<NavigationSourcePolicy> PolicyGatheredFor(ECS::Entity& entity)
+    {
+        const NavigationStaticGeometry geometry = GatherNavigationStaticGeometry(*world, &meshes);
+        std::vector<Navigation::BakeSource> sources;
+        for (const auto& item : geometry.Items)
+            sources.push_back(item.Source);
+        return PolicyListedFor(sources, entity, Navigation::BakeSourceKind::Mesh);
     }
 
     void SetParent(ECS::Entity& child, ECS::Entity& parent)
@@ -265,6 +313,8 @@ protected:
     }
 
     std::unique_ptr<ECS::World> world;
+    // No device: a registration keeps its CPU copy and uploads nothing.
+    Rendering::MeshGPURegistry meshes;
 };
 
 } // namespace
@@ -623,6 +673,59 @@ TEST_F(NavigationSurfaceTest, InheritedIncludeLeavesOutAChildThatMovesOnItsOwn)
     EXPECT_EQ(PolicyListedFor(sources, includedBarrel, BakeSourceKind::Mesh), NavigationSourcePolicy::Include);
 }
 
+// A spline chunk has no model asset: the bake reads the CPU copy the mesh registry keeps for it,
+// under the NavigationSource policy of the entity that authored it.
+TEST_F(NavigationSurfaceTest, GeneratedMeshIsBakedUnderItsAuthorsPolicy)
+{
+    auto road = world->Create();
+    road.Set(Components::Transform{});
+    road.Set(Placed(0.0f, 0.0f, 0.0f));
+    auto chunk = CreateGeneratedFloor({GUID::Derive(GUID::Null(), "test/spline-paving/1"), 0u}, true);
+    SetParent(chunk, road);
+
+    EXPECT_EQ(PolicyGatheredFor(chunk), NavigationSourcePolicy::Auto);
+    SetPolicy(road, NavigationSourcePolicy::Exclude);
+    EXPECT_EQ(PolicyGatheredFor(chunk), std::nullopt);
+}
+
+// An HLOD proxy draws a generated mesh whose CPU copy the registry does not keep, and it stands for
+// member meshes the bake reads already: it is not a source.
+TEST_F(NavigationSurfaceTest, GeneratedMeshWithoutAKeptCpuCopyIsNotBaked)
+{
+    auto proxy = CreateGeneratedFloor({GUID::Derive(GUID::Null(), "test/hlod/1"), 0u}, false);
+
+    EXPECT_EQ(PolicyGatheredFor(proxy), std::nullopt);
+}
+
+// A recipe retires a chunk's mesh before the chunk entity goes. The handle's generation then finds
+// no entry, so the bake reads only the meshes a recipe has built and not retired.
+TEST_F(NavigationSurfaceTest, RetiredGeneratedMeshIsNotBaked)
+{
+    const Rendering::MeshGPUKey key{GUID::Derive(GUID::Null(), "test/spline-paving/2"), 0u};
+    auto chunk = CreateGeneratedFloor(key, true);
+    ASSERT_EQ(PolicyGatheredFor(chunk), NavigationSourcePolicy::Auto);
+
+    ASSERT_TRUE(meshes.UnregisterSubmesh(key));
+    EXPECT_EQ(PolicyGatheredFor(chunk), std::nullopt);
+}
+
+// A primitive that a script creates has no model. Its renderer holds the handle of the cube that
+// the engine registers with a kept CPU copy, so the bake reads it.
+TEST_F(NavigationSurfaceTest, ScriptPrimitiveIsBaked)
+{
+    using Engine::Renderer::PrimitiveGenerator;
+    auto cube = world->Create();
+    Components::MeshRenderer renderer{};
+    renderer.meshGpuHandleId = static_cast<uint64>(
+        meshes.RegisterSubmesh({PrimitiveGenerator::CubeGuid(), 0u}, PrimitiveGenerator::GenerateCube(), true));
+    cube.Set(renderer);
+    cube.Set(Components::Transform{});
+    cube.Set(Placed(0.0f, 0.5f, 0.0f));
+    world->ProcessCommands();
+
+    EXPECT_EQ(PolicyGatheredFor(cube), NavigationSourcePolicy::Auto);
+}
+
 // 32 m tiles at the default 0.5 m cell: a 100 m surface is 4 x 4 tiles, and a corner-to-corner
 // path crosses six tile edges.
 TEST_F(NavigationSurfaceTest, PathAcrossTileBordersIsComplete)
@@ -701,24 +804,8 @@ namespace
 void CreateStaticBox(ECS::World& world, float32 x, float32 y, float32 z, float32 halfX, float32 halfY, float32 halfZ,
                      float32 yawDegrees = 0.0f)
 {
-    auto entity = world.Create();
-    Components::PhysicsBody body{};
-    body.motionType = Physics::MotionType::Static;
-    entity.Set(body);
-    entity.Set(Components::PhysicsCollider{});
-    Components::BoxColliderShape shape{};
-    shape.halfExtentsX = halfX;
-    shape.halfExtentsY = halfY;
-    shape.halfExtentsZ = halfZ;
-    entity.Set(shape);
-    entity.Set(Components::Transform{});
-    Components::WorldTransform transform = Placed(x, y, z);
-    const float32 c = std::cos(yawDegrees * kDegreesToRadians), s = std::sin(yawDegrees * kDegreesToRadians);
-    transform.matrix[0] = c;
-    transform.matrix[2] = -s;
-    transform.matrix[8] = s;
-    transform.matrix[10] = c;
-    entity.Set(transform);
+    Testing::CreateTurnedBox(world, x, y, z, halfX, halfY, halfZ, std::cos(yawDegrees * kDegreesToRadians),
+                             std::sin(yawDegrees * kDegreesToRadians));
 }
 
 // #4045: the issue's scene. An 8 x 8 grid of 1 m cells over x, z in [-4, 4] on a floor box whose
@@ -896,6 +983,55 @@ TEST_F(NavigationSurfaceTest, GridBlocksARotatedWall)
     }
 }
 
+// The grid a bake makes is the one the cell-by-cell bake made before the bake read each triangle
+// once: the digests were taken from that bake, on square and hex cells.
+TEST_F(NavigationSurfaceTest, GridBakeOfABoxFieldMatchesTheCellByCellBake)
+{
+    for (const auto& [gridType, digest, topology] :
+         {std::tuple{Pathfinding::GridType::Square, uint64{13504515380522120182ull}, uint32{7827}},
+          std::tuple{Pathfinding::GridType::Hex, uint64{13637765875097549514ull}, uint32{7679}}})
+    {
+        world = std::make_unique<ECS::World>();
+        RegisterNavigationWorldHooks(*world);
+        auto surface = Testing::CreateBoxFieldGridSurface(*world, gridType);
+
+        BakeAll();
+
+        ASSERT_EQ(SurfaceOf(surface).BakePhase, NavigationBakePhase::Baked) << Navigation::FormatBakeStatus(SurfaceOf(surface));
+        const auto* grid = ResolveNavigationSurfaceGrid(*world, SurfaceOf(surface));
+        ASSERT_NE(grid, nullptr);
+        EXPECT_EQ(Testing::GridDigest(*grid), digest) << static_cast<int>(gridType);
+        EXPECT_EQ(grid->GetTopologyVersion(), topology) << static_cast<int>(gridType);
+    }
+}
+
+// The triangle test accepts a point slightly outside a triangle, in proportion to its size, and the
+// bake tries every cell centre it can accept, even one outside the triangle's bounds: a 5 km floor
+// whose edge stops 1 mm short of a cell grounds that cell's centre 26 mm away, and not the next one.
+TEST_F(NavigationSurfaceTest, GridBakeGroundsACellCentreTheTriangleTestAcceptsOutsideItsBounds)
+{
+    CreateBoxCollider(Physics::MotionType::Static, -2500.001f, -0.5f, 0.0f, 2500.0f, 0.5f, 2500.0f);
+    auto surface = world->Create();
+    NavigationSurface authored{};
+    authored.Mode = NavigationSurfaceMode::Grid;
+    authored.CellSize = 0.05f;
+    authored.FitBounds = false;
+    authored.Extent = {1.0f, 2.0f, 0.25f};
+    surface.Set(authored);
+    world->ProcessCommands();
+
+    BakeAll();
+
+    ASSERT_EQ(SurfaceOf(surface).BakePhase, NavigationBakePhase::Baked) << Navigation::FormatBakeStatus(SurfaceOf(surface));
+    const auto* grid = ResolveNavigationSurfaceGrid(*world, SurfaceOf(surface));
+    ASSERT_NE(grid, nullptr);
+    // Cell 19 lies on the floor, cell 20 (centre x = 0.025) just past its edge at x = -0.001.
+    EXPECT_FALSE(grid->IsCellBlocked(19, 5));
+    EXPECT_FALSE(grid->IsCellBlocked(20, 5)) << "a centre the triangle test accepts was never tried";
+    EXPECT_FLOAT_EQ(grid->GetCellHeight(20, 5), 0.0f);
+    EXPECT_TRUE(grid->IsCellBlocked(21, 5));
+}
+
 // The notice text the inspector shows, one line per phase.
 TEST_F(NavigationSurfaceTest, BakeStatusReadsAsTheInspectorShowsIt)
 {
@@ -910,6 +1046,10 @@ TEST_F(NavigationSurfaceTest, BakeStatusReadsAsTheInspectorShowsIt)
     surface.BakeDone = 212;
     surface.BakeTotal = 1024;
     EXPECT_EQ(Navigation::FormatBakeStatus(surface), "Baking: 212 of 1,024 tiles");
+    // A grid bakes as one job: only its size is shown.
+    surface.Mode = NavigationSurfaceMode::Grid;
+    EXPECT_EQ(Navigation::FormatBakeStatus(surface), "Baking: 1,024 cells");
+    surface.Mode = NavigationSurfaceMode::Mesh;
 
     surface.BakePhase = NavigationBakePhase::Baked;
     surface.BakedWalkable = 1948;

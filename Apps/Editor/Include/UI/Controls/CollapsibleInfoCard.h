@@ -13,13 +13,12 @@ namespace EditorUI
 
 // The editor's explanatory card. Cards read expanded; one whose text needs
 // more than one row gains a chevron and can be folded into itself, which
-// clamps the card to one clipped line ending in "show more" rather than
+// clamps the card to one line, cut with an ellipsis, ending in "show more" rather than
 // putting a header row above it. Clicking the card toggles.
 //
-// Whether a card folds at all is decided from the laid-out text in
-// OnPostLayout — a card that already fits on one row keeps no chevron and
-// stays a plain card. The full text stays on the control while collapsed, so
-// callers that search card copy can still match it.
+// OnPostLayout decides from the laid-out text whether a card folds. A one-row
+// card shows no chevron glyph but keeps the chevron's box, so all copy starts at
+// one x. The full text stays on a collapsed card, so a search still matches it.
 //
 // The chrome — chevron, copy and the "show more" action — is built in the
 // constructor, so a card carries its copy as a Label in the element tree from
@@ -34,7 +33,7 @@ public:
 
     const std::string& GetFullText() const { return m_FullText; }
     // Replaces the copy; the card re-decides whether it needs to fold on the
-    // next layout, so a card whose text shrinks to one row loses its chevron.
+    // next layout, so a card whose text shrinks to one row loses its chevron glyph.
     void SetText(const std::string& text);
 
     bool IsFoldable() const { return m_Foldable; }

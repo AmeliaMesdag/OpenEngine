@@ -2,7 +2,7 @@
 
 #include "TerrainECS/PagedHeightSampler.h"
 #include "TerrainECS/TerrainAtlas.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainService.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
@@ -323,7 +323,7 @@ SurfaceHeightQuery ResolveSurfaceHeightQuery(ECS::World& world, const Mathematic
 void RequestSurfaceHeightWindow(const Mathematics::Vector3& center)
 {
     if (TerrainService* service = TerrainService::TryGet())
-        service->GetHeightPages().RequestReaderWindow(center);
+        service->GetTerrainPages().RequestReaderWindow(center);
 }
 
 } // namespace GameEngine::TerrainECS

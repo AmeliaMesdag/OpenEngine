@@ -17,9 +17,9 @@
 
 #include "cbt_layout.glsl"
 #include "cbt_domain.glsl"
-// Earth-scale df64 (sector, local) decode (arc S2a) — GLSL bit-twin of CBTDeepDecode.h.
-// Pure math, no bindings; only the VertexEval deep branch calls it, and the driver DCEs
-// it out of every other kernel (and out of VertexEval when pc.deepDecode == 0).
+// Earth-scale df64 (sector, local) decode, the GLSL bit-twin of CBTDeepDecode.h.
+// Pure math, no bindings; only VertexEval's spherical branch calls it on the wide arm, and
+// the driver removes it from every other kernel.
 #include "cbt_deep_decode.glsl"
 // Resident-window atlas resolve (Phase E). Pure math, no bindings; cbt_layout.glsl
 // includes it and binds the indirection SSBO (17) + atlas height ring (18) that
@@ -432,6 +432,10 @@ uint CBT_BoundedDispatchGroups(uint count)
     return (count + CBT_WG_SIZE - 1u) / CBT_WG_SIZE;
 }
 
+#if !defined(CBT_DECODE_INT32)
+bool CBT_PlanarCriterionOn(CBTFrameParams fp);
+#endif
+
 // #1 Reset — single thread. Reference ResetBuffers: alloc cursor -> 0 and the
 // free budget -> pool − liveCount (the sum-tree root from the prior frame's
 // tail reduce). Clears the per-frame work counters, per-frame validation
@@ -453,6 +457,14 @@ void Kernel_Reset()
     }
     gQueue.WorkQueue[CBT_WQ_ALLOC_CURSOR] = 0;
     gQueue.WorkQueue[CBT_WQ_FREE_COUNT] = int(pc.poolSize) - int(CBT_LiveCount());
+    // The state both planar controllers read: the occupancy of the previous update's tail, the keep step
+    // and the pressure step that update ran with.
+    float occupancy = float(CBT_LiveCount()) / float(pc.poolSize);
+    float keepCeil = gParams.Params[pc.frameIndex % CBT_FRAME_RING].frame.demandTuning.y;
+    bool keepGated = pc.domainMode != CBT_DOMAIN_SPHERICAL && pc.classifyMode == CBT_CLASSIFY_SCREEN_SPACE &&
+                     keepCeil > 0.0;
+    int storedKeepStep = keepGated ? gQueue.WorkQueue[CBT_WQ_OFF_FRUSTUM_KEEP_STEP] : 0;
+    int storedPressureStep = gQueue.WorkQueue[CBT_WQ_PRESSURE_STEP];
     // Planar pool-pressure scale. A planar view whose VISIBLE field alone exceeds the pool pins it at
     // 100% and freezes the topology: every split is rolled back and no merge frees anything, so an
     // edit or a target change in view cannot re-tessellate (the 4 km preset from 650 m holds 92% of
@@ -466,14 +478,17 @@ void Kernel_Reset()
     // refill, and the same pose reached by different histories lands within one step of itself
     // (~4.4% of threshold). Every landing is a fixed point inside the hold band with headroom and
     // no rolled-back splits, which is the property the user has. Step 0 is exactly 1x.
+    // At rest under keep step 24 the step does not climb and falls one notch per update: that rest settles
+    // under the keep ceiling at step 0, and a climb only hides the merge-free update the keep up rule reads.
     {
         int step = 0;
         if (pc.poolPressure != 0u && pc.domainMode != CBT_DOMAIN_SPHERICAL &&
             pc.classifyMode == CBT_CLASSIFY_SCREEN_SPACE)
         {
-            step = gQueue.WorkQueue[CBT_WQ_PRESSURE_STEP];
-            float occupancy = float(CBT_LiveCount()) / float(pc.poolSize);
-            if (occupancy >= CBT_PRESSURE_FULL_OCC)
+            step = storedPressureStep;
+            if (pc.settle != 0u && keepGated && storedKeepStep < int(CBT_OFF_FRUSTUM_KEEP_STEPS))
+                step = max(step - 1, 0);
+            else if (occupancy >= CBT_PRESSURE_FULL_OCC)
                 step = min(step + 1, int(CBT_PRESSURE_MAX_STEP));
             else if (occupancy < CBT_PRESSURE_RECOVER_OCC)
                 step = max(step - 1, 0);
@@ -484,29 +499,71 @@ void Kernel_Reset()
     // it keeps sets the occupancy, and the occupancy sets the band. Read straight off occupancy, the
     // band flips the whole off-frustum field in one update (ungated below the ramp, a refill that
     // fills the pool; collapsed above it, a merge cascade that empties it again), so a view whose
-    // ungated field does not fit alternates between the two on every update. The step integrates
-    // instead: toward coarsening while occupancy is at or above the keep ceiling (one step per
-    // update, CBT_OFF_FRUSTUM_KEEP_SATURATED_STRIDE while the pool is full and rolling splits back),
-    // one step back while it is below the ceiling minus CBT_KEEP_RAMP, held in between. The loop
-    // rests wherever the band leaves occupancy inside that hold band, and a view that fits walks back
-    // to step 0, which is exactly the ungated field.
+    // ungated field does not fit alternates between the two on every update. While the camera moves
+    // the step integrates instead: toward coarsening while occupancy is at or above the keep ceiling
+    // (one step per update, CBT_OFF_FRUSTUM_KEEP_SATURATED_STRIDE while the pool is full and rolling
+    // splits back), one step back while it is below the ceiling minus CBT_KEEP_RAMP, held in between.
+    // So a moving camera holds the step wherever the band leaves occupancy inside that hold band, and
+    // a view that fits walks back to step 0, which is exactly the ungated field.
+    // At rest the step goes to the lowest step whose quiet tree fits under the ceiling. Up (the floor goes above
+    // it) when the tree is over the ceiling and merged nothing, or is over it without the leaves that want to merge.
+    // Down only at pressure step 0 under the ceiling: at once on the rest's first update (the probe), then from a quiet tree.
     {
         int keepStep = 0;
-        float keepCeil = gParams.Params[pc.frameIndex % CBT_FRAME_RING].frame.demandTuning.y;
-        if (pc.domainMode != CBT_DOMAIN_SPHERICAL && pc.classifyMode == CBT_CLASSIFY_SCREEN_SPACE &&
-            keepCeil > 0.0)
+        int keepFloor = 0;
+        if (keepGated)
         {
-            keepStep = gQueue.WorkQueue[CBT_WQ_OFF_FRUSTUM_KEEP_STEP];
-            float occupancy = float(CBT_LiveCount()) / float(pc.poolSize);
-            if (occupancy >= keepCeil)
+            keepStep = storedKeepStep;
+            int storedFloor = gQueue.WorkQueue[CBT_WQ_OFF_FRUSTUM_KEEP_FLOOR];
+            if (pc.settle != 0u)
             {
-                int stride = occupancy >= CBT_PRESSURE_FULL_OCC ? int(CBT_OFF_FRUSTUM_KEEP_SATURATED_STRIDE) : 1;
-                keepStep = min(keepStep + stride, int(CBT_OFF_FRUSTUM_KEEP_STEPS));
+                bool merged = gQueue.WorkQueue[CBT_WQ_SIMPLIFY_COUNTER] != 0;
+                bool split = gQueue.WorkQueue[CBT_WQ_ALLOCATE_COUNTER] != 0;
+                bool arriving = storedFloor == CBT_KEEP_FLOOR_ARRIVING;
+                bool probing = storedFloor == CBT_KEEP_FLOOR_PROBING;
+                bool over = occupancy >= keepCeil;
+                bool overWithoutCandidates = false;
+#if !defined(CBT_DECODE_INT32)
+                // The merge candidate count exists only for an update at rest under the planar criterion.
+                if (!arriving && CBT_PlanarCriterionOn(gParams.Params[pc.frameIndex % CBT_FRAME_RING].frame))
+                {
+                    int candidates = gQueue.WorkQueue[CBT_WQ_MERGE_CANDIDATE_COUNTER];
+                    overWithoutCandidates = float(int(CBT_LiveCount()) - candidates) / float(pc.poolSize) >= keepCeil;
+                }
+#endif
+                bool fitsAtPressureZero = storedPressureStep == 0 && !over;
+                keepFloor = max(storedFloor, 0);
+                if (over && (!merged || overWithoutCandidates))
+                {
+                    keepFloor = min(max(keepFloor, keepStep + 1), int(CBT_OFF_FRUSTUM_KEEP_STEPS));
+                    keepStep = keepFloor;
+                }
+                else if (fitsAtPressureZero && keepStep > keepFloor && (arriving || (!merged && !split)))
+                {
+                    keepStep = keepStep - 1;
+                    keepFloor = arriving ? CBT_KEEP_FLOOR_PROBING : keepFloor;
+                }
+                else if (probing && !(fitsAtPressureZero && !merged && !split))
+                    keepFloor = CBT_KEEP_FLOOR_PROBING;
             }
-            else if (occupancy < keepCeil - CBT_KEEP_RAMP)
-                keepStep = max(keepStep - 1, 0);
+            else
+            {
+                // A move undoes a probe that has no measured tree, so alternate moves and rests do not walk the step.
+                if (storedFloor == CBT_KEEP_FLOOR_PROBING)
+                    keepStep = min(keepStep + 1, int(CBT_OFF_FRUSTUM_KEEP_STEPS));
+                keepFloor = CBT_KEEP_FLOOR_ARRIVING;
+                if (occupancy >= keepCeil)
+                {
+                    int stride =
+                        occupancy >= CBT_PRESSURE_FULL_OCC ? int(CBT_OFF_FRUSTUM_KEEP_SATURATED_STRIDE) : 1;
+                    keepStep = min(keepStep + stride, int(CBT_OFF_FRUSTUM_KEEP_STEPS));
+                }
+                else if (occupancy < keepCeil - CBT_KEEP_RAMP)
+                    keepStep = max(keepStep - 1, 0);
+            }
         }
         gQueue.WorkQueue[CBT_WQ_OFF_FRUSTUM_KEEP_STEP] = keepStep;
+        gQueue.WorkQueue[CBT_WQ_OFF_FRUSTUM_KEEP_FLOOR] = keepFloor;
     }
     // The live count the planar classify reads its occupancy from at rest (CBT_WQ_REST_LIVE_COUNT).
     {
@@ -523,6 +580,7 @@ void Kernel_Reset()
     gQueue.WorkQueue[CBT_WQ_SIMPLIFY_COUNTER] = 0;
     gQueue.WorkQueue[CBT_WQ_VERTEX_EVAL_COUNTER] = 0; // plan §planet-shading perf counter
     gQueue.WorkQueue[CBT_WQ_UNRESOLVED_PAGE_SAMPLES] = 0;
+    gQueue.WorkQueue[CBT_WQ_MERGE_CANDIDATE_COUNTER] = 0;
     // The four counters, named: each one accumulates across frames if it is not zeroed here,
     // and CBTLayout.GlslValidationCountersMatchCpp pins each assignment by name.
     gValidation.Validation[CBT_VALIDATION_ERROR_COUNTER] = 0u;
@@ -599,10 +657,8 @@ const float CBT_CREASE_GATE_M = 0.25;
 // only burns Split work on rolled-back demand; below it, the crease refines and the near-bias
 // coarsening keeps occupancy under the ceiling (the R=2000 oracle converges at ~0.95, under this).
 const float CBT_CREASE_OCC_CEIL = 0.98;
-// wc0/wc2 are the split-edge corners in the PLANET-CENTER frame (S2a: handed in by the
-// caller's CBT_FetchCorners — a deep slot's fp32 recomposition, a legacy slot's stored
-// world corner; the radius math below was always planet-magnitude fp32, so the quality
-// class is unchanged either way).
+// wc0/wc2 are the split-edge corners in the PLANET-CENTER frame, from the caller's
+// CBT_FetchCorners. The radius math below is planet-magnitude fp32 for both stores.
 int CBT_SculptCreaseDemand(CBTFrameParams fp, uint slot, CBT_HEAPID_T h, uint depth, uint maxDepth,
                            vec3 origin, vec3 wc0, vec3 wc2)
 {
@@ -1401,17 +1457,38 @@ bool CBT_PlanarNodeSplits(CBTPlanarCriterion c, CBTFrameParams fp, vec2 uvMin, v
     return demand > limit;
 }
 
-// The off-frustum class of a node's box, for the keep gate: CBT_GATE_FRUSTUM with ndcExcess how far
-// past the margin the whole box sits (CBT_OFF_FRUSTUM_BEHIND_NDC and `behind` when it is wholly behind
-// the eye), else CBT_GATE_RELEVANT (in view, or reaching the eye plane: genuinely close). A sub-box sits
-// at least as far outside, so the gate nests.
-int CBT_PlanarBoxGate(CBTPlanarView v, vec3 lo, vec3 hi, out float ndcExcess, out bool behind)
+// Corner `i` (0 to 7) of the box [lo, hi] as (position, 1): bit 0 picks hi.x, bit 1 hi.y, bit 2 hi.z.
+vec4 CBT_BoxCorner(vec3 lo, vec3 hi, uint i)
+{
+    return vec4((i & 1u) != 0u ? hi.x : lo.x, (i & 2u) != 0u ? hi.y : lo.y, (i & 4u) != 0u ? hi.z : lo.z, 1.0);
+}
+
+// The keep gate's ndcExcess of a box wholly behind the eye: CBT_OFF_FRUSTUM_BEHIND_NDC * (1 + depth behind / clip
+// offset) * sqrt(distance / CBT_BEHIND_EYE_MIN_DIST), least over the box. Invariant: one keep step releases at most one
+// octave of distance behind the eye, so no step releases more than the hold band. A sub-box's value is never less.
+float CBT_PlanarBehindExcess(CBTPlanarView v, vec3 camRel, vec3 lo, vec3 hi)
+{
+    float widest = 0.0; // the largest clip offset per unit of depth behind the eye over the corners
+    for (uint i = 0u; i < 8u; ++i)
+    {
+        vec4 p = CBT_BoxCorner(lo, hi, i);
+        float w = dot(v.RowW, p);
+        widest = max(widest, length(vec2(dot(v.RowX, p), dot(v.RowY, p))) / max(-w, 1.0e-5));
+    }
+    float distanceM = max(length(max(max(lo - camRel, camRel - hi), vec3(0.0))), CBT_BEHIND_EYE_MIN_DIST);
+    return CBT_OFF_FRUSTUM_BEHIND_NDC * (1.0 + 1.0 / max(widest, 1.0e-6)) * sqrt(distanceM / CBT_BEHIND_EYE_MIN_DIST);
+}
+
+// The off-frustum class of a node's box for the keep gate: CBT_GATE_FRUSTUM with ndcExcess how far past the
+// margin the whole box sits (CBT_PlanarBehindExcess and `behind` when wholly behind the eye), else
+// CBT_GATE_RELEVANT (in view, or reaching the eye plane). A sub-box sits at least as far out, so the gate nests.
+int CBT_PlanarBoxGate(CBTPlanarView v, vec3 camRel, vec3 lo, vec3 hi, out float ndcExcess, out bool behind)
 {
     ndcExcess = 0.0;
     behind = CBT_BoxRowMax(v.RowW, lo, hi) <= 1.0e-5;
     if (behind)
     {
-        ndcExcess = CBT_OFF_FRUSTUM_BEHIND_NDC;
+        ndcExcess = CBT_PlanarBehindExcess(v, camRel, lo, hi);
         return CBT_GATE_FRUSTUM;
     }
     if (CBT_BoxRowMin(v.RowW, lo, hi) <= 1.0e-5)
@@ -1420,7 +1497,7 @@ int CBT_PlanarBoxGate(CBTPlanarView v, vec3 lo, vec3 hi, out float ndcExcess, ou
     vec4 ex = vec4(3.0e38); // left, right, bottom, top: the least excess over the corners
     for (uint i = 0u; i < 8u; ++i)
     {
-        vec4 p = vec4((i & 1u) != 0u ? hi.x : lo.x, (i & 2u) != 0u ? hi.y : lo.y, (i & 4u) != 0u ? hi.z : lo.z, 1.0);
+        vec4 p = CBT_BoxCorner(lo, hi, i);
         float w = dot(v.RowW, p);
         vec2 ndc = vec2(dot(v.RowX, p), dot(v.RowY, p)) / w;
         ex = min(ex, vec4(-m - ndc.x, ndc.x - m, -m - ndc.y, ndc.y - m));
@@ -1509,10 +1586,9 @@ void Kernel_Classify()
         // Frustum cull in the render-origin-relative frame (slice 1b): the rebased corners
         // against the rebased viewProjRel, so the plane distances stay fp32-precise at
         // planetary distance (a full-world test big-minus-big cancels and mis-culls near
-        // the frustum edge). CBT_FetchCorners (S2a) supplies both frames: a legacy slot
-        // reproduces corner - originW bit-for-bit (byte-identical dark-ship); a deep
-        // (sector, local) slot reconstructs the relative frame from the EXACT integer
-        // sector delta. The horizon cull below keeps the WORLD corners + world cameraPos:
+        // the frustum edge). CBT_FetchCorners supplies both frames: a world-corner slot
+        // gives corner - originW; a (sector, local) slot rebuilds the relative frame from
+        // the EXACT integer sector delta. The horizon cull below keeps the WORLD corners + world cameraPos:
         // it is a conservative occlusion test about the PLANET CENTER, not the camera, so
         // it needs true radii, not the rebased frame.
         CBTCornersWS cwv = CBT_FetchCorners(slot, fpv);
@@ -1613,15 +1689,12 @@ void Kernel_Classify()
 
     bool wantSplit = false;
     bool wantMerge = false;
-    // The behind-the-eye bound's own merge wish, carried past the off-frustum keep gate below. The
-    // keep band is the yaw buffer for facets just outside the frustum; a facet entirely behind the
-    // eye (ndcExcess = CBT_OFF_FRUSTUM_BEHIND_NDC) is not one, so the band must never cancel the
-    // coarsening the bound asked for. Otherwise the field behind the camera freezes wherever the
-    // band is at least CBT_OFF_FRUSTUM_BEHIND_NDC wide under pressure: on planar, every keep step
-    // whose CBT_PlanarKeepBand is at least that wide; on the sphere, which enters the gate's arm
-    // unconditionally, every occupancy up to keepCeil - CBT_KEEP_RAMP * CBT_OFF_FRUSTUM_BEHIND_NDC /
-    // CBT_OFF_FRUSTUM_KEEP_NDC.
+    // The merge wish of a facet wholly behind the eye passes the keep gate below. The keep band is the yaw
+    // buffer for facets just outside the frustum, not behind the eye: a band that cancels this merge freezes
+    // the field behind the camera while the band is wider than the facet's ndcExcess.
     bool behindEyeWantsMerge = false;
+    // A rest update under the planar criterion counts its merge candidates (CBT_WQ_MERGE_CANDIDATE_COUNTER).
+    bool countMergeCandidate = false;
     if (pc.classifyMode == CBT_CLASSIFY_SCREEN_SPACE)
     {
         // The LEB split edge is (corner0, corner2) — the triangle's longest edge,
@@ -1638,10 +1711,9 @@ void Kernel_Classify()
         // the LEB split-edge endpoints in the rebased frame through the rebased viewProjRel,
         // so the projected edge length is stable under camera motion at planetary distance (a
         // full-world projection swims => the pixel metric oscillates => tessellation boils).
-        // S2a: CBT_FetchCorners supplies the frames per the slot's storage — legacy slots
-        // reproduce corner - origin bit-for-bit; deep (sector, local) slots reconstruct the
-        // relative frame from the EXACT integer sector delta (fp32-precise at Earth radius,
-        // where the legacy world store's ~0.5 m quantization dominated the metric inputs).
+        // CBT_FetchCorners supplies the frames for the slot's store: a world-corner slot gives
+        // corner - origin; a (sector, local) slot rebuilds the relative frame from the EXACT
+        // integer sector delta (fp32-precise at Earth radius).
         vec3 origin = CBT_RenderOriginWorld(fp);
         CBTCornersWS cw = CBT_FetchCorners(slot, fp);
         vec3 wc0 = cw.W0;
@@ -1753,9 +1825,10 @@ void Kernel_Classify()
             float boxRangeM;
             CBT_PlanarNodeBox(criterion, fp, min(uv0, min(uv1, uv2)), max(uv0, max(uv1, uv2)), lo, hi, boxRangeM);
             bool behind;
-            gate = CBT_PlanarBoxGate(criterion.View, lo, hi, ndcExcess, behind);
+            gate = CBT_PlanarBoxGate(criterion.View, criterion.CamRel, lo, hi, ndcExcess, behind);
             behindEyeWantsMerge = behind && wantMerge;
             gateDecided = true;
+            countMergeCandidate = pc.settle != 0u;
             // The gate's merge reads the parent's box, which both children rebuild alike: a pair
             // merges by the gate only when the parent it collapses into is beyond the band too, so
             // the merged parent is gated and does not split straight back. A parent box that still
@@ -1774,10 +1847,9 @@ void Kernel_Classify()
                                   parentRangeM);
                 bool parentBehind;
                 float parentExcess;
-                keepExcess = CBT_PlanarBoxGate(criterion.View, parentLo, parentHi, parentExcess, parentBehind) ==
-                                     CBT_GATE_FRUSTUM
-                                 ? parentExcess
-                                 : 0.0;
+                int parentGate = CBT_PlanarBoxGate(criterion.View, criterion.CamRel, parentLo, parentHi, parentExcess,
+                                                   parentBehind);
+                keepExcess = parentGate == CBT_GATE_FRUSTUM ? parentExcess : 0.0;
             }
         }
         else
@@ -2031,7 +2103,14 @@ void Kernel_Classify()
             // pool stays at the keep ceiling. A view that fits never reaches the ceiling, so its
             // step stays 0. keepCeil <= 0 leaves planar entirely ungated (the "every DemandTuning
             // field 0 => the pre-slice metric" contract).
-            if (spherical || poolUnderPressure)
+            if (!spherical && poolUnderPressure && gateDecided)
+            {
+                // The criterion inside the band, merged outside it: the tree at a keep step depends
+                // on the pose and the step only, so a step down refines again what the step up merged.
+                wantSplit = wantSplit && ndcExcess <= keepBand;
+                wantMerge = (wantMerge || !keepDepth) && (depth > pc.baseDepth);
+            }
+            else if (spherical || poolUnderPressure)
             {
                 wantSplit = false;
                 // Only the bound's own term survives the gate, not the straddle branch's
@@ -2063,6 +2142,8 @@ void Kernel_Classify()
         // Both twins carry the SIMPLIFY state (PrepareSimplify's pair-agreement
         // test reads it) but only the even heapID enqueues the merge candidate.
         state = CBT_STATE_SIMPLIFY;
+        if (countMergeCandidate)
+            atomicAdd(gQueue.WorkQueue[CBT_WQ_MERGE_CANDIDATE_COUNTER], 1);
         if ((uint(h) & 1u) == 0u)
             CBT_QueuePush(CBT_WQ_SIMPLIFY_CLASS_COUNTER, CBT_WQ_SIMPLIFY_CLASS_QUEUE, slot);
     }
@@ -3419,17 +3500,14 @@ void Kernel_VertexEval()
     // narrow arm (25, mirror of kHeap32DecodeSubdiv); a deeper slot is treated like the
     // corruption case (skipped, Validate flags it). depth is findMSB-bounded, so numSubdiv
     // is bounded and the loop terminates.
-    // Deep (sector, local) mode raises the guard to CBT_DEEP_NUM_SUBDIV (mirror of
-    // DeepDecode::SubdivCap); it is int64-only by construction (df64 sector arithmetic), so
-    // the narrow arm compiles it out and always takes the effective cap. S2b lifted
-    // classification to match: the provisioning cap (TerrainProvisioning SubdivCapFor ->
-    // fp.terrainOrigin.z) is always <= this guard — the flag->cap coupling is a single
-    // CPU-side read (CBTUpdateSystem), so a production bisector never exceeds the depth
-    // its storage representation can carry.
+    // On the wide arm the sphere stores (sector, local) corners, so its guard is
+    // CBT_DEEP_NUM_SUBDIV. The narrow arm has no deep decode (int64 only) and keeps the
+    // effective cap. The provisioning cap (TerrainProvisioning SubdivCapFor) follows the same rule.
 #if defined(CBT_DECODE_INT32)
     const uint decodeCap = CBT_MAX_NUM_SUBDIV_EFFECTIVE;
 #else
-    const uint decodeCap = (pc.deepDecode != 0u) ? CBT_DEEP_NUM_SUBDIV : CBT_MAX_NUM_SUBDIV_EFFECTIVE;
+    const uint decodeCap =
+        (pc.domainMode == CBT_DOMAIN_SPHERICAL) ? CBT_DEEP_NUM_SUBDIV : CBT_MAX_NUM_SUBDIV_EFFECTIVE;
 #endif
     if (numSubdiv > decodeCap)
     {
@@ -3488,9 +3566,8 @@ void Kernel_VertexEval()
     float invScale = 1.0 / float(scale);
     CBTFrameParams fp = CBT_Frame();
     CBTVertexData vd;
-    // S2a (sector, local) tail — zero (legacy world-corner mode) unless the deep
-    // branch below overwrites it. Zero matches the buffer's init fill, so a flag-off
-    // frame rewrites the tail with the bytes it already holds (dark-ship inert).
+    // The (sector, local) tail is zero for a world-corner slot; the sphere's store on the wide
+    // arm overwrites it below. Zero matches the buffer's init fill.
     vd.sector0 = uvec2(0u);
     vd.sector1 = uvec2(0u);
     vd.sector2 = uvec2(0u);
@@ -3590,38 +3667,27 @@ void Kernel_VertexEval()
         // spherical (face,rect) reclassification reads these. meta.w = -1 stays the SPHERE
         // sentinel the surface branches on (outward derivative normal; it ignores uv0).
         vd.meta = vec4(fuv0.y, fuv1.y, fuv2.y, -1.0);
-        // The deep store's df64 sector arithmetic is int64 through and through, so the
-        // narrow arm has no decode to call: cbt_deep_decode.glsl declares nothing there and
-        // the host never sets pc.deepDecode (SubdivCapFor's narrow arm ignores it). The
-        // branch vanishes with it and the fp32 world store below becomes the only path.
 #if !defined(CBT_DECODE_INT32)
-        if (pc.deepDecode != 0u)
-        {
-            // (sector, local) df64 store (arc S2a): decode each corner from its EXACT int64
-            // numerator through cbt_deep_decode.glsl — bit-twin of CBTDeepDecode.h — and
-            // persist (packed sector anchor, fp32 local offset) instead of the fp32 world
-            // position whose ~0.5 m Earth-magnitude store quantization is the measured S1
-            // wall. relief* is a pure fp32 function of the shared numerator (dir is), so
-            // two bisectors sharing a corner feed DecodeCorner bit-identical inputs and
-            // store bit-identical (sector, local) — crack-free by determinism.
-            CBTDeepVertex d0 = CBT_DeepDecodeCorner(num0, numSubdiv, radius, relief0);
-            CBTDeepVertex d1 = CBT_DeepDecodeCorner(num1, numSubdiv, radius, relief1);
-            CBTDeepVertex d2 = CBT_DeepDecodeCorner(num2, numSubdiv, radius, relief2);
-            vd.corner0 = vec4(d0.Local, fuv0.x);
-            vd.corner1 = vec4(d1.Local, fuv1.x);
-            vd.corner2 = vec4(d2.Local, fuv2.x);
-            vd.sector0 = CBT_PackCornerSector(d0.Sector);
-            vd.sector1 = CBT_PackCornerSector(d1.Sector);
-            vd.sector2 = CBT_PackCornerSector(d2.Sector);
-            vd.deepTag = uvec2(1u, 0u);
-        }
-        else
+        // (sector, local) df64 store: decode each corner from its EXACT int64 numerator through
+        // cbt_deep_decode.glsl (the bit-twin of CBTDeepDecode.h) and store (packed sector anchor,
+        // fp32 local offset). Two bisectors that share a corner store bit-identical values.
+        CBTDeepVertex d0 = CBT_DeepDecodeCorner(num0, numSubdiv, radius, relief0);
+        CBTDeepVertex d1 = CBT_DeepDecodeCorner(num1, numSubdiv, radius, relief1);
+        CBTDeepVertex d2 = CBT_DeepDecodeCorner(num2, numSubdiv, radius, relief2);
+        vd.corner0 = vec4(d0.Local, fuv0.x);
+        vd.corner1 = vec4(d1.Local, fuv1.x);
+        vd.corner2 = vec4(d2.Local, fuv2.x);
+        vd.sector0 = CBT_PackCornerSector(d0.Sector);
+        vd.sector1 = CBT_PackCornerSector(d1.Sector);
+        vd.sector2 = CBT_PackCornerSector(d2.Sector);
+        vd.deepTag = uvec2(1u, 0u);
+#else
+        // The narrow arm has no deep decode (its df64 sector arithmetic is int64), so the
+        // fp32 world store is its only path.
+        vd.corner0 = vec4(dir0 * (radius + relief0), fuv0.x);
+        vd.corner1 = vec4(dir1 * (radius + relief1), fuv1.x);
+        vd.corner2 = vec4(dir2 * (radius + relief2), fuv2.x);
 #endif
-        {
-            vd.corner0 = vec4(dir0 * (radius + relief0), fuv0.x);
-            vd.corner1 = vec4(dir1 * (radius + relief1), fuv1.x);
-            vd.corner2 = vec4(dir2 * (radius + relief2), fuv2.x);
-        }
     }
     else
     {

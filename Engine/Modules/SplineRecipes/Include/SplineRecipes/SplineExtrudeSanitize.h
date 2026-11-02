@@ -18,7 +18,8 @@ namespace GameEngine::SplineRecipes
 //
 // Non-finite floats fall back to the authored default (an infinity carries no
 // intent to clamp); domain checks stay with the profile builder, which already
-// clamps a negative dimension and rejects an unusable cross-section.
+// clamps a negative dimension and rejects an unusable cross-section. The
+// verge's width and height clamp to 0.01 to 10 m, the paving curb's range.
 Components::SplineExtrude SanitizeExtrudeRecipe(const Components::SplineExtrude& authored);
 
 // Whether `entity`'s SplineExtrude was saved with the retired Rectangle profile

@@ -13,6 +13,11 @@
 #include <cstdint>
 #include <vector>
 
+namespace GameEngine::Mathematics
+{
+struct Matrix4x4;
+}
+
 namespace GameEngine::Rendering
 {
 class IDevice;
@@ -65,7 +70,7 @@ struct OceanUnderwaterPortalData
 /// may be visible through the view-projection `viewProj` (16 floats, the
 /// CameraData layout). A dry camera needs the underwater composite only then.
 /// Ribbons are tested by the bounds of their tree's root record.
-bool IsUnderwaterPortalInView(const OceanUnderwaterPortalData& data, const float* viewProj);
+bool IsUnderwaterPortalInView(const OceanUnderwaterPortalData& data, const Mathematics::Matrix4x4& viewProj);
 
 // Fullscreen underwater overlay (Phase 7). When the camera is submerged the
 // render node CPU-gates this pass on; it tints the frame with a submerged

@@ -1317,7 +1317,7 @@ TEST(UIRegressions, DeferredRelayoutReflowsSiblingAfterSelfResize)
 
     // Grow 'a' AFTER the initial solve via a direct Style::Height override (the CurvePresetPicker
     // path); mark only 'a' LayoutDirty -- no parent poke, no RequestRelayout.
-    aPtr->Overrides().Set(Style::Height, StyleLength::Px(120.0f));
+    aPtr->Style().Set(Style::Height, StyleLength::Px(120.0f));
     aPtr->MarkDirty(UIElement::LayoutDirty | UIElement::VisualDirty);
 
     ui.Update(0.0f, /*interactive=*/false);
@@ -1382,7 +1382,7 @@ TEST(UIRegressions, SearchBarClearButtonClickClearsFieldOverText)
     clearPtr->RegisterEventHandler(kEventMouseDown, [&](UIEvent&) { ++clearMouseDown; });
 
     // Picker's inline overrides.
-    fieldPtr->Overrides()
+    fieldPtr->Style()
         .Set(Style::Width, StyleLength::Percent(100.0f))
         .Set(Style::Height, StyleLength::Percent(100.0f))
         .Set(Style::MinWidth, StyleLength::Px(0.0f))
@@ -1394,7 +1394,7 @@ TEST(UIRegressions, SearchBarClearButtonClickClearsFieldOverText)
         .Set(Style::ZIndex, 10002)
         .Set(Style::PointerEvents, true);
     clearPtr->SetFocusProxy(fieldPtr);
-    clearPtr->Overrides().Set(Style::ZIndex, 10003);
+    clearPtr->Style().Set(Style::ZIndex, 10003);
 
     // Picker's root mouse-down focus handler.
     searchBarPtr->RegisterEventHandler(kEventMouseDown, [&, fieldPtr](UIEvent& e) {
@@ -1409,10 +1409,10 @@ TEST(UIRegressions, SearchBarClearButtonClickClearsFieldOverText)
     // compares z flat across stacking contexts.
     auto modal = std::make_unique<UIElement>();
     modal->SetId("modal");
-    modal->Overrides().Set(Style::ZIndex, 10000);
+    modal->Style().Set(Style::ZIndex, 10000);
     auto window = std::make_unique<UIElement>();
     window->SetId("modal-window");
-    window->Overrides().Set(Style::ZIndex, 10001);
+    window->Style().Set(Style::ZIndex, 10001);
     window->AddChild(std::move(searchBar));
     modal->AddChild(std::move(window));
     root->AddChild(std::move(modal));

@@ -54,6 +54,7 @@ set(ECS_CORE_TEST_SOURCES
     ChunkAllocationCounterTest.cpp
     RegisterComponentsTest.cpp
     QueryInvalidationAndOverflowTest.cpp
+    ArchetypeMatchCacheTest.cpp
     CommandBufferRingTest.cpp
     ProcessCommandsBatchLimitTest.cpp
     DeferredRequiredComponentTest.cpp
@@ -128,6 +129,7 @@ target_include_directories(ECSCoreTests PRIVATE
     # Rendering/RenderLayerMask.h (header-only, Types only): the component headers and the
     # render layer field trait include it.
     ${CMAKE_SOURCE_DIR}/Engine/Modules/Rendering/Include
+    ${CMAKE_SOURCE_DIR}/Tests  # DeathTestChild.h
 )
 
 target_link_libraries(ECSCoreTests PRIVATE

@@ -3,6 +3,7 @@
 // infrastructure it introduces.
 
 #include <gtest/gtest.h>
+#include "Mathematics/Vector2.h"
 #include "UI/Layout/YogaLayout.h"
 #include "UI/ResolvedStyle.h"
 #include "UI/Controls/Mount.h"
@@ -19,13 +20,16 @@ using namespace GameEngine::UILayout;
 
 namespace {
 
+// The styles here hold px only, so no length reads the viewport.
+const Mathematics::Vector2 kNoViewportUnits{};
+
 YGNodeRef MakeFixed(float w, float h)
 {
     YGNodeRef n = YogaAdapter::CreateNode();
     ResolvedStyle s;
     s.Layout.Width = StyleLength::Px(w);
     s.Layout.Height = StyleLength::Px(h);
-    YogaAdapter::ApplyStyle(n, s);
+    YogaAdapter::ApplyStyle(n, s, kNoViewportUnits);
     return n;
 }
 
@@ -37,7 +41,7 @@ YGNodeRef MakeContainer(float w, float h)
     s.Layout.Height = StyleLength::Px(h);
     s.Layout.FlexDirection = FlexDirection::Row;
     s.Layout.HasFlexDirection = true;
-    YogaAdapter::ApplyStyle(n, s);
+    YogaAdapter::ApplyStyle(n, s, kNoViewportUnits);
     return n;
 }
 

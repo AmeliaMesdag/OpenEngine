@@ -126,10 +126,6 @@ class MaterialSystem
     // order (adjacent in the current spine at :945 / :950-951). Ends by pumping
     // the project material warm-up.
     void BeginFrame();
-    // The active render pipeline blueprint (RenderServices-owned) just swapped:
-    // drain in-flight PSO prewarm before the old nodes are destroyed and drop
-    // stale per-material variant entries. Both are material-cache concerns.
-    void OnActiveRenderPipelineChanged();
     // A different project was just opened in this process. Every material-side
     // cache keyed on the old project's paths has to go; the reasons differ per
     // cache and are stated at the definition.

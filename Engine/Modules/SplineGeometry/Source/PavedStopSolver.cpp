@@ -8,19 +8,8 @@ namespace GameEngine::SplineGeometry
 
 PavedStopSolver::PavedStopSolver(std::span<const PavedArm> arms, std::span<const uint8> armValid,
                                  std::vector<PavedTaggedRing> outlines)
-    : m_Arms(arms), m_ArmValid(armValid), m_Outlines(std::move(outlines))
+    : m_Arms(arms), m_ArmValid(armValid), m_Outlines(std::move(outlines)), m_Paths(BuildPavedArmPaths(arms))
 {
-    m_Paths.reserve(arms.size());
-    for (const PavedArm& arm : arms)
-        m_Paths.emplace_back(arm);
-    for (uint32 arm = 0; arm < arms.size(); ++arm)
-    {
-        for (uint32 other = 0; other < arms.size(); ++other)
-        {
-            if (other != arm && arms[other].Road == arms[arm].Road)
-                m_Paths[arm].ShareNodeSection(m_Paths[other]);
-        }
-    }
     m_LastOverlap.assign(arms.size(), 0);
     m_Stops.assign(arms.size(), 0.0f);
     m_Ribbons.resize(arms.size());
@@ -55,6 +44,14 @@ void PavedStopSolver::Solve()
             moved = true;
         }
     }
+}
+
+void PavedStopSolver::EndAtMouth(uint32 arm, float32 throat, bool bothSides)
+{
+    const PavedArmPath& path = m_Paths[arm];
+    const float32 overlap = path.GetAlong(m_LastOverlap[arm]);
+    const float32 stop = bothSides ? std::max(throat, overlap) : std::max(m_Stops[arm], throat);
+    SetStop(arm, path.StopClearOfTurns(stop));
 }
 
 void PavedStopSolver::SetStop(uint32 arm, float32 stop)

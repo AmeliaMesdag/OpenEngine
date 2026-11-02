@@ -62,7 +62,7 @@ void StyleSwatch(UIElement* swatch, uint32_t argb)
     if (!swatch)
         return;
 
-    swatch->Overrides()
+    swatch->Style()
         .Set(Style::Width, StyleLength::Px(kSwatchSize))
         .Set(Style::Height, StyleLength::Px(kSwatchSize))
         .Set(Style::MinWidth, StyleLength::Px(kSwatchSize))
@@ -103,7 +103,7 @@ void RegisterMeasureInspector()
             colorLabel->AddClass("inspector-label-no-drag");
 
         UIElement* fieldContainer = InspectorUI::AddFieldContainer(row);
-        fieldContainer->Overrides()
+        fieldContainer->Style()
             .Set(Style::FlexDir, FlexDirection::Row)
             .Set(Style::AlignItems, AlignItems::Center)
             .Set(Style::Gap, StyleLength::Px(6.0f));
@@ -118,7 +118,7 @@ void RegisterMeasureInspector()
         auto rgbLabel = std::make_unique<Label>();
         rgbLabel->AddClass("inspector-text");
         rgbLabel->SetText(FormatRgb(measure->Color));
-        rgbLabel->Overrides().Set(Style::Cursor, CursorStyle::Pointer);
+        rgbLabel->Style().Set(Style::Cursor, CursorStyle::Pointer);
         Label* rgbLabelRaw = rgbLabel.get();
         fieldContainer->AddChild(std::move(rgbLabel));
 

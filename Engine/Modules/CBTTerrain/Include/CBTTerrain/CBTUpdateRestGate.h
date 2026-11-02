@@ -23,9 +23,15 @@ struct CBTUpdateActivity
     int32_t MergeServed = 0;        // kWQSimplifyCounter: merge groups PrepareSimplify built
     int32_t PressureStep = 0;       // kWQPressureStep: planar pool-pressure scale step
     int32_t OffFrustumKeepStep = 0; // kWQOffFrustumKeepStep
+    int32_t OffFrustumKeepFloor = 0; // kWQOffFrustumKeepFloor: the rest's keep floor (>= 0) or its phase
     int32_t VertexEvalCount = 0;    // kWQVertexEvalCounter: bisectors a gated VertexEval re-evaluated
     int32_t UnresolvedPageSamples = 0; // kWQUnresolvedPageSamples: page samples no resident page answered
 };
+
+// True while the planar keep step's rest search has a step left to take: the last update moved and a probe
+// can start, a probe has no measured tree, or the keep step sits above its floor. Such a tree is not at rest
+// even when one update split and merged nothing.
+bool CBTKeepSearchOpen(int32_t offFrustumKeepStep, int32_t offFrustumKeepFloor);
 
 class CBTUpdateRestGate
 {

@@ -421,6 +421,94 @@ TEST(TextureCookFilter, NormalUsageRenormalizesMips)
     EXPECT_NEAR(mip1[1], 128, 3);
 }
 
+// ── Normal maps: the variance companion ──────────────────────────────────────
+
+// A one-texel checker of two normals tilted +-30 degrees about X: every 2x2 footprint averages
+// to length L = cos(30) = 0.866, so sigma = sqrt((1 - L) / L) = 0.393 stores 100.
+std::vector<uint8> MakeNormalChecker(uint32 size)
+{
+    std::vector<uint8> rgba(static_cast<size_t>(size) * size * 4);
+    for (uint32 y = 0; y < size; ++y)
+        for (uint32 x = 0; x < size; ++x)
+        {
+            uint8* px = rgba.data() + (static_cast<size_t>(y) * size + x) * 4;
+            px[0] = 128;
+            px[1] = ((x + y) & 1u) ? 64 : 191;
+            px[2] = 238;
+            px[3] = 255;
+        }
+    return rgba;
+}
+
+// Only an Auto-compressed normal map with mips gets a companion; a hand-set BC5 reads zero
+// variance, as does any texture of another type. The companion re-keys the artifact.
+TEST(TextureCookNormalVariance, OnlyAnAutoNormalMapWithMipsHasACompanion)
+{
+    TextureCookInputs inputs = MakeInputs(TextureCookUsage::Normal, TextureColorSpace::Linear);
+    EXPECT_TRUE(HasNormalVarianceCompanion(inputs, TextureCookOutput::BC5));
+    EXPECT_FALSE(HasNormalVarianceCompanion(inputs, TextureCookOutput::Uncompressed));
+    TextureCookInputs explicitBc5 = inputs;
+    explicitBc5.Settings.Compression = TextureCookCompression::BC5;
+    EXPECT_FALSE(HasNormalVarianceCompanion(explicitBc5, TextureCookOutput::BC5));
+    EXPECT_NE(ComputeTextureCookConfigHash(inputs, TextureCookOutput::BC5),
+              ComputeTextureCookConfigHash(explicitBc5, TextureCookOutput::BC5));
+    TextureCookInputs noMips = inputs;
+    noMips.Settings.MipsEnabled = false;
+    EXPECT_FALSE(HasNormalVarianceCompanion(noMips, TextureCookOutput::BC5));
+    EXPECT_FALSE(HasNormalVarianceCompanion(MakeInputs(TextureCookUsage::Mask, TextureColorSpace::Linear),
+                                            TextureCookOutput::BC5));
+}
+
+// The cook writes a BC4 companion at half the normal map's extent (the resolution rule: normal
+// mip 0 has zero variance, so level j holds mip j + 1). The checker shortens at mip 1 and 2.
+TEST(TextureCookNormalVariance, ANormalMapCooksAHalfResolutionBc4CompanionThatShortensAtMip1And2)
+{
+    if (!IsTextureCookEncoderAvailable())
+        GTEST_SKIP() << "no BC encoder compiled in";
+
+    constexpr uint32 kSize = 16;
+    const std::vector<uint8> tga = MakeTga(kSize, kSize, MakeNormalChecker(kSize));
+    const TextureCookInputs inputs = MakeInputs(TextureCookUsage::Normal, TextureColorSpace::Linear);
+    const TextureCookOutput output = ResolveTextureCookOutput(inputs.Settings, false, true, true);
+    ASSERT_EQ(output, TextureCookOutput::BC5);
+
+    std::vector<uint8> cooked;
+    std::vector<uint8> companionBytes;
+    std::string error;
+    ASSERT_TRUE(CookTexture(tga.data(), tga.size(), "checker.tga", ".tga", inputs, output, cooked, error, {},
+                            nullptr, &companionBytes))
+        << error;
+    ASSERT_FALSE(companionBytes.empty()) << "a normal map must cook a variance companion";
+    TextureAsset parent(GUID::Null(), "parent.ktx2");
+    ASSERT_TRUE(LoadCooked(cooked, parent));
+    EXPECT_EQ(parent.GetFormat(), TextureFormat::BC5) << "the direction stays BC5";
+    TextureAsset companion(GUID::Null(), "companion.ktx2");
+    ASSERT_TRUE(LoadCooked(companionBytes, companion));
+    ASSERT_EQ(companion.GetFormat(), TextureFormat::BC4);
+    EXPECT_EQ(companion.GetWidth(), kSize / 2);
+    EXPECT_EQ(companion.GetHeight(), kSize / 2);
+    const auto& chain = companion.GetMipChain();
+    ASSERT_EQ(chain.size(), parent.GetMipChain().size() - 1);
+    for (uint32 level = 0; level < 2; ++level)
+    {
+        const uint32 extent = (kSize / 2) >> level;
+        std::vector<uint8> decoded;
+        ASSERT_TRUE(DecodeBlockPayloadRGBA8(TextureFormat::BC4, extent, extent,
+                                            companion.GetPixelData() + chain[level].Offset, chain[level].Size,
+                                            decoded));
+        for (uint32 texel = 0; texel < extent * extent; ++texel)
+            ASSERT_NEAR(decoded[texel * 4], 100, 2) << "normal mip " << level + 1 << " texel " << texel;
+    }
+
+    std::vector<uint8> noCompanion;
+    TextureCookInputs explicitBc5 = inputs;
+    explicitBc5.Settings.Compression = TextureCookCompression::BC5;
+    ASSERT_TRUE(CookTexture(tga.data(), tga.size(), "checker.tga", ".tga", explicitBc5, output, cooked, error, {},
+                            nullptr, &noCompanion))
+        << error;
+    EXPECT_TRUE(noCompanion.empty()) << "a hand-set BC5 has no companion";
+}
+
 // ── Mip-chain golden ─────────────────────────────────────────────────────────
 
 namespace

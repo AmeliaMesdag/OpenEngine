@@ -1420,11 +1420,9 @@ button.flare-element-header-menu:focus,
 	border-left: 3px solid var(--ui_color_prefab);
 }
 
-/* A faded section reads as a component the entity does not have. Its edge and its override pill are muted,
-   so it does not read as one bar with the edge of an overridden header above it. */
+/* A faded section reads as a component the entity does not have: its title and its icon are muted. Its
+   override edge and pill keep the prefab color until the change is applied or reverted. */
 .inspector-section-faded {
-	--inspector-override-edge-color: var(--ui_color_text_secondary);
-	--inspector-override-badge-fill: var(--ui_color_prefab_background_muted);
 	--inspector-section-title: var(--ui_color_text_secondary);
 	--inspector-section-title-hover: var(--ui_color_text_secondary);
 }
@@ -1793,6 +1791,12 @@ button.flare-element-header-menu:focus,
 	align-items: stretch;
 	gap: 0;
 	width: 100%;
+}
+
+/* A picture choice row (InspectorUI::AddPictureChoiceRow): the label stays at the top of the tiles.
+   The field's own sheet is attached to the field's subtree, so the row rule lives here. */
+.inspector-section:not(.inspector-section-transform) .inspector-section-body .inspector-row.picture-choice-row {
+	align-items: flex-start;
 }
 
 /* A sky day curve row (Sky/SkyDayCurveRow.cpp): the label stays at the top of the tall field,
@@ -2367,13 +2371,6 @@ button.flare-element-header-menu:focus,
 	border: 1px solid rgba(255, 255, 255, 0.42);
 	border-radius: 4px;
 	color: var(--ui_color_text);
-}
-
-.inspector-transition-hint {
-	font-size: 12px;
-	color: var(--ui_color_text_muted, rgba(255, 255, 255, 0.58));
-	padding: 4px 8px 10px 8px;
-	line-height: 1.35;
 }
 
 .inspector-button:hover {
@@ -3162,7 +3159,7 @@ button.inspector-button.inspector-new-material-button,
 	font-size: 12px;
 	font-weight: 600;
 	color: #1e1e1e;
-	background-color: #d7a13b;
+	background-color: var(--inspector-badge-fill, var(--ui_color_warning_badge));
 	flex-shrink: 0;
 	white-space: nowrap;
 	text-align: left;
@@ -3186,7 +3183,7 @@ button.inspector-button.inspector-new-material-button,
 }
 
 /* An override pill draws its text in the color of its row's override edge on a tint of the prefab color,
-   so the pill, the edge and the prefab bar read as one mark. A removed component's faded header mutes both. */
+   so the pill, the edge and the prefab bar read as one mark. */
 .inspector-section-header-badge-override {
 	color: var(--inspector-override-edge-color, var(--ui_color_prefab));
 	background-color: var(--inspector-override-badge-fill, var(--ui_color_prefab_background));

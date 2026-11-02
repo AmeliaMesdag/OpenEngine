@@ -198,6 +198,13 @@ public:
         const std::filesystem::path& engineRuntimeDir,
         const std::vector<std::filesystem::path>& crossFlavorVcpkgBinDirs, const std::filesystem::path& editorDir);
 
+    /// The Player executable that the generated Player project built for the target `platformName`
+    /// in `playerBuildDir`: under `<buildConfiguration>/` for a multi-config generator, else in
+    /// the directory itself. Empty when the build left none.
+    static std::filesystem::path FindCompiledPlayer(const std::filesystem::path& playerBuildDir,
+                                                    std::string_view buildConfiguration,
+                                                    std::string_view platformName);
+
     /// Request cancellation of the current build. Safe to call from any thread.
     void RequestCancel();
     bool IsCancelled() const;

@@ -3,6 +3,8 @@
 #include "Engine/Rendering/ExposureReadbackFeature.h"
 #include "Engine/Rendering/Pipeline/PipelineResourceNames.h"
 #include "Engine/Rendering/Pipeline/RenderPipelineNodes.h"
+#include "Rendering/Core/ViewParamsLayout.h"
+#include "Rendering/Passes/MsaaColorResolvePass.h"
 
 #include <string>
 
@@ -16,6 +18,18 @@ namespace
 // Persistent (never transient: pool buffers alias across frames and the state is read across
 // frames), one per view.
 constexpr const char* kImportedHistoryPrefix = "Pipeline.AutoExposure.History.View";
+
+Rendering::RenderGraph::RGFullscreenBufferInput BufferInputOrPlaceholder(const PipelineBufferBindingRG& binding,
+                                                                        Rendering::BufferHandle placeholder,
+                                                                        uint64_t size)
+{
+    if (binding.IsValid())
+        return binding.AsFullscreenInput();
+    Rendering::RenderGraph::RGFullscreenBufferInput input{};
+    input.Buffer = placeholder;
+    input.Size = size;
+    return input;
+}
 } // namespace
 
 PipelineBufferBindingRG ResolveViewExposureHistory(ViewDeclare& d)
@@ -47,5 +61,15 @@ PipelineBufferBindingRG ResolveViewExposureHistory(ViewDeclare& d)
     binding.Graph = buffer;
     d.PublishBuffer(Names::Res::ExposureHistory, binding);
     return binding;
+}
+
+Rendering::Passes::MsaaResolveViewBuffers MsaaResolveViewBuffersFor(const PipelineBufferBindingRG& viewParams,
+                                                                    const PipelineBufferBindingRG& exposureHistory,
+                                                                    Rendering::BufferHandle placeholder)
+{
+    Rendering::Passes::MsaaResolveViewBuffers view{};
+    view.ViewParams = BufferInputOrPlaceholder(viewParams, placeholder, sizeof(Rendering::ViewParamsUBO));
+    view.ExposureHistory = BufferInputOrPlaceholder(exposureHistory, placeholder, kViewExposureHistoryBytes);
+    return view;
 }
 } // namespace GameEngine::Engine::Renderer::Pipeline

@@ -251,10 +251,7 @@ std::optional<Engine::Renderer::Camera> GameViewController::PrepareView(
     const Engine::Renderer::CameraAspectResolution aspectResolution =
         Engine::Renderer::ResolveCameraAspect(activeCam->params, w, h);
     const float bg = aspectResolution.letterbox.active ? 0.0f : 0.02f;
-    clear.clearColorValue[0] = bg;
-    clear.clearColorValue[1] = bg;
-    clear.clearColorValue[2] = bg;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue = ColorLinear(bg, bg, bg, 1.0f);
     clear.clearDepth = true;
     clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
     rs->Views().SetViewClearConfig(m_ViewId, clear);
@@ -377,10 +374,7 @@ bool GameViewController::DeclareTargetsRG(Rendering::RenderGraph::RGFrame& frame
     Rendering::ViewClearConfig clear{};
     clear.clearColor = true;
     const float bg = aspectResolution.letterbox.active ? 0.0f : 0.02f;
-    clear.clearColorValue[0] = bg;
-    clear.clearColorValue[1] = bg;
-    clear.clearColorValue[2] = bg;
-    clear.clearColorValue[3] = 1.0f;
+    clear.clearColorValue = ColorLinear(bg, bg, bg, 1.0f);
     clear.clearDepth = true;
     clear.clearDepthValue = Rendering::ReverseZ::kClearFar;
     rs->Views().SetViewClearConfig(m_ViewId, clear);

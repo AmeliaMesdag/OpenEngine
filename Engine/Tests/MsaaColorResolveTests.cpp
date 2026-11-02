@@ -2,6 +2,8 @@
 
 #include "TestDeviceHelper.h"
 #include "AssetCore/GUID.h"
+#include "Components/Rendering/Look.h"
+#include "Engine/Rendering/ExposureReadbackFeature.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/ViewReadbackUtils.h"
 #include "Mathematics/HalfFloat.h"
@@ -11,11 +13,16 @@
 #include "Rendering/Core/Pipeline/PipelineDescTranslator.h"
 #include "Rendering/Core/RenderGraph/RGFrame.h"
 #include "Rendering/Core/RenderGraph/RGFullscreen.h"
+#include "Rendering/Core/ViewParamsLayout.h"
 #include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/Materials/Shader/ShaderLayoutShape.h"
+#include "Rendering/Passes/MsaaColorResolvePass.h"
+#include "Rendering/Passes/TonemapPass.h"
 #include "Rendering/ShaderCache/ShaderPackageIO.h"
+#include "Types/Color.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -33,10 +40,75 @@ constexpr uint32_t kForcedSamples = 4; // every Apple GPU and Mesa lavapipe stop
 constexpr float kBright = 25.0f; // the helmet's white metal face against the sky, in sky units
 constexpr float kDim = 1.0f;
 
-// The curve the resolve's weight inverts: x / (1 + x) on a grey value.
+// The Neutral look on a grey (tonemap.frag's TonemapNeutral): the curve the resolve inverts for a view
+// with no look of its own, at exposure 1.
 float Tonemap(float x)
 {
+    const float v = x < 0.08f ? 6.25f * x * x : x - 0.04f;
+    return v < 0.76f ? v : 1.0f - 0.0576f / (v - 0.52f);
+}
+
+// The Karis curve x / (1 + x) on a grey: the curve the ocean's copy of the color inverts.
+float KarisTonemap(float x)
+{
     return x / (1.0f + x);
+}
+
+// The Filmic look on a grey: the ACES 2 tonescale at the SDR tier, with tsFScale and tsSDiv x 2^(1/3) from tier 0
+// of TonemapAces2Tables.h (TonemapHdrHeadroomTests checks the curve against tonemap.frag).
+float FilmicTonemap(float x)
+{
+    const float f = 1.04710376f * std::pow(x / (x + 0.730092108f * std::cbrt(2.0f)), 1.15f);
+    return std::min(f * f / (f + 0.04f), 1.0f);
+}
+
+// The Photographic look on a grey: tonemap.frag's AgX sigmoid. The inset and outset matrices keep a grey grey.
+float PhotographicTonemap(float x)
+{
+    const float a = std::clamp((std::log2(std::max(x, 1e-10f)) + 12.47393f) / (4.026069f + 12.47393f), 0.0f, 1.0f);
+    const float a2 = a * a;
+    const float a4 = a2 * a2;
+    const float sigmoid = 15.5f * a4 * a2 - 40.14f * a4 * a + 31.96f * a4 - 6.868f * a2 * a + 0.4298f * a2 +
+                          0.1191f * a - 0.00232f;
+    return std::pow(std::max(sigmoid, 0.0f), 2.2f);
+}
+
+// tonemap.frag's look values: Components::Look and the no-look arm.
+enum class Look : int32_t
+{
+    Neutral = static_cast<int32_t>(Components::Look::Neutral),
+    Filmic = static_cast<int32_t>(Components::Look::Filmic),
+    Photographic = static_cast<int32_t>(Components::Look::Photographic),
+    None = Passes::kTonemapNoLookArm,
+};
+
+// The display light a look shows for a grey of exposed luminance x.
+float LookTonemap(Look look, float x)
+{
+    switch (look)
+    {
+    case Look::Filmic:
+        return FilmicTonemap(x);
+    case Look::Photographic:
+        return PhotographicTonemap(x);
+    case Look::None:
+        return x;
+    default:
+        return Tonemap(x);
+    }
+}
+
+// sRGB-encoded 8-bit display levels of display-linear light in [0, 1].
+float EncodedLevels(float light)
+{
+    const float v = std::clamp(light, 0.0f, 1.0f);
+    return 255.0f * (v <= 0.0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f);
+}
+
+// Rec.709 luma, the luminance the resolve weights by.
+float Luma(const ColorLinear& color)
+{
+    return 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
 }
 
 TextureDesc ColorDesc(uint32_t samples, uint32_t extraUsage)
@@ -60,6 +132,13 @@ float IdealBlend(uint32_t samples)
     return (Tonemap(kBright) + static_cast<float>(samples - 1) * Tonemap(kDim)) / static_cast<float>(samples);
 }
 
+// The same blend under the Karis curve.
+float IdealKarisBlend(uint32_t samples)
+{
+    return (KarisTonemap(kBright) + static_cast<float>(samples - 1) * KarisTonemap(kDim)) /
+           static_cast<float>(samples);
+}
+
 // The plain average of the samples of a pixel with one sample at kBright and the rest at kDim.
 float PlainAverage(uint32_t samples)
 {
@@ -72,10 +151,10 @@ float PlainAverageTonemapped(uint32_t samples)
     return Tonemap(PlainAverage(samples));
 }
 
-// A full-screen draw that writes kBright into sample 0 of each pixel in the left half (gl_SampleMask = 1)
-// over a target cleared to kDim: a left-half pixel is one bright sample in `samples`, a right-half pixel
-// is flat.
-PipelineHandle CreateBrightSamplePipeline(IDevice& device, uint32_t samples, std::string& why)
+// A full-screen draw that writes `bright` into sample 0 of each pixel in the left half (gl_SampleMask = 1)
+// over a cleared target: a left-half pixel is one bright sample in `samples`, a right-half pixel is flat.
+PipelineHandle CreateBrightSamplePipeline(IDevice& device, uint32_t samples, const ColorLinear& bright,
+                                          std::string& why)
 {
     namespace fs = std::filesystem;
     const fs::path root = fs::temp_directory_path() / ("ge_msaa_resolve_probe_" + GUID::Generate().ToString());
@@ -97,9 +176,12 @@ void main()
     fragment.stage = "fs";
     fragment.sourcePath = root / "msaa_resolve_probe.frag";
     fragment.inlineSource = "#version 450\nlayout(location = 0) out vec4 oColor;\nvoid main()\n{\n"
-                            "    if (gl_FragCoord.x >= " + std::to_string(kSize / 2) + ".0)\n        discard;\n"
-                            "    gl_SampleMask[0] = 1;\n"
-                            "    oColor = vec4(vec3(" + std::to_string(kBright) + "), 1.0);\n}\n";
+                            "    if (gl_FragCoord.x >= " +
+                            std::to_string(kSize / 2) + ".0)\n        discard;\n"
+                                                        "    gl_SampleMask[0] = 1;\n"
+                                                        "    oColor = vec4(" +
+                            std::to_string(bright.r) + ", " + std::to_string(bright.g) +
+                            ", " + std::to_string(bright.b) + ", 1.0);\n}\n";
     request.stages = {vertex, fragment};
     ShaderProgramCompileResult result{};
     std::string error;
@@ -124,12 +206,20 @@ void main()
     return device.CreatePipeline(desc);
 }
 
-float RedAt(const ViewReadbackResult& image, uint32_t x, uint32_t y)
+float ChannelAt(const ViewReadbackResult& image, uint32_t x, uint32_t y, uint32_t channel)
 {
     constexpr size_t kTexelBytes = 4 * sizeof(uint16_t);
     uint16_t bits = 0;
-    std::memcpy(&bits, image.pixels.data() + (static_cast<size_t>(y) * image.width + x) * kTexelBytes, sizeof(bits));
+    std::memcpy(&bits,
+                image.pixels.data() + (static_cast<size_t>(y) * image.width + x) * kTexelBytes +
+                    channel * sizeof(uint16_t),
+                sizeof(bits));
     return Mathematics::HalfToFloat(bits);
+}
+
+float RedAt(const ViewReadbackResult& image, uint32_t x, uint32_t y)
+{
+    return ChannelAt(image, x, y, 0);
 }
 
 // One view of an empty scene with a multisampled color and its resolve, and the passes the tests declare
@@ -153,12 +243,9 @@ class MsaaColorResolveTest : public testing::TestWithParam<uint32_t>
         ASSERT_TRUE(m_Services->Initialize(m_Device.get()));
         const CameraId camera = m_Services->Views().AllocateCamera("MsaaResolveCam");
         CameraData cameraData{};
-        for (int i = 0; i < 16; i += 5)
-        {
-            cameraData.view[i] = 1.0f;
-            cameraData.proj[i] = 1.0f;
-            cameraData.viewProj[i] = 1.0f;
-        }
+        cameraData.view = Mathematics::Matrix4x4::Identity();
+        cameraData.proj = Mathematics::Matrix4x4::Identity();
+        cameraData.viewProj = Mathematics::Matrix4x4::Identity();
         m_Services->Views().SetCameraData(camera, cameraData);
         m_View = m_Services->Views().AllocateView("MsaaResolveView", camera);
         ViewClearConfig clear{};
@@ -166,7 +253,7 @@ class MsaaColorResolveTest : public testing::TestWithParam<uint32_t>
         m_Services->Views().SetViewTargets(m_View, 0, 0, 0, clear);
 
         std::string why;
-        m_Probe = CreateBrightSamplePipeline(*m_Device, m_Samples, why);
+        m_Probe = CreateBrightSamplePipeline(*m_Device, m_Samples, ColorLinear(kBright, kBright, kBright), why);
         ASSERT_TRUE(m_Probe.IsValid()) << why;
         m_Persistent = std::make_unique<RenderGraph::RGResourcePool>(m_Device.get());
         m_Transient = std::make_unique<RenderGraph::RGTransientPool>(m_Device.get());
@@ -193,6 +280,8 @@ class MsaaColorResolveTest : public testing::TestWithParam<uint32_t>
         m_Persistent.reset();
         if (m_Probe.IsValid())
             m_Device->DestroyPipeline(m_Probe);
+        if (m_ColoredProbe.IsValid())
+            m_Device->DestroyPipeline(m_ColoredProbe);
         if (m_OceanSampler.IsValid())
             m_Device->DestroySampler(m_OceanSampler);
         if (m_Services)
@@ -204,10 +293,15 @@ class MsaaColorResolveTest : public testing::TestWithParam<uint32_t>
     // sample 0 of each left-half pixel.
     void DeclareSamples(float value, bool brightSample)
     {
+        DeclareSamplesWith(value, brightSample ? m_Probe : PipelineHandle{});
+    }
+
+    // Clears every sample of the color to `value`, then draws `probe` when it is valid.
+    void DeclareSamplesWith(float value, PipelineHandle probe)
+    {
         const RenderGraph::RGTexture color = m_Color;
-        const PipelineHandle probe = brightSample ? m_Probe : PipelineHandle{};
         m_Frame->AddPass(
-            brightSample ? "MsaaResolve.BrightSample" : "MsaaResolve.Clear", PassPhase::kWorldRender,
+            probe.IsValid() ? "MsaaResolve.BrightSample" : "MsaaResolve.Clear", PassPhase::kWorldRender,
             [color, value](RenderGraph::RGPassBuilder& p)
             {
                 RenderGraph::RGAttachmentOps ops{};
@@ -330,6 +424,7 @@ class MsaaColorResolveTest : public testing::TestWithParam<uint32_t>
     uint32_t m_Samples = 0;
     ViewId m_View{};
     PipelineHandle m_Probe{};
+    PipelineHandle m_ColoredProbe{};
     SamplerHandle m_OceanSampler{};
     RenderGraph::RGTexture m_Color{};
     RenderGraph::RGTexture m_Resolve{};
@@ -343,9 +438,9 @@ std::string SampleCapName(const testing::TestParamInfo<uint32_t>& info)
 
 } // namespace
 
-// The world pass resolve on the path every view takes (RenderServices::AddWorldPassForView). One sample
-// at 25 and the rest at 1 must tonemap to the blend of the tonemapped samples (0.558 at 8x, 0.615 at
-// 4x), not to the tonemap of the plain average (0.80 at 8x, 0.875 at 4x).
+// The world pass resolve on the path every view takes (RenderServices::AddWorldPassForView), with no pipeline:
+// the Neutral look at exposure 1. One sample at 25 and the rest at 1 tonemap to the blend of the tonemapped
+// samples (0.885 at 8x, 0.901 at 4x), not to the tonemap of the plain average (0.983 at 8x, 0.990 at 4x).
 TEST_P(MsaaColorResolveTest, OneBrightSampleResolvesToTheTonemappedBlend)
 {
     DeclareSamples(kDim, true);
@@ -406,8 +501,7 @@ TEST_P(MsaaColorResolveTest, AResolveReadBeforeTheNextOneRunsAndTheLastOneAlways
     EXPECT_EQ(OverwrittenPassCount(), 1u) << "the unread resolve is culled";
 }
 
-// The ocean's copy of the multisampled color blends like the scene color resolve, so refraction and
-// the underwater view see the same edges.
+// The ocean's copy of the multisampled color takes the Karis-weighted mean, the blend under x / (1 + x).
 TEST_P(MsaaColorResolveTest, TheOceanCopyResolvesToTheTonemappedBlend)
 {
     DeclareSamples(kDim, true);
@@ -419,8 +513,100 @@ TEST_P(MsaaColorResolveTest, TheOceanCopyResolvesToTheTonemappedBlend)
     ViewReadbackResult image{};
     ASSERT_TRUE(Read(ticket, image));
     const float edge = RedAt(image, kSize / 4, kSize / 2);
-    EXPECT_NEAR(Tonemap(edge), IdealBlend(m_Samples), 0.01f) << m_Samples << "x resolved " << edge;
+    EXPECT_NEAR(KarisTonemap(edge), IdealKarisBlend(m_Samples), 0.01f) << m_Samples << "x resolved " << edge;
     EXPECT_FLOAT_EQ(RedAt(image, 3 * kSize / 4, kSize / 2), kDim) << "a flat pixel resolves to its value";
+}
+
+// The resolve with a view's own buffers: one colored bright sample over grey samples, each look, E / P = 0.25.
+// The pixel shows the mean display light of its samples, T(E / P * L_out) = mean T(E / P * L_i), with each
+// sample's chromaticity weighted by its light. The Photographic curve is a fit to AgX: its tolerance is wider.
+TEST_P(MsaaColorResolveTest, EachPixelShowsTheMeanLightOfItsSamplesUnderTheViewsLookAndExposure)
+{
+    constexpr ColorLinear kColored(100.0f, 50.0f, 20.0f);
+    constexpr float kGrey = 4.0f;
+    constexpr float kMeteredExposure = 0.5f;
+    constexpr float kPreExposure = 2.0f;
+    constexpr float kScale = kMeteredExposure / kPreExposure;
+    constexpr Look kLooks[] = {Look::Neutral, Look::Filmic, Look::Photographic, Look::None};
+    // In sRGB-encoded 8-bit levels; the fitted curve's error adds to the half-float rounding.
+    constexpr float kLevelTolerance = 0.5f;
+    constexpr float kFittedLevelTolerance = 1.5f;
+    // On each channel of the color divided by its luma.
+    constexpr float kChromaTolerance = 0.005f;
+    constexpr float kFittedChromaTolerance = 0.015f;
+    constexpr float kRelativeTolerance = 2e-3f;
+
+    std::string why;
+    m_ColoredProbe = CreateBrightSamplePipeline(*m_Device, m_Samples, kColored, why);
+    ASSERT_TRUE(m_ColoredProbe.IsValid()) << why;
+    DeclareSamplesWith(kGrey, m_ColoredProbe);
+
+    const auto exposure = m_Frame->AllocUpload<ExposureReadbackFeature::State>();
+    ASSERT_TRUE(exposure.Valid());
+    *exposure.Ptr = {kMeteredExposure, 1u, kPreExposure, kPreExposure};
+    std::shared_ptr<RGReadbackTicket> tickets[std::size(kLooks)];
+    for (size_t lookIndex = 0; lookIndex < std::size(kLooks); ++lookIndex)
+    {
+        const auto viewParams = m_Frame->AllocUpload<ViewParamsUBO>();
+        ASSERT_TRUE(viewParams.Valid());
+        *viewParams.Ptr = ViewParamsUBO{};
+        viewParams.Ptr->ge_exposureParams[0] = 9.0f; // the static scale, which metering overrides
+        viewParams.Ptr->ge_exposureParams[1] = 1.0f;
+        viewParams.Ptr->ge_exposureParams[2] = static_cast<float>(kLooks[lookIndex]);
+        Passes::MsaaResolveViewBuffers view{};
+        view.ViewParams.Buffer = viewParams.Buffer;
+        view.ViewParams.Offset = viewParams.Offset;
+        view.ViewParams.Size = sizeof(ViewParamsUBO);
+        view.ExposureHistory.Buffer = exposure.Buffer;
+        view.ExposureHistory.Offset = exposure.Offset;
+        view.ExposureHistory.Size = sizeof(ExposureReadbackFeature::State);
+        const std::string name = "MsaaResolve.Look" + std::to_string(lookIndex);
+        const RenderGraph::RGTexture resolved = m_Frame->ImportPersistentTexture(
+            (name + ".Target").c_str(), ColorDesc(1, static_cast<uint32_t>(TextureUsage::TransferSrc)));
+        ASSERT_TRUE(Passes::AddMsaaColorResolvePassRG(*m_Frame, m_Color, resolved, {}, view, name.c_str()).IsValid());
+        tickets[lookIndex] =
+            RequestTextureReadbackRG(m_Device.get(), *m_Frame, resolved, (name + ".Readback").c_str());
+        m_Frame->MarkOutput(resolved);
+    }
+    Execute();
+
+    const float coloredLuma = Luma(kColored);
+    const float samples = static_cast<float>(m_Samples);
+    for (size_t lookIndex = 0; lookIndex < std::size(kLooks); ++lookIndex)
+    {
+        const Look look = kLooks[lookIndex];
+        ViewReadbackResult image{};
+        ASSERT_TRUE(Read(tickets[lookIndex], image)) << "look " << static_cast<int>(look);
+        constexpr uint32_t kEdgeX = kSize / 4;
+        constexpr uint32_t kEdgeY = kSize / 2;
+        const ColorLinear resolved(ChannelAt(image, kEdgeX, kEdgeY, 0), ChannelAt(image, kEdgeX, kEdgeY, 1),
+                                   ChannelAt(image, kEdgeX, kEdgeY, 2));
+        const float luma = Luma(resolved);
+        const float coloredLight = LookTonemap(look, kScale * coloredLuma);
+        const float greyLight = LookTonemap(look, kScale * kGrey);
+        const float idealLight = (coloredLight + (samples - 1.0f) * greyLight) / samples;
+        const float shownLight = LookTonemap(look, kScale * luma);
+        if (look == Look::None)
+            EXPECT_NEAR(shownLight, idealLight, kRelativeTolerance * idealLight)
+                << m_Samples << "x, no look: the plain mean";
+        else
+            EXPECT_NEAR(EncodedLevels(shownLight), EncodedLevels(idealLight),
+                        look == Look::Photographic ? kFittedLevelTolerance : kLevelTolerance)
+                << m_Samples << "x, look " << static_cast<int>(look) << ": shows " << shownLight
+                << ", the samples' mean " << idealLight;
+        const float chromaTolerance = look == Look::Photographic ? kFittedChromaTolerance : kChromaTolerance;
+        const float coloredChannels[] = {kColored.r, kColored.g, kColored.b};
+        const float resolvedChannels[] = {resolved.r, resolved.g, resolved.b};
+        for (size_t channel = 0; channel < std::size(coloredChannels); ++channel)
+        {
+            const float idealChroma =
+                (coloredLight * coloredChannels[channel] / coloredLuma + (samples - 1.0f) * greyLight) /
+                (coloredLight + (samples - 1.0f) * greyLight);
+            EXPECT_NEAR(resolvedChannels[channel] / luma, idealChroma, chromaTolerance)
+                << m_Samples << "x, look " << static_cast<int>(look) << ", channel " << channel;
+        }
+        EXPECT_FLOAT_EQ(RedAt(image, 3 * kSize / 4, kSize / 2), kGrey) << "a flat pixel resolves to its value";
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(SampleCaps, MsaaColorResolveTest, testing::Values(kMaxSamples, kForcedSamples), SampleCapName);

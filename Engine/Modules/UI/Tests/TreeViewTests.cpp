@@ -107,7 +107,7 @@ TEST(TreeViewTests, ASlowSecondClickOnTheSoleSelectionRequestsRename)
     tree->SetSelectionModel(&selection);
     tree->SetSelectOnMouseUp(true);
     tree->SetDragPayloadBuilder([](TreeId) { return UI::Interaction::DragPayload{}; });
-    tree->Overrides().Set(Style::Width, StyleLength::Px(240.0f)).Set(Style::Height, StyleLength::Px(200.0f));
+    tree->Style().Set(Style::Width, StyleLength::Px(240.0f)).Set(Style::Height, StyleLength::Px(200.0f));
     // The callbacks in the order they run: 'S' for a selection sent, 'R' for a rename request.
     std::string calls;
     std::vector<TreeId> renameRequests;

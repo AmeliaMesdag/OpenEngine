@@ -260,6 +260,10 @@ void RenderServices::BeginWorldDrawFrame()
     m_WorldBeginFrameIndex = frameIdx;
     m_WorldDrawListsBuiltFrameIndex = 0xFFFFFFFFFFFFFFFFull;
     m_WorldSubmissionCountThisFrame.store(0, std::memory_order_relaxed);
+    // The sort bracket of this app frame. BuildWorldBatchKeys writes it when it runs,
+    // so a frame that builds no keys reports zero cost, not the last frame's value.
+    m_RenderTimelineStats.SortMs = 0.0;
+    m_RenderTimelineStats.SortViewCount = 0;
     // Rebuilt from this frame's submissions; a world that stops submitting
     // deforming content must stop forcing its caches to recompute.
     m_AnimatedVertexModifierWorlds.clear();

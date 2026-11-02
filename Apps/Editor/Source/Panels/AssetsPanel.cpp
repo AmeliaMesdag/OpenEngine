@@ -162,7 +162,7 @@ void SetAssetsVirtualizedViewActive(UIElement* view, bool active)
     if (!view)
         return;
 
-    view->Overrides()
+    view->Style()
         .Set(Style::Display, active ? DisplayMode::Flex : DisplayMode::None)
         .Set(Style::FlexGrow, active ? 1.0f : 0.0f)
         .Set(Style::MinWidth, StyleLength::Px(0.0f))
@@ -203,7 +203,7 @@ AssetsPanel::AssetsPanel()
     m_LeftPane = leftPane.get();
     leftPane->AddClass("pane");
     leftPane->AddClass("assets-left-pane");
-    leftPane->Overrides().Set(Style::MarginRight, StyleLength::Px(kAssetsPanelLeftPaneMarginRightPx));
+    leftPane->Style().Set(Style::MarginRight, StyleLength::Px(kAssetsPanelLeftPaneMarginRightPx));
     {
         auto tree = std::make_unique<TreeView>();
         m_TreeView = tree.get();
@@ -274,7 +274,7 @@ AssetsPanel::AssetsPanel()
         auto viewsContainer = std::make_unique<UIElement>();
         viewsContainer->AddClass("assets-views-container");
         viewsContainer->SetId("assets-views-container");
-        viewsContainer->Overrides()
+        viewsContainer->Style()
             .Set(Style::Display, DisplayMode::Flex)
             .Set(Style::FlexDir, FlexDirection::Column)
             .Set(Style::Position, PositionType::Relative)
@@ -288,7 +288,7 @@ AssetsPanel::AssetsPanel()
         m_GridView->SetId("assets-grid");
         m_GridView->AddClass("grid");
         m_GridView->SetIconSizeStep(kGridIconSizeStepPx);
-        m_GridView->Overrides()
+        m_GridView->Style()
             .Set(Style::MinWidth, StyleLength::Px(0.0f))
             .Set(Style::MinHeight, StyleLength::Px(0.0f))
             .Set(Style::Display, DisplayMode::Flex);
@@ -333,7 +333,7 @@ AssetsPanel::AssetsPanel()
         // existing keyboard / type-ahead / selection code keeps working against the same ListView.
         auto table = std::make_unique<TableView>();
         m_Table = table.get();
-        m_Table->Overrides()
+        m_Table->Style()
             .Set(Style::MinWidth, StyleLength::Px(0.0f))
             .Set(Style::MinHeight, StyleLength::Px(0.0f))
             .Set(Style::Display, DisplayMode::Flex);
@@ -400,7 +400,7 @@ AssetsPanel::AssetsPanel()
         auto buttonsContainer = std::make_unique<UIElement>();
         m_MainViewToggleContainer = buttonsContainer.get();
         buttonsContainer->AddClass("assets-view-toggle-container");
-        buttonsContainer->Overrides()
+        buttonsContainer->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PositionBottom, StyleLength::Px(20.0f))
             .Set(Style::PositionRight, StyleLength::Px(24.0f))
@@ -461,7 +461,7 @@ AssetsPanel::AssetsPanel()
         auto bottomToolbar = std::make_unique<UIElement>();
         m_ExtraViewToolbar = bottomToolbar.get();
         m_ExtraViewToolbar->AddClass("assets-view-toggle-toolbar");
-        m_ExtraViewToolbar->Overrides()
+        m_ExtraViewToolbar->Style()
             .Set(Style::Display, m_ExtraBottomViewToolbarEnabled ? DisplayMode::Flex : DisplayMode::None);
 
         auto bottomToolbarRight = std::make_unique<UIElement>();
@@ -1004,7 +1004,7 @@ void AssetsPanel::SetTreeIconSize(float px)
             if (!el) return;
             if (el->HasClass("tree-folder-icon"))
             {
-                el->Overrides()
+                el->Style()
                     .Set(Style::Width, StyleLength::Px(m_LastTreeIconSizePx))
                     .Set(Style::Height, StyleLength::Px(m_LastTreeIconSizePx))
                     .Set(Style::MinWidth, StyleLength::Px(m_LastTreeIconSizePx))
@@ -1596,11 +1596,11 @@ void AssetsPanel::SetExtraBottomViewToolbarEnabled(bool enabled)
     m_ExtraBottomViewToolbarEnabled = enabled;
     if (m_MainViewToggleContainer)
     {
-        m_MainViewToggleContainer->Overrides()
+        m_MainViewToggleContainer->Style()
             .Set(Style::Display, enabled ? DisplayMode::None : DisplayMode::Flex);
     }
     if (m_ExtraViewToolbar)
-        m_ExtraViewToolbar->Overrides().Set(Style::Display, enabled ? DisplayMode::Flex : DisplayMode::None);
+        m_ExtraViewToolbar->Style().Set(Style::Display, enabled ? DisplayMode::Flex : DisplayMode::None);
     UpdateViewToggleButtonsPresentation();
     UpdateSearchBarPlacement();
     ApplyAssetsViewsBottomInsetForToolbar();
@@ -1618,7 +1618,7 @@ void AssetsPanel::ApplyBottomToolbarZoomSliderVisibility()
     if (!m_ToolbarGridZoomSlider)
         return;
     const bool show = m_ExtraBottomViewToolbarEnabled && m_BottomToolbarZoomSliderVisible;
-    m_ToolbarGridZoomSlider->Overrides().Set(Style::Display, show ? DisplayMode::Flex : DisplayMode::None);
+    m_ToolbarGridZoomSlider->Style().Set(Style::Display, show ? DisplayMode::Flex : DisplayMode::None);
 }
 
 void AssetsPanel::HandleAssetsToolbarZoomSliderScroll(float scrollY)
@@ -1699,30 +1699,30 @@ void AssetsPanel::ApplyAssetsViewsBottomInsetForToolbar()
         return;
     if (m_ExtraBottomViewToolbarEnabled)
     {
-        m_AssetsViewsContainer->Overrides()
+        m_AssetsViewsContainer->Style()
             .Set(Style::PaddingBottom, StyleLength::Px(kAssetsBottomToolbarHeightPx));
     }
     else
     {
-        m_AssetsViewsContainer->Overrides().Set(Style::PaddingBottom, StyleLength::Px(0.0f));
+        m_AssetsViewsContainer->Style().Set(Style::PaddingBottom, StyleLength::Px(0.0f));
     }
 }
 
 void AssetsPanel::UpdateViewToggleButtonsPresentation()
 {
     if (m_GridViewButton)
-        m_GridViewButton->Overrides().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
+        m_GridViewButton->Style().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
     if (m_ListViewButton)
-        m_ListViewButton->Overrides().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
+        m_ListViewButton->Style().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
     if (m_SingleViewToggleButton)
-        m_SingleViewToggleButton->Overrides().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::Flex : DisplayMode::None);
+        m_SingleViewToggleButton->Style().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::Flex : DisplayMode::None);
 
     if (m_ExtraGridViewButton)
-        m_ExtraGridViewButton->Overrides().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
+        m_ExtraGridViewButton->Style().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
     if (m_ExtraListViewButton)
-        m_ExtraListViewButton->Overrides().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
+        m_ExtraListViewButton->Style().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::None : DisplayMode::Flex);
     if (m_ExtraSingleViewToggleButton)
-        m_ExtraSingleViewToggleButton->Overrides().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::Flex : DisplayMode::None);
+        m_ExtraSingleViewToggleButton->Style().Set(Style::Display, m_SingleViewToggleIconEnabled ? DisplayMode::Flex : DisplayMode::None);
 }
 
 void AssetsPanel::UpdateSingleViewToggleButtons()

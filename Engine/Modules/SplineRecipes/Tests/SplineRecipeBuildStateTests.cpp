@@ -220,6 +220,13 @@ TEST_F(SplineRecipeBuildStateTests, ARecipeIsPendingUntilItsFirstBuildAndBuiltAf
     EXPECT_EQ(StateOf(road), BuildState::Built);
     EXPECT_TRUE(m_Controllers.BuildStates().IsSceneSettled(m_World));
     EXPECT_TRUE(m_Controllers.BuildStates().IsSceneSettledAtLastUpdate(m_World));
+
+    // A reset drops what the last update found: a recipe of the next scene keeps it unsettled.
+    m_Controllers.ReleaseSceneScoped(m_World, &m_RenderServices);
+    m_World.Clear();
+    CreateExtrude(2);
+    EXPECT_FALSE(m_Controllers.BuildStates().IsSceneSettledAtLastUpdate(m_World))
+        << "the update before the reset settled the scene";
 }
 
 // A process with no render device builds no recipe: each recipe fails at once with the reason,
@@ -243,6 +250,27 @@ TEST_F(SplineRecipeBuildStateTests, WithNoRenderDeviceEveryRecipeFailsAndTheScen
     EXPECT_TRUE(states.IsSceneSettled(m_World)) << "a run with no render device kept the scene unsettled";
     EXPECT_TRUE(states.IsSceneSettledAtLastUpdate(m_World));
     EXPECT_EQ(ChunkCount(), 0u);
+}
+
+// A host can update its own world beside the world of the rendering loop. The states of the loop's
+// recipe system then answer for that world from its recipes: settled with none, so a navigation
+// bake there does not wait for an update that never comes.
+TEST_F(SplineRecipeBuildStateTests, AWorldTheControllersDoNotUpdateIsSettledOnlyWithNoRecipe)
+{
+    CreateExtrude(2);
+    Update();
+    const RecipeBuildStates& states = m_Controllers.BuildStates();
+    ASSERT_TRUE(states.IsSceneSettledAtLastUpdate(m_World));
+
+    ECS::World other;
+    EXPECT_TRUE(states.IsSceneSettledAtLastUpdate(other))
+        << "a world with no recipe waits for an update of the controllers";
+
+    const ECS::EntityHandle road = other.CreateEntity();
+    other.AddComponentImmediate(road, Components::SplineComponent{});
+    other.AddComponentImmediate(road, Components::SplineExtrude{});
+    other.AddComponentImmediate(road, Components::WorldTransform{});
+    EXPECT_FALSE(states.IsSceneSettledAtLastUpdate(other)) << "a recipe that no update has seen settled the scene";
 }
 
 // The script API answers on the main thread only: a call from another thread is refused and

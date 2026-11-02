@@ -88,6 +88,8 @@ private:
     BuildSettings GatherBuildSettings();
     void OnBuildProgress(const BuildProgress& progress);
     void ScheduleBuildTimerTick();
+    // One timer tick: refresh the running durations and rows, then re-arm while a build runs.
+    void RunBuildTimerTick();
     void UpdateRunningBuildDurations();
     void UpdateBuildButtonState();
     void SaveOutputDirectoryForAllPlatforms(const std::string& value);

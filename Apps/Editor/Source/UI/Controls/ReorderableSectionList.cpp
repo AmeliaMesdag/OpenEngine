@@ -141,7 +141,7 @@ void ReorderableSectionList::SetDropPreview(const UI::Interaction::DropPreviewSt
             continue;
         const bool after = state.Hit.Location == UI::Interaction::DropLocation::AfterItem;
         const float y = section->GetLayoutY() - GetLayoutY() + (after ? section->GetLayoutHeight() : 0.0f);
-        m_Line->Overrides()
+        m_Line->Style()
             .Set(Style::PositionTop, StyleLength::Px(y))
             .Set(Style::Width, StyleLength::Px(GetLayoutWidth()));
         m_Line->AddClass(kLineShownClass);

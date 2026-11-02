@@ -4,6 +4,7 @@
 #include "Engine/Rendering/Pipeline/PipelineResourceNames.h"
 #include "Engine/Rendering/Pipeline/RenderPipeline.h"
 #include "Engine/Rendering/Pipeline/ViewExposureCompensation.h"
+#include "Engine/Rendering/Pipeline/ViewExposureHistory.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/ShadowMapRenderFeature.h"
 #include "Engine/Rendering/Pipeline/Nodes/PipelineNodeUtils.h"
@@ -1631,8 +1632,13 @@ void Detail::FullscreenShaderNodeRenderer::Declare(
             });
     }
     if (resolvePair.IsValid())
+    {
+        const Rendering::Passes::MsaaResolveViewBuffers resolveView =
+            MsaaResolveViewBuffersFor(d.ResolveBuffer(Names::Res::ViewParams), ResolveViewExposureHistory(d),
+                                      d.Services.GetDefaultPlaceholderBuffer());
         Rendering::Passes::AddMsaaColorResolvePassRG(d.Frame, passOutput, resolvePair, d.ViewBloomSampleDelta,
-                                                     d.PassName("ColorResolve").c_str());
+                                                     resolveView, d.PassName("ColorResolve").c_str());
+    }
 
     // The chain variable: downstream resolvers of the output ref see THIS
     // stage's output from here on.

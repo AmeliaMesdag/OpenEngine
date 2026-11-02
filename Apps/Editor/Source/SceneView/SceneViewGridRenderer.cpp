@@ -131,7 +131,7 @@ static void FillGridPCCommon(float invVPOut[16], float cameraPosOut[4], float gr
                              float& opacityOut, const Rendering::CameraData& cam,
                              const float camPos[3], float gridOpacity, uint32_t gridColor)
 {
-    Mathematics::Matrix4x4 invVP = Mathematics::Inverse(Mathematics::Matrix4x4::FromColumnMajor(cam.viewProj));
+    Mathematics::Matrix4x4 invVP = Mathematics::Inverse(cam.viewProj);
     std::memcpy(invVPOut, invVP.Data(), sizeof(float) * 16);
 
     cameraPosOut[0] = camPos[0];

@@ -115,7 +115,7 @@ CascadeRenderInputs BuildCascadeCacheInputs(RenderServices& rs, ViewId viewId,
         if (!fitFreeze && viewDesc->cameraId != 0)
         {
             if (const auto* cam = rs.Views().FindCameraData(viewDesc->cameraId))
-                std::memcpy(in.CameraViewProj, cam->viewProj, sizeof(in.CameraViewProj));
+                std::memcpy(in.CameraViewProj, cam->viewProj.Data(), sizeof(in.CameraViewProj));
         }
     }
     in.PhysicalId = physicalId;
@@ -444,10 +444,10 @@ Rendering::RenderGraph::RGPass ShadowMapRenderFeature::DeclareCascadePass(
     if (cam.Valid())
     {
         CameraData shadowCam{};
-        std::memcpy(shadowCam.view, kIdentity4x4.Data(), 64);
-        std::memcpy(shadowCam.proj, kIdentity4x4.Data(), 64);
-        std::memcpy(shadowCam.viewProj, frameData->LightVP[cascadeIndex].Data(), 64);
-        std::memcpy(shadowCam.viewProjRel, frameData->LightVPRel[cascadeIndex].Data(), 64);
+        shadowCam.view = kIdentity4x4;
+        shadowCam.proj = kIdentity4x4;
+        shadowCam.viewProj = frameData->LightVP[cascadeIndex];
+        shadowCam.viewProjRel = frameData->LightVPRel[cascadeIndex];
         shadowCam.renderOriginSector[0] = frameData->RenderOriginSector[0];
         shadowCam.renderOriginSector[1] = frameData->RenderOriginSector[1];
         shadowCam.renderOriginSector[2] = frameData->RenderOriginSector[2];
@@ -632,10 +632,10 @@ Rendering::RenderGraph::RGPass ShadowMapRenderFeature::DeclareTransmittancePass(
     if (cam.Valid())
     {
         CameraData shadowCam{};
-        std::memcpy(shadowCam.view, kIdentity4x4.Data(), 64);
-        std::memcpy(shadowCam.proj, kIdentity4x4.Data(), 64);
-        std::memcpy(shadowCam.viewProj, frameData->LightVP[cascadeIndex].Data(), 64);
-        std::memcpy(shadowCam.viewProjRel, frameData->LightVPRel[cascadeIndex].Data(), 64);
+        shadowCam.view = kIdentity4x4;
+        shadowCam.proj = kIdentity4x4;
+        shadowCam.viewProj = frameData->LightVP[cascadeIndex];
+        shadowCam.viewProjRel = frameData->LightVPRel[cascadeIndex];
         shadowCam.renderOriginSector[0] = frameData->RenderOriginSector[0];
         shadowCam.renderOriginSector[1] = frameData->RenderOriginSector[1];
         shadowCam.renderOriginSector[2] = frameData->RenderOriginSector[2];
@@ -644,9 +644,9 @@ Rendering::RenderGraph::RGPass ShadowMapRenderFeature::DeclareTransmittancePass(
         // glass normal, so it needs the cascade light direction. cameraPos is
         // unused for an ortho light shadow camera, so carry the (caller-resolved,
         // shadow-casting) directional light's world direction there.
-        shadowCam.cameraPos[0] = lightDirWS[0];
-        shadowCam.cameraPos[1] = lightDirWS[1];
-        shadowCam.cameraPos[2] = lightDirWS[2];
+        shadowCam.cameraPos.x = lightDirWS[0];
+        shadowCam.cameraPos.y = lightDirWS[1];
+        shadowCam.cameraPos.z = lightDirWS[2];
         *cam.Ptr = shadowCam;
     }
 
@@ -795,13 +795,13 @@ Rendering::RenderGraph::RGPass ShadowMapRenderFeature::DeclareAreaPass(
     if (cam.Valid())
     {
         CameraData shadowCam{};
-        std::memcpy(shadowCam.view, areaShadow.lightView.Data(), 64);
-        std::memcpy(shadowCam.proj, areaShadow.lightProj.Data(), 64);
-        std::memcpy(shadowCam.viewProj, areaShadow.lightVP.Data(), 64);
-        shadowCam.cameraPos[0] = areaShadow.position.x;
-        shadowCam.cameraPos[1] = areaShadow.position.y;
-        shadowCam.cameraPos[2] = areaShadow.position.z;
-        shadowCam.cameraPos[3] = -areaShadow.farPlane;
+        shadowCam.view = areaShadow.lightView;
+        shadowCam.proj = areaShadow.lightProj;
+        shadowCam.viewProj = areaShadow.lightVP;
+        shadowCam.cameraPos.x = areaShadow.position.x;
+        shadowCam.cameraPos.y = areaShadow.position.y;
+        shadowCam.cameraPos.z = areaShadow.position.z;
+        shadowCam.cameraPos.w = -areaShadow.farPlane;
         *cam.Ptr = shadowCam;
     }
 
@@ -913,13 +913,13 @@ Rendering::RenderGraph::RGPass ShadowMapRenderFeature::DeclareSpotPass(
     if (cam.Valid())
     {
         CameraData shadowCam{};
-        std::memcpy(shadowCam.view, spotShadow.lightView.Data(), 64);
-        std::memcpy(shadowCam.proj, spotShadow.lightProj.Data(), 64);
-        std::memcpy(shadowCam.viewProj, spotShadow.lightVP.Data(), 64);
-        shadowCam.cameraPos[0] = spotShadow.position.x;
-        shadowCam.cameraPos[1] = spotShadow.position.y;
-        shadowCam.cameraPos[2] = spotShadow.position.z;
-        shadowCam.cameraPos[3] = spotShadow.farPlane;
+        shadowCam.view = spotShadow.lightView;
+        shadowCam.proj = spotShadow.lightProj;
+        shadowCam.viewProj = spotShadow.lightVP;
+        shadowCam.cameraPos.x = spotShadow.position.x;
+        shadowCam.cameraPos.y = spotShadow.position.y;
+        shadowCam.cameraPos.z = spotShadow.position.z;
+        shadowCam.cameraPos.w = spotShadow.farPlane;
         *cam.Ptr = shadowCam;
     }
 
@@ -1128,13 +1128,13 @@ void ShadowMapRenderFeature::DeclarePointPasses(Rendering::RenderGraph::RGFrame&
             if (cam.Valid())
             {
                 CameraData shadowCam{};
-                std::memcpy(shadowCam.view, fi.lightView[face].Data(), 64);
-                std::memcpy(shadowCam.proj, fi.lightProj.Data(), 64);
-                std::memcpy(shadowCam.viewProj, fi.lightVP[face].Data(), 64);
-                shadowCam.cameraPos[0] = fi.position.x;
-                shadowCam.cameraPos[1] = fi.position.y;
-                shadowCam.cameraPos[2] = fi.position.z;
-                shadowCam.cameraPos[3] = fi.farPlane;
+                shadowCam.view = fi.lightView[face];
+                shadowCam.proj = fi.lightProj;
+                shadowCam.viewProj = fi.lightVP[face];
+                shadowCam.cameraPos.x = fi.position.x;
+                shadowCam.cameraPos.y = fi.position.y;
+                shadowCam.cameraPos.z = fi.position.z;
+                shadowCam.cameraPos.w = fi.farPlane;
                 *cam.Ptr = shadowCam;
             }
 

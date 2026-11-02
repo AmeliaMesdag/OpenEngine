@@ -58,22 +58,6 @@ std::string_view TrimSpaces(std::string_view text)
     return text;
 }
 
-// The whole of `token` as one finite decimal number, or false: ParseStrictDecimal (no hex, inf, nan
-// or trailing text, the same on every platform), without the leading '+' it allows, and finite as a
-// float too.
-bool ParseFiniteNumber(std::string_view token, float& out)
-{
-    token = TrimSpaces(token);
-    double value = 0.0;
-    if (token.empty() || token.front() == '+' || !ParseStrictDecimal(token, value))
-        return false;
-    const float narrowed = static_cast<float>(value);
-    if (!std::isfinite(narrowed))
-        return false;
-    out = narrowed;
-    return true;
-}
-
 std::vector<std::string_view> SplitOn(std::string_view text, char separator)
 {
     std::vector<std::string_view> parts;
@@ -102,9 +86,11 @@ bool ParseKey(std::string_view text, const std::string& name, Math::CurveKey& ou
     float values[std::size(kKeyFields)] = {};
     for (size_t i = 0; i < fields.size(); ++i)
     {
-        if (!ParseFiniteNumber(fields[i], values[i]))
+        // A key field is a strict decimal float without the leading '+' ParseStrictDecimal allows.
+        const std::string_view field = TrimSpaces(fields[i]);
+        if (field.starts_with('+') || !ParseStrictDecimalFloat(field, values[i]))
         {
-            outError = name + "'s " + std::string(kKeyFields[i]) + " \"" + std::string(TrimSpaces(fields[i])) +
+            outError = name + "'s " + std::string(kKeyFields[i]) + " \"" + std::string(field) +
                        "\" is not a finite number; write a decimal number such as -6 or 1.5";
             return false;
         }

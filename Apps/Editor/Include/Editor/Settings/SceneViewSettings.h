@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -92,10 +93,10 @@ public:
     static constexpr float kMinFastMoveMultiplier = 1.0f;
     static constexpr float kMaxFastMoveMultiplier = 20.0f;
     static constexpr float kDefaultMoveAccelerationTime = 0.15f;
-    // Valid ranges shared by Validate() and the editing UIs (Settings panel rows +
-    // the scene camera popup), so sliders and the clamp can never diverge.
-    // The floor reaches a moonless night: airglow and starlight meter near EV100 -7.
-    static constexpr float kMinExposureEv = -7.0f;
+    // One range for Validate(), the settings page and the camera popover, wide enough for a game camera's
+    // exposure. The floor is the Picture meter's darkest reading (about EV100 -13.9), below a moonless
+    // night (about -12); the ceiling is above a sunlit exterior (about 15).
+    static constexpr float kMinExposureEv = -14.0f;
     static constexpr float kMaxExposureEv = 20.0f;
     // The Scene View's Auto floor is a game camera's (Components::kDefaultAutoExposureMinEv), and it
     // takes the engine's default exposure compensation curve, so the Scene View shows a night as the
@@ -110,7 +111,9 @@ public:
     // a light or the sky changes, and the Picture meter re-meters every frame unsmoothed. The delay
     // (the sensor's adaptation speeds) is a setting a user turns on.
     static constexpr bool kDefaultAutoExposureAdaptationDelay = false;
-    static constexpr float kMaxExposureCompensation = 5.0f;
+    // EV Compensation's range either way: the gap between a sunlit exterior (EV100 about 15)
+    // and a lamp-lit interior (about 7). A larger shift is a different exposure, set by the EV100.
+    static constexpr float kMaxExposureCompensation = 8.0f;
     // Detent size of the popup's exposure sliders — also the granularity the
     // Auto->Fixed EV handoff seed is quantized to, so the seed lands on a
     // slider detent (kEvSeedDecimalGrid mirrors Slider's decimal-grid snap).
@@ -146,6 +149,8 @@ public:
         auto prefs = OpenEditorPreferences();
         std::string err;
         prefs.Load(&err);
+        // What loads is the user's own exposure: a session-only one (UseExposureForSession) ends here.
+        m_UserExposure.reset();
 
         double nearClip = static_cast<double>(m_NearClip);
         double farClip = static_cast<double>(m_FarClip);
@@ -427,14 +432,16 @@ public:
         prefs.SetBool("sceneView.postFxColorFilterEnabled", m_PostFxColorFilterEnabled);
         prefs.SetBool("sceneView.postFxCasEnabled", m_PostFxCasEnabled);
         prefs.SetBool("sceneView.postFxCrtEnabled", m_PostFxCrtEnabled);
-        prefs.SetString("sceneView.exposure", m_ExposureMode == SceneViewExposureMode::Fixed ? "fixed" : "auto");
+        // While the view uses a session-only exposure, the user's own is the one saved.
+        const Exposure exposure = m_UserExposure.value_or(GetExposure());
+        prefs.SetString("sceneView.exposure", exposure.Mode == SceneViewExposureMode::Fixed ? "fixed" : "auto");
         prefs.SetString("sceneView.exposureMeter",
-                        m_ExposureMeter == Components::ExposureMeter::Picture ? "picture" : "lights");
-        prefs.SetBool("sceneView.autoExposureAdaptationDelay", m_PostFxAutoExposureUseAdaptationDelay);
-        prefs.SetDouble("sceneView.postFxFixedExposureEv", static_cast<double>(m_PostFxFixedExposureEv));
-        prefs.SetDouble("sceneView.autoExposureMinEv", static_cast<double>(m_PostFxAutoExposureMinEv));
-        prefs.SetDouble("sceneView.autoExposureMaxEv", static_cast<double>(m_PostFxAutoExposureMaxEv));
-        prefs.SetDouble("sceneView.postFxExposureCompensation", static_cast<double>(m_PostFxExposureCompensation));
+                        exposure.Meter == Components::ExposureMeter::Picture ? "picture" : "lights");
+        prefs.SetBool("sceneView.autoExposureAdaptationDelay", exposure.AdaptationDelay);
+        prefs.SetDouble("sceneView.postFxFixedExposureEv", static_cast<double>(exposure.FixedEv));
+        prefs.SetDouble("sceneView.autoExposureMinEv", static_cast<double>(exposure.AutoMinEv));
+        prefs.SetDouble("sceneView.autoExposureMaxEv", static_cast<double>(exposure.AutoMaxEv));
+        prefs.SetDouble("sceneView.postFxExposureCompensation", static_cast<double>(exposure.Compensation));
         prefs.SetDouble("sceneView.pixelPerfectScale", static_cast<double>(m_PixelPerfectScale));
         prefs.SetDouble("sceneView.hoverHighlightMode", static_cast<double>(m_HoverHighlightMode));
         prefs.SetDouble("sceneView.hoverHighlightModifier", static_cast<double>(m_HoverHighlightModifier));
@@ -533,6 +540,55 @@ public:
     // into the metering key under Auto (either meter), multiplies the pinned EV's
     // scale under Fixed (the ResolveExposureScale convention — + brightens).
     float GetPostFxExposureCompensation() const { return m_PostFxExposureCompensation; }
+
+    // The Scene View's exposure settings as one value: the fields the getters above read one by one.
+    // A default-constructed one holds the shipped defaults.
+    struct Exposure
+    {
+        SceneViewExposureMode Mode = kDefaultExposureMode;
+        Components::ExposureMeter Meter = kDefaultExposureMeter;
+        bool AdaptationDelay = kDefaultAutoExposureAdaptationDelay;
+        float FixedEv = Components::kDefaultManualExposureEv;
+        float AutoMinEv = kDefaultAutoExposureMinEv;
+        float AutoMaxEv = kDefaultAutoExposureMaxEv;
+        float Compensation = 0.0f;
+
+        bool operator==(const Exposure&) const = default;
+    };
+
+    // The exposure settings the view uses now.
+    Exposure GetExposure() const
+    {
+        return {m_ExposureMode,
+                m_ExposureMeter,
+                m_PostFxAutoExposureUseAdaptationDelay,
+                m_PostFxFixedExposureEv,
+                m_PostFxAutoExposureMinEv,
+                m_PostFxAutoExposureMaxEv,
+                m_PostFxExposureCompensation};
+    }
+
+    // Makes the view use `exposure` for this session. Every Save() writes the user's own exposure in its
+    // place until Load() or an edit through an exposure setter, which makes the values on screen the
+    // user's own.
+    void UseExposureForSession(const Exposure& exposure)
+    {
+        const Exposure before = GetExposure();
+        if (!m_UserExposure)
+            m_UserExposure = before;
+        m_ExposureMode = exposure.Mode;
+        m_ExposureMeter = exposure.Meter;
+        m_PostFxAutoExposureUseAdaptationDelay = exposure.AdaptationDelay;
+        m_PostFxFixedExposureEv = exposure.FixedEv;
+        m_PostFxAutoExposureMinEv = exposure.AutoMinEv;
+        m_PostFxAutoExposureMaxEv = exposure.AutoMaxEv;
+        m_PostFxExposureCompensation = exposure.Compensation;
+        Validate();
+        if (m_ExposureMode != before.Mode)
+            m_LastShownExposureEvValid = false; // stale once the view stops showing it
+        if (GetExposure() != before)
+            NotifyCameraSettingsChanged();
+    }
     MarqueeShape GetMarqueeShape() const { return m_MarqueeShape; }
     uint32_t GetMarqueeColor() const { return m_MarqueeColor; }
     float    GetMarqueeThickness() const { return m_MarqueeThickness; }
@@ -887,9 +943,7 @@ public:
             m_LastShownExposureEvValid = false; // stale once the view stops showing it
         m_ExposureMode = mode;
         Validate();
-        Save();
-        if (m_ExposureMode != beforeMode || m_PostFxFixedExposureEv != beforeFixedEv)
-            NotifyCameraSettingsChanged();
+        FinishExposureEdit(m_ExposureMode != beforeMode || m_PostFxFixedExposureEv != beforeFixedEv, /*save=*/true);
     }
 
     void SetExposureMeter(Components::ExposureMeter meter)
@@ -897,8 +951,7 @@ public:
         if (m_ExposureMeter == meter)
             return;
         m_ExposureMeter = meter;
-        Save();
-        NotifyCameraSettingsChanged();
+        FinishExposureEdit(/*changed=*/true, /*save=*/true);
     }
 
     void SetPostFxAutoExposureUseAdaptationDelay(bool value)
@@ -906,8 +959,7 @@ public:
         if (m_PostFxAutoExposureUseAdaptationDelay == value)
             return;
         m_PostFxAutoExposureUseAdaptationDelay = value;
-        Save();
-        NotifyCameraSettingsChanged();
+        FinishExposureEdit(/*changed=*/true, /*save=*/true);
     }
 
     // Runtime only (not persisted): the EV100 that reproduces the Scene View's
@@ -930,10 +982,7 @@ public:
         const float before = m_PostFxFixedExposureEv;
         m_PostFxFixedExposureEv = value;
         Validate();
-        if (save)
-            Save();
-        if (m_PostFxFixedExposureEv != before)
-            NotifyCameraSettingsChanged();
+        FinishExposureEdit(m_PostFxFixedExposureEv != before, save);
     }
 
     void SetPostFxAutoExposureMinEv(float value, bool save = true)
@@ -942,10 +991,7 @@ public:
         const float beforeMax = m_PostFxAutoExposureMaxEv;
         m_PostFxAutoExposureMinEv = value;
         Validate();
-        if (save)
-            Save();
-        if (m_PostFxAutoExposureMinEv != beforeMin || m_PostFxAutoExposureMaxEv != beforeMax)
-            NotifyCameraSettingsChanged();
+        FinishExposureEdit(m_PostFxAutoExposureMinEv != beforeMin || m_PostFxAutoExposureMaxEv != beforeMax, save);
     }
 
     void SetPostFxAutoExposureMaxEv(float value, bool save = true)
@@ -954,10 +1000,7 @@ public:
         const float beforeMax = m_PostFxAutoExposureMaxEv;
         m_PostFxAutoExposureMaxEv = value;
         Validate();
-        if (save)
-            Save();
-        if (m_PostFxAutoExposureMinEv != beforeMin || m_PostFxAutoExposureMaxEv != beforeMax)
-            NotifyCameraSettingsChanged();
+        FinishExposureEdit(m_PostFxAutoExposureMinEv != beforeMin || m_PostFxAutoExposureMaxEv != beforeMax, save);
     }
 
     void SetPostFxExposureCompensation(float value, bool save = true)
@@ -965,10 +1008,7 @@ public:
         const float before = m_PostFxExposureCompensation;
         m_PostFxExposureCompensation = value;
         Validate();
-        if (save)
-            Save();
-        if (m_PostFxExposureCompensation != before)
-            NotifyCameraSettingsChanged();
+        FinishExposureEdit(m_PostFxExposureCompensation != before, save);
     }
 
     void SetMarqueeShape(MarqueeShape value)
@@ -1216,6 +1256,18 @@ private:
         }
     }
 
+    // Ends a user's edit of an exposure setting. An edit that changed a value makes the values on screen
+    // the user's own, so a session-only exposure (UseExposureForSession) becomes what Save() writes.
+    void FinishExposureEdit(bool changed, bool save)
+    {
+        if (changed)
+            m_UserExposure.reset();
+        if (save)
+            Save();
+        if (changed)
+            NotifyCameraSettingsChanged();
+    }
+
     uint64_t m_NextCameraSettingsListenerId = 1;
     std::unordered_map<uint64_t, CameraSettingsChangedCallback> m_CameraSettingsChangedListeners;
 
@@ -1285,6 +1337,9 @@ private:
     // Runtime-only handoff seed into Fixed (SetLastShownExposureEv); never persisted.
     float m_LastShownExposureEv = 0.0f;
     bool m_LastShownExposureEvValid = false;
+    // The user's own exposure settings while the view uses a session-only one (UseExposureForSession):
+    // what Save() writes for the exposure fields. Empty while the view uses the user's own.
+    std::optional<Exposure> m_UserExposure;
     // Selection tool marquee drag-select appearance.
     MarqueeShape m_MarqueeShape      = MarqueeShape::Rectangle;
     uint32_t     m_MarqueeColor      = 0xFFFFFF33u; // ARGB, pale yellow

@@ -45,7 +45,7 @@ namespace {
 
 bool IsDisplayNone(const UIElement& el)
 {
-    const std::optional<DisplayMode> display = el.Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> display = el.Style().Get(Style::Display);
     return display.has_value() && *display == DisplayMode::None;
 }
 
@@ -215,9 +215,9 @@ TEST(GraphNodeLayoutTests, BindModelPlacesPortsByPortCountPercent)
     node.BindModel(model, Graph::kKindIdMaterial, GraphNodeVisualState{false, false, false, false, false});
 
     const float height = GraphNodeMetrics::GetNodeBaseHeight(model);
-    const std::optional<StyleLength> top0 = node.FindPort("a")->Overrides().Get(Style::PositionTop);
-    const std::optional<StyleLength> top1 = node.FindPort("b")->Overrides().Get(Style::PositionTop);
-    const std::optional<StyleLength> top2 = node.FindPort("c")->Overrides().Get(Style::PositionTop);
+    const std::optional<StyleLength> top0 = node.FindPort("a")->Style().Get(Style::PositionTop);
+    const std::optional<StyleLength> top1 = node.FindPort("b")->Style().Get(Style::PositionTop);
+    const std::optional<StyleLength> top2 = node.FindPort("c")->Style().Get(Style::PositionTop);
     ASSERT_TRUE(top0.has_value() && top0->IsPercent());
     ASSERT_TRUE(top1.has_value() && top1->IsPercent());
     ASSERT_TRUE(top2.has_value() && top2->IsPercent());
@@ -227,12 +227,12 @@ TEST(GraphNodeLayoutTests, BindModelPlacesPortsByPortCountPercent)
     EXPECT_GT(top1->Value, top0->Value);
     EXPECT_GT(top2->Value, top1->Value);
 
-    const std::optional<StyleLength> portH = node.FindPort("a")->Overrides().Get(Style::Height);
+    const std::optional<StyleLength> portH = node.FindPort("a")->Style().Get(Style::Height);
     ASSERT_TRUE(portH.has_value() && portH->IsPercent());
     EXPECT_FLOAT_EQ(portH->Value, GraphNodeMetrics::PortHeightPercent(height));
     EXPECT_LT(portH->Value, 16.667f);
 
-    const std::optional<StyleLength> portW = node.FindPort("a")->Overrides().Get(Style::Width);
+    const std::optional<StyleLength> portW = node.FindPort("a")->Style().Get(Style::Width);
     ASSERT_TRUE(portW.has_value() && portW->IsPercent());
     const float uniformW = GraphNodeMetrics::GetNodeWidth(model);
     EXPECT_FLOAT_EQ(portW->Value, GraphNodeMetrics::PortWidthPercent(uniformW));
@@ -241,7 +241,7 @@ TEST(GraphNodeLayoutTests, BindModelPlacesPortsByPortCountPercent)
 
     UIElement* header = FindByClass(node, "graph-node-header");
     ASSERT_NE(header, nullptr);
-    const std::optional<StyleLength> headerH = header->Overrides().Get(Style::Height);
+    const std::optional<StyleLength> headerH = header->Style().Get(Style::Height);
     ASSERT_TRUE(headerH.has_value() && headerH->IsPercent());
     EXPECT_FLOAT_EQ(headerH->Value, GraphNodeMetrics::HeaderHeightPercent(height));
     EXPECT_LT(headerH->Value, 46.667f);
@@ -287,10 +287,10 @@ TEST(GraphNodeLayoutTests, BindModelAssignsRealPortIdsAndHidesExtra)
     EXPECT_EQ(node.InputPortCount(), 3u);
     EXPECT_EQ(node.OutputPortCount(), 3u);
 
-    const std::optional<DisplayMode> extraIn = node.InputPortAt(1)->Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> extraIn = node.InputPortAt(1)->Style().Get(Style::Display);
     ASSERT_TRUE(extraIn.has_value());
     EXPECT_EQ(*extraIn, DisplayMode::None);
-    const std::optional<DisplayMode> extraOut = node.OutputPortAt(1)->Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> extraOut = node.OutputPortAt(1)->Style().Get(Style::Display);
     ASSERT_TRUE(extraOut.has_value());
     EXPECT_EQ(*extraOut, DisplayMode::None);
 }
@@ -832,7 +832,7 @@ TEST(GraphNodeLayoutTests, CssMathFunctionsResolveAgainstLengthScale)
 
     auto resolveProbe = [&](const char* scale) -> ResolvedStyle
     {
-        parent.Overrides().SetCustom(kLengthScaleVar, scale);
+        parent.Style().SetCustom(kLengthScaleVar, scale);
         const ResolvedStyle parentStyle = CSSParser::ComputeStyleFor(parent, sheet, state);
         return CSSParser::ComputeStyleFor(*probe, sheets, state, &parentStyle);
     };
@@ -1025,8 +1025,8 @@ TEST(GraphNodeLayoutTests, StackedFloatBoxesShareTheMostConstrainedWidth)
         ASSERT_NE(port, nullptr) << portId;
         UIElement* editors = FindByClass(*port, "graph-inline-editors");
         ASSERT_NE(editors, nullptr) << portId;
-        const std::optional<StyleLength> w = editors->Overrides().Get(Style::Width);
-        const std::optional<StyleLength> l = editors->Overrides().Get(Style::PositionLeft);
+        const std::optional<StyleLength> w = editors->Style().Get(Style::Width);
+        const std::optional<StyleLength> l = editors->Style().Get(Style::PositionLeft);
         ASSERT_TRUE(w.has_value() && w->IsPercent()) << portId;
         ASSERT_TRUE(l.has_value() && l->IsPercent()) << portId;
         EXPECT_FLOAT_EQ(w->Value, capPct) << portId << ": equal widths at the float cap";
@@ -1560,7 +1560,7 @@ TEST(GraphNodeLayoutTests, LongOutNameOnSharedRowShrinksValueHost)
         << "Entity is 6 letters on the same row as Name; the value box must yield";
     UIElement* nameHost = FindByClass(*name, "graph-inline-editors");
     ASSERT_NE(nameHost, nullptr);
-    const std::optional<StyleLength> nameW = nameHost->Overrides().Get(Style::Width);
+    const std::optional<StyleLength> nameW = nameHost->Style().Get(Style::Width);
     ASSERT_TRUE(nameW.has_value() && nameW->IsPercent());
     const float nodeW = GraphNodeMetrics::GetNodeWidth(model);
     const float nameUnits = nodeW - GraphNodeMetrics::InlineEditorRightReserveGraph(6) -
@@ -1580,7 +1580,7 @@ TEST(GraphNodeLayoutTests, LongOutNameOnSharedRowShrinksValueHost)
         << "even a 3-letter Out shares the row; the host just yields less";
     UIElement* clipHost = FindByClass(*clip, "graph-inline-editors");
     ASSERT_NE(clipHost, nullptr);
-    const std::optional<StyleLength> clipW = clipHost->Overrides().Get(Style::Width);
+    const std::optional<StyleLength> clipW = clipHost->Style().Get(Style::Width);
     ASSERT_TRUE(clipW.has_value() && clipW->IsPercent());
     const float clipNodeW = GraphNodeMetrics::GetNodeWidth(sound);
     const float clipUnits = clipNodeW - GraphNodeMetrics::InlineEditorRightReserveGraph(3) -
@@ -1720,7 +1720,7 @@ Graph::Node MakeExpandableNode()
 
 bool RowIsHidden(const UIElement& el)
 {
-    const std::optional<DisplayMode> display = el.Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> display = el.Style().Get(Style::Display);
     return display.has_value() && display.value() == DisplayMode::None;
 }
 

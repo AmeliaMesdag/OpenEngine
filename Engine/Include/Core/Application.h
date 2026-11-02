@@ -19,7 +19,7 @@
 
 namespace GameEngine {
 
-namespace Input { class GamepadEdgeTracker; class InputSystem; }
+namespace Input { class GamepadEdgeTracker; class GamepadPoller; class InputSystem; }
 namespace Audio { enum class AudioOutput : std::uint8_t; }
 
 // Default project layout, relative to the workspace root.
@@ -349,6 +349,10 @@ private:
 	    // The chain GamepadInputChain() answers with unless a derived application
 	    // names another: the shared InputSystem and nothing above it.
 	    WindowInputRouterConfig m_ApplicationInputChain;
+
+	    // Reads the gamepads once per frame; its first read (frame 0) skips the
+	    // platform's device enumeration.
+	    std::unique_ptr<Input::GamepadPoller> m_GamepadPoller;
 
 	    // Holds the previous poll so the buttons that changed since it become
 	    // edges, and everything else stays state.

@@ -50,7 +50,7 @@ const PreviewExtents& ExtentsFor(CubeLutPreviewSize size)
 void BindBandTexture(UIElement& band, const CubeLutStripRequest& request)
 {
     UI::Layout::SetBackgroundResourceName(band, MakeCubeLutStripKey(request));
-    band.Styles().ResetBackgroundSize();
+    band.Style().Reset(Style::BackgroundSize);
 }
 
 // One band with its name beside it, so the band says what it is without a hover.

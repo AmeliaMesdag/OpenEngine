@@ -1,8 +1,8 @@
 // GitHub #1382 — a stylesheet must be able to hide a ScrollView.
 //
-// ScrollView used to set `display` as an inline style override in its
-// constructor. Overrides land on the resolved style AFTER the cascade
-// (UIManager_StyleResolve.cpp), so no rule could outrank them and every
+// ScrollView's constructor used to set `display` in the element's code style,
+// Style(). Style() lands on the resolved style AFTER the cascade
+// (UIManager::FinalizeElementStyle), so no rule could outrank it and every
 // `... scrollview { display: none; }` in the shipped theme was dead. The
 // graph panel's collapsed palette is the specimen: double-clicking the title
 // hid the search row and the content, and left the scroller behind.

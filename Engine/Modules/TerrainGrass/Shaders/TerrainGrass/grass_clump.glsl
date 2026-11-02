@@ -48,8 +48,10 @@ const float kGrassBladeHueShare = 0.4;
 //   bits 0-1   LOD index (written per cell by the placement compute)
 //   bits 2-9   clump colour code (8 bits)
 //   bits 10-25 minimum projected width, as a multiple of the blade's authored width (16 bits)
-//   bits 26-31 unused
+//   bit  26    the root height and normal come from the terrain's surface pages
+//   bits 27-31 unused
 const uint kGrassFlagLodMask = 3u;
+const uint kGrassFlagGroundFromPages = 67108864u; // 1 << 26
 const uint kGrassClumpCodeShift = 2u;
 const uint kGrassClumpCodeMask = 255u;
 const uint kGrassMinWidthScaleShift = 10u;

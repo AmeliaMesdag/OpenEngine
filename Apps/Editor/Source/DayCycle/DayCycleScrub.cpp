@@ -23,9 +23,11 @@ std::string LightName(const ECS::World& world, ECS::EntityHandle light)
 }
 } // namespace
 
-DayCycleScrub::DayCycleScrub(ECS::World& world, Engine::Renderer::SkyEnvironmentSystem& sky, UndoRedoService* undo,
-                             EditorChangeNotifications* notifications, std::function<bool()> isPlaying)
-    : m_World(world), m_Sky(sky), m_Undo(undo), m_Notifications(notifications), m_IsPlaying(std::move(isPlaying))
+DayCycleScrub::DayCycleScrub(ECS::World& world, std::function<Engine::Renderer::SkyEnvironmentSystem*()> skyGetter,
+                             UndoRedoService* undo, EditorChangeNotifications* notifications,
+                             std::function<bool()> isPlaying)
+    : m_World(world), m_SkyGetter(std::move(skyGetter)), m_Undo(undo), m_Notifications(notifications),
+      m_IsPlaying(std::move(isPlaying))
 {
     if (!m_Notifications)
         return;
@@ -52,6 +54,8 @@ std::string DayCycleScrub::BlockedNotice() const
 {
     if (IsPlaying())
         return "The scrub is off in Play mode.";
+    if (!CurrentSky())
+        return "The scrub is off while rendering is stopped.";
     const ECS::EntityHandle skyEntity = Components::SkySunIlluminance::RenderedSky(m_World);
     const auto* sky = skyEntity.IsValid() ? m_World.GetComponent<Components::SkyEnvironment>(skyEntity) : nullptr;
     if (!sky)
@@ -72,9 +76,11 @@ void DayCycleScrub::SetHeld(bool held)
     if (held)
         return;
     const std::optional<float> hours = PreviewHour();
+    if (!hours)
+        return;
     const ECS::EntityHandle skyEntity = Components::SkySunIlluminance::RenderedSky(m_World);
     const auto* sky = skyEntity.IsValid() ? m_World.GetComponent<Components::SkyEnvironment>(skyEntity) : nullptr;
-    if (!hours || !sky || !sky->AnimateTimeOfDay)
+    if (!sky || !sky->AnimateTimeOfDay)
         return;
     // A running clock goes on from where the playhead was let go: the hour becomes the scene's.
     m_Releasing = true;
@@ -88,14 +94,18 @@ void DayCycleScrub::ScrubTo(float hours)
 {
     if (!BlockedNotice().empty())
         return;
-    m_Sky.SetPreviewHour(m_World.GetWorldId(), hours);
+    auto* sky = CurrentSky();
+    if (!sky)
+        return;
+    sky->SetPreviewHour(m_World.GetWorldId(), hours);
     m_PreviewSky = Components::SkySunIlluminance::RenderedSky(m_World);
     m_PreviewResetGeneration = m_World.GetLifecycleResetGeneration();
 }
 
 std::optional<float> DayCycleScrub::PreviewHour() const
 {
-    return m_Sky.GetPreviewHour(m_World.GetWorldId());
+    const auto* sky = CurrentSky();
+    return sky ? sky->GetPreviewHour(m_World.GetWorldId()) : std::nullopt;
 }
 
 void DayCycleScrub::CheckScene()
@@ -112,9 +122,15 @@ bool DayCycleScrub::IsPlaying() const
     return m_IsPlaying && m_IsPlaying();
 }
 
+Engine::Renderer::SkyEnvironmentSystem* DayCycleScrub::CurrentSky() const
+{
+    return m_SkyGetter ? m_SkyGetter() : nullptr;
+}
+
 void DayCycleScrub::ClearPreview()
 {
-    m_Sky.ClearPreviewHour(m_World.GetWorldId());
+    if (auto* sky = CurrentSky())
+        sky->ClearPreviewHour(m_World.GetWorldId());
 }
 
 void DayCycleScrub::OnComponentChanged(const EditorChangeNotifications::ComponentChangedEvent& event)

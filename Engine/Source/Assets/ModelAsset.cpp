@@ -5,6 +5,7 @@
 #include "AssetCore/SubassetDeriveKeys.h"
 #include "Assets/AnimationClip.h"
 #include "Assets/AssetDecodeCancellation.h"
+#include "Assets/AssetDecodeInputFiles.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetRegistry.h"
 #include "Core/Engine.h"
@@ -14,6 +15,7 @@
 #include "Assets/MeshLODCache.h"
 #include "Assets/MeshLODGenerator.h"
 #include "Logger/Logger.h"
+#include "Types/Fnv1a.h"
 #include "ECSModules/Rendering/ClipStore.h"
 #include "ECSModules/Rendering/SkeletonStore.h"
 
@@ -318,7 +320,10 @@ bool ModelAsset::Load() {
     }
 
     SetState(AssetState::Loading);
-    Logger::Log::Info("Loading model: {}", GetPath().string());
+    Logger::Log::Debug("Loading model: {}", GetPath().string());
+    // A synchronous load reads its own inputs; one nested in a decode must not take the
+    // decode's (ScopedAssetDecodeInputFiles).
+    const ScopedAssetDecodeInputFiles readsTheDisk(nullptr);
 
     if (!Exists()) {
         Logger::Log::Error("Model file does not exist: {}", GetPath().string());
@@ -426,6 +431,8 @@ bool ModelAsset::LoadFromData(const Vector<uint8>& data) {
         // counts so both reflect the consumed submesh array (format-agnostic — it
         // operates on the assembled submesh names every loader produced).
         ConsumeLodSuffixFamilies(m_Meshes);
+        for (EmbeddedImage& image : m_EmbeddedImages)
+            image.ContentHash = Hashing::Fnv1a64(image.Data.data(), image.Data.size());
         CalculateBoundingBox();
         CalculateCounts();
         SetState(AssetState::Loaded);

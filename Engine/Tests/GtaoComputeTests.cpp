@@ -1299,9 +1299,9 @@ TEST_F(GtaoComputeTest, ProductionNodeExecutesBothResolutionPathsAndKeepsViewHis
     {
         const auto cameraId = services.Views().AllocateCamera("GtaoTestCamera");
         CameraData camera{};
-        std::memcpy(camera.view, Params.ge_view, 64);
-        std::memcpy(camera.proj, Params.ge_proj, 64);
-        std::memcpy(camera.viewProj, Params.ge_viewProj, 64);
+        camera.view = GameEngine::Mathematics::Matrix4x4::FromColumnMajor(Params.ge_view);
+        camera.proj = GameEngine::Mathematics::Matrix4x4::FromColumnMajor(Params.ge_proj);
+        camera.viewProj = GameEngine::Mathematics::Matrix4x4::FromColumnMajor(Params.ge_viewProj);
         services.Views().SetCameraData(cameraId, camera);
         const auto viewA = services.Views().AllocateView("GtaoTestA", cameraId);
         const auto viewB = services.Views().AllocateView("GtaoTestB", cameraId);
@@ -1446,12 +1446,12 @@ TEST_F(GtaoComputeTest, ProductionNodeAppliesHistoryAndDropsItOnTheFirstFrameAft
             glm::mat4 proj(1.0f);
             std::memcpy(&proj[0][0], Params.ge_proj, 64);
             const glm::mat4 viewProj = proj * view;
-            std::memcpy(camera.view, &view[0][0], 64);
-            std::memcpy(camera.proj, Params.ge_proj, 64);
-            std::memcpy(camera.viewProj, &viewProj[0][0], 64);
-            std::memcpy(camera.viewRel, &view[0][0], 64);
-            std::memcpy(camera.viewProjRel, &viewProj[0][0], 64);
-            camera.cameraPos[0] = x;
+            camera.view = view;
+            camera.proj = proj;
+            camera.viewProj = viewProj;
+            camera.viewRel = view;
+            camera.viewProjRel = viewProj;
+            camera.cameraPos.x = x;
             services.Views().SetCameraData(cameraId, camera);
         };
         SetCameraAt(0.0f);

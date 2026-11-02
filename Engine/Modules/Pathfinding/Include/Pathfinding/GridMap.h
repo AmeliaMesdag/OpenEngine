@@ -2,8 +2,12 @@
 
 #include "Pathfinding/INavigationMap.h"
 #include "Pathfinding/PathfindingTypes.h"
+#include "Types/DisjointSets.h"
+#include "Types/InlineVector.h"
 
 #include <atomic>
+#include <cassert>
+#include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -30,11 +34,9 @@ public:
         }
     };
 
-    // Read-only access to the cell arrays for path solves: the settings by
-    // value and raw pointers to the five arrays, with inline accessors and no
-    // lock. A view is valid only inside a path-solve window, which holds the
-    // reservation lock shared and keeps every writer out (see
-    // OpenPathSolveWindow); take one per window with View().
+    // Lock-free read access to the cells and the regions for path solves. A view
+    // is valid only inside a path-solve window (OpenPathSolveWindow), which keeps
+    // every writer out; take one per window with View().
     class ReadView
     {
     public:
@@ -70,6 +72,14 @@ public:
         {
             return IsValidCell(cellX, cellZ) ? m_Reservations[CellIndex(cellX, cellZ)] : CellReservation{};
         }
+        // False when no path joins the two cells for any agent (GridRegions); true
+        // does not mean a path exists. Both cells are on the grid and statically
+        // open, and the view comes from View().
+        bool InSameRegion(uint32 firstIndex, uint32 secondIndex) const
+        {
+            assert(m_Regions != nullptr && "GridMap: regions were read from a view View() did not make");
+            return m_Regions[firstIndex] == m_Regions[secondIndex];
+        }
 
         bool WorldToCell(float32 worldX, float32 worldZ, uint32& outCellX, uint32& outCellZ) const;
         void CellToWorld(uint32 cellX, uint32 cellZ, float32& outWorldX, float32& outWorldZ) const;
@@ -95,6 +105,7 @@ public:
         const uint8* m_Blocked;
         const uint8* m_DynamicBlocked;
         const CellReservation* m_Reservations;
+        const uint32* m_Regions = nullptr;
     };
 
     explicit GridMap(const GridSettings& settings);
@@ -183,8 +194,9 @@ public:
     // recursive).
     void OpenPathSolveWindow() const;
     void ClosePathSolveWindow() const;
-    // The cells as a ReadView; asserts (Debug, DebugFast) that a path-solve
-    // window is open.
+    // The cells as a ReadView, regions included; asserts (Debug, DebugFast) that a path-solve window is open. The
+    // first view on a new map or after a change to a cell's static blocked flag or height labels the regions
+    // (GridRegions) once, on the thread that asks first; views on other threads wait for it.
     ReadView View() const;
 
     // Debug data (raw arrays, size = Width * Depth)
@@ -215,8 +227,9 @@ private:
     // Per-agent cell indices so ClearReservationsForAgent is O(stamped cells),
     // not O(Width*Depth). Keyed by AgentId so ReserveCell is O(1) lookup,
     // not a linear scan of every live agent. Stale indices are skipped if
-    // the cell was stolen. Erased on clear so size is live agents.
-    std::unordered_map<uint32, std::vector<uint32>> m_AgentCells;
+    // the cell was stolen. Erased on clear so size is live agents. An agent
+    // stamps a few cells, so four are held inline.
+    std::unordered_map<uint32, InlineVector<uint32, 4>> m_AgentCells;
 
     // Guards m_Reservations and m_AgentCells. Writers (ReserveCell,
     // ClearCellReservation, ClearReservationsForAgent, ClearExpiredReservations)
@@ -227,7 +240,18 @@ private:
     std::atomic<uint32> m_TopologyVersion{0};
     mutable std::atomic<uint32> m_PathSolveWindows{0};
 
+    // Each cell's region, labelled by View() while m_RegionsCurrent is false; SetCellBlocked and SetCellHeight clear
+    // it, outside path-solve windows. Views read the flag (acquire) and the labels with no lock; the labelling holds
+    // m_RegionsMutex, taken only inside a window after its reservation lock, and sets the flag (release) at the end.
+    mutable std::vector<uint32> m_Regions;
+    // The sets the labelling joins the cells in; only the labelling reads them, under m_RegionsMutex.
+    mutable DisjointSets m_RegionSets;
+    mutable std::mutex m_RegionsMutex;
+    mutable std::atomic<bool> m_RegionsCurrent{false};
+
     void AssertNoPathSolveWindow() const;
+    // Labels m_Regions when m_RegionsCurrent is false.
+    void LabelRegionsIfStale() const;
 };
 
 } // namespace GameEngine::Pathfinding

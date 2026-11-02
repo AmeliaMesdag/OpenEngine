@@ -184,7 +184,7 @@ void SunGlareRenderNode::DeclareForView(ViewDeclare& d)
     // over the whole viewport rather than a halo. The sky already treats these views
     // separately, drawing a 2D backdrop instead of the atmosphere. A projection matrix's
     // (3,3) element is 0 when it divides by w and 1 when it does not.
-    if (std::fabs(camera->proj[15]) > 0.5f)
+    if (std::fabs(camera->proj[3][3]) > 0.5f)
         return;
 
     RenderGraph::RGTexture target{};
@@ -250,9 +250,9 @@ void SunGlareRenderNode::DeclareForView(ViewDeclare& d)
     // which is the intent — but it also means the halo stops spreading visibly outside a disc a
     // few times oversized.
     pc.SunDirRadius[3] = kSunAngularRadiusRad;
-    pc.SunColorIrradiance[0] = sky.primarySunColor[0];
-    pc.SunColorIrradiance[1] = sky.primarySunColor[1];
-    pc.SunColorIrradiance[2] = sky.primarySunColor[2];
+    pc.SunColorIrradiance[0] = sky.primarySunColor.r;
+    pc.SunColorIrradiance[1] = sky.primarySunColor.g;
+    pc.SunColorIrradiance[2] = sky.primarySunColor.b;
     pc.SunColorIrradiance[3] = sky.primarySunIntensity;
 
     // Everything the sky scales the drawn sun by, so the halo tracks the disc exactly: the
@@ -266,8 +266,8 @@ void SunGlareRenderNode::DeclareForView(ViewDeclare& d)
     Rendering::AtmosphereParametersGPU atmo{};
     Rendering::SkyRenderer::FillDefaultAtmosphere(atmo);
     const float planetCenterY = -atmo.planetRadius;
-    const Mathematics::Vector3 fromCenter(camera->cameraPos[0], camera->cameraPos[1] - planetCenterY,
-                                          camera->cameraPos[2]);
+    const Mathematics::Vector3 fromCenter(camera->cameraPos.x, camera->cameraPos.y - planetCenterY,
+                                          camera->cameraPos.z);
     const float r = std::max(std::sqrt(fromCenter.LengthSquared()), 1e-5f);
     const Mathematics::Vector3 up = fromCenter / r;
     pc.Params[1] = std::clamp(Mathematics::Vector3::Dot(sunDir, up), -1.0f, 1.0f);
@@ -288,8 +288,8 @@ void SunGlareRenderNode::DeclareForView(ViewDeclare& d)
     // by each gives a ring that is a circle in PIXELS. One scalar on both axes stretches it
     // by the viewport aspect — on a 3.4:1 view the horizontal taps land three times further
     // from the sun than the vertical ones, and anything narrower can never occlude it.
-    const float projXX = std::fabs(camera->proj[0]);
-    const float projYY = std::fabs(camera->proj[5]);
+    const float projXX = std::fabs(camera->proj[0][0]);
+    const float projYY = std::fabs(camera->proj[1][1]);
     const float visibilityDiscRadius = kProbeRadiusInSunRadii * kSunAngularRadiusRad;
     pc.Probe[2] = visibilityDiscRadius * projXX * 0.5f;
     pc.Probe[3] = visibilityDiscRadius * projYY * 0.5f;
@@ -344,8 +344,8 @@ void SunGlareRenderNode::DeclareForView(ViewDeclare& d)
     if (cascadesReady && feature.GetCastersPipelineId().IsValid())
     {
         SunGlareCastersPushConstants castersPc{};
-        castersPc.Eye = Mathematics::Vector4(camera->cameraPos[0], camera->cameraPos[1],
-                                             camera->cameraPos[2], 0.0f);
+        castersPc.Eye = Mathematics::Vector4(camera->cameraPos.x, camera->cameraPos.y,
+                                             camera->cameraPos.z, 0.0f);
         castersPc.SunDirRadius = Mathematics::Vector4(sunDir.x, sunDir.y, sunDir.z,
                                                       visibilityDiscRadius);
         casters = DeclareCastersPass(d, feature, shadowArray, shadowData, castersPc);

@@ -97,32 +97,32 @@ static StarLightTargets CreateStarLightTargets(ViewDeclare& d, RenderGraph::RGTe
 static void FillAtmosphereFromSettings(const Rendering::SkySettings& settings, Rendering::AtmosphereParametersGPU& atmo)
 {
     Rendering::SkyRenderer::FillDefaultAtmosphere(atmo);
-    atmo.groundAlbedo[0] = settings.groundAlbedo[0];
-    atmo.groundAlbedo[1] = settings.groundAlbedo[1];
-    atmo.groundAlbedo[2] = settings.groundAlbedo[2];
+    atmo.groundAlbedo[0] = settings.groundAlbedo.r;
+    atmo.groundAlbedo[1] = settings.groundAlbedo.g;
+    atmo.groundAlbedo[2] = settings.groundAlbedo.b;
     atmo.groundBrightness = settings.groundBrightness;
-    atmo.groundNightColor[0] = settings.groundNightColor[0];
-    atmo.groundNightColor[1] = settings.groundNightColor[1];
-    atmo.groundNightColor[2] = settings.groundNightColor[2];
+    atmo.groundNightColor[0] = settings.groundNightColor.r;
+    atmo.groundNightColor[1] = settings.groundNightColor.g;
+    atmo.groundNightColor[2] = settings.groundNightColor.b;
     atmo.groundNightColorStd140Pad = 0.0f;
-    atmo.groundHorizonColor[0] = settings.groundHorizonColor[0];
-    atmo.groundHorizonColor[1] = settings.groundHorizonColor[1];
-    atmo.groundHorizonColor[2] = settings.groundHorizonColor[2];
+    atmo.groundHorizonColor[0] = settings.groundHorizonColor.r;
+    atmo.groundHorizonColor[1] = settings.groundHorizonColor.g;
+    atmo.groundHorizonColor[2] = settings.groundHorizonColor.b;
     atmo.groundHorizonColorStd140Pad = 0.0f;
-    atmo.groundHorizonNightColor[0] = settings.groundHorizonNightColor[0];
-    atmo.groundHorizonNightColor[1] = settings.groundHorizonNightColor[1];
-    atmo.groundHorizonNightColor[2] = settings.groundHorizonNightColor[2];
-    atmo.nightSkyHorizonColor[0] = settings.nightSkyHorizonColor[0];
-    atmo.nightSkyHorizonColor[1] = settings.nightSkyHorizonColor[1];
-    atmo.nightSkyHorizonColor[2] = settings.nightSkyHorizonColor[2];
+    atmo.groundHorizonNightColor[0] = settings.groundHorizonNightColor.r;
+    atmo.groundHorizonNightColor[1] = settings.groundHorizonNightColor.g;
+    atmo.groundHorizonNightColor[2] = settings.groundHorizonNightColor.b;
+    atmo.nightSkyHorizonColor[0] = settings.nightSkyHorizonColor.r;
+    atmo.nightSkyHorizonColor[1] = settings.nightSkyHorizonColor.g;
+    atmo.nightSkyHorizonColor[2] = settings.nightSkyHorizonColor.b;
     atmo.nightSkyHorizonColorStd140Pad = 0.0f;
     atmo.groundHorizonDayCosWidth = settings.groundHorizonCosWidth;
     atmo.groundHorizonNightCosWidth = settings.groundHorizonNightCosWidth;
     atmo.belowHorizonBlendSharpness = settings.belowHorizonBlendSharpness;
     atmo.belowHorizonDarkness = settings.belowHorizonDarkness;
-    atmo.belowHorizonDarkColor[0] = settings.belowHorizonDarkColor[0];
-    atmo.belowHorizonDarkColor[1] = settings.belowHorizonDarkColor[1];
-    atmo.belowHorizonDarkColor[2] = settings.belowHorizonDarkColor[2];
+    atmo.belowHorizonDarkColor[0] = settings.belowHorizonDarkColor.r;
+    atmo.belowHorizonDarkColor[1] = settings.belowHorizonDarkColor.g;
+    atmo.belowHorizonDarkColor[2] = settings.belowHorizonDarkColor.b;
     atmo.belowHorizonMode = settings.belowHorizonMode;
     atmo.groundHazeStrength = settings.groundHazeStrength;
 }
@@ -141,23 +141,23 @@ struct CameraVectors
 // no sign flip is needed on forward.
 static CameraVectors ExtractCameraVectors(const Rendering::CameraData& cam)
 {
-    const float* v = cam.view;
+    const Mathematics::Matrix4x4& v = cam.view;
     CameraVectors out;
-    out.Right   = Mathematics::Vector3(v[0], v[4], v[8]);
-    out.Up      = Mathematics::Vector3(v[1], v[5], v[9]);
-    out.Forward = Mathematics::Vector3(v[2], v[6], v[10]);
+    out.Right   = Mathematics::Vector3(v[0][0], v[1][0], v[2][0]);
+    out.Up      = Mathematics::Vector3(v[0][1], v[1][1], v[2][1]);
+    out.Forward = Mathematics::Vector3(v[0][2], v[1][2], v[2][2]);
 
-    out.Position = Mathematics::Vector3(-(v[0] * v[12] + v[1] * v[13] + v[2]  * v[14]),
-                                        -(v[4] * v[12] + v[5] * v[13] + v[6]  * v[14]),
-                                        -(v[8] * v[12] + v[9] * v[13] + v[10] * v[14]));
+    out.Position = Mathematics::Vector3(-(v[0][0] * v[3][0] + v[0][1] * v[3][1] + v[0][2] * v[3][2]),
+                                        -(v[1][0] * v[3][0] + v[1][1] * v[3][1] + v[1][2] * v[3][2]),
+                                        -(v[2][0] * v[3][0] + v[2][1] * v[3][1] + v[2][2] * v[3][2]));
     return out;
 }
 
-// Perspective LH projections leave proj[15] (m[3][3]) at 0 because clip.w = view.z.
-// Orthographic projections preserve w = 1, so proj[15] == 1 distinguishes the two.
+// Perspective LH projections leave proj[3][3] at 0 because clip.w = view.z.
+// Orthographic projections preserve w = 1, so proj[3][3] == 1 distinguishes the two.
 static bool IsOrthographicProjection(const Rendering::CameraData& cam)
 {
-    return std::abs(cam.proj[15] - 1.0f) < kProjectionEpsilon;
+    return std::abs(cam.proj[3][3] - 1.0f) < kProjectionEpsilon;
 }
 
 // Returns 0.0 for orthographic projections as a sentinel; the sky/star shaders
@@ -167,7 +167,7 @@ static float ExtractTanHalfFovY(const Rendering::CameraData& cam)
 {
     if (IsOrthographicProjection(cam))
         return 0.0f;
-    float p5 = cam.proj[5];
+    float p5 = cam.proj[1][1];
     if (std::abs(p5) < kProjectionEpsilon)
         return std::tan(kDefaultHalfFovDeg * std::numbers::pi_v<float> / 180.0f);
     return 1.0f / std::abs(p5);
@@ -175,8 +175,8 @@ static float ExtractTanHalfFovY(const Rendering::CameraData& cam)
 
 static float ExtractAspect(const Rendering::CameraData& cam)
 {
-    float p0 = cam.proj[0];
-    float p5 = cam.proj[5];
+    float p0 = cam.proj[0][0];
+    float p5 = cam.proj[1][1];
     if (std::abs(p0) < kProjectionEpsilon)
         return kDefaultAspect;
     return std::abs(p5) / std::abs(p0);
@@ -207,9 +207,9 @@ static void FillSkyUBOFromSettings(const Rendering::SkySettings& settings, SkyUB
     ubo.moonAngularRadius = settings.moonAngularRadius;
     ubo.skyRotateAroundZenithRadians = 0.0f;
     ubo.moonUboPad2 = settings.moonExposureEV;
-    ubo.sunColor[0] = settings.primarySunColor[0];
-    ubo.sunColor[1] = settings.primarySunColor[1];
-    ubo.sunColor[2] = settings.primarySunColor[2];
+    ubo.sunColor[0] = settings.primarySunColor.r;
+    ubo.sunColor[1] = settings.primarySunColor.g;
+    ubo.sunColor[2] = settings.primarySunColor.b;
     ubo.sunIntensity = settings.primarySunIntensity;
     ubo.timeOfDayHours = settings.timeOfDayHours;
 
@@ -238,15 +238,12 @@ static void FillSkyUBOFromSettings(const Rendering::SkySettings& settings, SkyUB
     // sentinel rides gradientSkyTop.w: an HDRI backdrop wins (it is a separate component path),
     // so gradient is only active when there is no environment texture.
     const bool gradientMode = ClassifySkyBackdrop(settings) == SkyBackdropKind::Gradient;
-    for (int i = 0; i < 3; ++i)
-    {
-        ubo.gradientSkyTop[i]     = settings.gradientSkyTopColor[i];
-        ubo.gradientSkyHorizon[i] = settings.gradientSkyHorizonColor[i];
-        ubo.gradientSkyBottom[i]  = settings.gradientSkyBottomColor[i];
-    }
-    ubo.gradientSkyTop[3]     = gradientMode ? 1.0f : -1.0f;
-    ubo.gradientSkyHorizon[3] = 0.0f;
-    ubo.gradientSkyBottom[3]  = 0.0f;
+    const ColorLinear& top = settings.gradientSkyTopColor;
+    const ColorLinear& horizon = settings.gradientSkyHorizonColor;
+    const ColorLinear& bottom = settings.gradientSkyBottomColor;
+    ubo.gradientSkyTop = Mathematics::Vector4(top.r, top.g, top.b, gradientMode ? 1.0f : -1.0f);
+    ubo.gradientSkyHorizon = Mathematics::Vector4(horizon.r, horizon.g, horizon.b, 0.0f);
+    ubo.gradientSkyBottom = Mathematics::Vector4(bottom.r, bottom.g, bottom.b, 0.0f);
 }
 
 // FNV-1a 64-bit. Stable across runs; sufficient quality for change detection.
@@ -286,15 +283,15 @@ static uint64_t ComputeSkyLutSettingsDigest(const Rendering::SkySettings& settin
     // Atmosphere block in its entirety.
     MixDigest(h, &atmo, sizeof(atmo));
     // Only the sun and moon SkyUBO fields the LUT shaders actually consume.
-    MixDigest(h, settings.scatteringSunDir, sizeof(settings.scatteringSunDir));
-    MixDigest(h, settings.sunSourceColor, sizeof(settings.sunSourceColor));
+    MixDigest(h, &settings.scatteringSunDir, sizeof(settings.scatteringSunDir));
+    MixDigest(h, &settings.sunSourceColor, sizeof(settings.sunSourceColor));
     MixDigest(h, &settings.sunSourceIntensity, sizeof(settings.sunSourceIntensity));
     // The moon reaches the kernel only while it lights the sky, so a hidden moon's direction does not
     // re-bake the LUT.
     const float moonIntensity = settings.showMoonDisk ? settings.moonIntensity : 0.0f;
     MixDigest(h, &moonIntensity, sizeof(moonIntensity));
     if (moonIntensity > 0.0f)
-        MixDigest(h, settings.moonDirWS, sizeof(settings.moonDirWS));
+        MixDigest(h, &settings.moonDirWS, sizeof(settings.moonDirWS));
     return h;
 }
 
@@ -316,7 +313,7 @@ static uint32_t SkyViewLutCameraBand(const Engine::Renderer::RenderServices& rs,
     if (!camData)
         return 0u;
     const CameraVectors camera = ExtractCameraVectors(*camData);
-    return Rendering::SkyViewLutAltitudeBand(Rendering::AltitudeAbovePlanetMeters(camera.Position.v, planetRadius));
+    return Rendering::SkyViewLutAltitudeBand(Rendering::AltitudeAbovePlanetMeters(camera.Position, planetRadius));
 }
 
 void SkyRenderNode::EnsureDescriptorSetDescs(const Rendering::SkyRenderer& renderer)
@@ -633,8 +630,7 @@ void SkyRenderNode::Declare(RenderPipelineInstance& instance, const PipelineDecl
                 skyUbo.cameraPosition[1] = Rendering::SkyViewLutBandAltitude(altitudeBand);
                 // Its sun term is the sun's own source; the moon is its second term
                 // (moonDirection / moonIntensity), so neither carries the handover.
-                for (int channel = 0; channel < 3; ++channel)
-                    skyUbo.sunColor[channel] = s.sunSourceColor[channel];
+                skyUbo.sunColor = Mathematics::Vector3(s.sunSourceColor.r, s.sunSourceColor.g, s.sunSourceColor.b);
                 skyUbo.sunIntensity = s.sunSourceIntensity;
                 Rendering::AtmosphereParametersGPU atmo{};
                 FillAtmosphereFromSettings(s, atmo);
@@ -842,7 +838,7 @@ void SkyRenderNode::DeclareForView(ViewDeclare& d)
             skyUbo.viewportAspect = (vh > 0.0f) ? (vw / vh) : aspect;
             skyUbo.tanHalfFovY = tanHalfFovY;
             skyUbo.skyRotateAroundZenithRadians =
-                (tanHalfFovY <= 0.0f && camData->cameraPos[3] > 0.5f) ? 1.0f : 0.0f;
+                (tanHalfFovY <= 0.0f && camData->cameraPos.w > 0.5f) ? 1.0f : 0.0f;
             skyUbo.viewportResolution[0] = vw;
             skyUbo.viewportResolution[1] = vh;
             skyUbo.starsUndoCompensation = starsUndoCompensation ? 1.0f : 0.0f;

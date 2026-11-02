@@ -55,6 +55,9 @@ void EmitCbtForwardDraw(Pipeline::ViewDeclare& d, CBTRenderFeature& feature)
     static const bool kCbtNoDraw = std::getenv("GE_CBT_NO_DRAW") != nullptr;
     if (kCbtNoDraw)
         return;
+    // The terrain draws into this view, so an update that is not at rest can change the view's depth.
+    if (feature.WritesDynamicDepth())
+        rs.NotifyUnversionedMotion(d.View.id);
 
     // Re-import the update outputs for THIS view's forward reads (idempotent per
     // frame -> the same RGBuffers -> the compute->graphics edge forms).
@@ -131,6 +134,12 @@ void EmitCbtForwardDraw(Pipeline::ViewDeclare& d, CBTRenderFeature& feature)
         rs.EmitForwardSampledRead(
             d.Frame, d.View.id,
             d.Frame.ImportExternalTexture("CBT.HeightSource", pageCache, ResourceState::ShaderResource));
+    // A paged planar surface samples its plane caches, which the terrain upload pass leaves in ShaderResource.
+    for (const TextureHandle plane : feature.GetDrawSurfacePlanes())
+        if (plane.IsValid())
+            rs.EmitForwardSampledRead(
+                d.Frame, d.View.id,
+                d.Frame.ImportExternalTexture("Terrain.SurfacePageCache", plane, ResourceState::ShaderResource));
 }
 
 // The terrain's shadow on the directional light (TerrainShadowBake): declares this frame's bake
@@ -259,6 +268,8 @@ void CBTRenderNode::DeclareForView(Pipeline::ViewDeclare& d)
     CBTTerrain::CBTFrameParams params{};
     if (!feature.BuildFrameParams(rs, d.View.id, d.RenderWidth, d.RenderHeight, frameCounter, params))
         return;
+    // A tree restarted above draws its settled shape at this camera from this frame on.
+    feature.RefineRestartedTree(params, frameCounter);
 
     const void* graph = &d.Frame;
     const uint64_t rgFrame = d.Frame.FrameIndex(); // monotonic, per-graph, stale-safe

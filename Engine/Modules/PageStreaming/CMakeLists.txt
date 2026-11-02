@@ -10,7 +10,7 @@ add_library(PageStreaming OBJECT
     Source/PageAddress.cpp
     Source/PageStore/PageStoreFormat.cpp
     Source/PageStore/PageStoreSerialization.cpp
-    Source/HeightPageCodec.cpp
+    Source/Height/HeightPageCodec.cpp
     Source/PageCodec.cpp
     Source/BytePageCodec.cpp
     Source/Bc5PageCodec.cpp
@@ -21,17 +21,17 @@ add_library(PageStreaming OBJECT
     Source/PageCache.cpp
     Source/PageResidency.cpp
     Source/GeneratedHeightPageProvider.cpp
-    Source/HeightPageOverlay.cpp
-    Source/HeightStoreKey.cpp
-    Source/HeightStoreCache.cpp
-    Source/HeightSourceRows.cpp
+    Source/Height/HeightPageOverlay.cpp
+    Source/Height/HeightStoreKey.cpp
+    Source/Height/HeightStoreCache.cpp
+    Source/Height/HeightSourceRows.cpp
     Source/SourceRangeReader.cpp
     Source/PageFieldFilter.cpp
     Source/PagePyramidBuilder.cpp
     Source/PageStore/PageStorePatcher.cpp
-    Source/HeightStepPlanner.cpp
-    Source/HeightCookBands.cpp
-    Source/HeightPageCooker.cpp
+    Source/Height/HeightStepPlanner.cpp
+    Source/Height/HeightCookBands.cpp
+    Source/Height/HeightPageCooker.cpp
     Source/PlanetPageCooker.cpp
     Source/PageFaceSeams.cpp
     Source/TerrainPageContainer.cpp

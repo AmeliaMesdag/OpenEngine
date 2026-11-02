@@ -30,10 +30,11 @@ namespace GameEngine::TerrainECS
 
 class TerrainService;
 class TerrainRenderFeature;
-class TerrainHeightPageFeature;
+class TerrainPageFeature;
 struct TiledTerrainData;
 struct TiledRenderExtent;
 struct TerrainHandle;
+struct PageRequestCamera;
 
 /// The generated height lattice of a noise or flat tiled terrain: its tile grid and the tile fill's
 /// noise. The height pages and the surface pages read it.
@@ -44,7 +45,8 @@ uint64 GeneratedHeightIdentity(const PageStreaming::GeneratedHeightLattice& latt
 
 /// The height-source inputs of a tiled terrain and its page requests for `cameras` this frame: its
 /// CPU pages whenever TerrainHeightHasCpuPages says so, and its GPU pages too when
-/// TerrainHeightIsPaged does and there is a view. `renderTerrain` is the handle the CBT draws it
+/// TerrainHeightIsPaged does and there is a view; its surface pages over the wedges of `views` when
+/// TerrainSurfaceIsPaged does. `renderTerrain` is the handle the CBT draws it
 /// with; `name` is the entity's name for the log lines (empty: its render index);
 /// `originY` and `heightScale` place its normalized heights in the world; `targetPixelError` is the
 /// terrain's CBT split target; `focalScale` is the largest 1 / tan(vfov / 2) of the views (0 when
@@ -53,12 +55,11 @@ uint64 GeneratedHeightIdentity(const PageStreaming::GeneratedHeightLattice& latt
 /// being paged at that frame's UpdateHeightPages. Sets `tiled`'s PageOverlayByteCap (the
 /// platform's cap when the terrain has CPU pages, else zero) and logs OverlayRefusal when its
 /// overlay is over the cap.
-void RequestTiledTerrainHeightPages(TerrainService& service, const Rendering::IDevice& device,
-                                    TiledTerrainData& tiled, const TiledRenderExtent& extent,
-                                    const TerrainHandle& renderTerrain, std::string_view name, float32 originY,
-                                    float32 heightScale,
-                                    float32 targetPixelError, std::span<const Mathematics::Vector3> cameras,
-                                    float32 focalScale);
+void RequestTiledTerrainPages(TerrainService& service, const Rendering::IDevice& device, TiledTerrainData& tiled,
+                              const TiledRenderExtent& extent, const TerrainHandle& renderTerrain,
+                              std::string_view name, float32 originY, float32 heightScale, float32 targetPixelError,
+                              std::span<const Mathematics::Vector3> cameras, std::span<const PageRequestCamera> views,
+                              float32 focalScale);
 
 /// Requests the height pages of planet entity `planet` at the world origin for world-space `cameras`. The wide
 /// arm draws the pages of render handle index `renderTerrain` (kNoRenderTerrain: none yet); the narrow arm
@@ -72,7 +73,7 @@ void RequestPlanetHeightPages(TerrainService& service, const Rendering::IDevice&
 /// being paged), its uploads and page tables published to `pages`, and the rects whose height
 /// changed source published into the CBT's dirty-rect accumulator of `terrainFeature`, a planet's
 /// into `service`'s sphere dirty union.
-void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature, TerrainHeightPageFeature& pages,
+void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature, TerrainPageFeature& pages,
                        uint64 frameIndex, float32 deltaSeconds, uint32 framesInFlight);
 
 } // namespace GameEngine::TerrainECS

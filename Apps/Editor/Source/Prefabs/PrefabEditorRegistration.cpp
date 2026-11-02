@@ -12,6 +12,7 @@
 #include "Inspectors/DefaultComponentInspector.h"
 #include "Prefabs/CreatePrefab/CreatePrefabCommand.h"
 #include "Prefabs/CreatePrefab/CreatePrefabDialog.h"
+#include "Prefabs/PrefabOverridesList/PrefabOverridesList.h"
 #include "Prefabs/PrefabBar.h"
 #include "Prefabs/PrefabInstanceDescriptions.h"
 #include "Prefabs/PrefabRemovedComponents.h"
@@ -385,6 +386,20 @@ void UnpackPrefab(const HierarchyCommandContext& context, Scene::PrefabUnpackDep
         context.NotifyWorldStructureChanged();
 }
 
+// The instance whose Overrides list is open, kept across a rebuild of the Inspector.
+PrefabOverridesListReopen& OverridesListReopen()
+{
+    static PrefabOverridesListReopen s_Reopen;
+    return s_Reopen;
+}
+
+// What the Overrides list of every prefab bar reads: RegisterPrefabEditor sets it.
+PrefabOverridesListContext& OverridesListContext()
+{
+    static PrefabOverridesListContext s_Context;
+    return s_Context;
+}
+
 // The Inspector's prefab bar on every entity of an instance. Each Inspector build describes the
 // instance again, and the bar, the component headers and the field rows read that description.
 void AddPrefabBar(const InspectorContext& context)
@@ -393,25 +408,9 @@ void AddPrefabBar(const InspectorContext& context)
         return;
     PrefabInstanceDescriptions::Get().Forget(*context.World, context.Entity);
     context.Parent->AddChild(std::make_unique<PrefabBar>(*context.World, context.Entity, context.ChangeNotifications,
-                                                         context.PingAsset, context.RefreshOverrideMarks,
+                                                         context.Undo, OverridesListContext(), context.PingAsset,
+                                                         context.RefreshOverrideMarks,
                                                          context.RequestInspectorRefresh));
-}
-
-// The reflected field of `typeId` that the scene key `key` writes: the field of that name, or the
-// array field whose name the element's index follows. Empty when no reflected field matches.
-std::string_view ReflectedFieldForKey(ECS::ComponentTypeId typeId, std::string_view key)
-{
-    std::string_view arrayField;
-    for (const ECS::FieldInfo& field : ECS::ComponentFieldRegistry::Get(typeId))
-    {
-        if (EqualsIgnoreCase(key, field.Name))
-            return field.Name;
-        const bool indexFollows = key.size() > field.Name.size() && StartsWithIgnoreCase(key, field.Name) &&
-                                  key[field.Name.size()] >= '0' && key[field.Name.size()] <= '9';
-        if (indexFollows && field.Name.size() > arrayField.size())
-            arrayField = field.Name;
-    }
-    return arrayField;
 }
 
 // The Inspector's answer for one component of an instance entity: the fields it overrides and whether
@@ -447,7 +446,7 @@ ComponentOverrides QueryPrefabComponentOverrides(ECS::World& world, ECS::EntityH
         else if (entry.Kind == Scene::PrefabOverrideKind::Field)
         {
             answer.Overridden = true;
-            const std::string_view field = ReflectedFieldForKey(typeId, entry.Field);
+            const std::string_view field = ReflectedFieldForSceneKey(typeId, entry.Field);
             if (!field.empty() && !answer.IsFieldOverridden(field))
                 answer.Fields.emplace_back(field);
         }
@@ -467,8 +466,10 @@ void AddRemovedComponentHeaders(const InspectorContext& context)
     for (const Scene::PrefabOverride& entry : described->Overrides)
         if (entry.Kind == Scene::PrefabOverrideKind::RemovedComponent)
             removed.push_back(entry.Component);
-    if (!removed.empty())
-        context.Parent->AddChild(std::make_unique<PrefabRemovedComponents>(removed));
+    if (removed.empty())
+        return;
+    const OverrideMenuTarget entity{context.World, context.Entity, 0, {}, context.Undo, context.ChangeNotifications};
+    context.Parent->AddChild(std::make_unique<PrefabRemovedComponents>(removed, entity, context.RequestInspectorRefresh));
 }
 
 // The menu entry that selects the prefab file, named for the prefab as the Inspector's bar names it.
@@ -544,8 +545,11 @@ PrefabHierarchyMenu& Menu()
 
 } // namespace
 
-void RegisterPrefabEditor(EditorChangeNotifications& notifications, IThumbnailProvider* thumbnails)
+void RegisterPrefabEditor(EditorChangeNotifications& notifications, IThumbnailProvider* thumbnails,
+                          std::function<bool()> isInPlayMode, std::function<SceneDocumentManager*()> document)
 {
+    OverridesListReopen() = {};
+    OverridesListContext() = {std::move(document), isInPlayMode, &OverridesListReopen()};
     PrefabInstanceDescriptions::Get().Track(notifications);
     EditorComponentTraits traits;
     traits.HierarchyRowClass = "hierarchy-entity-prefab";
@@ -558,6 +562,9 @@ void RegisterPrefabEditor(EditorChangeNotifications& notifications, IThumbnailPr
     InspectorRegistry::Get().RegisterEntityBanner("prefab-removed-components", EntityBannerPlacement::AfterComponents,
                                                   &AddRemovedComponentHeaders);
     InspectorRegistry::Get().SetComponentOverridesAnswerer(&QueryPrefabComponentOverrides);
+    InspectorRegistry::Get().SetOverrideMenuAnswerer(
+        [isInPlayMode = std::move(isInPlayMode)](const OverrideMenuTarget& target)
+        { return isInPlayMode && isInPlayMode() ? std::vector<OverrideMenuEntry>{} : QueryPrefabOverrideMenu(target); });
     EditorPluginRegistry::Get().RegisterPlugin(Menu());
     AssetsFolderDropRegistry::Get().Register(UI::Interaction::GetPayloadTypeId<HierarchyEntityDragPayload>(),
                                              {&CanDropEntityOnFolder, &CreatePrefabFromFolderDrop});

@@ -17,6 +17,7 @@
 #include "Assets/TextureAsset.h"
 #include "EditorContextMenu/UIContextMenu.h"
 #include "Editor/Registries/EditorPluginRegistry.h"
+#include "Editor/Hierarchy/HierarchyDataProvider.h"
 #include "Editor/Hierarchy/HierarchyEmptyParent.h"
 #include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityCommands.h"
 #include "Editor/Hierarchy/HierarchyEntity/HierarchyEntityDelete.h"
@@ -148,14 +149,6 @@ namespace GameEngine
 {
 namespace
 {
-// Above this many per-Update deltas (created + destroyed entities, or actual reparent
-// moves) the per-entity ops lose to a single full Rebuild: each sorted-insert / erase into
-// a large sibling list is O(list), so an N-sized delta degrades to O(N^2) vector shifts
-// (a 100k bench spawn would memmove gigabytes and hang for seconds). At/under the threshold
-// the per-entity path wins; over it, Rebuild is the always-correct fallback (and reseeds all
-// bookkeeping). 512 is comfortably above normal editor/gameplay per-frame churn yet far below
-// the point where O(N^2) bites.
-constexpr std::size_t kIncrementalDeltaMax = 512;
 
 // Kill switch (design §5): GE_HIERARCHY_INCREMENTAL=0 restores the pre-incremental
 // full-Refresh Update path exactly. Default ON. Read once per process. Prefix-'0' convention
@@ -222,7 +215,7 @@ ECS::EntityHandle FindEntityBySceneTag(ECS::World& world, std::string_view tag)
 }
 } // namespace
 
-static constexpr TreeId kRootId = std::numeric_limits<TreeId>::max();
+static constexpr TreeId kRootId = HierarchyDataProvider::kRootId;
 
 namespace
 {
@@ -604,709 +597,6 @@ class CreateReflectionProbeEntityCommand final : public Editor::IEditorCommand
 };
 
 } // namespace
-
-// Private provider implementation
-class HierarchyPanel::HierarchyDataProvider final : public TreeChangeTrackingProvider
-{
-  public:
-    explicit HierarchyDataProvider(World* world)
-        : m_World(world) {}
-
-    void SetWorld(World* world)
-    {
-        m_World = world;
-        Rebuild();
-    }
-
-    void SetSortMode(HierarchySortMode mode) { m_SortMode = mode; }
-    void SetSortDirection(HierarchySortDirection dir) { m_SortDirection = dir; }
-    void Rebuild()
-    {
-        m_Roots.clear();
-        m_Children.clear();
-        m_EntityParentKey.clear();
-        m_PendingResortParents.clear(); // a full rebuild resorts everything; drop stale deferrals
-        if (!m_World)
-        {
-            m_Labels.clear();
-            return;
-        }
-        // m_Labels is intentionally retained across rebuilds: strings are reused in place
-        // below (assign keeps each buffer) and stale entries are pruned at the end.
-
-        // Collect alive entities from the World's canonical metadata.
-        // This avoids observing transient archetype-move states and eliminates the need for
-        // defensive de-duplication when components are added/removed immediately.
-        m_World->GetAliveEntitiesSnapshot(m_SnapshotScratch);
-
-        // Physics world settings live in Settings > Project Settings > Physics; hide here.
-        m_SnapshotScratch.erase(
-            std::remove_if(m_SnapshotScratch.begin(), m_SnapshotScratch.end(), [this](const EntityHandle& e)
-                           { return m_World->GetComponent<Components::PhysicsWorldSettingsComponent>(e) != nullptr; }),
-            m_SnapshotScratch.end());
-
-        // Stable pre-sort by TreeId (Encode). The decorate-sort below (SortGroup) applies a
-        // total order with an id tie-break, so this only fixes the flatten-path order
-        // deterministically; final sibling order is fully determined by SortGroup.
-        std::sort(m_SnapshotScratch.begin(), m_SnapshotScratch.end(), [](const EntityHandle& a, const EntityHandle& b)
-                  { return Encode(a) < Encode(b); });
-
-        // Build membership set (use the same packed representation as TreeId)
-        std::unordered_set<uint32_t> alive;
-        alive.reserve(m_SnapshotScratch.size());
-        for (auto& e : m_SnapshotScratch)
-        {
-            alive.insert(static_cast<uint32_t>(Encode(e)));
-        }
-
-        // Build adjacency from Parent component
-        bool anyParent = false;
-        for (auto& e : m_SnapshotScratch)
-        {
-            ECS::Entity ent(m_World, e);
-            if (auto* p = ent.Get<Parent>())
-            {
-                anyParent = true;
-
-                // Key children by the same packed representation we expose via TreeId
-                TreeId parentKey = Encode(p->Entity);
-                if (p->Entity.IsValid() && alive.count(static_cast<uint32_t>(parentKey)))
-                {
-                    m_Children[static_cast<uint32_t>(parentKey)].push_back(e);
-                }
-                else
-                {
-                    m_Roots.push_back(e);
-                }
-            }
-            else
-            {
-                m_Roots.push_back(e);
-            }
-        }
-
-        // No Parent anywhere: show every entity as a root (still ordered by HierarchyOrder below).
-        if (!anyParent)
-        {
-            m_Children.clear();
-            m_Roots = m_SnapshotScratch;
-        }
-
-        // Sibling order: either scene-authored (HierarchyOrder) or overridden by the
-        // view-only sort mode configured on the panel. The decorate-sort keys and comparator
-        // (KeyOf / KeyLess, via SortGroup) are the SAME ones the incremental sorted-inserts
-        // use — comparator parity is the correctness crux, so both paths share one helper.
-        SortGroup(m_Roots);
-        for (auto& kv : m_Children)
-            SortGroup(kv.second);
-
-        // Labels: prefer Name component if present, fall back to entity id. Reuse the existing
-        // label strings across rebuilds (assign into the slot keeps its buffer) and prune
-        // entries whose entity is no longer alive, so a rebuild does not free and reallocate one
-        // string per entity every time.
-        for (const EntityHandle& e : m_SnapshotScratch)
-            BuildLabel(e);
-        for (auto it = m_Labels.begin(); it != m_Labels.end();)
-        {
-            if (alive.count(static_cast<uint32_t>(it->first)) == 0)
-                it = m_Labels.erase(it);
-            else
-                ++it;
-        }
-
-        // Seed the incremental position index from the freshly-built adjacency so the per-entity
-        // ops and the identity diff have correct bookkeeping to mutate.
-        SeedParentKeyIndex();
-
-        MarkAllChanged();
-    }
-
-    // ------------------------------------------------------------------
-    // Incremental maintenance (design §2 Tier 1+2). Each op mutates the built
-    // adjacency for the touched entity/entities only, ending with a structure/subset
-    // change signal so TreeView pays only its O(visible) flat walk — not a full rebuild.
-    // ------------------------------------------------------------------
-
-    struct DiffOutcome
-    {
-        bool AnyDestroyed = false;        // a tracked row vanished → caller revalidates selection
-        bool AnyMembershipChange = false; // any entity created OR destroyed this batch
-        bool Escalate = false;            // delta too large for per-entity ops → caller full-rebuilds
-    };
-
-    // Entity create/destroy authority (there are no entity-level lifecycle events, only
-    // per-component ones). Merge-diffs the live entity set against the tracked set — no
-    // component reads, no sorting — then applies per-delta ops. Also the swap-generation
-    // gap-heal backstop. Nothing is applied when the delta exceeds kIncrementalDeltaMax
-    // (F1: per-entity inserts into large sibling lists are O(list), so a mass spawn/despawn
-    // would be O(N^2)); the caller full-rebuilds instead.
-    DiffOutcome ApplyIdentityDiff()
-    {
-        DiffOutcome out;
-        if (!m_World)
-            return out;
-
-        m_World->GetAliveEntitiesSnapshot(m_SnapshotScratch);
-
-        // created = live keys not yet tracked. The hide filter is deferred to ApplyCreated
-        // (only new entities need the component read), keeping this pass free of reads.
-        m_DiffCreated.clear();
-        std::unordered_set<uint32_t> snapKeys;
-        snapKeys.reserve(m_SnapshotScratch.size());
-        for (const EntityHandle& e : m_SnapshotScratch)
-        {
-            const uint32_t key = static_cast<uint32_t>(Encode(e));
-            snapKeys.insert(key);
-            if (m_EntityParentKey.find(key) == m_EntityParentKey.end())
-                m_DiffCreated.push_back(e);
-        }
-
-        // destroyed = tracked keys no longer live. Removed handles are IDs only — never
-        // dereferenced (ApplyDestroyed works purely on provider state).
-        m_DiffDestroyed.clear();
-        for (const auto& kv : m_EntityParentKey)
-            if (snapKeys.find(kv.first) == snapKeys.end())
-                m_DiffDestroyed.push_back(Decode(static_cast<TreeId>(kv.first)));
-
-        out.AnyMembershipChange = !m_DiffCreated.empty() || !m_DiffDestroyed.empty();
-        out.AnyDestroyed = !m_DiffDestroyed.empty();
-
-        // F1: bail to a full Rebuild for large deltas (mass spawn/despawn). Measure-only up to
-        // here (no structures mutated), so nothing to unwind.
-        if (m_DiffCreated.size() + m_DiffDestroyed.size() > kIncrementalDeltaMax)
-        {
-            out.Escalate = true;
-            return out;
-        }
-
-        for (const EntityHandle& e : m_DiffDestroyed)
-            ApplyDestroyed(e);
-        for (const EntityHandle& e : m_DiffCreated)
-            ApplyCreated(e);
-        // Intra-batch parent adoption: a child created before its (also-new) parent was
-        // rooted during ApplyCreated because the parent wasn't tracked yet. Now that the
-        // whole created set is present, re-home any such child. ApplyReparented no-ops when
-        // placement is already correct, so pre-existing correctly-placed creates cost nothing.
-        for (const EntityHandle& e : m_DiffCreated)
-            ApplyReparented(e);
-
-        return out;
-    }
-
-    // C6 (visibility inversion): an entity can be query-visible a frame before its Added
-    // event, and the identity diff may have already inserted it — so this is insert-if-absent.
-    void ApplyCreated(const EntityHandle& e)
-    {
-        if (!m_World || !e.IsValid())
-            return;
-        const uint32_t childKey = static_cast<uint32_t>(Encode(e));
-        if (m_EntityParentKey.find(childKey) != m_EntityParentKey.end())
-            return; // already tracked (C6 / re-delivered)
-
-        // Same hide filter Rebuild applies.
-        if (m_World->GetComponent<Components::PhysicsWorldSettingsComponent>(e) != nullptr)
-            return;
-
-        const TreeId parentKey = DesiredParentKey(e);
-        if (parentKey == kRootId)
-            SortedInsert(m_Roots, e);
-        else
-            SortedInsert(m_Children[static_cast<uint32_t>(parentKey)], e);
-        m_EntityParentKey[childKey] = parentKey;
-        BuildLabel(e);
-        MarkStructureChanged();
-    }
-
-    void ApplyDestroyed(const EntityHandle& e)
-    {
-        const uint32_t childKey = static_cast<uint32_t>(Encode(e));
-        auto itPos = m_EntityParentKey.find(childKey);
-        if (itPos == m_EntityParentKey.end())
-            return; // not tracked — idempotent
-        const TreeId storedParent = itPos->second; // copy: the map may rehash below
-
-        // Remove from its own sibling list.
-        RemoveFromSiblingList(storedParent, e);
-
-        // Re-root its children: dangling Parent ⇒ root (matches Rebuild's alive-check). Their
-        // Parent components still point at the dead handle — identical to today's post-rebuild
-        // state.
-        auto childrenIt = m_Children.find(childKey);
-        if (childrenIt != m_Children.end())
-        {
-            std::vector<EntityHandle> orphans = std::move(childrenIt->second);
-            m_Children.erase(childrenIt);
-            for (const EntityHandle& c : orphans)
-            {
-                SortedInsert(m_Roots, c);
-                m_EntityParentKey[static_cast<uint32_t>(Encode(c))] = kRootId;
-            }
-        }
-
-        m_EntityParentKey.erase(childKey);
-        m_Labels.erase(Encode(e));
-        MarkStructureChanged();
-    }
-
-    // Idempotent within a window (LifecycleEvents contract): compares the current Parent
-    // against tracked placement and no-ops when unchanged — so re-delivered Added/Removed
-    // spans and chunk-granular Changed<Parent> over-reports cost nothing. Returns true only
-    // when the entity actually moved (the caller counts real moves for the F1 escalation; a
-    // no-op is O(1) so over-reports don't count against the threshold).
-    bool ApplyReparented(const EntityHandle& e)
-    {
-        if (!m_World)
-            return false;
-        const uint32_t childKey = static_cast<uint32_t>(Encode(e));
-        auto itPos = m_EntityParentKey.find(childKey);
-        if (itPos == m_EntityParentKey.end())
-            return false; // destroyed / hidden / never tracked — idempotent no-op
-        const TreeId storedParent = itPos->second;
-        const TreeId desiredParent = DesiredParentKey(e); // absent Parent ⇒ root (Removed<Parent>)
-        if (desiredParent == storedParent)
-            return false;
-
-        RemoveFromSiblingList(storedParent, e);
-        if (desiredParent == kRootId)
-            SortedInsert(m_Roots, e);
-        else
-            SortedInsert(m_Children[static_cast<uint32_t>(desiredParent)], e);
-        m_EntityParentKey[childKey] = desiredParent;
-        MarkStructureChanged();
-        return true;
-    }
-
-    // Tier 1: label update + Subset rebind (no flat rebuild). Under name-sensitive sort modes
-    // (Alphabetical / Type) a rename can reorder siblings, so escalate to a one-list resort —
-    // but only RECORD the touched list (FlushPendingResorts sorts each once). F2: early-return
-    // when the freshly computed label is unchanged, so the chunk-stamp over-report (an archetype
-    // move stamps every column of source+dest chunks, so Changed<Name> reports ~a chunk of
-    // unrelated entities per unrelated create/destroy) costs one string compare, not a resort.
-    void ApplyRenamed(const EntityHandle& e)
-    {
-        if (!m_World)
-            return;
-        const uint32_t childKey = static_cast<uint32_t>(Encode(e));
-        auto itPos = m_EntityParentKey.find(childKey);
-        if (itPos == m_EntityParentKey.end())
-            return; // not tracked — idempotent
-
-        const TreeId tid = Encode(e);
-        ComputeLabel(e, m_LabelScratch);
-        auto lit = m_Labels.find(tid);
-        const bool changed = (lit == m_Labels.end()) || (lit->second != m_LabelScratch);
-        if (!changed)
-            return; // F2: no actual label change (filters the chunk-stamp over-report)
-        if (lit != m_Labels.end())
-            lit->second = m_LabelScratch;
-        else
-            m_Labels.emplace(tid, m_LabelScratch);
-
-        if (m_SortMode == HierarchySortMode::Custom)
-        {
-            MarkChanged(tid); // name-independent order: paint-only rebind
-            return;
-        }
-        // Name-sensitive sort: defer the resort of the touched sibling list (coalesced across all
-        // renames this Update by FlushPendingResorts — many renames into one list resort once).
-        m_PendingResortParents.insert(itPos->second);
-        MarkStructureChanged();
-    }
-
-    // Sort each sibling list recorded by ApplyRenamed exactly once. Called by the panel after a
-    // rename batch (the Changed<Name> scan and the editor Name-commit path both flush).
-    void FlushPendingResorts()
-    {
-        if (m_PendingResortParents.empty())
-            return;
-        for (TreeId parentKey : m_PendingResortParents)
-        {
-            if (parentKey == kRootId)
-                SortGroup(m_Roots);
-            else if (auto cit = m_Children.find(static_cast<uint32_t>(parentKey)); cit != m_Children.end())
-                SortGroup(cit->second);
-        }
-        m_PendingResortParents.clear();
-    }
-
-// Debug-config-only parity check. `!defined(NDEBUG)` catches unoptimized debug builds on every
-// compiler (incl. macOS/clang Debug where the MSVC-ism `_DEBUG` is unset); `!defined(GE_DEBUGFAST)`
-// then excludes this engine's DebugFast config, which seeds Debug flags (so NDEBUG is unset there
-// too) but is the daily-driver perf config that must NOT pay a per-frame Rebuild. Release defines
-// NDEBUG and is excluded by the first clause.
-#if !defined(NDEBUG) && !defined(GE_DEBUGFAST)
-    // Behavioral-parity cross-check (design §4): the incremental result must be
-    // byte-equivalent to a fresh Rebuild after every mutation batch. Save the incremental
-    // state, rebuild from scratch, compare, then restore the incremental state so latent
-    // cross-frame accumulation bugs surface instead of being masked.
-    void DebugVerifyAgainstRebuild()
-    {
-        std::vector<EntityHandle> incRoots = m_Roots;
-        std::unordered_map<uint32_t, std::vector<EntityHandle>> incChildren = m_Children;
-        std::unordered_map<TreeId, std::string> incLabels = m_Labels;
-        std::unordered_map<uint32_t, TreeId> incParentKey = m_EntityParentKey;
-
-        Rebuild(); // authoritative; overwrites members
-
-        const bool ok = (incRoots == m_Roots) && (incChildren == m_Children) && (incLabels == m_Labels);
-        if (!ok)
-        {
-            Logger::Log::Error("[Hierarchy] incremental sync diverged from a fresh Rebuild");
-            assert(false && "HierarchyDataProvider incremental sync diverged from Rebuild");
-        }
-
-        m_Roots = std::move(incRoots);
-        m_Children = std::move(incChildren);
-        m_Labels = std::move(incLabels);
-        m_EntityParentKey = std::move(incParentKey);
-    }
-#endif
-
-    // Baseline-only rows, injected by the VCS controller. The provider stores
-    // and orders them but knows nothing about version control.
-    struct GhostRow
-    {
-        TreeId Id = 0;
-        TreeId ParentId = kRootId;
-        std::string Label;
-    };
-
-    void SetGhostRows(std::vector<GhostRow> rows)
-    {
-        if (rows.empty() && m_GhostChildren.empty())
-            return;
-        m_GhostChildren.clear();
-        m_GhostLabels.clear();
-        for (GhostRow& row : rows)
-        {
-            m_GhostChildren[row.ParentId].push_back(row.Id);
-            m_GhostLabels.emplace(row.Id, std::move(row.Label));
-        }
-        MarkStructureChanged();
-        MarkAllChanged();
-    }
-
-    int GhostChildCount(TreeId parent) const
-    {
-        const auto it = m_GhostChildren.find(parent);
-        return it == m_GhostChildren.end() ? 0 : static_cast<int>(it->second.size());
-    }
-
-    // The entity's children in the order the tree lists them; empty when it has none.
-    std::span<const EntityHandle> ChildrenOf(const EntityHandle& entity) const
-    {
-        const auto it = m_Children.find(static_cast<uint32_t>(Encode(entity)));
-        if (it == m_Children.end())
-            return {};
-        return it->second;
-    }
-
-    // ITreeDataProvider
-    int GetRootCount() const override { return 1; }
-    TreeId GetRootId(int) const override { return kRootId; }
-    int GetChildCount(TreeId parent) const override
-    {
-        if (parent == kRootId)
-            return static_cast<int>(m_Roots.size()) + GhostChildCount(parent);
-        if (Editor::IsGhostTreeId(parent))
-            return GhostChildCount(parent);
-        const auto pid = static_cast<uint32_t>(parent);
-        auto it = m_Children.find(pid);
-        const int entityCount = it == m_Children.end() ? 0 : static_cast<int>(it->second.size());
-        return entityCount + GhostChildCount(parent);
-    }
-    TreeId GetChildId(TreeId parent, int index) const override
-    {
-        // Ghost rows sort after the live children of the same parent: a deleted
-        // sibling should not displace the entities that are still there.
-        const auto ghostAt = [this, parent](int ghostIndex) -> TreeId
-        {
-            const auto it = m_GhostChildren.find(parent);
-            if (it == m_GhostChildren.end() || ghostIndex < 0 ||
-                ghostIndex >= static_cast<int>(it->second.size()))
-                return 0;
-            return it->second[static_cast<size_t>(ghostIndex)];
-        };
-
-        if (parent == kRootId)
-        {
-            const int rootCount = static_cast<int>(m_Roots.size());
-            if (index >= 0 && index < rootCount)
-                return Encode(m_Roots[static_cast<size_t>(index)]);
-            return ghostAt(index - rootCount);
-        }
-        if (Editor::IsGhostTreeId(parent))
-            return ghostAt(index);
-        const auto pid = static_cast<uint32_t>(parent);
-        auto it = m_Children.find(pid);
-        const int entityCount = it == m_Children.end() ? 0 : static_cast<int>(it->second.size());
-        if (index >= 0 && index < entityCount)
-            return Encode(it->second[static_cast<size_t>(index)]);
-        return ghostAt(index - entityCount);
-    }
-    const char* GetLabel(TreeId id) const override
-    {
-        if (Editor::IsGhostTreeId(id))
-        {
-            const auto ghost = m_GhostLabels.find(id);
-            return ghost != m_GhostLabels.end() ? ghost->second.c_str() : "";
-        }
-        auto it = m_Labels.find(id);
-        if (it != m_Labels.end())
-            return it->second.c_str();
-        return "";
-    }
-    bool IsExpandable(TreeId id) const override
-    {
-        if (id == kRootId)
-            return true;
-        if (Editor::IsGhostTreeId(id))
-            return GhostChildCount(id) > 0;
-        const auto pid = static_cast<uint32_t>(id);
-        auto it = m_Children.find(pid);
-        if (it != m_Children.end() && !it->second.empty())
-            return true;
-        return GhostChildCount(id) > 0;
-    }
-
-    std::unordered_map<TreeId, std::vector<TreeId>> m_GhostChildren;
-    std::unordered_map<TreeId, std::string> m_GhostLabels;
-
-    static TreeId Encode(const EntityHandle& e)
-    {
-        // Pack [version (upper kEntityVersionBits) | index (lower kEntityIndexBits)] explicitly.
-        // This avoids relying on EntityHandle's union layout when round-tripping through TreeId.
-        uint32 idx = static_cast<uint32>(e.index) & ECS::kEntityIndexMask;
-        uint32 ver = static_cast<uint32>(e.version) & ECS::kEntityVersionMask;
-        uint32 raw = idx | (ver << ECS::kEntityIndexBits);
-        return static_cast<TreeId>(raw);
-    }
-
-    static EntityHandle Decode(TreeId id)
-    {
-        uint32 raw = static_cast<uint32>(id);
-        ECS::EntityIndex idx = static_cast<ECS::EntityIndex>(raw & ECS::kEntityIndexMask);
-        ECS::EntityVersion ver = static_cast<ECS::EntityVersion>((raw >> ECS::kEntityIndexBits) & ECS::kEntityVersionMask);
-        return EntityHandle(idx, ver);
-    }
-
-  private:
-    // Decorated sort key for one entity under the active sort mode. Only the field(s) the mode
-    // needs are filled; KeyLess reads only those. Shared by Rebuild's decorate-sort AND the
-    // incremental sorted-inserts (via KeyOf/KeyLess/SortGroup) — one key helper so the two
-    // ordering paths cannot diverge (the correctness crux, design §3).
-    struct SortKey
-    {
-        uint32_t Id = 0;         // unique tie-break (EntityHandle::id) — makes KeyLess a total order
-        std::int32_t Order = 0;  // Custom mode
-        int TypeRank = 0;        // Type mode
-        std::string NameKey;     // lowercased; Alphabetical / Type modes
-    };
-    struct SortScratchEntry
-    {
-        EntityHandle Handle{};
-        SortKey Key;
-    };
-
-    std::int32_t OrderOf(const EntityHandle& h) const
-    {
-        if (auto* o = m_World->GetComponent<Components::HierarchyOrder>(h))
-            return o->order;
-        return 0;
-    }
-    std::string LowerNameOf(const EntityHandle& h) const
-    {
-        std::string name;
-        if (auto* n = m_World->GetComponent<Components::Name>(h); n && n->value[0])
-            name = n->View();
-        else
-            name = std::string("Entity ") + std::to_string(h.id);
-        for (char& c : name)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return name;
-    }
-    int TypeRankOf(const EntityHandle& h) const
-    {
-        // Lower rank sorts first in ascending order. Groups roughly by how "structural" the
-        // entity is in the scene.
-        if (m_World->GetComponent<Components::Camera>(h))
-            return 0;
-        if (m_World->GetComponent<Components::Light>(h))
-            return 1;
-        if (m_World->GetComponent<Components::Skybox>(h))
-            return 2;
-        if (m_World->GetComponent<Components::Terrain>(h))
-            return 3;
-        if (m_World->GetComponent<Components::ParticleEmitter3D>(h))
-            return 4;
-        if (m_World->GetComponent<Components::MeshRenderer>(h))
-            return 5;
-        return 6; // Empty / other
-    }
-
-    // Read one entity's sort key (per active mode) from the ECS. One read per key field.
-    SortKey KeyOf(const EntityHandle& e) const
-    {
-        SortKey k;
-        k.Id = e.id;
-        switch (m_SortMode)
-        {
-        case HierarchySortMode::Alphabetical:
-            k.NameKey = LowerNameOf(e);
-            break;
-        case HierarchySortMode::Type:
-            k.TypeRank = TypeRankOf(e);
-            k.NameKey = LowerNameOf(e);
-            break;
-        case HierarchySortMode::Custom:
-        default:
-            k.Order = OrderOf(e);
-            break;
-        }
-        return k;
-    }
-
-    // Strict total order matching Rebuild's old `entryLess` exactly, with direction applied.
-    bool KeyLess(const SortKey& a, const SortKey& b) const
-    {
-        return (m_SortDirection == HierarchySortDirection::Descending) ? KeyLessAsc(b, a) : KeyLessAsc(a, b);
-    }
-    bool KeyLessAsc(const SortKey& a, const SortKey& b) const
-    {
-        switch (m_SortMode)
-        {
-        case HierarchySortMode::Alphabetical:
-            if (a.NameKey != b.NameKey)
-                return a.NameKey < b.NameKey;
-            return a.Id < b.Id;
-        case HierarchySortMode::Type:
-            if (a.TypeRank != b.TypeRank)
-                return a.TypeRank < b.TypeRank;
-            if (a.NameKey != b.NameKey)
-                return a.NameKey < b.NameKey;
-            return a.Id < b.Id;
-        case HierarchySortMode::Custom:
-        default:
-            if (a.Order != b.Order)
-                return a.Order < b.Order;
-            return a.Id < b.Id;
-        }
-    }
-
-    // Decorate-sort one sibling list in place (Rebuild + rename escalation).
-    void SortGroup(std::vector<EntityHandle>& group)
-    {
-        if (group.size() < 2)
-            return;
-        m_SortScratch.clear();
-        m_SortScratch.reserve(group.size());
-        for (const EntityHandle& e : group)
-            m_SortScratch.push_back(SortScratchEntry{e, KeyOf(e)});
-        std::sort(m_SortScratch.begin(), m_SortScratch.end(),
-                  [this](const SortScratchEntry& a, const SortScratchEntry& b)
-                  { return KeyLess(a.Key, b.Key); });
-        for (size_t i = 0; i < group.size(); ++i)
-            group[i] = m_SortScratch[i].Handle;
-    }
-
-    // Insert e into a sorted sibling list at the position dictated by KeyLess (the same total
-    // order SortGroup produces), so a sequence of inserts equals a full std::sort of the set.
-    void SortedInsert(std::vector<EntityHandle>& list, const EntityHandle& e)
-    {
-        const SortKey key = KeyOf(e);
-        auto pos = std::lower_bound(list.begin(), list.end(), key,
-                                    [this](const EntityHandle& a, const SortKey& k)
-                                    { return KeyLess(KeyOf(a), k); });
-        list.insert(pos, e);
-    }
-
-    // Remove e from the sibling list identified by its stored parent key; drops an emptied
-    // m_Children bucket so the map key-set matches a fresh Rebuild (which never creates empty
-    // buckets). Linear find by id: e's sort key may have changed since insertion (an unresorted
-    // rename), so a key-based binary search could miss it.
-    void RemoveFromSiblingList(TreeId storedParent, const EntityHandle& e)
-    {
-        if (storedParent == kRootId)
-        {
-            auto it = std::find(m_Roots.begin(), m_Roots.end(), e);
-            if (it != m_Roots.end())
-                m_Roots.erase(it);
-            return;
-        }
-        auto cit = m_Children.find(static_cast<uint32_t>(storedParent));
-        if (cit == m_Children.end())
-            return;
-        auto& list = cit->second;
-        auto it = std::find(list.begin(), list.end(), e);
-        if (it != list.end())
-            list.erase(it);
-        if (list.empty())
-            m_Children.erase(cit);
-    }
-
-    // Desired sibling-list key for e's CURRENT Parent: the parent's key if it is a tracked
-    // (alive + visible) entity, else kRootId. Absent/invalid/dangling Parent ⇒ root — matches
-    // Rebuild's alive-check semantics.
-    TreeId DesiredParentKey(const EntityHandle& e) const
-    {
-        if (auto* p = m_World->GetComponent<Components::Parent>(e); p && p->Entity.IsValid())
-        {
-            const uint32_t pk = static_cast<uint32_t>(Encode(p->Entity));
-            if (m_EntityParentKey.find(pk) != m_EntityParentKey.end())
-                return static_cast<TreeId>(pk);
-        }
-        return kRootId;
-    }
-
-    // Label rule shared by Rebuild/ApplyCreated (unconditional set) and ApplyRenamed (compare
-    // first, F2). Name component if present, else the entity-id fallback.
-    void ComputeLabel(const EntityHandle& e, std::string& out) const
-    {
-        if (auto* name = m_World->GetComponent<Components::Name>(e); name && name->value[0])
-            out.assign(name->View());
-        else
-        {
-            out.assign("Entity ");
-            out += std::to_string(e.id);
-        }
-    }
-
-    void BuildLabel(const EntityHandle& e) { ComputeLabel(e, m_Labels[Encode(e)]); }
-
-    // (Re)build the child→parent position index from the current adjacency. Called at the end
-    // of every full Rebuild so the incremental ops have correct bookkeeping to mutate.
-    void SeedParentKeyIndex()
-    {
-        m_EntityParentKey.clear();
-        // Reserve for the total tracked entity count (roots + all children == the hide-filtered
-        // snapshot), not m_Children.size() which is the parent-bucket count.
-        m_EntityParentKey.reserve(m_SnapshotScratch.size());
-        for (const EntityHandle& r : m_Roots)
-            m_EntityParentKey[static_cast<uint32_t>(Encode(r))] = kRootId;
-        for (const auto& kv : m_Children)
-            for (const EntityHandle& c : kv.second)
-                m_EntityParentKey[static_cast<uint32_t>(Encode(c))] = static_cast<TreeId>(kv.first);
-    }
-
-    World* m_World = nullptr; // not owned
-    std::vector<EntityHandle> m_Roots;
-    std::unordered_map<uint32_t, std::vector<EntityHandle>> m_Children; // key = parent id
-    std::unordered_map<TreeId, std::string> m_Labels;
-
-    // Child key (Encode as uint32) → its sibling list key: kRootId for a root, else the parent's
-    // TreeId. Doubles as the tracked-entity membership set for the identity diff and the O(1)
-    // position lookup the reparent/destroy ops need. Kept in lockstep with m_Roots/m_Children.
-    std::unordered_map<uint32_t, TreeId> m_EntityParentKey;
-
-    std::vector<EntityHandle> m_SnapshotScratch; // reused alive-snapshot buffer (Rebuild + diff)
-    std::vector<EntityHandle> m_DiffCreated;     // reused identity-diff delta buffers
-    std::vector<EntityHandle> m_DiffDestroyed;
-    std::vector<SortScratchEntry> m_SortScratch; // reused across rebuilds and sibling groups
-    std::unordered_set<TreeId> m_PendingResortParents; // sibling lists to resort (coalesced renames)
-    std::string m_LabelScratch;                  // reused by ApplyRenamed's compare-then-assign
-    HierarchySortMode m_SortMode = HierarchySortMode::Custom;
-    HierarchySortDirection m_SortDirection = HierarchySortDirection::Ascending;
-};
 
 namespace
 {
@@ -1717,7 +1007,7 @@ HierarchyPanel::HierarchyPanel()
                 UI::Layout::DisableBackgroundOverride(*titleEl);
 
                 const float iconSize = std::max(1.0f, m_LastTreeIconSizePx);
-                previewIconEl->Overrides()
+                previewIconEl->Style()
                     .Set(Style::Width, StyleLength::Px(iconSize))
                     .Set(Style::Height, StyleLength::Px(iconSize))
                     .Set(Style::MinWidth, StyleLength::Px(iconSize))
@@ -1774,9 +1064,9 @@ HierarchyPanel::HierarchyPanel()
                                     size.SizeXIsPercent = false;
                                     size.SizeY = icon;
                                     size.SizeYIsPercent = false;
-                                    BackgroundPositionValue pos{0.0f, true, 50.0f, true};
+                                    BackgroundPositionValue pos = BackgroundPositionValue::Percent(0.0f, 50.0f);
                                     previewIconEl->AddClass("hierarchy-entity-model-thumb");
-                                    previewIconEl->Overrides()
+                                    previewIconEl->Style()
                                         .Set(Style::BackgroundImage, source)
                                         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
                                         .Set(Style::BackgroundSize, size)
@@ -1818,9 +1108,9 @@ HierarchyPanel::HierarchyPanel()
                                     source.Value = pathStr;
                                     BackgroundSizeValue size{};
                                     size.Mode = BackgroundSizeMode::Contain;
-                                    BackgroundPositionValue pos{0.0f, true, 50.0f, true};
+                                    BackgroundPositionValue pos = BackgroundPositionValue::Percent(0.0f, 50.0f);
                                     previewIconEl->AddClass("hierarchy-entity-model-thumb");
-                                    previewIconEl->Overrides()
+                                    previewIconEl->Style()
                                         .Set(Style::BackgroundImage, source)
                                         .Set(Style::BackgroundRepeatProp, BackgroundRepeat::NoRepeat)
                                         .Set(Style::BackgroundSize, size)
@@ -4280,8 +3570,8 @@ void HierarchyPanel::ApplyModelThumbColorOverride(UIElement* titleEl)
                                root->HasClass("hierarchy-icons-colored");
     if (!modelsColored)
         return;
-    titleEl->Overrides().Set(Style::BackgroundImageSaturation, 1.0f);
-    titleEl->Overrides().Set(Style::BackgroundTint, uint32_t(0xFFFFFFFFu));
+    titleEl->Style().Set(Style::BackgroundImageSaturation, 1.0f);
+    titleEl->Style().Set(Style::BackgroundTint, uint32_t(0xFFFFFFFFu));
     titleEl->MarkDirty(UIElement::VisualDirty);
 }
 
@@ -4655,7 +3945,7 @@ void HierarchyPanel::Update()
         if (escalateReparent)
             return;
         incrementalTouched = true;
-        if (m_Provider->ApplyReparented(e) && ++reparentMoves > kIncrementalDeltaMax)
+        if (m_Provider->ApplyReparented(e) && ++reparentMoves > HierarchyDataProvider::kIncrementalDeltaMax)
             escalateReparent = true;
     };
 
@@ -5899,13 +5189,14 @@ void HierarchyPanel::SyncSelectionWithSceneViewPick(ECS::EntityHandle entity)
         ~SkipGuard() { flag = false; }
     } guard{m_SkipOnSelectEntity};
 
+    if (entity.IsValid() && !m_World->IsValid(entity))
+        return;
+    // A generated entity has no row: the row of its nearest listed ancestor shows the pick.
+    entity = HierarchyDataProvider::ListedSelfOrAncestor(*m_World, entity);
+
     if (!entity.IsValid())
     {
         m_Selection->Clear();
-    }
-    else if (!m_World->IsValid(entity))
-    {
-        return;
     }
     else
     {
@@ -5958,38 +5249,20 @@ void HierarchyPanel::SelectEntities(const std::vector<ECS::EntityHandle>& entiti
     if (m_SkipSyncFromSceneView)
         return;
 
+    // A generated entity has no row: the row of its nearest listed ancestor shows the pick.
     std::vector<UI::Interaction::ItemId> ids;
-    ids.reserve(entities.size());
-    for (ECS::EntityHandle h : entities)
-    {
-        if (!h.IsValid() || !m_World->IsValid(h))
-            continue;
-
-        const TreeId tid = HierarchyDataProvider::Encode(h);
-        if (tid == 0 || tid == kRootId)
-            continue;
-
-        ids.push_back(static_cast<UI::Interaction::ItemId>(tid));
-    }
-
+    const UI::Interaction::ItemId anchor = HierarchyDataProvider::ListedRowIds(*m_World, entities, ids);
     if (ids.empty())
         return;
 
     // Reveal the most recent valid pick (the scene view's primary is the last
     // entry): expand its ancestors before the refresh, scroll after.
     ECS::EntityHandle reveal{};
-    for (auto it = entities.rbegin(); it != entities.rend(); ++it)
-    {
-        if (it->IsValid() && m_World->IsValid(*it))
-        {
-            reveal = *it;
-            break;
-        }
-    }
+    for (auto it = entities.rbegin(); it != entities.rend() && !reveal.IsValid(); ++it)
+        reveal = HierarchyDataProvider::ListedSelfOrAncestor(*m_World, *it);
     if (reveal.IsValid())
         ExpandAncestors(reveal);
 
-    const UI::Interaction::ItemId anchor = ids[0];
     ApplySelectionProgrammatic(ids, anchor);
 
     if (reveal.IsValid())

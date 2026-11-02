@@ -306,7 +306,7 @@ void OceanFoamSim::FillParams(OceanFoamParamsGPU& out, uint32 writeIndex,
             DecayedDepositScale(m_Params.FadeRate * m_Params.ShorelineFadeRateScale, out.DeltaTime);
         for (uint32 i = 0u; i < out.AuthoredFoamSourceCount; ++i)
         {
-            float32* amountFeatherBlend = out.AuthoredFoamSources[i].AmountFeatherBlend;
+            Mathematics::Vector4& amountFeatherBlend = out.AuthoredFoamSources[i].AmountFeatherBlend;
             if (std::lround(amountFeatherBlend[2]) == static_cast<long>(OceanInputBlendMode::Additive))
                 amountFeatherBlend[0] *= waveScale;
         }

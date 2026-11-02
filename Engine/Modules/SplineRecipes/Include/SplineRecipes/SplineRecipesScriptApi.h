@@ -62,9 +62,9 @@ std::int32_t Failures(ECS::World& world, std::span<RecipeStatus> failures);
 // @ge-script @ge-context
 std::string ReasonOf(ECS::World& world, ECS::EntityHandle recipe);
 
-/// IsSceneSettled as the recipe system found it at the end of its last update of `world`, or false
-/// before that update. For a system of the schedule, which can run on a job: it reads one value the
-/// recipe system's exclusive update writes. With no recipe system, it is IsSceneSettled.
+/// IsSceneSettled as the recipe system found it at the end of its last update of `world`. Before that
+/// update, and for a world it does not update, it is IsSceneSettled. A system of the schedule can call
+/// it on a job: the recipe system's update is exclusive, so the two never run at the same time.
 bool IsSceneSettledAtLastUpdate(ECS::World& world);
 
 } // namespace GameEngine::SplineRecipes

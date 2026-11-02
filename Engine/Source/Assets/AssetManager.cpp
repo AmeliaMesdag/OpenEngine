@@ -2532,6 +2532,7 @@ void AssetManager::StartAsyncReload(const GUID& guid, const SharedPtr<Asset>& as
         FinishReloadJob();
         return staged;
     };
+    request.ResolveDecodeInputs = MakeDecodeInputResolver(*this, metadata);
     request.OnFailure = [this, guid, cancelFlag, generation, submitTime](const String& error)
     {
         if (!cancelFlag->load(std::memory_order_acquire))

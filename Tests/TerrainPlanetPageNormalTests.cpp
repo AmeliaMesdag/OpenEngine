@@ -8,7 +8,7 @@
 #include "CBTTerrain/CBTPlanetShading.h"
 #include "Mathematics/CubeFaces.h"
 #include "PageStreaming/GeneratedHeightPageProvider.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
 #include "PageStreaming/PageTableEntry.h"
 #include "TerrainECS/PageTable.h"

@@ -14,6 +14,7 @@
 #include "Rendering/Core/RenderGraph/RGBarrier.h"
 #include "Rendering/Core/RenderGraph/RGCrossFrameAccesses.h"
 #include "Rendering/Core/RenderGraph/RGTypes.h"
+#include "Types/DisjointSets.h"
 
 #include <cstdint>
 #include <tuple>
@@ -484,7 +485,7 @@ class RGGraph
     std::vector<std::vector<RGPassId>> m_ScratchReadersSince;
     std::vector<RGPassId> m_ScratchTopo;
     std::vector<uint64_t> m_ScratchReach;
-    std::vector<uint32_t> m_ScratchUnionFind;
+    DisjointSets m_ScratchComponents;
     std::vector<uint32_t> m_ScratchClusterOf;
     std::vector<uint64_t> m_ScratchUnionReach;
     std::vector<uint64_t> m_ScratchGroupMask;

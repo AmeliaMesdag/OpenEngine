@@ -18,6 +18,15 @@ float32 SanitizedFloat(float32 value, float32 fallback)
     return std::isfinite(value) ? value : fallback;
 }
 
+// The verge's width and height, in meters: the paving curb's range.
+constexpr float32 kMinVergeMeters = 0.01f;
+constexpr float32 kMaxVergeMeters = 10.0f;
+
+float32 SanitizedVergeLength(float32 value, float32 fallback)
+{
+    return std::isfinite(value) ? std::clamp(value, kMinVergeMeters, kMaxVergeMeters) : fallback;
+}
+
 bool EqualsIgnoringCase(std::string_view a, std::string_view b)
 {
     return a.size() == b.size() &&
@@ -47,6 +56,8 @@ Components::SplineExtrude SanitizeExtrudeRecipe(const Components::SplineExtrude&
     clean.VerticalOffset = SanitizedFloat(authored.VerticalOffset, defaults.VerticalOffset);
     clean.TilesPerMetreU = SanitizedFloat(authored.TilesPerMetreU, defaults.TilesPerMetreU);
     clean.TilesPerMetreV = SanitizedFloat(authored.TilesPerMetreV, defaults.TilesPerMetreV);
+    clean.VergeWidth = SanitizedVergeLength(authored.VergeWidth, defaults.VergeWidth);
+    clean.VergeHeight = SanitizedVergeLength(authored.VergeHeight, defaults.VergeHeight);
     return clean;
 }
 

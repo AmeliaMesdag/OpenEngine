@@ -397,7 +397,7 @@ void RegisterValueCurveInspector()
             cfg.MaxKeys = Math::Curve::Capacity;
             curveField->SetConfig(cfg);
             curveField->SetKeys(ShapeKeys(*curve));
-            curveField->Overrides()
+            curveField->Style()
                 .Set(Style::Height, StyleLength::Px(220.0f))
                 .Set(Style::MinHeight, StyleLength::Px(220.0f))
                 .Set(Style::MarginTop, StyleLength::Px(8.0f));

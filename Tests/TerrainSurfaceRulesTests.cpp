@@ -26,7 +26,7 @@
 #include "TerrainECS/TerrainModifierComponents.h"
 #include "TerrainECS/TerrainModifierSystem.h"
 #include "TerrainECS/TerrainService.h"
-#include "TerrainECS/TerrainSurfaceRuleEval.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceRuleEval.h"
 #include "JobSystem/WorkStealingThreadPool.h"
 
 #include "Logger/CallbackSink.h"

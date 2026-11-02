@@ -44,6 +44,9 @@ add_executable(EditorSdkRegistryTests
     # A settings text row: its refusal, its placeholder and its commit.
     SettingsTextFieldRowTests.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/SettingsTextFieldRow.cpp
+    # The group break above a registered settings row: its header and its description card.
+    SettingsSectionBreakTests.cpp
+    ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/SettingsSectionBreak.cpp
     RenderLayersSettingsPageTests.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Editor/Settings/Render/RenderLayersSettingsPage.cpp
     ${CMAKE_SOURCE_DIR}/Apps/Editor/Source/Inspectors/RenderLayers/RenderLayerField.cpp
@@ -119,6 +122,10 @@ ge_stage_test_asset(EditorSdkRegistryTests
 ge_stage_test_asset(EditorSdkRegistryTests
     "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/ScriptPackagesList/ScriptPackageRow.uxml"
     "Assets/UI/controls/ScriptPackagesList/ScriptPackageRow.uxml")
+# The settings group break builds its header and description card from its layout.
+ge_stage_test_asset(EditorSdkRegistryTests
+    "${CMAKE_SOURCE_DIR}/Apps/Editor/Assets/UI/controls/SettingsSectionBreak/SettingsSectionBreak.uxml"
+    "Assets/UI/controls/SettingsSectionBreak/SettingsSectionBreak.uxml")
 
 add_test(NAME EditorSdkRegistryTests COMMAND $<TARGET_FILE:EditorSdkRegistryTests>)
 set_tests_properties(EditorSdkRegistryTests PROPERTIES

@@ -363,9 +363,9 @@ bool MarkupRenderFeature::DeclareView(RenderGraph::RGFrame& frame, RenderGraph::
     if (device)
         m_RegionBuffers.Collect(*device, frameNumber,
                                 (world.GetWorldId() << 32) ^ world.GetLifecycleResetGeneration());
-    const Mathematics::Vector3 cameraPos(camera.cameraPos[0], camera.cameraPos[1], camera.cameraPos[2]);
+    const Mathematics::Vector3 cameraPos(camera.cameraPos.x, camera.cameraPos.y, camera.cameraPos.z);
     Mathematics::Vector4 frustumPlanes[6];
-    ExtractFrustumPlanes(Mathematics::Matrix4x4::FromColumnMajor(camera.viewProj), frustumPlanes);
+    ExtractFrustumPlanes(camera.viewProj, frustumPlanes);
     m_Bodies = CollectMarkupDrawItems(world, bridge, bridge.GetHighlight(), cameraPos, frustumPlanes, frameNumber,
                                       m_Items, m_ExcludedScratch);
     BuildDraws(m_Items, m_Bodies, m_Draws);

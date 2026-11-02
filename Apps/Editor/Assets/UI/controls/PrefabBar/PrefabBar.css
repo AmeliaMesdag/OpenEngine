@@ -56,12 +56,13 @@
 	color: var(--ui_color_error_text);
 }
 
-/* The button text sits on the baseline of the first count line.
-   The button keeps its one height when the count lines wrap. */
+/* The button text and the first count line start at one y: the counts start 4 px down, the button's
+   top padding. Not baseline alignment: a pill is a button whose first child is an empty text, which has
+   no baseline. The button keeps its one height when the count lines wrap. */
 .prefab-bar-actions {
 	display: flex;
 	flex-direction: row;
-	align-items: baseline;
+	align-items: flex-start;
 	gap: 8px;
 }
 
@@ -70,16 +71,30 @@
 	white-space: nowrap;
 }
 
-/* The entity's count, then the instance's count when only other entities of the instance have overrides. */
+/* The entity's count, then the instance's count when only other entities of the instance have overrides, then
+   the count of the override lines that the prefab does not have. Each pill is a header pill (theme/inspector.css)
+   in a .badge-button (controls/Button.css) that opens the Overrides list. */
 .prefab-bar-counts {
 	display: flex;
 	flex-direction: column;
+	align-items: flex-start;
 	flex-shrink: 1;
 	min-width: 0;
 	gap: 2px;
+	margin-top: 4px;
 }
 
-.prefab-bar-count {
+/* A long count wraps inside its pill, so the pill never runs past the Inspector's edge. */
+.prefab-bar-count-text {
+	flex-shrink: 1;
+	min-width: 0;
+	white-space: normal;
+}
+
+/* No overrides: plain grey text, not a pill. It has the pill's padding, so its text sits where
+   a pill's text does. */
+.prefab-bar-count-none {
+	padding: 1px 0px;
 	font-size: 12px;
 	color: var(--ui_color_text_secondary);
 }

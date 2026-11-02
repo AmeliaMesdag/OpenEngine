@@ -161,8 +161,9 @@ protected:
         sky.tanHalfFovY = 1.0f;
         sky.viewportResolution[0] = sky.viewportResolution[1] = 1.0f;
         sky.skyboxParams[1] = -1.0f;
-        for (float* gradient : {sky.gradientSkyTop, sky.gradientSkyHorizon, sky.gradientSkyBottom})
-            gradient[0] = 1.0f;
+        sky.gradientSkyTop.x = 1.0f;
+        sky.gradientSkyHorizon.x = 1.0f;
+        sky.gradientSkyBottom.x = 1.0f;
         sky.gradientSkyTop[3] = 1.0f;
         m_Device->UpdateBuffer(m_Sky, 0, sizeof(sky), &sky);
         const AtmosphereParametersGPU atmosphere{};

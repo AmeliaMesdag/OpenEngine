@@ -15,7 +15,7 @@
 #include "Scene/SceneRaycast.h"
 #include "Scene/SceneTlas.h"
 #include "Scene/TerrainPicking.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainService.h"
 
 #include <gtest/gtest.h>

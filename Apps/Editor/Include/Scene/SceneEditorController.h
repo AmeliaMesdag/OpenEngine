@@ -2,6 +2,7 @@
 
 #include "Scene/SceneIO.h"
 #include "Scene/SceneLoadFailure.h"
+#include "Types/ScopedSubscription.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -140,8 +141,11 @@ class SceneEditorController
     // a partial load, and this is the only thing that says so.
     const std::optional<SceneLoadFailure>& GetLastSceneLoadFailure() const;
 
-    // The last scene open that loaded without being able to apply everything in the file, exactly
-    // as that load left it: see SceneDocumentManager::GetLastLoadDegraded.
+    // The document of the open scene; null until AttachToRoot.
+    SceneDocumentManager* GetDocument() const { return m_Doc.get(); }
+
+    // The last scene open that loaded without being able to apply everything in the file, less the
+    // skips the user discarded: see SceneDocumentManager::GetLastLoadDegraded.
     const std::optional<SceneLoadDegraded>& GetLastSceneLoadDegraded() const;
 
     // The same record filtered to what is still outstanding, which is what Save is guarded on and
@@ -261,6 +265,7 @@ class SceneEditorController
     // crash-recovery staging. The chosen resolution re-queues as a pending
     // action (opens never run inside UI callbacks).
     void BeginRecoveryPrompt(const std::filesystem::path& scenePath);
+    void RequestLoadScene();
     void DoSave();
     // Save that has already cleared (or does not need) the degraded-document guard.
     void DoSaveConfirmed(DegradedSavePolicy degradedPolicy);
@@ -323,6 +328,9 @@ class SceneEditorController
     /// When non-empty, invoked after a successful Save As (used for quit flow).
     std::function<void()> m_DeferredProceedAfterSave;
     std::function<void()> m_DeferredCancelAfterSave;
+
+    // The File menu items; they call this controller, so they go when it goes.
+    std::vector<ScopedSubscription> m_MenuItems;
 };
 
 } // namespace Editor

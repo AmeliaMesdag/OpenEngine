@@ -9,6 +9,7 @@
 #include "Types/Types.h"
 
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -128,6 +129,16 @@ struct SplineNodeChange
     SplineNodeChangeKind Kind = SplineNodeChangeKind::Added;
 };
 
+/// The nearest place on a member where an end being placed joins it.
+struct SplineSnapTarget
+{
+    ECS::EntityHandle Member{};
+    // On an Area's outline, or on the edge of a Road's width band; at the member's height.
+    Mathematics::Vector3 Point{};
+    // From the queried point to Point in the ground plane, in world meters.
+    float32 DistanceMetres = 0.0f;
+};
+
 /// The spline network: derives the nodes among the member splines (SplineNetworkMember) of each
 /// world, keeps their identities across edits and reloads, and matches the authored records
 /// (SplineNetworkOverrides) to them. It generates no geometry. Each world has its own nodes and
@@ -151,7 +162,17 @@ public:
     /// Re-derive the world's nodes when a member, its spline, its transform or its records
     /// changed, then raise NodesChanged with the nodes that were added, changed or removed.
     /// Re-keys the records in the components. Runs after SplineExtraction and TransformHierarchy.
+    /// Only the pairs of a changed member are searched again; every other pair keeps its nodes.
+    /// Each pair searched is one call of the profiler scope "SplineNetwork.SearchPair".
     void Update(ECS::World& world);
+
+    /// The nearest point within `reachMetres` of `point`, in the ground plane, where an end
+    /// placed there meets a member other than `exclude`: an Area's outline, or the edge of a
+    /// Road's width band (the point itself, at the Road's height, when it already lies inside
+    /// the band). Reads the members as the last Update sampled them; a member edited since
+    /// then is skipped until the next Update.
+    std::optional<SplineSnapTarget> FindSnapTarget(const ECS::World& world, const Mathematics::Vector3& point,
+                                                   float32 reachMetres, ECS::EntityHandle exclude) const;
 
     /// The world's nodes at its last Update; empty for a world never updated.
     std::span<const SplineNode> GetNodes(const ECS::World& world) const;

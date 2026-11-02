@@ -1,5 +1,6 @@
 #include "UI/UIManager.h"
 #include "UI/UIElement.h"
+#include "SolidTga.h"
 #include "UIRgTestHarness.h"
 #include "Assets/AssetManager.h"
 #include "Assets/TextureAsset.h"
@@ -30,17 +31,8 @@ constexpr const char* kThinStrokeSvg =
 // Writes an uncompressed 32-bit TGA of `width` x `height` opaque gray texels.
 void WriteTga(const std::filesystem::path& path, uint16_t width, uint16_t height)
 {
-    std::vector<uint8_t> bytes(18, 0);
-    bytes[2] = 2;
-    bytes[12] = uint8_t(width & 0xff);
-    bytes[13] = uint8_t(width >> 8);
-    bytes[14] = uint8_t(height & 0xff);
-    bytes[15] = uint8_t(height >> 8);
-    bytes[16] = 32;
-    bytes[17] = 0x28;
-    bytes.resize(bytes.size() + size_t(width) * height * 4, 128);
-    std::ofstream file(path, std::ios::binary);
-    file.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    constexpr uint8_t kGray = 128;
+    UITesting::WriteSolidTga(path, width, height, kGray, kGray, kGray);
 }
 
 // Loads the image file at `fileName` (written into `assetRoot` by the caller) as a texture

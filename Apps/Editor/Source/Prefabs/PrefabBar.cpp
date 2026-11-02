@@ -2,6 +2,9 @@
 
 #include "Prefabs/PrefabHierarchyRows.h"
 #include "Prefabs/PrefabInstanceDescriptions.h"
+#include "Prefabs/PrefabOverridesList/PrefabOverridesList.h"
+#include "Prefabs/PrefabOverridesList/PrefabOverridesListModel.h"
+#include "Scene/SceneDocumentManager.h"
 #include "UI/ControlLayoutLoader.h"
 
 #include "Assets/AssetManager.h"
@@ -12,6 +15,7 @@
 #include "ECS/ECSTemplates.h"
 #include "ECS/World.h"
 #include "Scene/PrefabAuthoring.h"
+#include "Scene/SceneIO.h"
 #include "Types/StringUtils.h"
 #include "UI/Controls/Button.h"
 #include "UI/Controls/Label.h"
@@ -20,6 +24,7 @@
 #include <array>
 #include <format>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -33,14 +38,19 @@ namespace
 constexpr const char* kLayoutAssetPath = "UI/controls/PrefabBar/PrefabBar.uxml";
 constexpr const char* kStyleAssetPath = "UI/controls/PrefabBar/PrefabBar.css";
 // The ids the constructor looks up. A layout that lacks one does not load.
-constexpr std::array<std::string_view, 8> kRequiredIds = {
-    "prefab-bar-title",      "prefab-bar-glyph",        "prefab-bar-title-lead", "prefab-bar-prefab",
-    "prefab-bar-title-tail", "prefab-bar-select-asset", "prefab-bar-count",      "prefab-bar-instance-count"};
+constexpr std::array<std::string_view, 14> kRequiredIds = {
+    "prefab-bar-title",       "prefab-bar-glyph",          "prefab-bar-title-lead",
+    "prefab-bar-prefab",      "prefab-bar-title-tail",     "prefab-bar-select-asset",
+    "prefab-bar-counts",      "prefab-bar-count-none",     "prefab-bar-count",
+    "prefab-bar-count-text",  "prefab-bar-instance-count", "prefab-bar-instance-count-text",
+    "prefab-bar-stale-count", "prefab-bar-stale-count-text"};
 // The glyph shows the Hierarchy's instance glyph, or the missing glyph when the prefab file is not in the
 // project; the name takes its missing class then.
 constexpr const char* kPrefabGlyphClass = "hierarchy-entity-prefab";
 constexpr const char* kMissingGlyphClass = "prefab-bar-glyph-missing";
 constexpr const char* kMissingNameClass = "prefab-bar-prefab-missing";
+// A pill's button has this class while the pointer is over it (controls/Button.css .badge-button.hovered).
+constexpr const char* kPillHoveredClass = "hovered";
 
 // The asset record of the prefab of the instance root `root`; false when the file is not in the project.
 bool FindPrefabMetadata(ECS::World& world, ECS::EntityHandle root, AssetMetadata& out)
@@ -100,55 +110,53 @@ TitleParts DescribeTitle(ECS::World& world, ECS::EntityHandle entity)
     return {"Part of", shownPrefab, "in " + EntityNameOf(world, outermost), missing};
 }
 
-// The number of overrides of the outermost instance that holds `entity`: each changed field, added or
-// removed component, removed child and added entity.
-std::size_t CountInstanceOverrides(ECS::World& world, ECS::EntityHandle entity)
-{
-    const DescribedPrefabInstance* instance = PrefabInstanceDescriptions::Get().FindInstance(world, entity);
-    if (!instance)
-        return 0;
-    std::size_t count = 0;
-    for (const Scene::PrefabInstanceEntity& described : instance->Entities)
-        count += described.AddedOnInstance ? 1 : described.Overrides.size();
-    return count;
-}
-
-// The count lines: the entity's line, and the instance's line under it.
+// The count lines: the entity's line, and the instance's line under it. A line with no override is plain text.
 struct CountLines
 {
     std::string Entity;
+    bool EntityHasNone = false;
     std::string Instance;
 };
 
-// On the outermost root the first line counts the whole instance. On any other entity it counts the
+// On the outermost root the first line counts the whole instance (`total`). On any other entity it counts the
 // entity's own overrides, and the second line counts the instance's when only other entities have some.
 // Both are empty on an entity the instance added: it is one of the root's overrides and has none of its own.
-CountLines DescribeCounts(ECS::World& world, ECS::EntityHandle entity)
+CountLines DescribeCounts(ECS::World& world, ECS::EntityHandle entity, std::size_t total)
 {
     const ECS::EntityHandle outermost = FindOutermostInstanceRoot(world, entity);
-    const std::size_t total = CountInstanceOverrides(world, entity);
     if (entity == outermost)
-        return {total == 0 ? std::string("No overrides") : FormatCount(total, "override", "overrides"), {}};
+        return total == 0 ? CountLines{"No overrides", true, {}}
+                          : CountLines{FormatCount(total, "override", "overrides"), false, {}};
     const Scene::PrefabInstanceEntity* described = PrefabInstanceDescriptions::Get().FindEntity(world, entity);
     if (described && described->AddedOnInstance)
         return {};
     const std::size_t own = described ? described->Overrides.size() : 0;
     if (own > 0)
-        return {std::format("{} on {}", FormatCount(own, "override", "overrides"), EntityNameOf(world, entity)), {}};
+        return {std::format("{} on {}", FormatCount(own, "override", "overrides"), EntityNameOf(world, entity)),
+                false,
+                {}};
     if (total > 0)
-        return {"No overrides on " + EntityNameOf(world, entity),
+        return {"No overrides on " + EntityNameOf(world, entity), true,
                 std::format("{} on {}", FormatCount(total, "override", "overrides"), EntityNameOf(world, outermost))};
-    return {"No overrides", {}};
+    return {"No overrides", true, {}};
 }
 
-// Shows `text` on `label`; an empty `text` hides the label, so it takes no space.
-void SetLine(Label& label, const std::string& text)
+// Sets the pill's hover class on pointer enter and removes it on leave. A class, not :hover, because the
+// badge reads its fill from a variable the button sets, and a :hover change does not restyle the badge.
+void TrackPillHover(Button& pill)
+{
+    pill.RegisterEventHandler(kEventMouseEnter, [&pill](UIEvent&) { pill.AddClass(kPillHoveredClass); });
+    pill.RegisterEventHandler(kEventMouseLeave, [&pill](UIEvent&) { pill.RemoveClass(kPillHoveredClass); });
+}
+
+// Shows `text` in the pill `label` of `button`; an empty `text` hides the button.
+void SetPill(Button& button, Label& label, const std::string& text)
 {
     label.SetText(text);
     if (text.empty())
-        label.AddClass("hidden");
+        button.AddClass("hidden");
     else
-        label.RemoveClass("hidden");
+        button.RemoveClass("hidden");
 }
 
 // The components the overrides `overrides` remove from the entity; the Inspector shows a header for each.
@@ -164,9 +172,11 @@ std::vector<std::string> RemovedComponentsOf(const std::vector<Scene::PrefabOver
 } // namespace
 
 PrefabBar::PrefabBar(ECS::World& world, ECS::EntityHandle entity, EditorChangeNotifications* notifications,
+                     UndoRedoService* undo, const PrefabOverridesListContext& overridesContext,
                      SelectAssetHandler selectAsset, std::function<void()> refreshMarks,
                      std::function<void()> requestRebuild)
     : m_World(world), m_Entity(entity), m_Notifications(notifications), m_SelectAsset(std::move(selectAsset)),
+      m_Document(overridesContext.Document), m_Reopen(overridesContext.Reopen),
       m_RefreshMarks(std::move(refreshMarks)), m_RequestRebuild(std::move(requestRebuild)),
       m_ShownOverrides(OwnOverridesOf(world, entity))
 {
@@ -179,12 +189,35 @@ PrefabBar::PrefabBar(ECS::World& world, ECS::EntityHandle entity, EditorChangeNo
     m_TitleLead = dynamic_cast<Label*>(layout->FindById("prefab-bar-title-lead"_sid));
     m_TitlePrefab = dynamic_cast<Label*>(layout->FindById("prefab-bar-prefab"_sid));
     m_TitleTail = dynamic_cast<Label*>(layout->FindById("prefab-bar-title-tail"_sid));
-    m_Count = dynamic_cast<Label*>(layout->FindById("prefab-bar-count"_sid));
-    m_InstanceCount = dynamic_cast<Label*>(layout->FindById("prefab-bar-instance-count"_sid));
+    m_Counts = layout->FindById("prefab-bar-counts"_sid);
+    m_CountNone = dynamic_cast<Label*>(layout->FindById("prefab-bar-count-none"_sid));
+    m_Count = dynamic_cast<Button*>(layout->FindById("prefab-bar-count"_sid));
+    m_CountText = dynamic_cast<Label*>(layout->FindById("prefab-bar-count-text"_sid));
+    m_InstanceCount = dynamic_cast<Button*>(layout->FindById("prefab-bar-instance-count"_sid));
+    m_InstanceCountText = dynamic_cast<Label*>(layout->FindById("prefab-bar-instance-count-text"_sid));
+    m_StaleCount = dynamic_cast<Button*>(layout->FindById("prefab-bar-stale-count"_sid));
+    m_StaleCountText = dynamic_cast<Label*>(layout->FindById("prefab-bar-stale-count-text"_sid));
     m_SelectAssetButton = dynamic_cast<Button*>(layout->FindById("prefab-bar-select-asset"_sid));
     AddChild(std::move(layout));
     if (m_SelectAssetButton)
         m_SelectAssetButton->SetOnClick([this](UIEvent&) { SelectAsset(); });
+    for (Button* pill : {m_Count, m_InstanceCount})
+    {
+        if (!pill)
+            continue;
+        pill->SetOnClick([this](UIEvent&) { OpenOverridesList(); });
+        TrackPillHover(*pill);
+        pill->SetTooltip("Show every override of the instance.");
+    }
+    if (m_StaleCount)
+    {
+        m_StaleCount->SetOnClick([this](UIEvent&) { OpenOverridesList(); });
+        TrackPillHover(*m_StaleCount);
+        m_StaleCount->SetTooltip("Show the overrides on entities that are not in the prefab.");
+    }
+    auto overridesList = std::make_unique<PrefabOverridesList>(world, undo, notifications, overridesContext);
+    m_OverridesList = overridesList.get();
+    AddChild(std::move(overridesList));
     if (m_Notifications)
     {
         m_ComponentToken = m_Notifications->SubscribeComponentChanged(
@@ -194,6 +227,9 @@ PrefabBar::PrefabBar(ECS::World& world, ECS::EntityHandle entity, EditorChangeNo
             { OnWorldStructureChanged(change); });
     }
     Refresh();
+    // The list was open on this instance when a rebuild of the Inspector took the last bar away.
+    if (m_Reopen && m_Reopen->World == &m_World && m_Reopen->Root == m_Root)
+        OpenOverridesList();
 }
 
 PrefabBar::~PrefabBar()
@@ -206,14 +242,15 @@ PrefabBar::~PrefabBar()
 
 void PrefabBar::Refresh()
 {
-    if (!m_Glyph || !m_TitleLead || !m_TitlePrefab || !m_TitleTail || !m_Count || !m_InstanceCount ||
+    if (!m_Glyph || !m_TitleLead || !m_TitlePrefab || !m_TitleTail || !m_Counts || !m_CountNone || !m_Count ||
+        !m_CountText || !m_InstanceCount || !m_InstanceCountText || !m_StaleCount || !m_StaleCountText ||
         !m_World.IsValid(m_Entity))
         return;
     m_Root = FindOutermostInstanceRoot(m_World, m_Entity);
     const TitleParts title = DescribeTitle(m_World, m_Entity);
-    SetLine(*m_TitleLead, title.Lead);
-    SetLine(*m_TitlePrefab, title.Prefab);
-    SetLine(*m_TitleTail, title.Tail);
+    SetShownText(*m_TitleLead, title.Lead);
+    SetShownText(*m_TitlePrefab, title.Prefab);
+    SetShownText(*m_TitleTail, title.Tail);
     if (title.PrefabMissing)
     {
         m_Glyph->RemoveClass(kPrefabGlyphClass);
@@ -226,9 +263,20 @@ void PrefabBar::Refresh()
         m_Glyph->AddClass(kPrefabGlyphClass);
         m_TitlePrefab->RemoveClass(kMissingNameClass);
     }
-    const CountLines counts = DescribeCounts(m_World, m_Entity);
-    SetLine(*m_Count, counts.Entity);
-    SetLine(*m_InstanceCount, counts.Instance);
+    // The pills count the rows of the Overrides list: the teal pill its overrides, the amber pill its stale rows.
+    SceneDocumentManager* document = m_Document ? m_Document() : nullptr;
+    std::span<const Scene::SceneLoadSkip> skips;
+    if (document && document->GetLastLoadDegraded().has_value())
+        skips = document->GetLastLoadDegraded()->Census.skips;
+    const PrefabOverrideCounts rows = PrefabOverridesListModel::Count(m_World, m_Entity, skips);
+    const std::size_t stale = rows.Stale;
+    const CountLines counts = DescribeCounts(m_World, m_Entity, rows.Overrides);
+    // An instance whose only rows are stale shows the amber pill alone, never "No overrides".
+    const bool showsNone = counts.EntityHasNone && (stale == 0 || !counts.Instance.empty());
+    SetShownText(*m_CountNone, showsNone ? counts.Entity : std::string());
+    SetPill(*m_Count, *m_CountText, counts.EntityHasNone ? std::string() : counts.Entity);
+    SetPill(*m_InstanceCount, *m_InstanceCountText, counts.Instance);
+    SetPill(*m_StaleCount, *m_StaleCountText, stale == 0 ? std::string() : std::format("{} not in prefab", stale));
     if (!m_SelectAssetButton)
         return;
     const ECS::EntityHandle nearest = FindInstanceRoot(m_World, m_Entity);
@@ -246,6 +294,8 @@ void PrefabBar::RefreshAfterChange()
         return;
     PrefabInstanceDescriptions::Get().Forget(m_World, m_Entity);
     Refresh();
+    if (m_OverridesList)
+        m_OverridesList->Refresh();
     std::vector<Scene::PrefabOverride> overrides = OwnOverridesOf(m_World, m_Entity);
     const bool removedChanged = RemovedComponentsOf(overrides) != RemovedComponentsOf(m_ShownOverrides);
     const bool overridesChanged = overrides != m_ShownOverrides;
@@ -263,6 +313,12 @@ void PrefabBar::SelectAsset()
     const std::filesystem::path file = PrefabFileOf(m_World, FindInstanceRoot(m_World, m_Entity));
     if (!file.empty() && m_SelectAsset)
         m_SelectAsset(file);
+}
+
+void PrefabBar::OpenOverridesList()
+{
+    if (m_OverridesList && m_Counts && m_World.IsValid(m_Entity))
+        m_OverridesList->Open(*m_Counts, m_Entity);
 }
 
 void PrefabBar::OnComponentChanged(const EditorChangeNotifications::ComponentChangedEvent& change)

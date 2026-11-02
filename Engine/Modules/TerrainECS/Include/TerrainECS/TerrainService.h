@@ -2,12 +2,13 @@
 
 #include "TerrainECS/CoarseTileStandIn.h"
 #include "TerrainECS/DirtyRegionLog.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfacePageSource.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
 #include "TerrainECS/TerrainBakeCache.h"
-#include "TerrainECS/TerrainColorMap.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMap.h"
 #include "TerrainECS/TerrainZonePayload.h"
 #include "TerrainECS/TerrainGpuBake.h"
-#include "TerrainECS/TerrainGrassField.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassField.h"
 #include "TerrainECS/TerrainReprovisionDebounce.h" // TiledTerrainEdit
 #include "CBTTerrain/SphereAnalyticModifiers.h"
 #include "CBTTerrain/SphereSculptLayer.h"
@@ -16,7 +17,7 @@
 #include "Terrain/CDLODQuadtree.h"
 #include "AssetCore/AssetReloadInvalidator.h"
 #include "AssetCore/GUID.h"
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageAddress.h"
 #include "Types/FlatMap.h"
 #include "GenerationalVector/GenerationalVector.h"
@@ -491,6 +492,9 @@ struct TiledTerrainData
     // eval); drained by TerrainExtractionSystem, which resolves each tile's atlas slot and hands
     // the dispatches to TerrainRenderFeature. Transient per bake.
     GpuHeightBakeBatch GpuBakeBatch;
+    // The last height bake's path and refusals (TerrainModifierSystem); read by the debug readback
+    // and the volume inspector.
+    TerrainHeightBakeReport HeightBakeReport;
 
     // ---- Height page overlay (TerrainModifierSystem, BakeHeightPageOverlay) ----
     // What the modifiers add to this terrain's base height pages: the baked minus the base over the
@@ -526,6 +530,8 @@ struct TiledTerrainData
     PageStreaming::PageSampleRect SurfaceChanged;
     uint64 SurfaceChangedSince = 0;
     SurfaceRefreshReason SurfaceRefresh = SurfaceRefreshReason::Edit;
+    // The surface stores as the surface page stream reads them: set by TerrainSurfacePageDriver each frame.
+    TerrainSurfacePageSource SurfacePages;
 
     /// True when the terrain has height pages and its overlay is neither built nor refused: the
     /// modifier system bakes it at its next update.
@@ -567,9 +573,9 @@ struct TerrainHandle
     bool operator!=(const TerrainHandle& other) const { return !(*this == other); }
 };
 
-class TerrainHeightPages;
+class TerrainPages;
 class TerrainRenderFeature;
-class TerrainHeightPageFeature;
+class TerrainPageFeature;
 class HeightPageStoreLoader;
 struct HeightPageStoreLocation;
 
@@ -1092,20 +1098,20 @@ public:
     // Every call passes the same job system, which outlives this service.
     JobSystem::JobChannel& BakeStoreChannel(JobSystem::WorkStealingThreadPool& jobSystem);
 
-    // ---- Height pages (TerrainHeightPages.h; design page-streaming D-c) ----
+    // ---- Height pages (TerrainPages.h; design page-streaming D-c) ----
 
     // The process's one height-page residency, created on first use with the engine's job pool.
-    TerrainHeightPages& GetHeightPages();
+    TerrainPages& GetTerrainPages();
     /// The CPU height of the planar terrain `terrain` describes (its component, placed by `transform`),
     /// valid until the next height-page Update: its pages when it is tiled (unsampled while they have no
     /// source), its heightfield when it is one map; an invalid query when it has no height data yet.
     SurfaceHeightQuery SurfaceQuery(const Components::Terrain& terrain, const Components::WorldTransform& transform);
     /// Fetches the finest CPU height page under `worldPoint` of the paged terrain `terrain` describes
-    /// now, on the main thread (TerrainHeightPages::FetchFinestPage): a pick reads the finest height
+    /// now, on the main thread (TerrainPages::FetchFinestPage): a pick reads the finest height
     /// where it lands, wherever the cameras are. Returns whether that page is then on the CPU.
     bool FetchFinestHeightPage(const Components::Terrain& terrain, const Mathematics::Vector3& worldPoint);
     /// The level-0 pages of the CPU windows of the paged terrain `terrain` describes
-    /// (TerrainHeightPages::CpuWindowPages): the pages its colliders stand on. Empty when it is not
+    /// (TerrainPages::CpuWindowPages): the pages its colliders stand on. Empty when it is not
     /// paged.
     std::span<const PageStreaming::PageAddress> FinestWindowPages(const Components::Terrain& terrain);
     // The cooked height stores of the heightmaps paged terrains read.
@@ -1298,10 +1304,10 @@ public:
 private:
     // UpdateHeightPages adds the planets' height page changes to the render dirty union.
     friend void UpdateHeightPages(TerrainService& service, TerrainRenderFeature& terrainFeature,
-                                  TerrainHeightPageFeature& pages, uint64 frameIndex, float32 deltaSeconds,
+                                  TerrainPageFeature& pages, uint64 frameIndex, float32 deltaSeconds,
                                   uint32 framesInFlight);
 
-    /// Adds the planet's height page changes (TerrainHeightPages::PlanetDirtyRegions) to the render
+    /// Adds the planet's height page changes (TerrainPages::PlanetDirtyRegions) to the render
     /// per-face dirty union ConsumeSphereSculptDirtyRegions drains, so the CBT re-evaluates the
     /// bisectors over them. The physics union does not take them: no collider reads the pages.
     void AccumulatePlanetPageDirtyRegions(const CBTTerrain::SphereEditRegions& regions);
@@ -1461,7 +1467,7 @@ private:
     // from the queue, and compact the transient arrays. Lock held by the caller.
     void FlushSphereStrokePrefixLocked(uint32 entries);
 
-    std::unique_ptr<TerrainHeightPages> m_HeightPages;
+    std::unique_ptr<TerrainPages> m_TerrainPages;
     std::unique_ptr<HeightPageStoreLoader> m_HeightPageStores;
     bool m_HeightModifiersGathered = false;
     bool m_HeightModifiersPresent = false;
@@ -1537,7 +1543,8 @@ void FillAtlasCoarseBaseField(Terrain::HeightfieldData& field, const TiledTerrai
 // Surface rules composite the material placement on top (ApplySplatModifiers).
 //
 // ZERO IS THE ONLY CORRECT BASE, for two independent reasons. CompositeSplatTexel
-// adds a row's weight then renormalizes the texel, so a channel-0-full base would
+// with Replace off adds a row's weight then renormalizes the texel (with Replace on it
+// reads an all-zero texel as the first material at 255), so a channel-0-full base would
 // pin channel 0 at 1.0 in the accumulator and cap any row targeting another channel
 // at 50%. And an all-zero texel is not "no data" — the surface resolves it to
 // channel 0 (cbt_surface.glsl's wSum guard, normalizeLayerWeights in the grass

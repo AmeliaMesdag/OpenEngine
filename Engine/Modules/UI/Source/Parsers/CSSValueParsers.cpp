@@ -376,6 +376,29 @@ static uint32_t ParseColor(const std::string& v)
     return TryParseColorValue(v).value_or(0xFFFFFFFFu);
 }
 
+// The unit of a dimension token: its trailing ASCII letters ("vh" in "233.33vh").
+static std::string_view UnitSuffixOf(std::string_view token)
+{
+    size_t start = token.size();
+    while (start > 0 && std::isalpha(static_cast<unsigned char>(token[start - 1])))
+        --start;
+    return token.substr(start);
+}
+
+// The CSS viewport unit (css-values-4 §6.1.2) a unit suffix names, ASCII case-insensitive.
+static std::optional<StyleLength::UnitType> ViewportUnitFromSuffix(std::string_view suffix)
+{
+    if (Ieq(suffix, "vw"))
+        return StyleLength::UnitType::Vw;
+    if (Ieq(suffix, "vh"))
+        return StyleLength::UnitType::Vh;
+    if (Ieq(suffix, "vmin"))
+        return StyleLength::UnitType::Vmin;
+    if (Ieq(suffix, "vmax"))
+        return StyleLength::UnitType::Vmax;
+    return std::nullopt;
+}
+
 static float ParseFloatPx(const std::string& v, bool* ok = nullptr)
 {
     if (ok)
@@ -394,14 +417,12 @@ static float ParseFloatPx(const std::string& v, bool* ok = nullptr)
     if (end == begin)
         return 0.f; // no numeric prefix
 
-    // Returns the NUMERIC PREFIX only; the unit suffix is not interpreted here and
-    // an unknown unit is not rejected. Callers that care about the unit — every
-    // property whose value can be a percentage — inspect a single already-
-    // tokenized component themselves and build a StyleLength (ParseLengthValue,
-    // ParseRadiusToken, ParseGapToken, ParseFontSizeValue). A caller that reads
-    // this number alone is declaring that its property is pixels-only.
-    std::string suf = end ? Trim(std::string(end)) : std::string{};
-    (void)suf;
+    // Returns the numeric prefix and ignores an unknown unit. A viewport unit sets
+    // *ok to false, because its number is not px. A property that takes a unit
+    // reads its own StyleLength (ParseLengthComponent, ParseGapToken and their kin).
+    const std::string suf = end ? Trim(std::string(end)) : std::string{};
+    if (ViewportUnitFromSuffix(suf))
+        return 0.f;
 
     if (ok)
         *ok = true;
@@ -490,16 +511,37 @@ struct PropertyRow
 
 static const PropertyRow* FindPropertyRow(const std::string& name);
 
+// True when a token of `value` is in a viewport unit. A property that reads its
+// lengths as px ignores such a declaration, so the earlier rule stands.
+static bool HasViewportDimension(const std::string& value)
+{
+    for (const std::string& token : TokenizeWhitespaceOutsideParens(value))
+    {
+        if (ViewportUnitFromSuffix(UnitSuffixOf(token)))
+            return true;
+    }
+    return false;
+}
+
 // --- shared category parsers ------------------------------------------------
 
+// A value ParseFloatPx refuses (no number, or a viewport unit) is ignored.
 static StyleValue ParseFloatPxValue(const std::string& value)
 {
-    return ParseFloatPx(value);
+    bool ok = false;
+    const float px = ParseFloatPx(value, &ok);
+    if (!ok)
+        return std::monostate{};
+    return px;
 }
 
 static StyleValue ParseFloat01Value(const std::string& value)
 {
-    return Math::Clamp01(ParseFloatPx(value));
+    bool ok = false;
+    const float fraction = ParseFloatPx(value, &ok);
+    if (!ok)
+        return std::monostate{};
+    return Math::Clamp01(fraction);
 }
 
 static StyleValue ParseColorValue(const std::string& value)
@@ -514,12 +556,13 @@ static StyleValue ParseColorValue(const std::string& value)
 // reads `calc(12px * 1.375)`. Only same-type arithmetic can fold without a
 // layout-time calc tree, so a px/percent mix ("calc(50% - 4px)") is rejected
 // whole, leaving the cascaded value standing — the same failure shape every
-// other unreadable declaration has here.
+// other unreadable declaration has here. Each viewport unit is its own type, so
+// "calc(10vw + 10vh)" and "min(320px, 70vw)" are rejected the same way.
 namespace CssMath
 {
 struct Value
 {
-    enum class Kind : uint8_t { Number, Px, Percent };
+    enum class Kind : uint8_t { Number, Px, Percent, Vw, Vh, Vmin, Vmax };
     Kind K = Kind::Number;
     float V = 0.0f;
 };
@@ -711,8 +754,8 @@ class Parser
             return ParseMathFunction(out);
         }
 
-        // <number> with an optional px / % suffix. Any other unit is rejected:
-        // folding cannot guess what an unknown dimension means.
+        // <number> with an optional px, %, vw, vh, vmin or vmax suffix. Any other
+        // unit is rejected: folding cannot guess what an unknown dimension means.
         const size_t start = m_Pos;
         if (m_Pos < m_S.size() && (m_S[m_Pos] == '+' || m_S[m_Pos] == '-'))
             ++m_Pos;
@@ -738,6 +781,14 @@ class Parser
             out.K = Value::Kind::Percent;
         else if (EatWord("px"))
             out.K = Value::Kind::Px;
+        else if (EatWord("vmin"))
+            out.K = Value::Kind::Vmin;
+        else if (EatWord("vmax"))
+            out.K = Value::Kind::Vmax;
+        else if (EatWord("vw"))
+            out.K = Value::Kind::Vw;
+        else if (EatWord("vh"))
+            out.K = Value::Kind::Vh;
         else
             out.K = Value::Kind::Number;
         return true;
@@ -759,6 +810,18 @@ bool EvalToLength(std::string_view token, StyleLength& out)
         return true;
     case Value::Kind::Percent:
         out = StyleLength::Percent(v.V);
+        return true;
+    case Value::Kind::Vw:
+        out = StyleLength{StyleLength::UnitType::Vw, v.V};
+        return true;
+    case Value::Kind::Vh:
+        out = StyleLength{StyleLength::UnitType::Vh, v.V};
+        return true;
+    case Value::Kind::Vmin:
+        out = StyleLength{StyleLength::UnitType::Vmin, v.V};
+        return true;
+    case Value::Kind::Vmax:
+        out = StyleLength{StyleLength::UnitType::Vmax, v.V};
         return true;
     case Value::Kind::Number:
         return false;
@@ -788,7 +851,16 @@ bool IsMathFunctionToken(std::string_view v)
 // that cannot fold — mixed px/percent, unknown units — is rejected rather than
 // resolved to Auto, and the author's earlier rule survives instead of being
 // overwritten with a value they never wrote.
-static StyleValue ParseLengthValue(const std::string& raw)
+//
+// The viewport units resolve at layout against the UI root's size: the sizes,
+// the insets and flex-basis keep one; a margin, a padding or translate() rejects it.
+enum class ViewportUnits : uint8_t
+{
+    Rejected,
+    Kept
+};
+
+static StyleValue ParseLengthComponent(const std::string& raw, ViewportUnits viewportUnits)
 {
     const auto toks = TokenizeWhitespaceOutsideParens(raw);
     if (toks.size() != 1)
@@ -799,9 +871,21 @@ static StyleValue ParseLengthValue(const std::string& raw)
     if (CssMath::IsMathFunctionToken(v))
     {
         StyleLength folded{};
-        if (CssMath::EvalToLength(v, folded))
-            return folded;
-        return std::monostate{};
+        if (!CssMath::EvalToLength(v, folded))
+            return std::monostate{};
+        if (folded.IsViewport() && viewportUnits == ViewportUnits::Rejected)
+            return std::monostate{};
+        return folded;
+    }
+    const std::string_view suffix = UnitSuffixOf(v);
+    if (const std::optional<StyleLength::UnitType> viewportUnit = ViewportUnitFromSuffix(suffix))
+    {
+        if (viewportUnits == ViewportUnits::Rejected)
+            return std::monostate{};
+        float number = 0.0f;
+        if (!ParseStrictDecimalFloat(std::string_view(v).substr(0, v.size() - suffix.size()), number))
+            return std::monostate{};
+        return StyleLength{*viewportUnit, number};
     }
     bool ok = false;
     const bool isPercent = (!v.empty() && v.back() == '%');
@@ -809,6 +893,33 @@ static StyleValue ParseLengthValue(const std::string& raw)
     if (!ok)
         return std::monostate{};
     return isPercent ? StyleLength::Percent(f) : StyleLength::Px(f);
+}
+
+// The margin and padding edges, and translate(): px or a percentage.
+static StyleValue ParseLengthValue(const std::string& raw)
+{
+    return ParseLengthComponent(raw, ViewportUnits::Rejected);
+}
+
+// The insets: any length, a negative one included.
+static StyleValue ParseInsetValue(const std::string& raw)
+{
+    return ParseLengthComponent(raw, ViewportUnits::Kept);
+}
+
+// width, height, min-width, min-height and flex-basis. A negative size is
+// invalid in every unit (css-sizing-3 §5.1, css-flexbox-1 §7.3.3). A math
+// function that folds below zero clamps to zero (css-values-4 §10.12).
+static StyleValue ParseSizeValue(const std::string& raw)
+{
+    StyleValue parsed = ParseLengthComponent(raw, ViewportUnits::Kept);
+    StyleLength* len = std::get_if<StyleLength>(&parsed);
+    if (!len || len->Value >= 0.0f)
+        return parsed;
+    if (!CssMath::IsMathFunctionToken(ToLowerAscii(Trim(raw))))
+        return std::monostate{};
+    len->Value = 0.0f;
+    return parsed;
 }
 
 // max-width / max-height, whose extra keyword is `none`. StyleLength has no
@@ -819,7 +930,7 @@ static StyleValue ParseMaxLengthValue(const std::string& value)
     const std::string v = ToLowerAscii(Trim(value));
     if (v == "none" || v == "auto")
         return StyleLength::Auto();
-    return ParseLengthValue(value);
+    return ParseSizeValue(value);
 }
 
 // One corner radius component: a length or a percentage, never `auto`. A
@@ -916,12 +1027,13 @@ static StyleValue ParseFontSizeValue(const std::string& raw)
     const std::string v = ToLowerAscii(Trim(toks[0]));
     if (v.empty() || v == "auto")
         return std::monostate{};
-    // Math functions fold as they do for every length (ParseLengthValue): after var()
-    // substitution, `calc(14px * var(--scale))` reads `calc(14px * 1.5)`.
+    // Math functions fold as they do for every length (ParseLengthComponent): after var()
+    // substitution, `calc(14px * var(--scale))` reads `calc(14px * 1.5)`. A viewport
+    // unit does not resolve on font-size.
     if (CssMath::IsMathFunctionToken(v))
     {
         StyleLength folded{};
-        if (CssMath::EvalToLength(v, folded))
+        if (CssMath::EvalToLength(v, folded) && !folded.IsViewport())
             return folded;
         return std::monostate{};
     }
@@ -935,7 +1047,8 @@ static StyleValue ParseFontSizeValue(const std::string& raw)
 
 // margin/padding shorthand: 1-4 values, each a length, a percentage, or (margin
 // only) `auto`. Padding has no `auto` in CSS, so the padding appliers read
-// Values/IsPercent and ignore IsAuto, leaving the zero.
+// Values/IsPercent and ignore IsAuto, leaving the zero. An edge stores a
+// number, so a viewport unit rejects the declaration (ParseLengthComponent).
 static StyleValue ParseBoxValue(const std::string& value)
 {
     struct Edge
@@ -950,6 +1063,8 @@ static StyleValue ParseBoxValue(const std::string& value)
     std::vector<Edge> edges;
     while (ss >> tok)
     {
+        if (ViewportUnitFromSuffix(UnitSuffixOf(tok)))
+            return std::monostate{};
         Edge edge{};
         edge.IsAuto = Ieq(tok, "auto");
         edge.IsPercent = !edge.IsAuto && !tok.empty() && tok.back() == '%';
@@ -1054,7 +1169,11 @@ static StyleValue ParseLineWidthValue(const std::string& value)
         return kMediumLineWidthPx;
     if (v == "thick")
         return kThickLineWidthPx;
-    return std::max(0.0f, ParseFloatPx(v));
+    bool ok = false;
+    const float px = ParseFloatPx(v, &ok);
+    if (!ok)
+        return std::monostate{};
+    return std::max(0.0f, px);
 }
 
 static StyleValue ParseCursorValue(const std::string& value)
@@ -1143,16 +1262,15 @@ static StyleValue ParseTextOverflowValue(const std::string& value)
 
 static StyleValue ParseLineHeightValue(const std::string& value)
 {
-    // 0 is the resolver's "normal" sentinel. Recognise the keyword explicitly:
-    // it otherwise lands there only because the numeric parse fails and the
-    // unit scan happens to see letters.
+    // 0 is the resolver's "normal" sentinel. A value ParseFloatPx refuses
+    // (no number, or a viewport unit) is ignored.
     if (ToLowerAscii(Trim(value)) == "normal")
         return 0.0f;
 
     bool ok = false;
     float f = ParseFloatPx(value, &ok);
     if (!ok)
-        f = 0.0f;
+        return std::monostate{};
 
     // Distinguish unitless multiplier from pixel value. CSS "line-height: 1.5"
     // means 1.5x the font size, while "line-height: 21px" means 21 pixels.
@@ -1182,7 +1300,9 @@ static StyleValue ParseLetterSpacingValue(const std::string& value)
 
     bool ok = false;
     const float f = ParseFloatPx(value, &ok);
-    return ok ? f : 0.0f;
+    if (!ok)
+        return std::monostate{};
+    return f;
 }
 
 static StyleValue ParseFontFamilyValue(const std::string& value)
@@ -1521,6 +1641,8 @@ static StyleValue ParseBackgroundRepeatValue(const std::string& value)
 
 static StyleValue ParseBackgroundSizeValue(const std::string& value)
 {
+    if (HasViewportDimension(value))
+        return std::monostate{};
     std::istringstream ss(Trim(value));
     std::string a, b;
     ss >> a;
@@ -1587,6 +1709,8 @@ static void ParseVerticalBackgroundPositionToken(const std::string& token, Backg
 
 static StyleValue ParseBackgroundPositionValue(const std::string& value)
 {
+    if (HasViewportDimension(value))
+        return std::monostate{};
     std::istringstream ss(ToLowerAscii(Trim(value)));
     std::string xTok, yTok;
     ss >> xTok;
@@ -1678,6 +1802,8 @@ static StyleValue ParseBorderImageSliceValue(const std::string& value)
     // 1-4 unitless/px numbers (CSS shorthand: T | T LR | T LR B | T R B L,
     // source texels) plus optional `fill` keyword. `border-image-slice: 0`
     // overrides the texture's intrinsic slice to "no border" (stretched).
+    if (HasViewportDimension(value))
+        return std::monostate{};
     BorderImageSliceValue s{};
     s.Fill = false;
     std::istringstream ss(ToLowerAscii(Trim(value)));
@@ -1926,6 +2052,8 @@ static StyleValue ParseBoxShadowValue(const std::string& value)
 {
     if (ToLowerAscii(Trim(value)) == "none")
         return BoxShadowValue{};
+    if (HasViewportDimension(value))
+        return std::monostate{};
     const auto toks = TokenizeWhitespaceOutsideParens(value);
     BoxShadowValue sv{};
     std::vector<std::string> rest;
@@ -1948,6 +2076,8 @@ static StyleValue ParseGlowValue(const std::string& value)
 {
     if (ToLowerAscii(Trim(value)) == "none")
         return GlowValue{};
+    if (HasViewportDimension(value))
+        return std::monostate{};
     const auto toks = TokenizeWhitespaceOutsideParens(value);
     GlowValue gv{};
     if (toks.size() >= 1) gv.Radius = std::max(0.0f, ParseFloatPx(toks[0]));
@@ -2220,6 +2350,8 @@ static BorderShorthandParts ScanBorderShorthand(const std::string& value)
 // "border: <width> <style?> <color>"
 static void ExpandBorderValue(const std::string& value, std::vector<StyleProperty>& outProps)
 {
+    if (HasViewportDimension(value))
+        return;
     const BorderShorthandParts parts = ScanBorderShorthand(value);
 
     if (parts.HasWidth)
@@ -2258,6 +2390,8 @@ static void ExpandBorderValue(const std::string& value, std::vector<StylePropert
 static void ExpandBorderSideValue(const std::string& value, StylePropertyId widthId,
                                   StylePropertyId colorId, std::vector<StyleProperty>& outProps)
 {
+    if (HasViewportDimension(value))
+        return;
     const BorderShorthandParts parts = ScanBorderShorthand(value);
     const bool suppressed = parts.HasStyle && parts.Style == BorderStyle::None;
 
@@ -2310,6 +2444,8 @@ static void ExpandBorderLeftValue(const std::string& value, std::vector<StylePro
 // colour standing instead of falling back to currentColor.
 static void ExpandOutlineValue(const std::string& value, std::vector<StyleProperty>& outProps)
 {
+    if (HasViewportDimension(value))
+        return;
     float width = kMediumLineWidthPx;
     BorderStyle style = BorderStyle::None;
     uint32_t color = 0u;
@@ -2527,31 +2663,36 @@ static FlexComponent ClassifyFlexComponent(const std::string& tok, float& outNum
         return FlexComponent::Length;
     }
 
-    const char* begin = tok.c_str();
-    char* end = nullptr;
-    const float f = std::strtof(begin, &end);
-    if (end == begin)
-        return FlexComponent::Invalid; // not numeric, and not a basis keyword we can represent
+    const std::string_view token = tok;
+    const std::string_view suffix = token.ends_with('%') ? token.substr(token.size() - 1) : UnitSuffixOf(token);
+    float number = 0.0f;
+    if (!ParseStrictDecimalFloat(token.substr(0, token.size() - suffix.size()), number))
+        return FlexComponent::Invalid; // not a finite number, and not a basis keyword we can represent
 
-    const std::string suffix = Trim(std::string(end));
     if (suffix.empty())
     {
-        outNumber = f;
+        outNumber = number;
         return FlexComponent::Number;
     }
 
-    if (f < 0.0f)
+    if (number < 0.0f)
         return FlexComponent::Invalid; // negative flex-basis is invalid
 
     if (suffix == "%")
     {
-        outBasis = StyleLength::Percent(f);
+        outBasis = StyleLength::Percent(number);
         return FlexComponent::Length;
     }
 
-    // Any other unit is taken as px, which is how ParseLengthValue treats unit
+    if (const std::optional<StyleLength::UnitType> viewportUnit = ViewportUnitFromSuffix(suffix))
+    {
+        outBasis = StyleLength{*viewportUnit, number};
+        return FlexComponent::Length;
+    }
+
+    // Any other unit is taken as px, which is how ParseLengthComponent treats unit
     // suffixes for every other length property in this engine.
-    outBasis = StyleLength::Px(f);
+    outBasis = StyleLength::Px(number);
     return FlexComponent::Length;
 }
 
@@ -2846,10 +2987,10 @@ constexpr PropertyRow kPropertyRows[] = {
     {"gap", StylePropertyId::Gap, nullptr, &ExpandGapValue},
     {"row-gap", StylePropertyId::RowGap, &ParseGapLengthValue},
     {"column-gap", StylePropertyId::ColumnGap, &ParseGapLengthValue},
-    {"width", StylePropertyId::Width, &ParseLengthValue},
-    {"height", StylePropertyId::Height, &ParseLengthValue},
-    {"min-width", StylePropertyId::MinWidth, &ParseLengthValue},
-    {"min-height", StylePropertyId::MinHeight, &ParseLengthValue},
+    {"width", StylePropertyId::Width, &ParseSizeValue},
+    {"height", StylePropertyId::Height, &ParseSizeValue},
+    {"min-width", StylePropertyId::MinWidth, &ParseSizeValue},
+    {"min-height", StylePropertyId::MinHeight, &ParseSizeValue},
     {"max-width", StylePropertyId::MaxWidth, &ParseMaxLengthValue},
     {"max-height", StylePropertyId::MaxHeight, &ParseMaxLengthValue},
     {"aspect-ratio", StylePropertyId::AspectRatio, &ParseAspectRatioValue},
@@ -2862,15 +3003,15 @@ constexpr PropertyRow kPropertyRows[] = {
     {"align-content", StylePropertyId::AlignContent, &ParseAlignContentValue},
     {"direction", StylePropertyId::Direction, &ParseDirectionValue},
     {"position", StylePropertyId::Position, &ParsePositionValue},
-    {"left", StylePropertyId::PositionLeft, &ParseLengthValue},
-    {"top", StylePropertyId::PositionTop, &ParseLengthValue},
-    {"right", StylePropertyId::PositionRight, &ParseLengthValue},
-    {"bottom", StylePropertyId::PositionBottom, &ParseLengthValue},
+    {"left", StylePropertyId::PositionLeft, &ParseInsetValue},
+    {"top", StylePropertyId::PositionTop, &ParseInsetValue},
+    {"right", StylePropertyId::PositionRight, &ParseInsetValue},
+    {"bottom", StylePropertyId::PositionBottom, &ParseInsetValue},
     {"order", StylePropertyId::Order, &ParseOrderValue},
     {"z-index", StylePropertyId::ZIndex, &ParseZIndexValue},
     {"flex-grow", StylePropertyId::FlexGrow, &ParseFloatPxValue},
     {"flex-shrink", StylePropertyId::FlexShrink, &ParseFloatPxValue},
-    {"flex-basis", StylePropertyId::FlexBasis, &ParseLengthValue},
+    {"flex-basis", StylePropertyId::FlexBasis, &ParseSizeValue},
     {"box-shadow", StylePropertyId::BoxShadow, &ParseBoxShadowValue},
     {"text-shadow", StylePropertyId::Unknown, nullptr, &ExpandTextShadow, kTextShadowTargets},
     {"text-glow", StylePropertyId::Unknown, nullptr, &ExpandTextGlow, kTextGlowTargets},

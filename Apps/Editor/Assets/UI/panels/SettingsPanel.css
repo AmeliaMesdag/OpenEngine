@@ -297,12 +297,12 @@ button.trash-icon.pressed,
 }
 
 /* Give Settings-only explanatory cards extra breathing room and depth. The
-   larger right margin also reserves the vertical scrollbar's 6px overlay, so
-   both visible side insets remain equal. */
+   right margin is the row's inset, so a card ends at the right edge of the
+   value fields. */
 .settings-content-body .editor-info-card {
     width: auto;
     margin-left: 6px;
-    margin-right: 12px;
+    margin-right: var(--ui_spacing_md);
     padding: 10px 12px;
 }
 

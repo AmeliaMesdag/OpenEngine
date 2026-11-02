@@ -48,6 +48,17 @@ FileLogLevel ResolveFileLogLevel()
 	return resolved;
 }
 
+void AnnounceFileSink(std::string_view announcement, std::string_view filename, const FileLogLevel& level)
+{
+	if (!level.unrecognizedValue.empty())
+	{
+		Log::Warning("{}='{}' names no log level; the log file falls back to {}", kFileLogLevelEnvVar,
+					 level.unrecognizedValue, LogLevelToString(level.level));
+	}
+	Log::Info("{} '{}' (records {} and above; override with {}=<debug|info|warn|error>)", announcement, filename,
+			  LogLevelToString(level.level), kFileLogLevelEnvVar);
+}
+
 FileSink::FileSink(const Config& config)
 	: m_Config(config)
 	, m_CurrentFilename(config.filename)

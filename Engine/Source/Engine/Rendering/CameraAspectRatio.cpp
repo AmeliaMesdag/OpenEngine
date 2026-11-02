@@ -270,7 +270,7 @@ void ApplyActiveCameraAspect(RenderServices& rs,
         auto cameraData = activeCamera.ToCameraData(rtAspect, pp.orthoHeight);
         if (activeCamera.params.PixelPerfectPixelSnap)
         {
-            std::array<float, 4> uvTransform;
+            Mathematics::Vector4 uvTransform;
             // The pixel-perfect raster already includes its guard cells.
             cameraData = Rendering::StabilizeCameraToPixelGrid(cameraData,
                 pp.state.PaddedWidth, pp.state.PaddedHeight, 1.0f, uvTransform, 0);

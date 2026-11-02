@@ -1,3 +1,5 @@
+#include "UIBenchStats.h"
+
 #include "UI/SlotAllocator.h"
 
 #include <gtest/gtest.h>
@@ -10,6 +12,7 @@
 #include <vector>
 
 using GameEngine::UI::SlotAllocator;
+using GameEngine::UITesting::Percentile;
 
 namespace
 {
@@ -58,14 +61,6 @@ bool ResizeRange(SlotAllocator& a, Range& r, uint16_t newCount)
     r.cap = newCap;
     r.count = newCount;
     return true;
-}
-
-double Percentile(std::vector<double>& sorted, double p)
-{
-    if (sorted.empty())
-        return 0.0;
-    const size_t idx = static_cast<size_t>(std::ceil(p * sorted.size())) - 1;
-    return sorted[std::min(idx, sorted.size() - 1)];
 }
 
 } // anonymous namespace

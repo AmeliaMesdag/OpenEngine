@@ -6,6 +6,7 @@
 // stay in RenderServicesDetail.h (§0a-A6), included below.
 #include "Engine/Rendering/MaterialSystem.h"
 
+#include "Core/CpuProfiler.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/CompileConcurrencyGate.h"
 #include "Engine/Rendering/Material.h"
@@ -106,51 +107,54 @@ std::string SurfaceDisplayName(const std::filesystem::path& surfacePath, const s
     return relative.generic_string();
 }
 
-// The bindless texture indices an UNASSIGNED material slot must carry, slot for
-// slot as Material::InitBindlessDefaults bakes them. Bindless index 0 is the
-// engine-wide "not set" sentinel and the texture array's descriptor[0] is never
-// written, so any row left at zero samples an unwritten descriptor: undefined
-// per Vulkan, and on NVIDIA an alias of the most recently written descriptor —
-// the stray-texture-leak symptom.
-std::array<uint32_t, kTextureSlotArraySize> UnassignedSlotTextureIndices(const TextureService& textures)
+// The bindless indices an unassigned row carries: the slot defaults (as Material::InitBindlessDefaults
+// bakes them) and the black normal-variance texture. Index 0 is a descriptor that is never written:
+// a row left at 0 samples undefined data (on NVIDIA, the last descriptor written).
+struct UnassignedRowIndices
 {
-    std::array<uint32_t, kTextureSlotArraySize> indices{};
+    std::array<uint32_t, kTextureSlotArraySize> Textures{};
+    uint32_t NormalVariance = 0;
+
+    bool IsComplete() const
+    {
+        return NormalVariance != 0u && std::find(Textures.begin(), Textures.end(), 0u) == Textures.end();
+    }
+};
+
+UnassignedRowIndices ResolveUnassignedRowIndices(const TextureService& textures)
+{
+    UnassignedRowIndices indices;
     for (uint32_t ordinal = 0; ordinal < kTextureSlotArraySize; ++ordinal)
-        indices[ordinal] = textures.UnassignedSlotBindlessIndex(ordinal);
+        indices.Textures[ordinal] = textures.UnassignedSlotBindlessIndex(ordinal);
+    indices.NormalVariance = textures.DefaultBlackBindlessIndex();
     return indices;
 }
 
-// Write one MaterialParams row's unassigned-slot defaults over an already
-// zeroed row: the texture indices above plus identity UV transforms. The SSBO
-// stores the transforms as two split arrays (TextureST[8] then TextureST2[8]),
-// NOT interleaved, so identity means row0.x = 1 in the first block and
-// row1.y = 1 in the second; addressing them as one interleaved array yields a
-// garbled transform that collapses UVs. The packed sampler word is left at
-// zero: sampler-preset 0 (LinearRepeat) is a real entry of the dense
-// sampler-preset array, unlike bindless texture 0.
-void WriteUnassignedRowDefaults(uint8_t* rowPtr,
-                                const std::array<uint32_t, kTextureSlotArraySize>& textureIndices)
+// Writes the unassigned defaults over a zeroed row: the indices above and identity UV transforms.
+// TextureST[8] and TextureST2[8] are split arrays, not interleaved: identity is row0.x = 1 in the first
+// and row1.y = 1 in the second. The sampler word stays 0: preset 0 (LinearRepeat) is a real entry.
+void WriteUnassignedRowDefaults(uint8_t* rowPtr, const UnassignedRowIndices& indices)
 {
-    std::memcpy(rowPtr + kMaterialParamBytes, textureIndices.data(), kTextureIndexBytes);
+    std::memcpy(rowPtr + kMaterialParamBytes, indices.Textures.data(), kTextureIndexBytes);
     float* stPtr = reinterpret_cast<float*>(rowPtr + kMaterialParamBytes + kTextureIndexBytes);
     for (uint32_t s = 0; s < kTextureSlotArraySize; ++s)
     {
         stPtr[s * 4 + 0] = 1.0f;                           // TextureST[s].x  (row0)
         stPtr[(kTextureSlotArraySize + s) * 4 + 1] = 1.0f; // TextureST2[s].y (row1)
     }
+    std::memcpy(rowPtr + kNormalVarianceIndexOffset, &indices.NormalVariance, sizeof(uint32_t));
 }
 
 // Write one whole MaterialParams row: the material's parameters, texture
 // indices, UV transforms and sampler word, or the unassigned-slot defaults for a
 // null material. The row is cleared first, so the bytes match a full pack's
 // whatever the row held before.
-void WriteMaterialRow(uint8_t* rowPtr, const Material* mat,
-                      const std::array<uint32_t, kTextureSlotArraySize>& unassignedTextureIndices)
+void WriteMaterialRow(uint8_t* rowPtr, const Material* mat, const UnassignedRowIndices& unassignedIndices)
 {
     std::memset(rowPtr, 0, kMaterialEntryStride);
     if (!mat)
     {
-        WriteUnassignedRowDefaults(rowPtr, unassignedTextureIndices);
+        WriteUnassignedRowDefaults(rowPtr, unassignedIndices);
         return;
     }
 
@@ -176,6 +180,8 @@ void WriteMaterialRow(uint8_t* rowPtr, const Material* mat,
 
     const uint32_t packedSamplers = mat->GetPackedSamplerIndices();
     std::memcpy(rowPtr + kSamplerIndicesOffset, &packedSamplers, sizeof(uint32_t));
+    const uint32_t normalVarianceIndex = mat->GetNormalVarianceIndex();
+    std::memcpy(rowPtr + kNormalVarianceIndexOffset, &normalVarianceIndex, sizeof(uint32_t));
 }
 
 // Material recompiles a single shader-source drain runs before carrying the
@@ -312,8 +318,6 @@ void MaterialSystem::Initialize(Rendering::IDevice* device, PerFrameWritePool& f
     // Runtime material registry: owns all runtime Material instances.
     m_RuntimeMaterialRegistry.Initialize(device);
     m_RuntimeMaterialRegistry.SetPreUnregisterCallback([this](const Material* mat) {
-        m_ShaderCompilationCache.ClearVariantsForMaterial(mat);
-
         // Defer variant-pipeline cache erasure to BeginFrame on the render
         // thread. The unregister callback can fire from any thread (asset
         // reloader, GC worker); the four caches are written from the render
@@ -397,18 +401,13 @@ void MaterialSystem::ShutdownPhaseA()
 
 void MaterialSystem::ShutdownPhaseB()
 {
-    // Clear the shader compilation cache before the material registry — the
-    // per-material variant map holds Material pointers that become invalid after
-    // registry shutdown. (was :1064)
+    // Drop the compiled shader entries.
     m_ShaderCompilationCache.Clear();
     m_ShaderErrors.Clear();
 
-    // Suppress the pre-unregister callback during shutdown: the shader cache is
-    // already bulk-cleared above, and the SSBO free-list / reverse lookup are
-    // about to be cleared below. Only after the callback is disarmed reset the
-    // variant cache the callback dereferences (EnqueueEviction), then shut the
-    // registry down — feature teardown (RS-side, between the phases) can
-    // unregister materials, so this order is load-bearing. (was :1069-1073)
+    // Disarm the pre-unregister callback, then reset the variant cache it reads,
+    // then shut the registry down. Keep this order: feature teardown between the
+    // phases can unregister materials.
     m_RuntimeMaterialRegistry.SetPreUnregisterCallback(nullptr);
     m_PipelineVariants.reset();
     m_RuntimeMaterialRegistry.Shutdown();
@@ -515,12 +514,6 @@ void MaterialSystem::PumpProjectPrewarm()
         engine.IsWorkspaceRootFallback() ? std::filesystem::path{} : engine.GetWorkspaceRoot();
     m_ProjectPrewarm->Update(*assets, *this, engine.GetJobSystem(), projectRoot,
                              std::chrono::steady_clock::now(), m_ResolveWorldPassKeywords);
-}
-
-void MaterialSystem::OnActiveRenderPipelineChanged()
-{
-    // Stale per-material variant entries must not persist across pipeline changes.
-    m_ShaderCompilationCache.ClearAllMaterialVariants();
 }
 
 void MaterialSystem::OnProjectSwitched()
@@ -906,6 +899,7 @@ void MaterialSystem::FinalizeFrameBuffers()
     // Both indexing modes read the MaterialParams SSBO: it carries the material
     // param block and TextureST. Only its texture-index lane is bindless-only,
     // and Classic simply never reads that lane.
+    GE_CPU_PROFILE_SCOPE("MaterialSystem.FinalizeFrameBuffers");
     PackMaterialSSBO();
 }
 
@@ -918,19 +912,16 @@ void MaterialSystem::EnsureFallbackRowSeeded()
     // one: every draw in the scene collapses onto it, and zeroed texture
     // indices would point the whole scene at the never-written bindless
     // descriptor 0 (WriteUnassignedRowDefaults states the consequence).
-    const auto textureIndices = UnassignedSlotTextureIndices(*m_Textures);
+    const UnassignedRowIndices indices = ResolveUnassignedRowIndices(*m_Textures);
 
     // The TextureService publishes these indices when its default textures
     // register, which can be later than the first pack. Seeding before that
     // would latch the very zeros this seeding exists to avoid, so wait.
-    for (const uint32_t index : textureIndices)
-    {
-        if (index == 0u)
-            return;
-    }
+    if (!indices.IsComplete())
+        return;
 
     uint8_t row[kMaterialEntryStride]{};
-    WriteUnassignedRowDefaults(row, textureIndices);
+    WriteUnassignedRowDefaults(row, indices);
     if (void* ptr = m_Device->MapBuffer(m_MaterialParamsSSBOFallback))
     {
         std::memcpy(ptr, row, sizeof(row));
@@ -1055,7 +1046,7 @@ void MaterialSystem::PackMaterialSSBO()
     // A delta pack rewrites only the rows whose revision moved since this slot
     // was last packed; a full pack rewrites every row, so an unvisited or
     // recycled row is never sampled as zero (see WriteUnassignedRowDefaults).
-    const auto defaultTexIdx = UnassignedSlotTextureIndices(*m_Textures);
+    const UnassignedRowIndices defaultTexIdx = ResolveUnassignedRowIndices(*m_Textures);
     if (!sameLayout)
         packedSlot.RowRevisions.assign(materialCount, 0u);
     const uint32_t lookupSize = static_cast<uint32_t>(m_MaterialsBySSBOIndex.size());
@@ -1860,7 +1851,6 @@ void MaterialSystem::ResubmitMaterialPipeline(const GUID& guid, Material* mat, c
 {
     assert(std::this_thread::get_id() == m_OwnerThreadId
            && "ResubmitMaterialPipeline is main-thread-only (retires the pipeline id unlocked)");
-    m_ShaderCompilationCache.ClearVariantsForMaterial(mat);
     if (auto slots = ResolveSurfaceTextureSlots(resolved, mat->GetMaterialAssetPath()))
         mat->SetTextureSlotMap(std::move(*slots));
 
@@ -2187,8 +2177,6 @@ void MaterialSystem::CompileMaterialPipeline(Material& mat, const MaterialDocume
     if (!m_Device)
         return;
 
-    m_ShaderCompilationCache.ClearVariantsForMaterial(&mat);
-
     if (!EnsureMaterialBuildContextReady())
         return;
 
@@ -2491,12 +2479,6 @@ void MaterialSystem::ApplyPendingPipelinePublishes()
             continue;
         }
 
-        // Drop stale per-material shader variants so a draw re-derives against the
-        // published base — the synchronous CompileMaterialPipeline does the same
-        // before it interns (they are keyed by Material*, not MaterialVersion, so
-        // the version bump below does not evict them).
-        m_ShaderCompilationCache.ClearVariantsForMaterial(mat);
-
         // F4: these are plain (unsynchronized) writes to fields a draw-time record
         // reads. They are safe ONLY because there is no render-ahead thread — the
         // engine runs a single frame spine, and this drain executes in BeginFrame
@@ -2689,7 +2671,7 @@ void MaterialSystem::PrewarmMaterialVariants(Material& mat,
                                              Rendering::MaterialKeyword colorPassKeywords)
 {
     // The registered key and compile inputs are exactly what the draw path
-    // compiles its variants from (ShaderCompilationCache::GetOrCompileVariant).
+    // compiles its variants from (PipelineVariantCache::RunColorVariantCompile).
     PrewarmMaterialVariantSet(mat.GetVariantKey(), mat.GetCompileSpec(), mat.GetAlphaMode(),
                               mat.IgnoresVertexColor(), mat.GetName(), mat.GetMaterialAssetPath(), colorPassKeywords,
                               PrewarmOrigin::OnDemand);

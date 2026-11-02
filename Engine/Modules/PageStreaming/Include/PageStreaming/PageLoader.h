@@ -30,17 +30,21 @@ class PageStoreAccess;
 class PageStoreReader;
 
 /// Where one field's pages come from: a cooked store (read through the asset reader threads), a
-/// generated provider (evaluated on Background jobs) or a store that a bake writes while it is read
-/// (read on Background jobs). Exactly one is set.
+/// generated provider (evaluated on Background jobs) or the planes of one lattice that a bake writes
+/// while they are read (read on Background jobs). Exactly one of Store, Generated and Planes is set.
 struct PageSource
 {
     std::shared_ptr<const PageStoreReader> Store;
     std::shared_ptr<const GeneratedHeightPageProvider> Generated;
-    std::shared_ptr<const PageStoreAccess> Access;
+    /// One store access per plane, all on one lattice. A page loads with every plane or not at all.
+    std::vector<std::shared_ptr<const PageStoreAccess>> Planes;
 
-    /// The bytes each loaded page of this source holds: PagePayloadBytes of the store's format, or
-    /// of a height page for the generated provider.
+    /// The bytes each loaded page of this source holds: PagePayloadBytes of the store's format, of a
+    /// height page for the generated provider, or of each plane in turn, in the order of Planes.
     uint32 PayloadBytes() const;
+    /// The sum of the planes' PageStoreAccess::Version: it changes when a page of any plane can
+    /// become readable. 0 for a source without planes.
+    uint64 PlanesVersion() const;
 };
 
 /// How one page fetch ended: the page's bytes, or why there are none.
@@ -57,9 +61,9 @@ struct PageFetchOutcome
 /// `frameIndex`, is fetched again: the wait doubles from one frame up to 64.
 uint64 NextPageFetchRetryFrame(uint64 frameIndex, uint32 failedAttempts);
 
-/// Fetches page `address` of `source` on the calling thread: a store's read and decode, or the
-/// generated provider's evaluation. Thread-safe. A PageStoreAccess read waits while its bake
-/// changes the store's layout.
+/// Fetches page `address` of `source` on the calling thread: a store's read and decode, the
+/// generated provider's evaluation, or each plane's read. Thread-safe. A plane's read waits while
+/// its bake changes the store's layout; the page is absent while any plane does not hold it.
 PageFetchOutcome FetchPage(const PageSource& source, const PageAddress& address);
 
 /// One asynchronous page load.

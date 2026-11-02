@@ -12,10 +12,9 @@
 // Instrument: the live heap ids read back from the GPU after the tree is quiet, compared as a sorted
 // set. Two arrivals settle to one tree when the sets are equal, not merely the counts.
 //
-// The pool-pressure controllers (the off-frustum keep step and the near-bias contention) carry their
-// own state across a path when they engage; the poses here converge below the occupancy where either
-// engages (keep step 0, contention 0 under 50% occupancy), which the tests assert, so the rest rule
-// alone is under test.
+// The pool-pressure controllers (the off-frustum keep step, the near-bias contention) keep state across a path.
+// A test turns them off or stays below where they engage, so the rest rule alone is under test, or it puts the
+// pool under the one controller it tests (AContendedPoolGoesQuietAtRest, APoolUnderTheKeepStepGoesQuietAtRest).
 //
 // The screen-space edge rule, which decides the planar terrains without a height pyramid, keeps its motion
 // band at rest; the TheEdgeRule tests bind the relief through the atlas source and assert that it goes
@@ -28,6 +27,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -68,6 +68,16 @@ constexpr float kContendedSplitPx = 12.0f;
 // 140); the rest stage then has to stay quiet for kQuietUpdates more.
 constexpr uint32_t kStageUpdates = 160u;
 constexpr uint32_t kQuietUpdates = 8u;
+// The fraction of the largest live count the smallest must reach over the motion stage's second half,
+// where the camera holds still and the tree has converged.
+constexpr float kStillLiveBand = 0.98f;
+// The updates a held stage under the keep step may take to stop changing, out of kStageUpdates.
+constexpr uint32_t kKeepSettleUpdates = 120u;
+// The updates the turned and back stages of both keep-path poses may take together to stop changing.
+constexpr uint32_t kStopSettleUpdates = 150u;
+// The pressure step the gate test's arrival climbs to in motion: one notch survives the update that drains
+// the pool under the keep ceiling, so the rest starts above pressure step 0.
+constexpr int32_t kArrivalPressureStep = 2;
 // The contention ramp's lower bound (cbt_layout.glsl CBT_NEAR_BIAS_CONTENTION_LO): below it the
 // near-bias is exactly 1.
 constexpr float kContentionFreeOccupancy = 0.50f;
@@ -199,9 +209,50 @@ struct RestTrace
     uint32_t MotionLive = 0;
     uint32_t RestLiveMin = 0;
     uint32_t RestLiveEnd = 0;
+    uint32_t StillLiveMin = std::numeric_limits<uint32_t>::max(); // the live count over the motion stage's second half
+    uint32_t StillLiveMax = 0;
+    uint32_t RestStillMin = std::numeric_limits<uint32_t>::max(); // the live count over the rest stage's second half
+    uint32_t RestStillMax = 0;
+    int32_t KeepStepMax = 0;            // the highest off-frustum keep step over both stages
     uint32_t RestUpdatesChanging = 0; // the rest updates up to the last one that split or merged anything
     bool Quiet = false;
 };
+
+// One stage of a held camera: where the tree rests and how long it took.
+struct StageRest
+{
+    uint32_t Live = 0;
+    int32_t KeepStep = 0;
+    uint32_t UpdatesChanging = 0; // the stage's updates up to the last one that split or merged anything
+    uint32_t SplitRuns = 0;       // the runs of consecutive updates that split anything
+    bool Quiet = false;           // the last kQuietUpdates updates split and merged nothing
+    int32_t ArrivalPressureStep = 0;       // the pressure step after the stage's moving update
+    uint32_t RestPressureClimbs = 0;       // the rest updates that raised the pressure step
+    uint32_t DownStepsAbovePressureZero = 0; // the rest updates that lowered the keep step after an
+                                             // update that ran above pressure step 0
+    int32_t ArrivalMergeDemand = 0;      // the merges the stage's moving update asked for
+    int32_t ArrivalMergeCandidates = 0;  // the merge candidates the moving update counted
+    int32_t RestMergeCandidatesMax = 0;  // the most merge candidates one rest update counted
+};
+
+// A keep-path walk: rest at a pose, turn the camera 180 degrees, turn back.
+struct PathStages
+{
+    StageRest Rest;
+    StageRest Turned;
+    StageRest Back;
+};
+
+// The keep-path poses, under kFullPoolSplitPx: each comes under the keep step at rest, and its turned
+// view rests at another keep step.
+const Pose kKeepPathPoses[] = {Above(256.0f, 6.0f, 256.0f, 0.0f, -30.0f), Above(256.0f, 6.0f, 300.0f, 45.0f, -30.0f)};
+
+Pose Turned(const Pose& pose)
+{
+    Pose turned = pose;
+    turned.YawDeg += 180.0f;
+    return turned;
+}
 
 struct Settled
 {
@@ -323,9 +374,17 @@ class CBTRestSettle : public ::testing::Test
         BuildParams(p, pose, shaping);
         relief.Apply(p);
         c.Settle = 0u;
-        for (uint32_t i = 0; i < kStageUpdates; ++i)
-            RunUpdate(inst, c, p);
         RestTrace t;
+        for (uint32_t i = 0; i < kStageUpdates; ++i)
+        {
+            RunUpdate(inst, c, p);
+            t.KeepStepMax = std::max(t.KeepStepMax, inst.ReadWorkQueueCounter(kWQOffFrustumKeepStep));
+            if (i < kStageUpdates / 2u)
+                continue;
+            const uint32_t live = inst.ReadTessellationStats().LiveCount;
+            t.StillLiveMin = std::min(t.StillLiveMin, live);
+            t.StillLiveMax = std::max(t.StillLiveMax, live);
+        }
         t.MotionLive = inst.ReadTessellationStats().LiveCount;
         t.RestLiveMin = t.MotionLive;
         c.Settle = 1u;
@@ -336,6 +395,12 @@ class CBTRestSettle : public ::testing::Test
             const CBTTessellationStats s = inst.ReadTessellationStats();
             t.RestLiveMin = std::min(t.RestLiveMin, s.LiveCount);
             t.RestLiveEnd = s.LiveCount;
+            t.KeepStepMax = std::max(t.KeepStepMax, s.OffFrustumKeepStep);
+            if (i >= kStageUpdates / 2u)
+            {
+                t.RestStillMin = std::min(t.RestStillMin, s.LiveCount);
+                t.RestStillMax = std::max(t.RestStillMax, s.LiveCount);
+            }
             const bool changed = s.SplitServed != 0 || s.MergeServed != 0;
             quiet = changed ? 0u : quiet + 1u;
             t.RestUpdatesChanging = changed ? i + 1u : t.RestUpdatesChanging;
@@ -344,6 +409,63 @@ class CBTRestSettle : public ::testing::Test
         EXPECT_EQ(inst.ReadValidationErrorCount(), 0u) << "the rest tree must be conforming";
         inst.Shutdown();
         return t;
+    }
+
+    // Holds the camera at `pose` for kStageUpdates updates under `shaping`, the first with Settle 0.
+    StageRest HoldStage(CBTInstance& inst, const Pose& pose, const Shaping& shaping)
+    {
+        CBTClassifyDesc c = ScreenClassify(shaping);
+        CBTFrameParams p;
+        BuildParams(p, pose, shaping);
+        StageRest out;
+        uint32_t quietUpdates = 0;
+        bool splitting = false;
+        uint32_t splitRuns = 0;
+        int32_t pressureStep = 0;
+        int32_t keepStep = 0;
+        for (uint32_t i = 0; i < kStageUpdates; ++i)
+        {
+            const bool moving = i == 0u;
+            c.Settle = moving ? 0u : 1u;
+            RunUpdate(inst, c, p);
+            const CBTTessellationStats s = inst.ReadTessellationStats();
+            splitRuns += (s.SplitServed != 0 && !splitting) ? 1u : 0u;
+            splitting = s.SplitServed != 0;
+            out.ArrivalPressureStep = moving ? s.PressureStep : out.ArrivalPressureStep;
+            out.ArrivalMergeDemand = moving ? s.MergeDemand : out.ArrivalMergeDemand;
+            out.ArrivalMergeCandidates = moving ? s.MergeCandidates : out.ArrivalMergeCandidates;
+            out.RestMergeCandidatesMax = moving ? 0 : std::max(out.RestMergeCandidatesMax, s.MergeCandidates);
+            out.RestPressureClimbs += (!moving && s.PressureStep > pressureStep) ? 1u : 0u;
+            out.DownStepsAbovePressureZero += (!moving && s.OffFrustumKeepStep < keepStep && pressureStep > 0) ? 1u : 0u;
+            pressureStep = s.PressureStep;
+            keepStep = s.OffFrustumKeepStep;
+            const bool changed = s.SplitServed != 0 || s.MergeServed != 0;
+            quietUpdates = changed ? 0u : quietUpdates + 1u;
+            out.UpdatesChanging = changed ? i + 1u : out.UpdatesChanging;
+        }
+        const CBTTessellationStats s = inst.ReadTessellationStats();
+        out.Live = s.LiveCount;
+        out.KeepStep = s.OffFrustumKeepStep;
+        out.SplitRuns = splitRuns;
+        out.Quiet = quietUpdates >= kQuietUpdates;
+        return out;
+    }
+
+    // Rests at `pose`, turns the camera 180 degrees and turns back, each stage held for kStageUpdates.
+    PathStages WalkPath(const Pose& pose, const Shaping& shaping)
+    {
+        CBTInstance inst;
+        EXPECT_TRUE(inst.Initialize(*m_Device, m_KernelSet));
+        EXPECT_TRUE(inst.InitializeRoots(kDomainPlanar));
+        const ShapedRelief relief(*m_Device, inst, shaping);
+        EXPECT_TRUE(relief.IsArmed()) << "the relief bound no height source, so the lattice is flat";
+        PathStages out;
+        out.Rest = HoldStage(inst, pose, shaping);
+        out.Turned = HoldStage(inst, Turned(pose), shaping);
+        out.Back = HoldStage(inst, pose, shaping);
+        EXPECT_EQ(inst.ReadValidationErrorCount(), 0u) << "the tree must be conforming";
+        inst.Shutdown();
+        return out;
     }
 
     // Converges the motion tree at `pose`, then moves the eye kJiggleM to one side and back on alternate
@@ -564,6 +686,176 @@ TEST_F(CBTRestSettle, AContendedPoolGoesQuietAtRest)
     ASSERT_GT(occupancy, kContentionFreeOccupancy) << "the rest tree must sit on the contention ramp";
     ASSERT_LT(occupancy, 0.90f) << "the rest tree must sit under the contention ramp's top";
     EXPECT_TRUE(t.Quiet) << "the tree must stop changing at rest";
+}
+
+// #5355: with half the field behind the eye, the keep step holds a full pool still in both stages. If that
+// field leaves in one step, occupancy falls under the hold band and the field refills the pool on every cycle.
+// The first pose cycles under the motion threshold on a shared excess, the second under the rest threshold.
+TEST_F(CBTRestSettle, APoolUnderTheKeepStepGoesQuietAtRest)
+{
+    Shaping pressured;
+    pressured.SplitPx = kFullPoolSplitPx;
+    for (const Pose& pose : {Above(256.0f, 2.0f, 256.0f, 0.0f, -4.0f), Above(256.0f, 2.0f, 300.0f, 45.0f, -4.0f)})
+    {
+        SCOPED_TRACE(pose.YawDeg);
+        const RestTrace t = MotionThenRest(pose, pressured);
+        std::printf("[keep-step] live over the stages' second halves %u to %u and %u to %u, keep step max %d, quiet %d\n",
+                    t.StillLiveMin, t.StillLiveMax, t.RestStillMin, t.RestStillMax, t.KeepStepMax, t.Quiet ? 1 : 0);
+        ASSERT_GT(t.KeepStepMax, 0) << "the pool must come under the keep step for the test to say anything";
+        EXPECT_TRUE(t.Quiet) << "the tree must stop changing at rest";
+        EXPECT_GE(static_cast<float>(t.StillLiveMin), kStillLiveBand * static_cast<float>(t.StillLiveMax))
+            << "the live count must hold still under a still camera, not refill and drain";
+        EXPECT_GE(static_cast<float>(t.RestStillMin), kStillLiveBand * static_cast<float>(t.RestStillMax))
+            << "the live count must hold still at rest, not refill and drain";
+    }
+}
+
+// #5355: under the keep step the tree at rest is a function of the pose. The camera rests, turns around and back;
+// the turned rest matches a fresh arrival there and the return matches the first rest, in keep step and live count.
+// Several keep steps fit the hold band, so a step that rests wherever the path left it fails here.
+TEST_F(CBTRestSettle, AKeepStepTreeDependsOnThePoseNotThePath)
+{
+    Shaping pressured;
+    pressured.SplitPx = kFullPoolSplitPx;
+    for (const Pose& pose : kKeepPathPoses)
+    {
+        SCOPED_TRACE(pose.YawDeg);
+        const PathStages path = WalkPath(pose, pressured);
+        const StageRest& rest = path.Rest;
+        const StageRest& turn = path.Turned;
+        const StageRest& back = path.Back;
+        CBTInstance fresh;
+        ASSERT_TRUE(fresh.Initialize(*m_Device, m_KernelSet));
+        ASSERT_TRUE(fresh.InitializeRoots(kDomainPlanar));
+        const ShapedRelief freshRelief(*m_Device, fresh, pressured);
+        ASSERT_TRUE(freshRelief.IsArmed());
+        const StageRest direct = HoldStage(fresh, Turned(pose), pressured);
+        fresh.Shutdown();
+        std::printf("[keep-path] rest %u (keep step %d, %u updates), turned %u (%d, %u), back %u (%d, %u), "
+                    "turned pose direct %u (%d, %u)\n",
+                    rest.Live, rest.KeepStep, rest.UpdatesChanging, turn.Live, turn.KeepStep, turn.UpdatesChanging,
+                    back.Live, back.KeepStep, back.UpdatesChanging, direct.Live, direct.KeepStep,
+                    direct.UpdatesChanging);
+        ASSERT_GT(rest.KeepStep, 0) << "the pool must come under the keep step for the test to say anything";
+        for (const StageRest* stage : {&rest, &turn, &back, &direct})
+        {
+            EXPECT_TRUE(stage->Quiet) << "every stage must stop changing at rest";
+            EXPECT_LE(stage->UpdatesChanging, kKeepSettleUpdates) << "every stage must settle within the bound";
+        }
+        EXPECT_EQ(back.KeepStep, rest.KeepStep) << "the return must rest at the keep step the first rest found";
+        EXPECT_GE(static_cast<float>(std::min(rest.Live, back.Live)),
+                  kStillLiveBand * static_cast<float>(std::max(rest.Live, back.Live)))
+            << "the second rest at the pose must keep the tree the first rest kept, not what the turn left";
+        EXPECT_EQ(turn.KeepStep, direct.KeepStep) << "the turned pose must rest at its own keep step";
+        EXPECT_GE(static_cast<float>(std::min(turn.Live, direct.Live)),
+                  kStillLiveBand * static_cast<float>(std::max(turn.Live, direct.Live)))
+            << "the turned pose must keep the tree a fresh arrival there keeps";
+    }
+}
+
+// #5421, #5416: a stop under the keep step costs one settle. The rest starts one keep step down, so the probe
+// of that step refines while the old view merges, in the same split run.
+TEST_F(CBTRestSettle, AStopSettlesInOneSplitRun)
+{
+    Shaping pressured;
+    pressured.SplitPx = kFullPoolSplitPx;
+    uint32_t stopUpdates = 0;
+    for (uint32_t i = 0; i < 2u; ++i)
+    {
+        SCOPED_TRACE(i);
+        const PathStages path = WalkPath(kKeepPathPoses[i], pressured);
+        std::printf("[stop] pose %u: turned %u updates, %u split runs; back %u updates, %u split runs\n", i + 1u,
+                    path.Turned.UpdatesChanging, path.Turned.SplitRuns, path.Back.UpdatesChanging, path.Back.SplitRuns);
+        ASSERT_GT(path.Rest.KeepStep, 0) << "the pool must come under the keep step for the test to say anything";
+        EXPECT_TRUE(path.Turned.Quiet && path.Back.Quiet) << "every stage must stop changing at rest";
+        stopUpdates += path.Turned.UpdatesChanging + path.Back.UpdatesChanging;
+        if (i != 0u)
+            continue;
+        EXPECT_EQ(path.Turned.SplitRuns, 1u) << "the probe must refine in the stop's own split run";
+        EXPECT_EQ(path.Back.SplitRuns, 1u) << "the probe must refine in the stop's own split run";
+    }
+    EXPECT_LE(stopUpdates, kStopSettleUpdates) << "the stops must settle within the bound";
+}
+
+// #5563: at rest under keep step 24 the pressure step does not climb. The rest tree settles under the keep
+// ceiling, where the pressure step recovers to 0, so a climb during the keep search only coarsens the view
+// and hides the merge-free update the keep step's up rule reads.
+TEST_F(CBTRestSettle, ThePressureStepYieldsToTheKeepStepAtRest)
+{
+    Shaping pressured;
+    pressured.SplitPx = kFullPoolSplitPx;
+    for (const Pose& pose : kKeepPathPoses)
+    {
+        SCOPED_TRACE(pose.YawDeg);
+        const PathStages path = WalkPath(pose, pressured);
+        for (const StageRest* stage : {&path.Rest, &path.Turned, &path.Back})
+        {
+            ASSERT_GT(stage->KeepStep, 0) << "the pool must come under the keep step for the test to say anything";
+            ASSERT_LT(stage->KeepStep, int32_t(kOffFrustumKeepSteps)) << "the keep step must be able to rise";
+            EXPECT_EQ(stage->RestPressureClimbs, 0u) << "the pressure step climbed during the keep search";
+            EXPECT_TRUE(stage->Quiet) << "every stage must stop changing at rest";
+        }
+    }
+}
+
+// The early up proof reads the merge candidates of a rest update. A moving update counts none, so the camera in
+// motion pays no atomic per merging leaf.
+TEST_F(CBTRestSettle, MergeCandidatesAreCountedOnlyAtRest)
+{
+    Shaping pressured;
+    pressured.SplitPx = kFullPoolSplitPx;
+    const PathStages path = WalkPath(kKeepPathPoses[0], pressured);
+    const StageRest& turned = path.Turned;
+    ASSERT_GT(turned.ArrivalMergeDemand, 0) << "the turn must leave leaves to merge for the test to say anything";
+    EXPECT_EQ(turned.ArrivalMergeCandidates, 0) << "a moving update counted merge candidates";
+    EXPECT_GT(turned.RestMergeCandidatesMax, 0) << "a rest update with merges to make counted no merge candidates";
+}
+
+// A rest steps the keep step down only at pressure step 0: a tree measured above it is smaller than the settled tree.
+// The arrival fills the pool in motion until the pressure step climbs, then a coarser target drains the pool under
+// the keep ceiling in motion, so the rest starts under the ceiling with the pressure step raised.
+TEST_F(CBTRestSettle, AKeepStepStepsDownOnlyAtPressureStepZero)
+{
+    Shaping pressured;
+    pressured.SplitPx = kFullPoolSplitPx;
+    Shaping coarser;
+    coarser.SplitPx = kContendedSplitPx;
+    const Pose& pose = kKeepPathPoses[0];
+    CBTInstance inst;
+    ASSERT_TRUE(inst.Initialize(*m_Device, m_KernelSet));
+    ASSERT_TRUE(inst.InitializeRoots(kDomainPlanar));
+    const ShapedRelief relief(*m_Device, inst, pressured);
+    ASSERT_TRUE(relief.IsArmed());
+
+    CBTClassifyDesc filling = ScreenClassify(pressured);
+    filling.Settle = 0u;
+    CBTFrameParams fillingParams;
+    BuildParams(fillingParams, pose, pressured);
+    CBTTessellationStats stats = inst.ReadTessellationStats();
+    for (uint32_t i = 0; i < kStageUpdates && stats.PressureStep < kArrivalPressureStep; ++i)
+    {
+        RunUpdate(inst, filling, fillingParams);
+        stats = inst.ReadTessellationStats();
+    }
+    ASSERT_GE(stats.PressureStep, kArrivalPressureStep) << "the arrival must climb the pressure step in motion";
+
+    CBTClassifyDesc draining = ScreenClassify(coarser);
+    draining.Settle = 0u;
+    CBTFrameParams drainingParams;
+    BuildParams(drainingParams, pose, coarser);
+    for (uint32_t i = 0; i < kStageUpdates && stats.LiveCount >= uint32_t(kOffFrustumKeepOcc * float(stats.PoolSize));
+         ++i)
+    {
+        RunUpdate(inst, draining, drainingParams);
+        stats = inst.ReadTessellationStats();
+    }
+    ASSERT_GT(stats.OffFrustumKeepStep, 0) << "the keep step must have a step to take down";
+
+    const StageRest rest = HoldStage(inst, pose, coarser);
+    EXPECT_EQ(inst.ReadValidationErrorCount(), 0u) << "the tree must be conforming";
+    inst.Shutdown();
+    ASSERT_GT(rest.ArrivalPressureStep, 0) << "the rest must start above pressure step 0 for the test to say anything";
+    EXPECT_EQ(rest.DownStepsAbovePressureZero, 0u) << "the keep step stepped down above pressure step 0";
 }
 
 // #4823: the screen-space edge rule (here the atlas source) comes to rest at a still camera within a bounded

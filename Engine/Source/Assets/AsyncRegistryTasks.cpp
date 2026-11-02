@@ -7,6 +7,7 @@
 #include "JobSystem/WorkStealingThreadPool.h"
 #include "Logger/Logger.h"
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <functional>
 #include <iterator>
@@ -395,9 +396,8 @@ void MetadataBatchProcessingTask::Execute()
 
     try
     {
-        // Resolve the upstream file list (may block this worker thread, but will not block the caller thread).
-        // Cancellation is checked only after it resolves, so this stage never finishes while the walk
-        // before it still runs.
+        // The stage depends on the directory scan task, so the file list is ready and no worker waits here.
+        assert(m_AssetInfosFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
         const Vector<ScannedFileInfo> assetInfos = m_AssetInfosFuture.get();
 
         if (IsCancelled())
@@ -512,10 +512,10 @@ void RegistryUpdateTask::Execute()
 {
     try
     {
-        // Get processed metadata. Cancellation is checked only after it
-        // resolves: this stage's future is the one AssetRegistry::Shutdown
-        // joins, so it must not resolve while the stage before it still calls
-        // into the registry.
+        // The stage depends on the metadata task, so the metadata is ready and that
+        // task is done with the registry. AssetRegistry::Shutdown joins this stage's
+        // future, so a scan's future resolves only after all of its tasks.
+        assert(m_MetadataFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
         Vector<AssetMetadata> metadataList = m_MetadataFuture.get();
 
         if (IsCancelled())
@@ -626,8 +626,11 @@ std::future<size_t> AsyncRegistryCoordinator::ScanDirectoryAsync(const std::file
     auto processedMetadataFuture = processedMetadataPromise->get_future();
     auto registeredCountFuture = registeredCountPromise->get_future();
 
+    // Each stage depends on the stage before it, so it starts only after that
+    // stage resolves its promise. No worker waits on a stage's future.
     // Stage 1: Directory scan
-    SubmitDirectoryScanTask(directory, recursive, std::move(*foundAssetsPromise));
+    const JobSystem::TaskId scanTaskId =
+        SubmitDirectoryScanTask(directory, recursive, std::move(*foundAssetsPromise));
 
     // Stage 2: Metadata processing.
     // B.3b: copy the source's snapshot ONCE under the registry shared lock;
@@ -636,10 +639,13 @@ std::future<size_t> AsyncRegistryCoordinator::ScanDirectoryAsync(const std::file
     auto metadataTask = std::make_unique<MetadataBatchProcessingTask>(
         &m_JobSystem, std::move(foundAssetsFuture), m_Registry, std::move(*processedMetadataPromise),
         directory, std::move(snapshotByPath), m_CancelRequested);
+    metadataTask->AddDependency(scanTaskId);
+    const JobSystem::TaskId metadataTaskId = metadataTask->GetTaskId();
     m_JobSystem.Submit(std::move(metadataTask));
 
     // Stage 3: Registry update
-    SubmitRegistryUpdateTask(std::move(processedMetadataFuture), std::move(*registeredCountPromise), directory);
+    SubmitRegistryUpdateTask(std::move(processedMetadataFuture), std::move(*registeredCountPromise), directory,
+                             metadataTaskId);
 
     return registeredCountFuture;
 }
@@ -649,8 +655,8 @@ void AsyncRegistryCoordinator::CancelScans()
     m_CancelRequested->store(true);
 }
 
-void AsyncRegistryCoordinator::SubmitDirectoryScanTask(const std::filesystem::path& directory, bool recursive,
-                                                       std::promise<Vector<ScannedFileInfo>> foundAssetsPromise)
+JobSystem::TaskId AsyncRegistryCoordinator::SubmitDirectoryScanTask(
+    const std::filesystem::path& directory, bool recursive, std::promise<Vector<ScannedFileInfo>> foundAssetsPromise)
 {
     const AssetIgnoreRules rules = m_Registry.GetIgnoreRulesSnapshot();
     // C.2: pull the snapshot's per-directory mtime map once under the
@@ -660,15 +666,19 @@ void AsyncRegistryCoordinator::SubmitDirectoryScanTask(const std::filesystem::pa
     auto task = std::make_unique<DirectoryScanTask>(&m_JobSystem, directory, recursive, rules,
                                                     std::move(foundAssetsPromise), m_CancelRequested,
                                                     std::move(snapshotDirMtimes));
+    const JobSystem::TaskId taskId = task->GetTaskId();
     m_JobSystem.Submit(std::move(task));
+    return taskId;
 }
 
 void AsyncRegistryCoordinator::SubmitRegistryUpdateTask(std::future<Vector<AssetMetadata>> metadataFuture,
                                                         std::promise<size_t> registeredCountPromise,
-                                                        const std::filesystem::path& scanRoot)
+                                                        const std::filesystem::path& scanRoot,
+                                                        JobSystem::TaskId metadataTaskId)
 {
     auto task = std::make_unique<RegistryUpdateTask>(&m_JobSystem, std::move(metadataFuture), m_Registry,
                                                      std::move(registeredCountPromise), scanRoot, m_CancelRequested);
+    task->AddDependency(metadataTaskId);
     m_JobSystem.Submit(std::move(task));
 }
 

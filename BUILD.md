@@ -75,7 +75,7 @@ open build/macos-arm64-local/bin/Debug/Apps/Editor/Editor.app
 
 ### Linux
 
-Ninja, single configuration: the build type is set at configure.
+Linux builds are x64 only: the `linux-x64-*` presets build for the `x64-linux` triplet, the Steam Deck presets (`steamdeck-*`) for `x64-steamdeck`, and no preset builds for arm64 Linux. Ninja, single configuration: the build type is set at configure.
 
 ```bash
 git clone https://github.com/Game-Crafters-Guild/OpenEngine.git
@@ -126,11 +126,12 @@ node --version && python3 --version    # optional tools
 |---|---|---|
 | **C++20 toolchain** (recent GCC or Clang), **CMake 3.25 or newer**, **Ninja**, **pkg-config**, **Git** | | your distribution's packages |
 | **NASM (x86/x64)** | Required by FFmpeg when the video feature is enabled. | `sudo apt install nasm` |
-| **Windowing packages** | Required by vcpkg's `glfw3`. | `sudo apt install libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev pkg-config` |
+| **Windowing packages** | Required by vcpkg's `glfw3`. | `sudo apt install libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev libwayland-dev libxkbcommon-dev pkg-config` |
 | **Vulkan driver and tools** | Runtime requirement, plus the validation layers. | `sudo apt install mesa-vulkan-drivers vulkan-tools vulkan-validationlayers` |
 | **.NET 10 SDK** | C# scripting host and managed assemblies; not needed with `-DENABLE_SCRIPTING=OFF` ([Building without .NET](#building-without-net)). | [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) |
 | **Node.js 20 or newer** *(optional)* | Same use as on Windows. | your distribution's `nodejs` package, or [nodejs.org](https://nodejs.org/) |
 | **Python 3.10 or newer** *(optional)* | Same use as on Windows. | your distribution's `python3` package |
+| **WebKitGTK 4.1** *(optional)* | The editor's Web panel. Without it the configure prints that the web view is not built, and the panel shows "Web view not available". A game build never needs it. | `sudo apt install libwebkit2gtk-4.1-dev`, or `sudo dnf install webkit2gtk4.1-devel` |
 
 On Fedora (checked on Fedora 44), these two commands install everything above, including the system packages the vcpkg ports build with (Perl modules for OpenSSL, `nasm`, `autoconf-archive`):
 
@@ -141,10 +142,10 @@ sudo dnf install cmake ninja-build git pkgconf-pkg-config \
   libX11-devel libxcb-devel libXinerama-devel libXcursor-devel libXrandr-devel libXi-devel \
   libxkbcommon-devel wayland-devel mesa-libGLU-devel \
   mesa-vulkan-drivers vulkan-tools vulkan-validation-layers \
-  dotnet-sdk-10.0 nodejs python3
+  dotnet-sdk-10.0 nodejs python3 webkit2gtk4.1-devel
 ```
 
-If a port needs another system package, the vcpkg configure error prints the install command. `vcpkg.json` builds the Vulkan loader with X11 and Wayland surface support; GLFW is built for X11, so a Wayland session needs XWayland. For a pure Wayland session, add the `wayland` feature to `glfw3` in `vcpkg.json` and install your distribution's Wayland development packages.
+If a port needs another system package, the vcpkg configure error prints the install command. `vcpkg.json` builds the Vulkan loader and GLFW with X11 and Wayland support, so the Wayland packages in the table (`libwayland-dev`, `libxkbcommon-dev`) are required to configure on Linux. In a Wayland session GLFW uses Wayland, and the Web panel reports "Web view not available", because the web view is a child window of the editor's X11 window. To use the Web panel, log in to an X11 session (on the login screen, pick the session type that names X11 or Xorg) and start the editor there.
 
 ## Platform notes
 
@@ -165,12 +166,14 @@ On every platform (`cmake --list-presets` lists every configuration):
 - To open a project directly: `build/macos-arm64-local/bin/Debug/Apps/Editor/Editor.app/Contents/MacOS/Editor --project ~/GameProjects/MyGame`.
 - IDE: `open build/macos-arm64-local/*.xcodeproj`, select the **Editor** scheme, press **⌘R**.
 - The Ninja presets (`macos-arm64-ninja`, `macos-x64-ninja`) are faster for command-line iteration and emit `compile_commands.json`. If you delete the `.app` in a Ninja tree, configure again to regenerate its `Info.plist`.
+- Every macOS build targets macOS 15.0, whichever SDK compiles it: the Editor and the Player run on macOS 15 or later. The engine sets it in the root `CMakeLists.txt` (`CMAKE_OSX_DEPLOYMENT_TARGET`; an existing build tree picks it up on its next configure) and the vcpkg ports in `cmake/triplets/arm64-osx.cmake` and `x64-osx.cmake`. A call to an API newer than macOS 15 needs an `@available` (Objective-C) or `__builtin_available` (C++) check and a fallback.
 - The Editor build stages the Vulkan SDK's MoltenVK into `Editor.app`. To stage your own build, configure with `-DGE_MOLTENVK_SOURCE_LIB=<path>/libMoltenVK.dylib -DGE_MOLTENVK_SOURCE_ICD=<path>/MoltenVK_icd.json`.
 
 ### Linux
 
 - Pass `RelWithDebInfo` or `Release` as `CMAKE_BUILD_TYPE` for an optimized build. `linux-x64-local-unity` compiles faster cold.
-- From Windows without a Linux machine, `.\Tools\Scripts\run-linux-build.ps1` (Docker Desktop running) builds the `Editor` inside a container from `Tools/Docker/Dockerfile.linux-dev`, in `build-linux-docker`, with scripting off.
+- On any machine with Docker, `Tools/Docker/linux-x64/build.sh` builds the Editor, the Player, the MCP server and `gameenginecli` in Release inside the Ubuntu 24.04 image from `Tools/Docker/Dockerfile.linux-dev` with scripting on, keeping the build tree in a Docker volume; the comment at the top of the script lists its options. An arm64 host runs the x86-64 image under emulation, about half the speed of a native build.
+- From Windows without a Linux machine, `.\Tools\Scripts\run-linux-build.ps1` (Docker Desktop running) builds the `Editor` inside a container from the same image, in `build-linux-docker`, with scripting off.
 
 ### Building without .NET
 
@@ -201,8 +204,8 @@ From a Mac, `./Tools/Scripts/build-steamdeck-docker.sh` produces the same build 
 
 ## Build configurations
 
-- **Debug**: `/Od /Zi /MDd /RTC1`, iterator debugging, static analysis as warnings, Vulkan validation layers on. The slowest; use it when you want every check firing.
-- **DebugFast**: the default and the daily configuration. Same source-level debugging as Debug without the debug CRT (`/MD`, no `/RTC1`, no static analysis), validation layers off by default, asserts live, compiler warnings treated as errors by default on MSVC, GCC and Clang (including AppleClang).
+- **Debug**: `/Od /Zi /MDd /RTC1`, iterator debugging, every libc++ hardening check (debug mode; a failed check is logged before the abort), static analysis as warnings, Vulkan validation layers on. The slowest; use it when you want every check firing.
+- **DebugFast**: the default and the daily configuration. Same source-level debugging as Debug without the debug CRT (`/MD`, no `/RTC1`, no static analysis), validation layers off by default, asserts and standard-library precondition checks live (an out-of-range `operator[]` stops the process; libc++ runs its fast checks, which trap without a message), compiler warnings treated as errors by default on MSVC, GCC and Clang (including AppleClang).
 - **RelWithDebInfo**: `/O2` with symbols, asserts compiled out. For performance checks with usable crash stacks.
 - **Release**: optimized; the shipping configuration, and the only one a performance number comes from.
 
@@ -354,5 +357,5 @@ Select a subset with `-DVCPKG_MANIFEST_FEATURES="physics;nav;ui-extras;tests"` (
 - **`C1083: Cannot open compiler generated file: ''`**: the clone sits too deep and object paths overflow Windows' 260-character limit. Clone near a drive root (for example `C:\Dev\OpenEngine`).
 - **Editor misbehaves after a build**: a build overwrites the staged runtime in place; restart any editor that was running from that build directory.
 - **Example window opens then closes**: run it from `build/<preset>/bin/<Config>/Demos`; shaders resolve relative to the working directory.
-- **`Failed to create window surface! Error: -7`**: the Vulkan instance has no window-surface extension. On macOS, install the Vulkan SDK and configure again (set `VULKAN_SDK` if it is not under `~/VulkanSDK/<version>`). On Linux, install the windowing packages from *Prerequisites*; for a pure Wayland session see the note there.
+- **`Failed to create window surface! Error: -7`**: the Vulkan instance has no window-surface extension. On macOS, install the Vulkan SDK and configure again (set `VULKAN_SDK` if it is not under `~/VulkanSDK/<version>`). On Linux, install the windowing packages from *Prerequisites*; for a Wayland session see the note there.
 - **macOS: `[PipeTransport] Socket path too long` or `Timeout waiting for CompileServerHost`**: the C# compile server's socket path is too long for macOS. Before launching the editor: `export GE_PIPE_PATH=/tmp/gameengine-compile-server`.

@@ -1,7 +1,7 @@
 #include "TerrainECS/TerrainRenderFeature.h"
 #include "Mathematics/Interpolation.h"
 #include "TerrainECS/TerrainAtlas.h"
-#include "TerrainECS/TerrainColorMap.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMap.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Core/BarrierMapping.h"
@@ -1295,74 +1295,6 @@ bool TerrainRenderFeature::TryGetUnifiedGrassMaps(Rendering::TextureHandle& heig
     splat = GetSplatmapTexture(chosen);
     if (controls) *controls = GetFieldTexture(TerrainField::GrassControl, chosen, TerrainFieldMap::Unified);
     return true;
-}
-
-bool TerrainRenderFeature::TryGetAtlasGrassSource(AtlasGrassSource& out) const
-{
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    const TerrainInstanceInfo* chosen = nullptr;
-    uint32 atlasCount = 0;
-    for (const auto& t : m_ActiveTerrains)
-    {
-        if (!t.AtlasBacked || t.AtlasDim == 0)
-            continue;
-        ++atlasCount;
-        if (!chosen)
-            chosen = &t;
-    }
-    if (atlasCount > 1 && !m_MultiAtlasGrassWarned.exchange(true))
-        Logger::Log::Warning("TerrainGrass: {} atlas-backed terrains active; grass resolves ALL of "
-                             "them through the first terrain's atlas — other atlas terrains' blades "
-                             "would snap to the wrong heights. Single atlas terrain is supported.",
-                             atlasCount);
-    if (chosen)
-    {
-        const TerrainInstanceInfo& t = *chosen;
-        out.Valid = true;
-        out.Identity = (static_cast<uint64>(t.Handle.Index) << 32) | t.Handle.Generation;
-        out.AtlasDim = t.AtlasDim;
-        out.AtlasSlotStride = t.AtlasSlotStride;
-        out.AtlasSlotsPerRow = t.AtlasSlotsPerRow;
-        out.AtlasTileRes = t.AtlasTileRes;
-        out.AtlasTilesPerAxisX = t.AtlasTilesPerAxisX;
-        out.AtlasTilesPerAxisZ = t.AtlasTilesPerAxisZ;
-        out.AtlasCoarseDim = t.AtlasCoarseDim;
-        out.HeightBindless = t.AtlasHeightBindlessIndex;
-        out.HeightCoarseBindless = t.AtlasCoarseBindlessIndex;
-        out.NormalBindless = t.AtlasNormalBindlessIndex;
-        out.NormalCoarseBindless = t.AtlasNormalCoarseBindlessIndex;
-        out.SplatBindless = t.AtlasSplatBindlessIndex;
-        out.SplatCoarseBindless = t.AtlasSplatCoarseBindlessIndex;
-        out.GrassRegionsActive = t.GrassRegionsActive;
-        out.GrassBindless = t.AtlasGrassBindlessIndex;
-        out.GrassCoarseBindless = t.AtlasGrassCoarseBindlessIndex;
-        out.ColorBindless = t.AtlasColorBindlessIndex;
-        out.ColorCoarseBindless = t.AtlasColorCoarseBindlessIndex;
-        // Read the registries directly rather than through GetAtlas*Texture: m_Mutex is already
-        // held here and those getters take it again.
-        const auto textureAt = [&](const std::vector<TextureEntry>& entries) {
-            return t.Handle.Index < entries.size() ? entries[t.Handle.Index].Texture
-                                                   : Rendering::TextureHandle{};
-        };
-        out.HeightTexture = textureAt(m_AtlasHeights);
-        out.HeightCoarseTexture = textureAt(m_AtlasCoarse);
-        out.NormalTexture = textureAt(m_AtlasNormals);
-        out.NormalCoarseTexture = textureAt(m_AtlasNormalCoarse);
-        out.SplatTexture = textureAt(m_AtlasSplats);
-        out.SplatCoarseTexture = textureAt(m_AtlasSplatCoarse);
-        const auto& grass = m_Fields[static_cast<size_t>(TerrainField::GrassControl)];
-        const auto& color = m_Fields[static_cast<size_t>(TerrainField::Color)];
-        out.GrassTexture = textureAt(grass[static_cast<size_t>(TerrainFieldMap::Atlas)]);
-        out.GrassCoarseTexture = textureAt(grass[static_cast<size_t>(TerrainFieldMap::Coarse)]);
-        out.ColorTexture = textureAt(color[static_cast<size_t>(TerrainFieldMap::Atlas)]);
-        out.ColorCoarseTexture = textureAt(color[static_cast<size_t>(TerrainFieldMap::Coarse)]);
-        out.TableVersion = t.AtlasTableVersion;
-        out.RowCount = t.AtlasRowCount;
-        out.RowBytes = t.AtlasRowBytes;
-        return true;
-    }
-    out.Valid = false;
-    return false;
 }
 
 void TerrainRenderFeature::AccumulateAtlasHeightDirtyUV(TerrainHandle handle, float32 minU,

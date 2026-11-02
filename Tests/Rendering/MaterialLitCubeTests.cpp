@@ -262,15 +262,15 @@ TEST(MaterialShaders, MaterialV2_RendersLitCube)
     const Matrix4x4 VP = P * V;
 
     CameraData cam{};
-    std::memcpy(cam.view, V.Data(), sizeof(cam.view));
-    std::memcpy(cam.proj, P.Data(), sizeof(cam.proj));
-    std::memcpy(cam.viewProj, VP.Data(), sizeof(cam.viewProj));
-    cam.cameraPos[0] = eye.x;
-    cam.cameraPos[1] = eye.y;
-    cam.cameraPos[2] = eye.z;
+    cam.view = V;
+    cam.proj = P;
+    cam.viewProj = VP;
+    cam.cameraPos.x = eye.x;
+    cam.cameraPos.y = eye.y;
+    cam.cameraPos.z = eye.z;
     // Render origin inactive (sector 0): the rebased matrices equal the full-world ones.
-    std::memcpy(cam.viewRel, V.Data(), sizeof(cam.viewRel));
-    std::memcpy(cam.viewProjRel, VP.Data(), sizeof(cam.viewProjRel));
+    cam.viewRel = V;
+    cam.viewProjRel = VP;
     BufferHandle camBuf = CreateUploadBuffer(*dev, BufferUsage::Uniform, sizeof(CameraData), "MaterialLit.CameraUBO");
     ASSERT_TRUE(camBuf.IsValid());
     Upload(*dev, camBuf, &cam, sizeof(cam));
@@ -434,6 +434,17 @@ TEST(MaterialShaders, MaterialV2_RendersLitCube)
                     ASSERT_TRUE(rows != b.Block->Members.end()) << "MaterialParams has no ge_Materials member";
                     ASSERT_TRUE(rows->ArrayStride) << "ge_Materials reflected without an array stride";
                     EXPECT_EQ(*rows->ArrayStride, kMaterialEntryStride) << "MaterialData std430 stride drifted from kMaterialEntryStride";
+                    // Struct members reflect without offsets. Two uints at the row's end put the
+                    // second at SamplerIndices + 4 under std430 (kNormalVarianceIndexOffset).
+                    const auto& rowMembers = rows->Type.StructMembers;
+                    ASSERT_GE(rowMembers.size(), 2u) << "MaterialData reflected without its members";
+                    const Member& sampler = rowMembers[rowMembers.size() - 2];
+                    const Member& variance = rowMembers.back();
+                    EXPECT_EQ(sampler.Name, "SamplerIndices");
+                    EXPECT_EQ(variance.Name, "NormalVarianceIndex") << "MaterialData does not end with the normal-variance lane";
+                    EXPECT_TRUE(variance.Type.Kind == TypeKind::Scalar && variance.Type.Base == BaseType::UInt &&
+                                variance.Type.ArrayDims.empty())
+                        << "the normal-variance lane is not one uint";
                 }
             }
             else

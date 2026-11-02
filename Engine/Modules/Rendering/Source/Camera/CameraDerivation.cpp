@@ -14,8 +14,8 @@ CameraDerivedData DeriveCameraData(const CameraData& source)
 
     // CameraData stores column-major matrices compatible with Matrix4x4's
     // internal layout, so a raw memcpy lands the matrices in canonical form.
-    std::memcpy(out.ViewMatrix.Data(), source.view, sizeof(source.view));
-    std::memcpy(out.ProjMatrix.Data(), source.proj, sizeof(source.proj));
+    out.ViewMatrix = source.view;
+    out.ProjMatrix = source.proj;
     out.ViewProjMatrix = out.ProjMatrix * out.ViewMatrix;
 
     // Camera position = inverse(view) * origin.

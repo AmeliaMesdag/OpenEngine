@@ -19,6 +19,7 @@
 #include <cassert>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <system_error>
 
@@ -449,19 +450,34 @@ bool PlaceInstanceSection(PrefabPlacement& placement, const SceneLoadContext& ow
     return PlaceInstanceFromText(placement, ownerCtx, ownerFile, ownerDoc, section, instancePath, out, failure);
 }
 
-// The load-report row for an override line whose address names no entity of the prefab: an
-// orphaned override. The load goes on; the line is not kept by a save.
+// True when `memberAddress` is `address` or the address of an entity under it.
+static bool IsAtOrUnder(std::string_view memberAddress, std::string_view address)
+{
+    return memberAddress.starts_with(address) &&
+           (memberAddress.size() == address.size() || memberAddress[address.size()] == '.');
+}
+
+// The load-report row for an override line whose address names no entity of the instance: an
+// orphaned override, or a line under a child that the section removes (`removedAddresses`). The load
+// goes on; the line is not kept by a save.
 static void RecordOrphanedOverride(SceneLoadDegradation* degradation, const std::string& instancePath,
-                                   std::string_view address, std::string component, std::string_view line,
-                                   const std::filesystem::path& ownerFile, int lineNo, ECS::EntityHandle root)
+                                   std::string_view address, std::string component, std::string field,
+                                   std::string_view line, const std::filesystem::path& ownerFile, int lineNo,
+                                   ECS::EntityHandle root, std::span<const std::string> removedAddresses)
 {
     if (!degradation)
         return;
+    const bool underRemoved = std::ranges::any_of(
+        removedAddresses, [address](const std::string& removed) { return IsAtOrUnder(address, removed); });
+    const std::string quoted = "'" + std::string(line) + "' names \"" + std::string(address) + "\"";
     degradation->skips.push_back(SceneLoadSkip{
-        JoinPath(instancePath, address), std::move(component), {},
-        "'" + std::string(line) + "' names \"" + std::string(address) +
-            "\", which the prefab does not have. Delete the line, or put the entity back in the prefab.",
-        ownerFile, lineNo, /*preserved=*/false, root});
+        JoinPath(instancePath, address), std::move(component), std::move(field),
+        underRemoved ? quoted + ", a child that this instance removes. A save does not keep the line."
+                     : quoted + ", which the prefab does not have. Delete the line, or put the entity back in the "
+                                "prefab.",
+        ownerFile, lineNo, /*preserved=*/false, root, /*componentType=*/0,
+        underRemoved ? SceneLoadSkipKind::UnderRemovedEntity : SceneLoadSkipKind::OrphanedOverride,
+        std::string(address)});
 }
 
 // True when the section changes a field of `component` at its address.
@@ -479,13 +495,6 @@ static bool HasFieldLinesFor(const SceneDoc::PrefabInstanceSection& section,
         }
     }
     return false;
-}
-
-// True when `memberAddress` is `address` or the address of an entity under it.
-static bool IsAtOrUnder(std::string_view memberAddress, std::string_view address)
-{
-    return memberAddress.starts_with(address) &&
-           (memberAddress.size() == address.size() || memberAddress[address.size()] == '.');
 }
 
 // Destroys the member of `placed` at `address` and every member under it, and moves them from
@@ -518,15 +527,19 @@ static bool ApplyInstanceOverrides(ECS::World& world, const SceneLoadContext& ct
 {
     const std::size_t firstRow = degradation ? degradation->skips.size() : 0;
 
+    // The addresses of the children that this section removes.
+    std::vector<std::string> removedHere;
     for (const auto& removedEntity : section.removedEntities)
     {
         if (!FindMember(placed, removedEntity.address).IsValid())
         {
-            RecordOrphanedOverride(degradation, instancePath, removedEntity.address, {},
-                                   "-entity " + removedEntity.address, ownerFile, removedEntity.line, placed.root);
+            RecordOrphanedOverride(degradation, instancePath, removedEntity.address, {}, {},
+                                   "-entity " + removedEntity.address, ownerFile, removedEntity.line, placed.root,
+                                   removedHere);
             continue;
         }
         RemoveMemberAndItsChildren(world, placed, removedEntity.address, removed);
+        removedHere.push_back(removedEntity.address);
     }
 
     for (const auto& component : section.removedComponents)
@@ -535,8 +548,8 @@ static bool ApplyInstanceOverrides(ECS::World& world, const SceneLoadContext& ct
         const std::string text = "-" + Addressed(component.address, component.authoredName);
         if (!h.IsValid())
         {
-            RecordOrphanedOverride(degradation, instancePath, component.address, component.authoredName, text,
-                                   ownerFile, component.line, placed.root);
+            RecordOrphanedOverride(degradation, instancePath, component.address, component.authoredName, {}, text,
+                                   ownerFile, component.line, placed.root, removedHere);
             continue;
         }
         const auto* schema = SceneSchemaRegistry::Find(component.name);
@@ -569,9 +582,9 @@ static bool ApplyInstanceOverrides(ECS::World& world, const SceneLoadContext& ct
         const ECS::EntityHandle h = FindMember(placed, component.address);
         if (!h.IsValid())
         {
-            RecordOrphanedOverride(degradation, instancePath, component.address, component.authoredName,
+            RecordOrphanedOverride(degradation, instancePath, component.address, component.authoredName, {},
                                    "+" + Addressed(component.address, component.authoredName),
-                                   ownerFile, component.line, placed.root);
+                                   ownerFile, component.line, placed.root, removedHere);
             continue;
         }
         // The component's field lines add it with their values below.
@@ -595,10 +608,11 @@ static bool ApplyInstanceOverrides(ECS::World& world, const SceneLoadContext& ct
             if (!h.IsValid())
             {
                 RecordOrphanedOverride(degradation, instancePath, fields.address, comp.originalName,
+                                       comp.props.empty() ? std::string() : comp.props.front().first,
                                        Addressed(fields.address, comp.originalName + "." +
                                                                      (comp.props.empty() ? std::string()
                                                                                          : comp.props.front().first)),
-                                       ownerFile, line, placed.root);
+                                       ownerFile, line, placed.root, removedHere);
                 continue;
             }
             if (const auto* schema = SceneSchemaRegistry::Find(comp.name))

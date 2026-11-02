@@ -8,6 +8,7 @@
 #include "DeviceLossSurfacer.h"
 #include "Diagnostics/EditorFrameTimings.h"
 #include "Diagnostics/FramePhase/FramePhaseRecorder.h"
+#include "Display/WindowSwapchainResize.h"
 #include "EditorContext.h"
 #include "Platform/ContextMenu.h"
 #include "Platform/Window.h"
@@ -33,12 +34,20 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <vector>
+
+#include <nlohmann/json_fwd.hpp>
+
+namespace JobSystem
+{
+class JobChannel;
+} // namespace JobSystem
 
 namespace Logger { class RingBufferSink; }
 
@@ -119,6 +128,11 @@ class EditorApplication : public Application
     friend void RegisterGpuToolingHandlers(EditorDebugServer& server, EditorApplication& app);
     friend bool ApplyMainSceneViewPose(EditorApplication& app, const SceneViewCameraPose& pose);
     friend void RegisterMarkupDebugHandlers(EditorDebugServer& server, EditorApplication& app);
+    friend std::function<bool(nlohmann::json&)> BeginScreenshotCapture(EditorApplication& app,
+                                                                       EditorDebugServer& server,
+                                                                       const std::string& requestId,
+                                                                       const nlohmann::json& params,
+                                                                       nlohmann::json& outRefusal);
 
   public:
     enum class WindowRole : uint8_t
@@ -166,6 +180,8 @@ class EditorApplication : public Application
     void SyncHiDpiPlatformSettingsFromPreferences();
 
     // Actions callable from native menu handlers
+    /// Prompt to save dirty scene, graph and script documents; true when quitting is deferred.
+    bool TryInterceptQuitForDirtyScene();
     void ResetLayoutToDefault();
     /// Show or activate the named panel in the main editor window.
     /// preferredLeafId optionally hints which existing leaf the new tab should join.
@@ -252,6 +268,7 @@ class EditorApplication : public Application
         bool pendingShow = false; // show window after startup render warm-up
         uint32_t startupPresentedFrames = 0;
         uint32_t startupSceneReadyPresentedFrames = 0;
+        Editor::WindowSwapchainResize swapchainResize;
         bool pendingSwapchainResize = false;
         int pendingWidth = 0;
         int pendingHeight = 0;
@@ -316,8 +333,10 @@ class EditorApplication : public Application
     void OnFilesDropped(EditorWindowContext* ctx, const std::vector<std::filesystem::path>& paths);
 
   private:
-    // When the scene document is dirty, shows the save modal; returns true when the quit was intercepted.
-    bool TryInterceptQuitForDirtyScene();
+    // The startup jobs hook (EngineCore::SetStartupJobsHook): creates the main window on
+    // the main thread, then begins its render device on a startup-channel job. The result
+    // waits in m_StartupMainWindow; it stays null when the window cannot be created.
+    void BeginMainWindowAndDevice(JobSystem::JobChannel& startupChannel);
     // UI replay command invoker: used by UiReplayRunner's invokeCommand event.
     bool InvokeUiReplayCommand(std::uint32_t commandId, std::string* outError);
     // UI replay window resize hook: used by UiReplayRunner's windowResize event.
@@ -413,6 +432,8 @@ class EditorApplication : public Application
     // The startup preloads (a compute job for the UI assets, an "Engine startup" channel
     // job for the shader packages); OnShutdown waits for both before teardown.
     JobSystem::TaskHandle m_UiPreload;
+    // The main window from BeginMainWindowAndDevice, until Initialize takes it.
+    std::unique_ptr<EditorWindowContext> m_StartupMainWindow;
     JobSystem::TaskHandle m_ShaderPreload;
 
     // In-UI toolbar (play/pause/stop, panel toggles, etc.)
@@ -541,6 +562,8 @@ class EditorApplication : public Application
     void ImportLayoutPresetsInteractive();
     void SyncLayoutPresetToolbar();
     void ShowTabContextMenu(const std::string& panelId, float x, float y, Platform::Window* window);
+    // Every dockspace calls this after a rebuild, before layout, so no frame shows an Inspector tab without its lock.
+    void MountInspectorTabLocks();
 
     // SettingsPanel wiring helpers
     void InitializeTreeAndListSettings(SettingsPanel* settingsPanel, AssetsPanel* assetsPanel, HierarchyPanel* hierarchyPanel);
@@ -737,9 +760,8 @@ class EditorApplication : public Application
     void ApplyProjectLodImportPolicy(const std::filesystem::path& projectRoot);
 
   private:
-    /// Main window title: "Open Engine Editor <version> - <project folder> - <scene file or Untitled>",
-    /// plus "  [<session>]" when FormatSessionChromeSuffix knows who this session is.
-    /// Skips the native SetTitle call when the string is unchanged (see Update()).
+    /// Sends the caption row "<scene> - <project folder>" to the title bar and sets the window title
+    /// (Editor::MainWindowTitle). Skips the native SetTitle call when the string is unchanged (see Update()).
     void RefreshMainWindowTitle();
 
     std::string m_LastMainWindowTitle;
@@ -750,17 +772,14 @@ class EditorApplication : public Application
     // failures move only this one.
     std::optional<std::string> m_LastTitleSceneDisplayName;
 
-    // Bottom-bar status refresh (1 Hz tick in Update): Vulkan validation badge, which stays
-    // an empty label at zero errors, and the build-configuration tag.
+    // Bottom-bar status refresh (1 Hz tick in Update): the Vulkan validation badge, which stays
+    // an empty label at zero errors.
     double m_FooterStatusAccum = 0.0;
     uint64_t m_ValidationBadgeErrors = 0;
-    // Tree-structure generation at which the build-config tag was last asserted; a UI
-    // rebuild that recreates the label bumps it and re-triggers the id lookup.
-    uint64_t m_BuildConfigTagTreeGeneration = 0;
 
     // Destroy toolbar early during teardown by placing it last so it is released first
     std::unique_ptr<EditorToolbar> m_EditorToolbar;
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32) || defined(__linux__)
     bool m_EnableNativeToolbar = true;
 #else
     bool m_EnableNativeToolbar = false;

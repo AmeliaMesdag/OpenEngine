@@ -21,6 +21,7 @@
 #include "Physics/PhysicsWorld.h"
 #include "Platform/Capabilities.h"
 #include "Rendering/Text/FTUtils.h"
+#include "Mathematics/Vector2.h"
 #include "Scheduler/Scheduler.h"
 #include "UI/Layout/YogaLayout.h"
 #include "UI/ResolvedStyle.h"
@@ -201,8 +202,10 @@ int main()
         ResolvedStyle childStyle;
         YGNodeRef root = YogaAdapter::CreateNode();
         YGNodeRef child = YogaAdapter::CreateNode();
-        YogaAdapter::ApplyStyle(root, rootStyle);
-        YogaAdapter::ApplyStyle(child, childStyle);
+        // Default styles hold no viewport unit, so the basis is unused.
+        const GameEngine::Mathematics::Vector2 noViewportUnits{};
+        YogaAdapter::ApplyStyle(root, rootStyle, noViewportUnits);
+        YogaAdapter::ApplyStyle(child, childStyle, noViewportUnits);
         YogaAdapter::ChildWithOrder children[] = {{child, 0, 0}};
         YogaAdapter::InsertChildrenSortedByOrder(root, children);
         YogaAdapter::CalculateLayout(root, 800.0f, 600.0f);

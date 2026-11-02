@@ -7,7 +7,16 @@
 #include "Types/FlatMap.h"
 
 #include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
+
+namespace GameEngine
+{
+struct OverrideMenuEntry;
+struct OverrideMenuTarget;
+}
 
 namespace GameEngine::ECS
 {
@@ -16,6 +25,7 @@ class World;
 
 namespace GameEngine::Editor
 {
+class UndoRedoService;
 
 /// One outermost prefab instance as Scene::DescribePrefabInstance reports it.
 struct DescribedPrefabInstance
@@ -75,5 +85,25 @@ class PrefabInstanceDescriptions final
     // The GetChannelId of each tracked channel. An id is never given to a second channel.
     std::vector<uint64> m_TrackedChannels;
 };
+
+/// The reflected field of `typeId` that the scene key `key` of an override writes: the field of that name, or
+/// the array field whose name the element's index follows. Empty when no reflected field matches.
+std::string_view ReflectedFieldForSceneKey(ECS::ComponentTypeId typeId, std::string_view key);
+
+/// The Apply and Revert entries of the Inspector's override menu for a prefab entity's row or header; empty
+/// when the target has no override. Each entry is one undo step; a refusal shows a Scene View notice.
+/// This function and the two below are defined in ApplyRevert/PrefabOverrideMenu.cpp.
+std::vector<OverrideMenuEntry> QueryPrefabOverrideMenu(const OverrideMenuTarget& target);
+
+/// Writes `targets` into their prefab files as one undo step named `undoName`. A refusal shows a notice.
+void ApplyPrefabOverridesAsOneStep(ECS::World& world, std::span<const Scene::PrefabOverrideTarget> targets,
+                                   UndoRedoService* undo, EditorChangeNotifications* notifications,
+                                   const std::string& undoName);
+
+/// Gives each entity of `targets` the prefab's value of its override, as one undo step named `undoName`. A refusal
+/// shows a notice.
+void RevertPrefabOverridesAsOneStep(ECS::World& world, std::span<const Scene::PrefabOverrideTarget> targets,
+                                    UndoRedoService* undo, EditorChangeNotifications* notifications,
+                                    const std::string& undoName);
 
 } // namespace GameEngine::Editor

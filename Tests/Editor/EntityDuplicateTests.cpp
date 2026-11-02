@@ -25,6 +25,7 @@
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Spline/SplineNetworkMember.h"
 #include "Components/Spline/SplineNetworkOverrides.h"
+#include "Components/Spline/SplinePaving.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
 #include "ECS/ECSTemplates.h"
@@ -2608,5 +2609,32 @@ TEST_F(SplineNetworkDuplicateTests, AMemberDeletedThenRestoredKeepsItsRecords)
     ASSERT_NE(NodeAt(high, ford, 10.0f, 0.0f), nullptr);
     EXPECT_EQ(NodeAt(high, ford, 10.0f, 0.0f)->Rule, SplineNodeRule::AtGrade);
     EXPECT_EQ(NodeAt(high, ford, 10.0f, 0.0f)->RuleHolder, high);
+}
+
+// A paving's members are byte-copied: a bed duplicated with its square is the copy's member;
+// a square duplicated alone keeps excluding the original bed
+// (CopiedEntityRuntimeRefs::RepairPavingMembers).
+TEST_F(SplineNetworkDuplicateTests, APavingDuplicatedWithItsBedExcludesTheCopiedBed)
+{
+    const EntityHandle square = AddRoad({{-20.0f, 0.0f, -20.0f}, {20.0f, 0.0f, -20.0f}, {20.0f, 0.0f, 20.0f}});
+    const EntityHandle bed = AddRoad({{-2.0f, 0.0f, -2.0f}, {2.0f, 0.0f, -2.0f}, {2.0f, 0.0f, 2.0f}});
+    GameEngine::Components::SplinePaving paved{};
+    paved.MemberCount = 1;
+    paved.Members[0] = {bed, GameEngine::Components::SplinePavingMemberMode::Exclude};
+    m_World->AddComponentImmediate(square, paved);
+
+    const auto together = GameEngine::Editor::DuplicateEntitySubtreeRoots(*m_World, {square, bed});
+    ASSERT_EQ(together.NewRoots.size(), 2u);
+    EntityHandle squareCopy{};
+    EntityHandle bedCopy{};
+    for (const EntityHandle root : together.NewRoots)
+        (m_World->GetComponent<GameEngine::Components::SplinePaving>(root) ? squareCopy : bedCopy) = root;
+    ASSERT_TRUE(squareCopy.IsValid());
+    ASSERT_TRUE(bedCopy.IsValid());
+    EXPECT_EQ(m_World->GetComponent<GameEngine::Components::SplinePaving>(squareCopy)->Members[0].Entity, bedCopy);
+
+    const auto alone = GameEngine::Editor::DuplicateEntitySubtreeRoots(*m_World, {square});
+    ASSERT_EQ(alone.NewRoots.size(), 1u);
+    EXPECT_EQ(m_World->GetComponent<GameEngine::Components::SplinePaving>(alone.NewRoots.front())->Members[0].Entity, bed);
 }
 } // namespace

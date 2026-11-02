@@ -189,7 +189,7 @@ void RenderServices::BuildSortedTransparentForView(Rendering::ViewId viewId)
     Rendering::Vector3 origin{0.0f, 0.0f, 0.0f};
     {
         const auto originSector =
-            ComputeRenderOriginSector(cam.cameraPos[0], cam.cameraPos[1], cam.cameraPos[2]);
+            ComputeRenderOriginSector(cam.cameraPos.x, cam.cameraPos.y, cam.cameraPos.z);
         SectorToWorld(originSector, origin.x, origin.y, origin.z);
     }
 

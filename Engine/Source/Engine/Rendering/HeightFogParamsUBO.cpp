@@ -102,9 +102,9 @@ void FillHeightFogSkyColor(const PostProcessSettings& settings, const Rendering:
     case SkyBackdropKind::Gradient:
         // The gradient at view y == 0 is its horizon colour alone.
         out.colorSource = static_cast<int32>(HeightFogColorSource::SkyConstant);
-        out.skyHorizonColorR = sky.gradientSkyHorizonColor[0];
-        out.skyHorizonColorG = sky.gradientSkyHorizonColor[1];
-        out.skyHorizonColorB = sky.gradientSkyHorizonColor[2];
+        out.skyHorizonColorR = sky.gradientSkyHorizonColor.r;
+        out.skyHorizonColorG = sky.gradientSkyHorizonColor.g;
+        out.skyHorizonColorB = sky.gradientSkyHorizonColor.b;
         return;
     case SkyBackdropKind::Atmosphere:
         break;
@@ -115,17 +115,17 @@ void FillHeightFogSkyColor(const PostProcessSettings& settings, const Rendering:
     {
         // sky_render.frag paints the stylized rim over the horizon, fully at viewZenithCos == 0.
         out.colorSource = static_cast<int32>(HeightFogColorSource::SkyConstant);
-        out.skyHorizonColorR = std::lerp(sky.groundHorizonColor[0], sky.groundHorizonNightColor[0], nightAmount);
-        out.skyHorizonColorG = std::lerp(sky.groundHorizonColor[1], sky.groundHorizonNightColor[1], nightAmount);
-        out.skyHorizonColorB = std::lerp(sky.groundHorizonColor[2], sky.groundHorizonNightColor[2], nightAmount);
+        out.skyHorizonColorR = std::lerp(sky.groundHorizonColor.r, sky.groundHorizonNightColor.r, nightAmount);
+        out.skyHorizonColorG = std::lerp(sky.groundHorizonColor.g, sky.groundHorizonNightColor.g, nightAmount);
+        out.skyHorizonColorB = std::lerp(sky.groundHorizonColor.b, sky.groundHorizonNightColor.b, nightAmount);
         return;
     }
 
     out.colorSource = static_cast<int32>(HeightFogColorSource::SkyViewLut);
     out.skyNightAmount = nightAmount;
-    out.skyHorizonColorR = sky.nightSkyHorizonColor[0];
-    out.skyHorizonColorG = sky.nightSkyHorizonColor[1];
-    out.skyHorizonColorB = sky.nightSkyHorizonColor[2];
+    out.skyHorizonColorR = sky.nightSkyHorizonColor.r;
+    out.skyHorizonColorG = sky.nightSkyHorizonColor.g;
+    out.skyHorizonColorB = sky.nightSkyHorizonColor.b;
 }
 
 } // namespace GameEngine::Engine::Renderer

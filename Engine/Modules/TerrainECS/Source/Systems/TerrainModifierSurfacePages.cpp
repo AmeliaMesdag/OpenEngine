@@ -3,10 +3,10 @@
 
 #include "TerrainECS/TerrainModifierSystem.h"
 
-#include "TerrainECS/TerrainSurfaceBakeInputs.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceBakeInputs.h"
 
-#include "TerrainECS/TerrainColorMap.h"
-#include "TerrainECS/TerrainGrassField.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMap.h"
+#include "TerrainECS/TerrainGrass/TerrainGrassField.h"
 #include "TerrainECS/TerrainZonePayload.h"
 
 #include "PageStreaming/PageAddress.h"
@@ -123,7 +123,7 @@ void CopyLatticeToStride(const PageLattice& lattice, const PageStreaming::PageSt
 }
 
 // Copies `stack` into `out`. Each copy reads its own copy of its spline, rule rows, paint mask and
-// zone colors, kept in `inputs`. A stamp mask, a sculpt payload and a route become null: the
+// zone colors, kept in `inputs`. A stamp mask, a sculpt payload, a route and an area surface become null: the
 // surface bake reads them through the height overlay or not at all.
 void CopyBakeStack(std::span<const ResolvedModifier> stack, TerrainSurfaceBakeInputs& inputs,
                    std::vector<ResolvedModifier>& out)
@@ -132,6 +132,7 @@ void CopyBakeStack(std::span<const ResolvedModifier> stack, TerrainSurfaceBakeIn
     for (ResolvedModifier& mod : out)
     {
         mod.Route = nullptr;
+        mod.AreaSurface = nullptr;
         if (mod.ResolvedSpline)
             mod.ResolvedSpline = &inputs.Splines.emplace_back(*mod.ResolvedSpline);
         if (mod.ModType == ResolvedModifier::Type::PaintZone && mod.PaintZone.Mask)

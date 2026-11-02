@@ -37,6 +37,7 @@ if(BUILD_TESTING)
         SceneBvh
         JobSystem
         Logger
+        Memory
         GTest::gtest
         GTest::gtest_main
     )

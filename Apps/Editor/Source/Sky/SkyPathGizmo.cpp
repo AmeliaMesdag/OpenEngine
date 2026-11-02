@@ -194,9 +194,7 @@ void StrokeCircle(GizmoRenderContext& context, const Dome& dome, const Vector3& 
 Vector3 SunDirection(const Rendering::SolarFrame& frame, float hours)
 {
     const float theta = (hours / kHoursPerDay - 0.25f) * kTwoPi;
-    Vector3 direction;
-    Rendering::SolarDirection(frame, std::cos(theta), std::sin(theta), direction.v);
-    return direction;
+    return Rendering::SolarDirection(frame, std::cos(theta), std::sin(theta));
 }
 
 // A solid triangle over a dark outline, outside the horizon ring, pointing toward `heading` and

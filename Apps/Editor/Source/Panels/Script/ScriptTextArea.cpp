@@ -776,7 +776,7 @@ void ScriptTextArea::RefreshContentHeightOverride()
     if (std::fabs(effectiveHeight - m_LastContentHeightOverride) > 0.5f)
     {
         m_LastContentHeightOverride = effectiveHeight;
-        Overrides().Set(Style::Height, StyleLength::Px(effectiveHeight));
+        Style().Set(Style::Height, StyleLength::Px(effectiveHeight));
         MarkDirty(StyleDirty | LayoutDirty);
     }
 }

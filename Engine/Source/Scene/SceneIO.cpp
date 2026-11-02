@@ -60,12 +60,24 @@ void ClearLastSceneIOError()
     g_LastError = SceneIOError{};
 }
 
+// A save drops a never-preserved row's text only while the entity, and for a field row its
+// component, is still in the world. A row with no entity stands until a save.
+static bool NeverPreservedSkipIsOutstanding(const ECS::World& world, const SceneLoadSkip& skip)
+{
+    if (!skip.entityHandle.IsValid())
+        return true;
+    if (!world.IsValid(skip.entityHandle))
+        return false;
+    return skip.componentType == 0 || world.HasComponent(skip.entityHandle, skip.componentType);
+}
+
 bool SkipIsOutstanding(const ECS::World& world, const SceneLoadSkip& skip)
 {
-    // Nothing preserved it, so nothing can retire it: the file still holds text this build cannot
-    // read, and a save still drops it. Permanently outstanding.
+    // The instance removes the child, so a line under it has no effect and a save drops it.
+    if (skip.kind == SceneLoadSkipKind::UnderRemovedEntity)
+        return false;
     if (!skip.preserved)
-        return true;
+        return NeverPreservedSkipIsOutstanding(world, skip);
 
     const ECS::UnresolvedComponentStore* store = world.TryGetUnresolvedComponents();
     if (!store)
@@ -676,7 +688,7 @@ bool ReadTextFile(const std::filesystem::path& p, std::string& out)
     return ReadFileTextShared(p, out);
 }
 
-static bool WriteTextFileAtomic(const std::filesystem::path& p, const std::string& text)
+bool WriteTextFileAtomic(const std::filesystem::path& p, const std::string& text)
 {
     std::error_code ec;
     std::filesystem::create_directories(p.parent_path(), ec);
@@ -2453,7 +2465,7 @@ static bool FindReflectedFieldSpan(ECS::ComponentTypeId typeId, const std::strin
 static void RecordUnknownFields(const std::vector<std::string>& unknownFields,
                                 const SceneDoc::ComponentProps& comp, const std::string& entityId,
                                 const std::filesystem::path& ownerFile, ECS::EntityHandle h,
-                                SceneLoadDegradation* degradation)
+                                ECS::ComponentTypeId typeId, SceneLoadDegradation* degradation)
 {
     if (!degradation)
         return;
@@ -2468,7 +2480,7 @@ static void RecordUnknownFields(const std::vector<std::string>& unknownFields,
         degradation->skips.push_back(SceneLoadSkip{
             entityId, authoredComp, authoredProp,
             UnknownFieldMessage(authoredComp, authoredProp),
-            ownerFile, authored ? prop->second.line : 0, /*preserved=*/false, h});
+            ownerFile, authored ? prop->second.line : 0, /*preserved=*/false, h, typeId});
     }
 }
 
@@ -2517,7 +2529,7 @@ void RecordUnreadLines(const SceneDoc::UnreadLines& unreadLines, const std::stri
 // otherwise cost the component EVERY one of its fields, not just the offending one.
 static void ApplyComponentPropertiesTolerantly(ECS::World& world, const SceneLoadContext& ctx,
                                                const ISceneComponentSchema& schema, ECS::EntityHandle h,
-                                               const SceneDoc::ComponentProps& comp,
+                                               ECS::ComponentTypeId typeId, const SceneDoc::ComponentProps& comp,
                                                const std::string& entityId,
                                                const std::filesystem::path& ownerFile,
                                                SceneLoadDegradation* degradation)
@@ -2536,7 +2548,7 @@ static void ApplyComponentPropertiesTolerantly(ECS::World& world, const SceneLoa
     if (schema.ApplyProperties(world, h, ctx, pairs, &err, &failedIndex))
     {
         ctx.UnknownFields = nullptr;
-        RecordUnknownFields(unknownFields, comp, entityId, ownerFile, h, degradation);
+        RecordUnknownFields(unknownFields, comp, entityId, ownerFile, h, typeId, degradation);
         return;
     }
 
@@ -2580,10 +2592,10 @@ static void ApplyComponentPropertiesTolerantly(ECS::World& world, const SceneLoa
 
         if (degradation)
             degradation->skips.push_back(SceneLoadSkip{entityId, authoredComp, authoredProp, propErr,
-                                                       ownerFile, propKv.second.line, preserved, h});
+                                                       ownerFile, propKv.second.line, preserved, h, typeId});
     }
     ctx.UnknownFields = nullptr;
-    RecordUnknownFields(unknownFields, comp, entityId, ownerFile, h, degradation);
+    RecordUnknownFields(unknownFields, comp, entityId, ownerFile, h, typeId, degradation);
 }
 
 // A component block whose name resolves to no schema. Three cases, told apart through the field
@@ -2695,7 +2707,7 @@ void ApplyComponentBlock(ECS::World& world, const SceneLoadContext& ctx,
                 addErr, ownerFile, headerLine, /*preserved=*/false, h});
     }
     if (!block->props.empty())
-        ApplyComponentPropertiesTolerantly(world, ctx, schema, h, *block, entityId, ownerFile, degradation);
+        ApplyComponentPropertiesTolerantly(world, ctx, schema, h, typeId, *block, entityId, ownerFile, degradation);
 
     if (enabled && world.HasComponent(h, typeId))
         world.SetComponentEnabledImmediate(h, typeId, *enabled);

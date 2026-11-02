@@ -89,25 +89,6 @@ public:
     // changes, and once more when it finishes. One listener; an empty function
     // removes it.
     virtual void SetFolderBakeListener(std::function<void(const FolderBakeReport&)> /*listener*/) {}
-
-    // Dedicated live material preview surface. Unlike GetOrRequest(), this is
-    // not an asset-browser thumbnail lookup: callers already have a runtime
-    // material GUID and want a UI-sampleable engine resource of the requested
-    // size for a focused preview surface.
-    virtual std::string RequestLiveMaterialPreview(uint64_t /*windowId*/,
-                                                   const GUID& /*materialGuid*/,
-                                                   uint32_t /*widthPx*/,
-                                                   uint32_t /*heightPx*/,
-                                                   bool /*previewIblEnabled*/ = true)
-    {
-        return {};
-    }
-
-    virtual bool IsLiveMaterialPreviewReady(uint64_t windowId,
-                                            const std::string& engineName) const
-    {
-        return IsEngineThumbnailReadyForWindow(windowId, engineName);
-    }
 };
 
 } // namespace GameEngine

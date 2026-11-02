@@ -22,6 +22,7 @@
 #include "Source/Vulkan/VulkanDebugUtilsLabels.h"
 #include "Source/Vulkan/VulkanDevice/VulkanDeviceFault.h"
 #include "Source/Vulkan/VulkanGpu/VulkanGpuCheckpoints.h"
+#include "Source/Vulkan/VulkanHandleHelpers.h"
 #include "Source/Vulkan/VulkanSharedInstance.h"
 #include "Source/Vulkan/VulkanToolingInfo.h"
 #include "Source/Vulkan/VulkanValidationLayerSettings.h"
@@ -928,6 +929,18 @@ TEST(ValidationLogPolicy, OverflowOrdinalsAreThinnedOnTheSameStride)
     EXPECT_TRUE(ShouldLogValidationOccurrence(outcome));
     outcome.Count = kValidationLogRepeatStride + 1;
     EXPECT_FALSE(ShouldLogValidationOccurrence(outcome));
+}
+
+TEST(ValidationAssertPolicy, LayerErrorsTrapButLoaderErrorsDoNot)
+{
+    // On a machine with two drivers, one that fails enumeration gives a loader ERROR of GENERAL type.
+    // That ERROR must not trap a Debug Player. A validation-layer ERROR still traps.
+    constexpr VkDebugUtilsMessageSeverityFlagsEXT kError = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    constexpr VkDebugUtilsMessageSeverityFlagsEXT kWarning = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+    EXPECT_TRUE(ValidationMessageTraps(kError, VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT, false));
+    EXPECT_FALSE(ValidationMessageTraps(kError, VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT, false));
+    EXPECT_FALSE(ValidationMessageTraps(kWarning, VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT, false));
+    EXPECT_FALSE(ValidationMessageTraps(kError, VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT, true));
 }
 
 TEST(VuidSuppressions, TableSeedsEmptyAndLookupMatchesExactly)
@@ -3126,4 +3139,39 @@ TEST(DeviceDiagnostics, FillNewTargetsNaNFillsNewStorageBuffers)
                 << "half of word " << i << " is 0x" << std::hex << half << ", not a float16 NaN";
     }
     dev->DestroyBuffer(storage);
+}
+
+// A depth-stencil image must not share a memory block with other resources:
+// on NVIDIA the first bind of a depth image into a shared block costs about 700 ms (#5331).
+TEST(DeviceDiagnostics, ADepthStencilTextureOwnsADedicatedAllocation)
+{
+    SetEnvHeadless();
+    DeviceDesc dd{}; dd.preferredAPI = GraphicsAPI::Vulkan; dd.enableDynamicRendering = true;
+    auto dev = DeviceFactory::CreateDevice(dd);
+    ASSERT_TRUE(dev);
+    ASSERT_TRUE(dev->Initialize(dd));
+    auto* vk = static_cast<VulkanDevice*>(dev.get());
+    ASSERT_NE(vk->GetVmaAllocator(), nullptr);
+
+    TextureDesc td{};
+    td.width = 1u;
+    td.height = 1u;
+    td.depth = 1u;
+    td.mipLevels = 1u;
+    td.arrayLayers = 1u;
+    td.sampleCount = 1u;
+    td.format = static_cast<uint32_t>(TextureFormat::D32_FLOAT);
+    td.usage = static_cast<uint32_t>(TextureUsage::DepthStencil | TextureUsage::ShaderResource);
+    td.debugName = "DedicatedDepthTest.Depth";
+    const TextureHandle depth = dev->CreateTexture(td);
+    ASSERT_TRUE(depth.IsValid());
+    const VulkanTexture* texture = GetVulkanTextureConst(depth);
+    ASSERT_NE(texture, nullptr);
+    ASSERT_NE(texture->allocation, nullptr);
+
+    VmaAllocationInfo2 info{};
+    vmaGetAllocationInfo2(vk->GetVmaAllocator(), texture->allocation, &info);
+    EXPECT_EQ(info.dedicatedMemory, VK_TRUE) << "a depth-stencil image was placed in a shared memory block";
+
+    dev->DestroyTexture(depth);
 }

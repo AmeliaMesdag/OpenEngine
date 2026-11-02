@@ -88,10 +88,9 @@ class SceneDocumentManager
     // Cleared by whatever gives the world a different document (a successful replace/recovery open,
     // NewSceneUntitled, SaveAs to a new path) and by an accepted SaveAnyway, after which the file on
     // disk and the world agree again.
-    // The record EXACTLY AS THE LOAD LEFT IT. Correct for anything asking what that load did, which
-    // is why the title decoration and the autosave gate read it. Anything reporting what a SAVE
-    // will now do wants the outstanding view below instead: an override can retire after the load,
-    // and this record cannot see it happen.
+    // The record as the load left it, less the skips the user discarded (DiscardLoadSkip). The title
+    // decoration and the autosave gate read it. A report of what a save does now reads the outstanding
+    // view below: an override can retire after the load, and this record does not see it.
     const std::optional<SceneLoadDegraded>& GetLastLoadDegraded() const { return m_LastLoadDegraded; }
 
     // The same record filtered to the skips still outstanding against the world — see
@@ -103,6 +102,12 @@ class SceneDocumentManager
     // Cheap count of the above, for the guard's yes/no. Zero means every unreadable assignment has
     // been adjudicated and there is nothing left for the guard to protect.
     std::size_t OutstandingDegradedSkipCount() const;
+
+    // Takes the skip at `index` out of the last load's record: the user discards an override line that a save
+    // drops, so the save guard stops counting it. Empty when there is no such skip. Marks the document dirty.
+    std::optional<Scene::SceneLoadSkip> DiscardLoadSkip(std::size_t index);
+    // Puts back at `index` a skip that DiscardLoadSkip took out: the undo of the discard. Marks the document dirty.
+    void RestoreLoadSkip(std::size_t index, Scene::SceneLoadSkip skip);
 
     // Whether a save aimed at `targetPath` would be refused because this document did not fully
     // load and that path is the file it was read from. Callers use it to tell that refusal apart

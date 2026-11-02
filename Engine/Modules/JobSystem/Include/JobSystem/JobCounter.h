@@ -52,6 +52,7 @@
 #include "JobSystem/ConcurrentQueue.h"
 #include "JobSystem/Types.h"
 #include "Logger/Logger.h"
+#include "Memory/FrameJoinedScope.h"
 
 #include <atomic>
 #include <cassert>
@@ -172,6 +173,12 @@ class JobCounter
     struct Job : IJob
     {
         JobCounter* Counter;
+#if GE_DEBUG_INSTRUMENTATION
+        // The frame-joined bit of the thread that called Run, read as Run
+        // builds the envelope there; the closure runs with it on whichever
+        // thread runs it (a visit on a worker, a participating waiter).
+        bool FrameJoined = GameEngine::Memory::Detail::IsFrameJoined();
+#endif
         F Fn;
 
         template <typename Fn2>
@@ -179,6 +186,11 @@ class JobCounter
 
         void Execute() override
         {
+#if GE_DEBUG_INSTRUMENTATION
+            // Declared first, so the running thread gets its own bit back
+            // last, after the decrement, on every exit.
+            const GameEngine::Memory::Detail::FrameJoinedScope frameJoined(FrameJoined);
+#endif
             // F16: the guard decrements on EVERY exit path, including unwind.
             // The sticky failure flag is set inside the catch, i.e. BEFORE the
             // guard's decrement, so a waiter released by this task's zero-
@@ -188,6 +200,19 @@ class JobCounter
                 JobCounter* C;
                 ~DecrementGuard() { C->Decrement(); }
             } guard{Counter};
+#if GE_DEBUG_INSTRUMENTATION
+            // Declared after the guard, so the frame advance's count drops
+            // before the decrement can release a waiter.
+            struct OutstandingJoinedRunGuard
+            {
+                bool Joined;
+                ~OutstandingJoinedRunGuard()
+                {
+                    if (Joined)
+                        GameEngine::Memory::Detail::RemoveOutstandingJoinedRun();
+                }
+            } outstanding{FrameJoined};
+#endif
 
             try
             {
@@ -220,7 +245,7 @@ class JobCounter
     // object at that moment: each envelope decrements its own counter.
     //
     // Queues are recycled: a fresh moodycamel queue costs four heap
-    // allocations (the queue, its first block, its producer and the
+    // allocations (the queue, its initial blocks, its producer and the
     // producer's block index), and every ECS wave and parallel query forks
     // on a fresh stack counter. AcquireTaggedJobs takes the forking thread's
     // cached queue, else one from a fixed shared pool, and constructs one
@@ -247,9 +272,10 @@ class JobCounter
     // envelope or can PROVE emptiness via JobCount == 0.
     struct TaggedJobs
     {
-        // One block to start with: the queue grows to a counter's high-water
-        // mark and, recycled, keeps those blocks for the next counter.
-        ConcurrentQueue<IJob*> Queue{ConcurrentQueue<IJob*>::BLOCK_SIZE};
+        // Two blocks to start with: the producer reuses the block ahead only when
+        // it is drained, so a fork that crosses a block boundary while its jobs
+        // wait needs two. A larger fork grows the queue; a recycled queue keeps its blocks.
+        ConcurrentQueue<IJob*> Queue{2 * ConcurrentQueue<IJob*>::BLOCK_SIZE};
         // The one producer every Run enqueues through. Run enqueues under
         // m_Mutex, so the token never serves two threads at once, and a
         // consumer's dequeue scans one producer however many threads have

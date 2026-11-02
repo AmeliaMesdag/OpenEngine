@@ -22,14 +22,14 @@ public:
     // The editor service factory (EditorServiceRegistry): null with no spline recipe system.
     static std::unique_ptr<IEditorService> Create(const EditorServiceContext& context);
 
-    // `undo` may be null: a cleanup then applies with no undo step.
+    // `undo` may be null: a ground edit then has no undo step.
     RecipeEditorHooks(UndoRedoService* undo, SplineRecipes::SplineRecipeSystem& recipes);
     ~RecipeEditorHooks() override;
 
     RecipeEditorHooks(const RecipeEditorHooks&) = delete;
     RecipeEditorHooks& operator=(const RecipeEditorHooks&) = delete;
 
-    void RecordGroundCleanup(ECS::World& world, const SplineRecipes::SplineGroundCleanup& cleanup) override;
+    void RecordGroundEdit(ECS::World& world, const SplineRecipes::SplineGroundEdit& edit) override;
     void ReleaseSceneScoped(ECS::World& world) override;
 
 private:

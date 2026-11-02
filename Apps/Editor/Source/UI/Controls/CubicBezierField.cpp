@@ -69,7 +69,7 @@ float ClampHandleCenter(float min, float max, float value, float logicalSizePx, 
 CubicBezierField::CubicBezierField()
 {
     AddClass("curve-field");
-    Overrides()
+    Style()
         .Set(Style::Height, StyleLength::Px(kFieldHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(kFieldHeightPx))
         .Set(Style::MarginTop, StyleLength::Px(8.0f));
@@ -511,7 +511,7 @@ void CubicBezierField::UpdateCursor()
     const CursorStyle cursor = (m_Drag >= 0) ? CursorStyle::Grabbing
                              : (m_Hover >= 0) ? CursorStyle::Grab
                                               : CursorStyle::Auto;
-    Overrides().Set(Style::Cursor, cursor);
+    Style().Set(Style::Cursor, cursor);
 }
 
 bool CubicBezierField::TryHandleCurveDoubleClick(float globalX, float globalY)

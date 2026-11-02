@@ -122,9 +122,9 @@ void BuildSpanPieceSection(const InspectorContext& ctx)
     RefreshWhenTheNameChanges(ctx);
 
     InspectorUI::AddLine(ctx.Parent, "Span " + std::to_string(piece->OrdinalInRun) +
-                                         " of the segment from point " + std::to_string(piece->Run) +
-                                         ". What it uses is saved on the fence and survives every "
-                                         "rebuild; the rest of this span is rebuilt from the fence.");
+                                         " of the segment from point " + std::to_string(piece->Run));
+    InspectorUI::AddInfoCard(ctx.Parent, "This span's part or gate is saved on the fence and kept through every rebuild. "
+                                         "The rest of the span is rebuilt from the fence.");
 
     const SplineSpanOverride* current =
         SplineRecipes::FindSpanOverride(*fence, piece->Run, piece->OrdinalInRun);
@@ -151,7 +151,7 @@ void BuildSpanPieceSection(const InspectorContext& ctx)
         });
     if (tableFull)
     {
-        kindField->SetDisabled(true);
+        kindField->SetEnabled(false);
         InspectorUI::AddInfoCard(
             ctx.Parent, "The fence already holds " +
                             std::to_string(Components::kSplineFenceMaxSpanOverrides) +
@@ -165,7 +165,7 @@ void BuildSpanPieceSection(const InspectorContext& ctx)
         {
             InspectorUI::AddInfoCard(ctx.Parent,
                                      "The fence has no Gate part with a mesh: a Gate here would leave an "
-                                     "opening, which cannot be selected in the scene view again.");
+                                     "opening, which cannot be selected in the Scene View again.");
         }
         return;
     }

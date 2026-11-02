@@ -1,12 +1,17 @@
 // The night sky's procedural star field (Source/Sky/StarCatalog.h). Pure CPU, no device.
 
 #include "Source/Sky/StarCatalog.h"
+#include "Types/Color.h"
+#include "Types/ColorUtils.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
+using GameEngine::ColorLinear;
+using GameEngine::ColorUtils::LinearRec709Luminance;
 using GameEngine::Rendering::BlackbodyLinearRec709;
 using GameEngine::Rendering::BuildStarField;
 using GameEngine::Rendering::kStarFieldFaintestMagnitude;
@@ -15,9 +20,37 @@ using GameEngine::Rendering::StarFieldCountBrighterThan;
 namespace
 {
 
-float Luminance(const float* rgb)
+double CieLobe(double nm, double peak, double widthBelow, double widthAbove)
 {
-    return 0.2126f * rgb[0] + 0.7152f * rgb[1] + 0.0722f * rgb[2];
+    const double t = (nm - peak) / (nm < peak ? widthBelow : widthAbove);
+    return std::exp(-0.5 * t * t);
+}
+
+// Planck's law against the CIE fit, every term evaluated at each wavelength: the reference the
+// tabulated integral in BlackbodyLinearRec709 must match.
+ColorLinear DirectBlackbodyLinearRec709(double kelvin)
+{
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+    for (double nm = 380.0; nm <= 780.0; nm += 2.0)
+    {
+        const double metres = nm * 1e-9;
+        const double planck = 1.0 / (std::pow(metres, 5.0) * (std::exp(1.4387769e-2 / (metres * kelvin)) - 1.0));
+        x += planck * (1.056 * CieLobe(nm, 599.8, 37.9, 31.0) + 0.362 * CieLobe(nm, 442.0, 16.0, 26.7) -
+                       0.065 * CieLobe(nm, 501.1, 20.4, 26.2));
+        y += planck * (0.821 * CieLobe(nm, 568.8, 46.9, 40.5) + 0.286 * CieLobe(nm, 530.9, 16.3, 31.1));
+        z += planck * (1.217 * CieLobe(nm, 437.0, 11.8, 36.0) + 0.681 * CieLobe(nm, 459.0, 26.0, 13.8));
+    }
+    x /= y;
+    z /= y;
+    std::array<double, 3> rgb = {3.2406 * x - 1.5372 - 0.4986 * z, -0.9689 * x + 1.8758 + 0.0415 * z,
+                                 0.0557 * x - 0.2040 + 1.0570 * z};
+    for (double& channel : rgb)
+        channel = std::max(channel, 0.0);
+    const double luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    return ColorLinear(static_cast<float>(rgb[0] / luminance), static_cast<float>(rgb[1] / luminance),
+                       static_cast<float>(rgb[2] / luminance));
 }
 
 } // namespace
@@ -58,7 +91,7 @@ TEST(StarCatalog, DirectionsCoverTheSphereEvenly)
         size_t positive = 0;
         for (const auto& star : stars)
         {
-            const float* d = star.dirAndMagnitude;
+            const float* d = star.dirAndMagnitude.v;
             ASSERT_NEAR(d[0] * d[0] + d[1] * d[1] + d[2] * d[2], 1.0f, 1e-5f);
             positive += d[axis] > 0.0f ? 1u : 0u;
         }
@@ -73,14 +106,27 @@ TEST(StarCatalog, BlackbodyColoursRunFromRedToBlue)
     const auto cool = BlackbodyLinearRec709(3000.0f);
     const auto white = BlackbodyLinearRec709(6504.0f);
     const auto hot = BlackbodyLinearRec709(20000.0f);
-    EXPECT_GT(cool[0], cool[1]);
-    EXPECT_GT(cool[1], cool[2]);
-    EXPECT_GT(hot[2], hot[1]);
-    EXPECT_GT(hot[1], hot[0]);
-    for (const float channel : white)
+    EXPECT_GT(cool.r, cool.g);
+    EXPECT_GT(cool.g, cool.b);
+    EXPECT_GT(hot.b, hot.g);
+    EXPECT_GT(hot.g, hot.r);
+    for (const float channel : {white.r, white.g, white.b})
         EXPECT_NEAR(channel, 1.0f, 0.06f) << "a 6,504 K blackbody is near white";
-    for (const auto& rgb : {cool, white, hot})
-        EXPECT_NEAR(Luminance(rgb.data()), 1.0f, 1e-4f);
+    for (const ColorLinear& rgb : {cool, white, hot})
+        EXPECT_NEAR(LinearRec709Luminance(rgb), 1.0f, 1e-4f);
+}
+
+// The integral reads its wavelength terms from a table built once; every colour matches the
+// integral evaluated term by term over the whole spectral mix, 2,800 K to 25,000 K.
+TEST(StarCatalog, TabulatedBlackbodyMatchesTheDirectIntegral)
+{
+    for (float kelvin = 2800.0f; kelvin <= 25000.0f; kelvin += 37.0f)
+    {
+        const auto tabulated = BlackbodyLinearRec709(kelvin);
+        const auto direct = DirectBlackbodyLinearRec709(kelvin);
+        for (float ColorLinear::*channel : {&ColorLinear::r, &ColorLinear::g, &ColorLinear::b})
+            EXPECT_NEAR(tabulated.*channel, direct.*channel, 1e-6 * std::max(1.0f, direct.*channel)) << kelvin << " K";
+    }
 }
 
 // The spectral mix of naked-eye stars: 42 % are B or A (hotter than 7,500 K, bluer than that
@@ -95,11 +141,11 @@ TEST(StarCatalog, ColoursFollowTheNakedEyeSpectralMix)
     size_t cool = 0;
     for (const auto& star : stars)
     {
-        const float* rgb = star.colorAndSeed;
-        ASSERT_NEAR(Luminance(rgb), 1.0f, 1e-4f);
+        const float* rgb = star.colorAndSeed.v;
+        ASSERT_NEAR(LinearRec709Luminance(ColorLinear(rgb[0], rgb[1], rgb[2])), 1.0f, 1e-4f);
         const float blueOverRed = rgb[2] / std::max(rgb[0], 1e-6f);
-        hot += blueOverRed > hotEdge[2] / hotEdge[0] ? 1u : 0u;
-        cool += blueOverRed < coolEdge[2] / coolEdge[0] ? 1u : 0u;
+        hot += blueOverRed > hotEdge.b / hotEdge.r ? 1u : 0u;
+        cool += blueOverRed < coolEdge.b / coolEdge.r ? 1u : 0u;
     }
     const double count = static_cast<double>(stars.size());
     EXPECT_NEAR(static_cast<double>(hot) / count, 0.42, 0.02);

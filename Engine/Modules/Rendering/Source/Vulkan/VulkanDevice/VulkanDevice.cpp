@@ -426,15 +426,8 @@ static void WatchCheckDescriptorGetInfo(const VkDescriptorGetInfoEXT& getInfo, u
 // Optional sync2 extension for Vulkan 1.2 fallback
 const char* kSync2Ext = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME;
 
-// How long the validation assert waits for the log trail before breaking. The
-// break is a death path, so the wait is bounded rather than a plain Log::Flush.
-constexpr std::chrono::milliseconds kValidationAssertFlushTimeout{2000};
-
-// Phase-3b validation assert (design: validation-observability-2026-07-23).
-// Default ON whenever validation runs: both descriptor configs measure zero
-// errors and zero warnings on the reference scene, so an unsuppressed ERROR
-// is always a regression worth breaking on. GE_VK_VALIDATION_ASSERT=0 is the
-// triage escape hatch; suppression-table hits never assert but stay counted.
+// The validation assert is on whenever validation runs. GE_VK_VALIDATION_ASSERT=0 turns it off.
+// ValidationMessageTraps decides which messages trap. Suppressed messages are counted and do not trap.
 static bool ValidationAssertEnabledFromEnv()
 {
     static const bool kEnabled = []
@@ -598,17 +591,15 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
                 Logger::Log::Warning("[Vulkan] {} repeated x{} (see get_validation_stats)", what, outcome.Count);
         }
 
-        // 3. Phase-3 assert, strictly after record + log so the stats and
-        // first-occurrence capture survive the break. ERROR only; suppression
-        // table hits skip the assert but were counted above.
-        if (isError && !record.Suppressed && ValidationAssertEnabledFromEnv())
+        // 3. Trap after the record and the log, so the stats and the first message survive the break.
+        if (ValidationMessageTraps(messageSeverity, messageType, record.Suppressed) && ValidationAssertEnabledFromEnv())
         {
             Logger::Log::Critical("[Vulkan] validation assert (GE_VK_VALIDATION_ASSERT): {}: {} objects:[{}] labels:[{}]",
                                   hasId ? messageId : "(no VUID)", msg, objects, labels);
             // Bounded: a break/abort without a flush loses the reason, but an
             // unbounded flush would hang here instead of breaking whenever the
             // drain thread is blocked behind the sink mutex.
-            Logger::Log::FlushForCrash(kValidationAssertFlushTimeout);
+            Logger::Log::FlushForCrash(Logger::Log::kCrashFlushTimeout);
             ValidationAssertBreak();
         }
     }
@@ -785,9 +776,9 @@ void VulkanDevice::ResolveDebugUtilsEntryPoints()
 // (which re-runs this on the surviving instance/physical device — design F8).
 bool VulkanDevice::CreateDeviceAndResources(const DeviceDesc& desc)
 {
-    // Bringup runs on the thread that owns this device's frames and teardown
-    // (initial Initialize, and the rebuild path). The immediate destroy helpers
-    // assert against this id; BeginFrame refreshes it each frame.
+    // Bringup makes its own thread the owner (initial Initialize, and the rebuild path).
+    // The immediate destroy helpers assert against this id. BindOwnerThread moves it
+    // to another thread, and BeginFrame refreshes it each frame.
     m_DeviceOwnerThread.store(std::this_thread::get_id(), std::memory_order_relaxed);
 
     // Initialize policy: clamp to device limit now that m_DeviceProperties is valid
@@ -946,6 +937,11 @@ bool VulkanDevice::CreateDeviceAndResources(const DeviceDesc& desc)
     m_PipelineCacheIface = std::make_unique<VulkanPipelineCacheAdapter>(m_VkDiskPipelineCache.get());
 
     return true;
+}
+
+void VulkanDevice::BindOwnerThread()
+{
+    m_DeviceOwnerThread.store(std::this_thread::get_id(), std::memory_order_relaxed);
 }
 
 void VulkanDevice::Shutdown()
@@ -4550,7 +4546,13 @@ TextureHandle VulkanDevice::CreateTexture(const TextureDesc& desc)
     // Use VMA for image creation
     VmaAllocationCreateInfo vmaAllocInfo = {};
     vmaAllocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; // Prefer device-local memory for images
-    vmaAllocInfo.flags = 0;                                   // No special flags needed for images
+    vmaAllocInfo.flags = 0;
+    // A depth-stencil image gets its own memory. On NVIDIA the first bind of a depth image
+    // into a block that holds other resources takes about 700 ms (#5331).
+    if (desc.usage & static_cast<uint32_t>(TextureUsage::DepthStencil))
+    {
+        vmaAllocInfo.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+    }
 
     VmaAllocation allocation;
     result = vmaCreateImage(AsVmaAllocator(m_VmaAllocator), &imageInfo, &vmaAllocInfo, &vulkanTexture->image, &allocation, nullptr);

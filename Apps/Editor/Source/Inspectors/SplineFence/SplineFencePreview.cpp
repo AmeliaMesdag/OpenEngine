@@ -523,7 +523,7 @@ void SplineFencePreview::Relayout()
     {
         const float32 alongSpan = m_AlongMax - m_AlongMin;
         const float32 aspect = alongSpan / std::max(m_HeightMax - m_HeightMin, alongSpan / kMaxPlotAspect);
-        m_Plot->Overrides().Set(Style::AspectRatio, aspect);
+        m_Plot->Style().Set(Style::AspectRatio, aspect);
     }
 }
 

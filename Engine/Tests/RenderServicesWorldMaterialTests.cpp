@@ -46,22 +46,12 @@ using namespace GameEngine::Components;
 
 #include "TestDeviceHelper.h"
 
-static void SetIdentityMatrix4x4(float outM[16])
-{
-    for (int i = 0; i < 16; ++i)
-        outM[i] = 0.0f;
-    outM[0] = 1.0f;
-    outM[5] = 1.0f;
-    outM[10] = 1.0f;
-    outM[15] = 1.0f;
-}
-
 static CameraData MakeIdentityCameraData()
 {
     CameraData data{};
-    SetIdentityMatrix4x4(data.view);
-    SetIdentityMatrix4x4(data.proj);
-    SetIdentityMatrix4x4(data.viewProj);
+    data.view = Mathematics::Matrix4x4::Identity();
+    data.proj = Mathematics::Matrix4x4::Identity();
+    data.viewProj = Mathematics::Matrix4x4::Identity();
     return data;
 }
 

@@ -1397,9 +1397,9 @@ class RenderServices
     void AddFrameMovers(std::span<const FrameMoverRecord> movers);
     // Declare-time only (after extraction completed for the frame).
     std::span<const FrameMoverRecord> GetFrameMovers() const { return m_FrameMovers; }
-    // Content that changes a view's pixels this frame without moving an
-    // instance or advancing any content epoch (moving particles). Extraction
-    // reports it per view; TAA then does not certify that view stationary.
+    // Content that changes a view's pixels or depth this frame with no instance move and no
+    // content epoch: moving particles, depth-writing producer draws, a changing ocean surface or
+    // a CBT update in the view. TAA and the reflections then do not treat the view as still.
     // Cleared by BeginWorldDrawFrame like the movers list.
     void NotifyUnversionedMotion(Rendering::ViewId viewId);
     // Declare-time only. True for a view reported this frame or the previous
@@ -1436,7 +1436,11 @@ class RenderServices
     void EmitProducerDepthCommandsForView(Rendering::ViewId viewId);
     // Build batch keys for a single view only (no global material/pipeline switching).
     void BuildWorldBatchKeysForView(Rendering::ViewId viewId);
-    void SubmitWorldSubmissions(std::span<const WorldSubmissionRecord> records);
+    /// Adds this frame's world records. `setRevision` names an unchanged record set
+    /// (KeyedWorldSubmissions::Revision); WorldDrawBuilder::kNoRecordSet names none, and the frame derives
+    /// every view's batch keys again.
+    void SubmitWorldSubmissions(std::span<const WorldSubmissionRecord> records,
+                                uint64_t setRevision = WorldDrawBuilder::kNoRecordSet);
 
     // Per-sub-phase wall-clock timing published once per frame by
     // RenderExtractionSystem::Update. Diagnostic only (benign racy read from
@@ -2298,9 +2302,8 @@ class RenderServices
     // coherent across views.
     uint32_t m_CullingFrameIndex = 0;
 
-    // World draw builder (engine-level helper). Initially wired up
-    // in a simple, single-threaded implementation; later iterations can use
-    // JobSystem for parallel submission and list construction.
+    // World draw builder (engine-level helper). Its submission buffers are
+    // sized from the engine job pool when RenderServices is constructed.
     WorldDrawBuilder m_WorldDrawBuilder;
     // Compatibility profile only: the CPU twin of the GPU scatter's per-slice
     // instance stream. Rebuilt from the merged submissions right after the

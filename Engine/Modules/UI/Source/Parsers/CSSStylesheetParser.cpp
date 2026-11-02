@@ -137,7 +137,7 @@ static Specificity ComputeSpecificityFromChain(const SelectorChain& chain)
     return sp;
 }
 
-static void ApplyPropertyToOverrides(StyleOverrides& overrides, const StyleProperty& prop)
+static void ApplyPropertyToOverrides(StyleDeclaration& overrides, const StyleProperty& prop)
 {
     // Canonical classification (GetStylePropertyImpact): an override-local
     // layout list here had drifted both ways — z-index/overflow relayouted
@@ -1003,7 +1003,7 @@ size_t WarnUnknownStylesheetProperties(const Stylesheet& sheet)
     return count;
 }
 
-void CSSParser::ParseInlineStyleToOverrides(std::string_view inlineStyle, StyleOverrides& out)
+void CSSParser::ParseInlineStyleToOverrides(std::string_view inlineStyle, StyleDeclaration& out)
 {
     out.Clear();
 

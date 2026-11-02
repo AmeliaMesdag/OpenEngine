@@ -88,8 +88,7 @@ std::string ReasonOf(ECS::World& world, ECS::EntityHandle recipe)
 
 bool IsSceneSettledAtLastUpdate(ECS::World& world)
 {
-    const RecipeBuildStates* states = RunningSystemStates();
-    return states ? states->IsSceneSettledAtLastUpdate(world) : kNoStates.IsSceneSettled(world);
+    return RunningStates().IsSceneSettledAtLastUpdate(world);
 }
 
 } // namespace GameEngine::SplineRecipes

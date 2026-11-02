@@ -139,7 +139,7 @@ CurveField::CurveField() : m_PlotHeightPx(kFieldHeightPx)
     AddClass("curve-field");
     RequestSubtreeStyleAssetPath(kCurveFieldStyleAssetPath, "editor");
     SetFocusable(true);
-    Overrides()
+    Style()
         .Set(Style::Height, StyleLength::Px(kFieldHeightPx))
         .Set(Style::MinHeight, StyleLength::Px(kFieldHeightPx));
     // Cursor is set per hover/drag state in UpdateCursor (grab only over a point), not statically.
@@ -166,7 +166,7 @@ void CurveField::SetConfig(const Config& config)
 void CurveField::ApplyLabelStripHeight()
 {
     const float height = m_PlotHeightPx + TimeLabelStripPx(m_Config, m_TimeLabelFontSizePx);
-    Overrides().Set(Style::Height, StyleLength::Px(height)).Set(Style::MinHeight, StyleLength::Px(height));
+    Style().Set(Style::Height, StyleLength::Px(height)).Set(Style::MinHeight, StyleLength::Px(height));
 }
 
 // The labels' font size and the plot's height come from the resolved style (CurveField.css, or a
@@ -495,7 +495,7 @@ void CurveField::UpdateCursor()
     const CursorStyle cursor = (m_Drag >= 0)      ? CursorStyle::Grabbing
                                : (m_Hover >= 0)   ? CursorStyle::Grab
                                                   : CursorStyle::Auto;
-    Overrides().Set(Style::Cursor, cursor);
+    Style().Set(Style::Cursor, cursor);
 }
 
 bool CurveField::TryHandleCurveDoubleClick(float globalX, float globalY)

@@ -9,6 +9,7 @@
 #include "Core/Engine.h"
 #include "ECS/Query.h"
 #include "ECS/World.h"
+#include "ECSModules/Rendering/RenderingLoop.h"
 #include "Engine/Rendering/PrimitiveGenerator.h"
 #include "Logger/Logger.h"
 #include "Mathematics/Geometry.h"
@@ -264,6 +265,13 @@ bool HoldForPendingBvh(const ConformMissTally& tally, uint32 entityId, ConformHo
             entityId, tally.PendingBvh, tally.Probes);
     }
     return true;
+}
+
+const TerrainECS::TerrainModifierSystem* ResolveTerrainModifierSystem()
+{
+    auto* loop = EngineCore::GetInstance().GetRenderingLoop();
+    auto* systems = loop ? loop->GetSystemManager() : nullptr;
+    return systems ? systems->GetSystem<TerrainECS::TerrainModifierSystem>() : nullptr;
 }
 
 uint64 ConformSurfaceRevision(ECS::World& world,

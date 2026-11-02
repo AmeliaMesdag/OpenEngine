@@ -1,19 +1,25 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
 #include <span>
+#include <thread>
 #include <vector>
 
 #include "Engine/Rendering/CpuDrawStreamBuilder.h"
 #include "Engine/Rendering/RenderServices.h"
 #include "Engine/Rendering/Material.h"
 #include "Engine/Rendering/WorldDrawTypes.h"
-#include "JobSystem/WorkStealingThreadPool.h"
 #include "Assets/ModelAsset.h"
 #include "AssetCore/GUID.h"
 #include "Rendering/Core/Device.h"
 #include "Rendering/Core/GPUInstanceDepthClass.h"
 #include "Rendering/Core/GPUScene.h"
+#include "JobSystem/JobCounter.h"
+#include "JobSystem/WorkStealingThreadPool.h"
 
 using namespace GameEngine;
 using namespace GameEngine::Rendering;
@@ -38,6 +44,128 @@ Rendering::MeshGPUHandle RegisterTestMesh(RenderServices& rs)
     m.Vertices = {v0, v1, v2};
     m.Indices = {0, 1, 2};
     return rs.GetMeshGPURegistry().RegisterSubmesh({GUID::Generate(), 0}, m);
+}
+
+constexpr Rendering::ViewId kSubmitBufferTestViewId = 21u;
+
+// The material index generation every test build passes (MaterialSystem::MaterialSSBOGeneration).
+constexpr uint64 kTestMaterialGeneration = 1u;
+
+// GetCurrentWorkerId off the pool's workers.
+constexpr size_t kOffPoolCaller = SIZE_MAX;
+
+// Submit one record carrying `instanceIndex` from the calling thread.
+void SubmitOne(WorldDrawBuilder& builder, uint32 instanceIndex)
+{
+    WorldSubmissionRecord rec{};
+    rec.viewId = kSubmitBufferTestViewId;
+    rec.instanceIndex = instanceIndex;
+    builder.Submit(std::span<const WorldSubmissionRecord>(&rec, 1u));
+}
+
+// A pool task that holds one worker for its whole life and runs the submits the
+// test hands it one at a time, so the test decides which worker submits what,
+// and in which order.
+class WorkerSubmitter
+{
+  public:
+    WorkerSubmitter(JobSystem::WorkStealingThreadPool& pool, JobSystem::JobCounter& counter)
+    {
+        pool.Run([this, &pool] { Serve(pool); }, counter);
+        std::unique_lock lock(m_Mutex);
+        m_Cv.wait(lock, [this] { return m_Started; });
+    }
+
+    size_t WorkerId() const { return m_WorkerId; }
+
+    void Submit(WorldDrawBuilder& builder, uint32 instanceIndex)
+    {
+        std::unique_lock lock(m_Mutex);
+        m_Builder = &builder;
+        m_InstanceIndex = instanceIndex;
+        m_HasWork = true;
+        m_Cv.notify_all();
+        m_Cv.wait(lock, [this] { return !m_HasWork; });
+    }
+
+    void Stop()
+    {
+        {
+            std::lock_guard lock(m_Mutex);
+            m_Stop = true;
+        }
+        m_Cv.notify_all();
+    }
+
+  private:
+    void Serve(const JobSystem::WorkStealingThreadPool& pool)
+    {
+        std::unique_lock lock(m_Mutex);
+        m_WorkerId = pool.GetCurrentWorkerId();
+        m_Started = true;
+        m_Cv.notify_all();
+        while (true)
+        {
+            m_Cv.wait(lock, [this] { return m_HasWork || m_Stop; });
+            if (m_Stop)
+                return;
+            SubmitOne(*m_Builder, m_InstanceIndex);
+            m_HasWork = false;
+            m_Cv.notify_all();
+        }
+    }
+
+    std::mutex m_Mutex;
+    std::condition_variable m_Cv;
+    size_t m_WorkerId = kOffPoolCaller;
+    WorldDrawBuilder* m_Builder = nullptr;
+    uint32 m_InstanceIndex = 0;
+    bool m_Started = false;
+    bool m_HasWork = false;
+    bool m_Stop = false;
+};
+
+// A two-worker pool whose workers are each held by one submitter.
+struct TwoWorkerSubmitters
+{
+    JobSystem::WorkStealingThreadPool Pool{2};
+    JobSystem::JobCounter Counter;
+    WorkerSubmitter A{Pool, Counter};
+    WorkerSubmitter B{Pool, Counter};
+
+    ~TwoWorkerSubmitters()
+    {
+        A.Stop();
+        B.Stop();
+        Pool.Wait(Counter);
+    }
+};
+
+struct SubmitEvent
+{
+    size_t WorkerId;
+    uint32 InstanceIndex;
+};
+
+// The order MergeSubmissions drains `submits` in: by worker id with the
+// off-pool caller last, and in submission order within one submitter.
+std::vector<uint32> DrainOrder(std::vector<SubmitEvent> submits)
+{
+    std::stable_sort(submits.begin(), submits.end(),
+                     [](const SubmitEvent& a, const SubmitEvent& b) { return a.WorkerId < b.WorkerId; });
+    std::vector<uint32> order;
+    for (const SubmitEvent& submit : submits)
+        order.push_back(submit.InstanceIndex);
+    return order;
+}
+
+std::vector<uint32> MergedInstanceOrder(WorldDrawBuilder& builder)
+{
+    builder.MergeSubmissions();
+    std::vector<uint32> order;
+    for (const WorldSubmissionRecord& rec : builder.GetSubmissions(kSubmitBufferTestViewId))
+        order.push_back(rec.instanceIndex);
+    return order;
 }
 
 } // namespace
@@ -206,10 +334,10 @@ TEST(RenderServicesWorldDrawBuilderTests, DedupAndDistinctMaterials_ProduceUniqu
     EXPECT_TRUE(sawA);
     EXPECT_TRUE(sawB);
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(records, 3u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{});
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
     const auto identityKeys = wdb.GetBatchKeys(viewId);
     ASSERT_EQ(identityKeys.size(), 2u);
     for (const auto& k : identityKeys)
@@ -260,10 +388,10 @@ TEST(RenderServicesWorldDrawBuilderTests, ColorClassMerge_DedupsByClassLowestMat
     recs[1].viewId = viewId; recs[1].meshHandle = mesh; recs[1].material = &matC;
     recs[2].viewId = viewId; recs[2].meshHandle = mesh; recs[2].material = &matB;
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 3u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), map);
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), map, kTestMaterialGeneration);
 
     auto keys = wdb.GetBatchKeys(viewId);
     ASSERT_EQ(keys.size(), 2u);
@@ -288,7 +416,6 @@ TEST(RenderServicesWorldDrawBuilderTests, ColorClassMerge_DedupsByClassLowestMat
     device->Shutdown();
 }
 
-
 // --- Compatibility profile: CpuDrawStreamBuilder ---
 //
 // A device without buffer_device_address cannot reach the GPU scatter's
@@ -305,16 +432,12 @@ namespace
 Rendering::CameraData MakeIdentityFrustumCamera()
 {
     Rendering::CameraData cam{};
-    for (int i = 0; i < 16; ++i)
-    {
-        const float identity = (i % 5 == 0) ? 1.0f : 0.0f;
-        cam.view[i] = identity;
-        cam.proj[i] = identity;
-        cam.viewProj[i] = identity;
-        cam.viewRel[i] = identity;
-        cam.viewProjRel[i] = identity;
-    }
-    cam.cameraPos[3] = 0.0f;
+    cam.view = Mathematics::Matrix4x4::Identity();
+    cam.proj = Mathematics::Matrix4x4::Identity();
+    cam.viewProj = Mathematics::Matrix4x4::Identity();
+    cam.viewRel = Mathematics::Matrix4x4::Identity();
+    cam.viewProjRel = Mathematics::Matrix4x4::Identity();
+    cam.cameraPos.w = 0.0f;
     return cam;
 }
 
@@ -387,10 +510,10 @@ TEST(RenderServicesWorldDrawBuilderTests, CpuDrawStream_ListsOneBatchAsOneDrawWh
         MakeRecord(viewId, mesh, mat, idx[0], 0u),
     };
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 5u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry());
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
 
     CpuDrawStreamBuilder cds;
     cds.Build(wdb, rs.GetMeshGPURegistry(), *scene, rs.Views(), nullptr);
@@ -453,10 +576,10 @@ TEST(RenderServicesWorldDrawBuilderTests, CpuDrawStream_CullsCameraSetButKeepsOf
                    kSubmissionFlagCastShadows | kSubmissionFlagShadowsOnly),
     };
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 4u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry());
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
 
     CpuDrawStreamBuilder cds;
     cds.Build(wdb, rs.GetMeshGPURegistry(), *scene, rs.Views(), nullptr);
@@ -525,10 +648,10 @@ TEST(RenderServicesWorldDrawBuilderTests, CpuDrawStream_TheSceneViewLeavesOutWha
         MakeRecord(gameView, mesh, mat, hidden, kHiddenCaster),
     };
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 4u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry());
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
 
     CpuDrawStreamBuilder cds;
     cds.Build(wdb, rs.GetMeshGPURegistry(), *scene, rs.Views(), nullptr);
@@ -587,10 +710,10 @@ TEST(RenderServicesWorldDrawBuilderTests, CpuDrawStream_KeysPerMaterialAndClears
         MakeRecord(viewId, mesh, matB, instB, 0u),
     };
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 2u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry());
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
 
     CpuDrawStreamBuilder cds;
     cds.Build(wdb, rs.GetMeshGPURegistry(), *scene, rs.Views(), nullptr);
@@ -610,7 +733,7 @@ TEST(RenderServicesWorldDrawBuilderTests, CpuDrawStream_KeysPerMaterialAndClears
     EXPECT_EQ(cds.GetStats().CameraBatches, 2u);
 
     wdb.BeginFrame();
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry());
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
     cds.Build(wdb, rs.GetMeshGPURegistry(), *scene, rs.Views(), nullptr);
     EXPECT_EQ(cds.GetInstances(viewId, 5u, entry->gpuMeshIndex,
                                CpuDrawStreamBuilder::InstanceSet::Camera).Count, 0u);
@@ -669,10 +792,10 @@ TEST(RenderServicesWorldDrawBuilderTests, CpuDrawStream_PooledCullMatchesSerial)
         recs.push_back(MakeRecord(viewId, mesh, mat, inst, flags));
     }
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry());
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
 
     CpuDrawStreamBuilder serial;
     serial.Build(wdb, rs.GetMeshGPURegistry(), *scene, rs.Views(), nullptr);
@@ -745,13 +868,13 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
         rec.flags = flags;
         wdb.BeginFrame();
         wdb.Submit(std::span<const WorldSubmissionRecord>(&rec, 1u));
-        wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{});
+        wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
     };
 
     // Transmissive but NOT a caster: the batch key still exists (the colour pass
     // needs it), the tint predicate is false.
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, glass, 0u);
         EXPECT_EQ(wdb.GetBatchKeys(viewId).size(), 1u);
         EXPECT_FALSE(wdb.HasTransmissiveCasterSubmissions(viewId));
@@ -760,7 +883,7 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
 
     // Transmissive AND a caster: the only combination the tint cascade can draw.
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, glass, 1u);
         EXPECT_EQ(wdb.GetBatchKeys(viewId).size(), 1u);
         EXPECT_TRUE(wdb.HasTransmissiveCasterSubmissions(viewId));
@@ -768,7 +891,7 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
 
     // Opaque caster: a shadow caster, but nothing the tint pass would ever draw.
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, opaque, 1u);
         EXPECT_TRUE(wdb.HasShadowCastingSubmissions(viewId));
         EXPECT_FALSE(wdb.HasTransmissiveCasterSubmissions(viewId));
@@ -776,7 +899,7 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
 
     // A view nobody submitted to answers false rather than inheriting another's.
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, glass, 1u);
         EXPECT_TRUE(wdb.HasTransmissiveCasterSubmissions(viewId));
         EXPECT_FALSE(wdb.HasTransmissiveCasterSubmissions(viewId + 1u));
@@ -785,7 +908,7 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
     // BeginFrame drops last frame's answer: a view that stops submitting must not
     // keep a stale true and keep a 64 MiB tint array alive forever.
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, glass, 1u);
         ASSERT_TRUE(wdb.HasTransmissiveCasterSubmissions(viewId));
         wdb.BeginFrame();
@@ -795,7 +918,7 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
 
     // ClearView drops it too (the editor one-shot/thumbnail path).
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, glass, 1u);
         ASSERT_TRUE(wdb.HasTransmissiveCasterSubmissions(viewId));
         wdb.ClearView(viewId);
@@ -805,7 +928,7 @@ TEST(RenderServicesWorldDrawBuilderTests, TransmissiveCasterPredicateFollowsTheC
     // The shadow-caster flag is per view and resets with the keys it was derived
     // alongside, like the transmissive one.
     {
-        WorldDrawBuilder wdb;
+        WorldDrawBuilder wdb(nullptr);
         submitOne(wdb, opaque, 1u);
         ASSERT_TRUE(wdb.HasShadowCastingSubmissions(viewId));
         EXPECT_FALSE(wdb.HasShadowCastingSubmissions(viewId + 1u));
@@ -855,10 +978,10 @@ TEST(RenderServicesWorldDrawBuilderTests, DeformingSubsetNamesOnlyTheLaneMembers
     recs[1].viewId = viewId; recs[1].meshHandle = mesh; recs[1].material = &rigid;
     recs[2].viewId = viewId; recs[2].meshHandle = mesh; recs[2].material = &terrain;
 
-    WorldDrawBuilder wdb;
+    WorldDrawBuilder wdb(nullptr);
     wdb.BeginFrame();
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 3u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{});
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
 
     EXPECT_EQ(wdb.GetBatchKeys(viewId).size(), 3u);
     const auto deforming = wdb.GetDeformingBatchKeys(viewId);
@@ -870,10 +993,394 @@ TEST(RenderServicesWorldDrawBuilderTests, DeformingSubsetNamesOnlyTheLaneMembers
     wdb.BeginFrame();
     EXPECT_TRUE(wdb.GetDeformingBatchKeys(viewId).empty());
     wdb.Submit(std::span<const WorldSubmissionRecord>(recs, 3u));
-    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{});
+    wdb.BuildBatchKeys(rs.GetMeshGPURegistry(), /*materialColorClass=*/{}, kTestMaterialGeneration);
     ASSERT_EQ(wdb.GetDeformingBatchKeys(viewId).size(), 1u);
     wdb.ClearView(viewId);
     EXPECT_TRUE(wdb.GetDeformingBatchKeys(viewId).empty());
+
+    rs.Shutdown();
+    device->Shutdown();
+}
+
+// Each worker keeps its own buffer from frame to frame. Next frame worker B
+// submits first; if it took over a buffer A had used, A would write into B's and
+// the merge would return the frame's records in plain submission order.
+TEST(RenderServicesWorldDrawBuilderTests, SubmitBufferIsPerWorkerAcrossFrames)
+{
+    TwoWorkerSubmitters workers;
+    const size_t a = workers.A.WorkerId();
+    const size_t b = workers.B.WorkerId();
+    ASSERT_NE(a, b) << "the submitters must hold different workers, or nothing is tested";
+    ASSERT_LT(std::max(a, b), 2u);
+    WorldDrawBuilder wdb(&workers.Pool);
+
+    wdb.BeginFrame();
+    workers.A.Submit(wdb, 1u);
+    workers.B.Submit(wdb, 2u);
+    EXPECT_EQ(MergedInstanceOrder(wdb), DrainOrder({{a, 1u}, {b, 2u}}));
+
+    wdb.BeginFrame();
+    workers.B.Submit(wdb, 10u);
+    workers.A.Submit(wdb, 11u);
+    workers.B.Submit(wdb, 12u);
+    EXPECT_EQ(MergedInstanceOrder(wdb), DrainOrder({{b, 10u}, {a, 11u}, {b, 12u}}));
+}
+
+// The same holds across builder instances: what a worker submitted to one
+// builder says nothing about which buffer it writes in another.
+TEST(RenderServicesWorldDrawBuilderTests, SubmitBufferIsPerWorkerAcrossBuilders)
+{
+    TwoWorkerSubmitters workers;
+    const size_t a = workers.A.WorkerId();
+    const size_t b = workers.B.WorkerId();
+    ASSERT_NE(a, b) << "the submitters must hold different workers, or nothing is tested";
+    WorldDrawBuilder first(&workers.Pool);
+    WorldDrawBuilder second(&workers.Pool);
+
+    first.BeginFrame();
+    workers.A.Submit(first, 1u);
+    workers.B.Submit(first, 2u);
+
+    second.BeginFrame();
+    workers.B.Submit(second, 10u);
+    workers.A.Submit(second, 11u);
+    workers.B.Submit(second, 12u);
+    EXPECT_EQ(MergedInstanceOrder(second), DrainOrder({{b, 10u}, {a, 11u}, {b, 12u}}));
+}
+
+// A caller off the pool (the render thread) has a buffer of its own, drained
+// after every worker's, so a worker submitting in the same frame never writes
+// into it, whichever of the two submitted first.
+TEST(RenderServicesWorldDrawBuilderTests, OffPoolCallerHasItsOwnSubmitBuffer)
+{
+    TwoWorkerSubmitters workers;
+    const size_t a = workers.A.WorkerId();
+    ASSERT_EQ(workers.Pool.GetCurrentWorkerId(), kOffPoolCaller)
+        << "the test thread must be off the pool, or nothing is tested";
+    WorldDrawBuilder wdb(&workers.Pool);
+
+    wdb.BeginFrame();
+    SubmitOne(wdb, 1u);
+    workers.A.Submit(wdb, 2u);
+    EXPECT_EQ(MergedInstanceOrder(wdb), DrainOrder({{kOffPoolCaller, 1u}, {a, 2u}}));
+
+    wdb.BeginFrame();
+    workers.A.Submit(wdb, 10u);
+    SubmitOne(wdb, 11u);
+    workers.A.Submit(wdb, 12u);
+    EXPECT_EQ(MergedInstanceOrder(wdb), DrainOrder({{a, 10u}, {kOffPoolCaller, 11u}, {a, 12u}}));
+}
+
+namespace
+{
+// Builds a builder on this thread, then submits from a second thread off the pool.
+// The test uses a plain std::thread only to reach the assertion.
+void SubmitFromSecondOffPoolThread()
+{
+    JobSystem::WorkStealingThreadPool pool{1};
+    WorldDrawBuilder wdb(&pool);
+    wdb.BeginFrame();
+    std::thread second([&wdb] { SubmitOne(wdb, 1u); });
+    second.join();
+}
+} // namespace
+
+// Off the pool, only the constructing thread may submit: two such threads would
+// share the off-pool buffer, so a submit from a second one dies in Debug builds.
+TEST(RenderServicesWorldDrawBuilderDeathTest, SubmitFromSecondOffPoolThreadDies)
+{
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    EXPECT_DEBUG_DEATH(SubmitFromSecondOffPoolThread(), "constructed the builder");
+}
+
+// Many workers submit into one builder at the same time, frame after frame. Each
+// record must arrive once: two threads that share a buffer lose or duplicate
+// records when their appends overlap.
+TEST(RenderServicesWorldDrawBuilderTests, ConcurrentSubmitsAcrossFramesKeepEveryRecord)
+{
+    constexpr size_t kWorkerCount = 4;
+    constexpr uint32 kFrameCount = 32;
+    constexpr uint32 kRecordsPerFrame = 4096;
+    JobSystem::WorkStealingThreadPool pool{kWorkerCount};
+    WorldDrawBuilder wdb(&pool);
+
+    for (uint32 frame = 0; frame < kFrameCount; ++frame)
+    {
+        wdb.BeginFrame();
+        JobSystem::ParallelFor(&pool, kRecordsPerFrame,
+                               [&wdb](size_t unit) { SubmitOne(wdb, static_cast<uint32>(unit)); });
+        std::vector<uint32> merged = MergedInstanceOrder(wdb);
+        std::sort(merged.begin(), merged.end());
+        ASSERT_EQ(merged.size(), kRecordsPerFrame) << "frame " << frame;
+        for (uint32 i = 0; i < kRecordsPerFrame; ++i)
+            ASSERT_EQ(merged[i], i) << "frame " << frame;
+    }
+}
+
+namespace
+{
+constexpr Rendering::ViewId kKeptBuildViewId = 91u;
+constexpr Rendering::ViewId kKeptBuildLateViewId = 92u;
+
+// One frame of the builder: the records as one submit naming `setRevision`, then the build.
+// Returns the views the build derived (0: the last build was kept).
+uint32 BuildFrame(WorldDrawBuilder& builder, const Rendering::MeshGPURegistry& meshRegistry,
+                  std::span<const WorldSubmissionRecord> records, uint64 setRevision,
+                  uint64 materialGeneration = kTestMaterialGeneration,
+                  std::span<const uint32> materialColorClass = {})
+{
+    builder.BeginFrame();
+    builder.Submit(records, setRevision);
+    return builder.BuildBatchKeys(meshRegistry, materialColorClass, materialGeneration);
+}
+
+WorldSubmissionRecord KeptBuildRecord(const Material& material, Rendering::MeshGPUHandle mesh, uint32 instance)
+{
+    WorldSubmissionRecord record{};
+    record.viewId = kKeptBuildViewId;
+    record.meshHandle = mesh;
+    record.material = &material;
+    record.instanceIndex = instance;
+    return record;
+}
+} // namespace
+
+// A frame that submits the same named record sets as the frame of the last build
+// keeps that build: no view is derived and the keys and records stay as they were.
+// A new set, or a submit that names no set, derives again. The submit order of the sets has no effect.
+TEST(RenderServicesWorldDrawBuilderTests, KeptBuildFollowsTheSubmittedSets)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+
+    Material matA = Material::TestFactory::Create(GUID::Generate(), "KeptA", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matA, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matA, 1u);
+    Material matB = Material::TestFactory::Create(GUID::Generate(), "KeptB", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matB, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matB, 2u);
+    const Rendering::MeshGPUHandle mesh = RegisterTestMesh(rs);
+    const WorldSubmissionRecord both[] = {KeptBuildRecord(matA, mesh, 0u), KeptBuildRecord(matB, mesh, 1u)};
+    const std::span<const WorldSubmissionRecord> onlyA(both, 1u);
+
+    WorldDrawBuilder wdb(nullptr);
+    const auto& meshes = rs.GetMeshGPURegistry();
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u) << "the first frame derives";
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 0u) << "the same set keeps the build";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 2u);
+    EXPECT_EQ(wdb.GetSubmissions(kKeptBuildViewId).size(), 2u) << "the kept build holds one copy of each record";
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 0u);
+    EXPECT_EQ(wdb.GetSubmissions(kKeptBuildViewId).size(), 2u);
+
+    EXPECT_EQ(BuildFrame(wdb, meshes, onlyA, 8u), 1u) << "a new set derives";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 1u);
+    EXPECT_EQ(BuildFrame(wdb, meshes, onlyA, 0u), 1u) << "a submit that names no set derives";
+    EXPECT_EQ(BuildFrame(wdb, meshes, onlyA, 0u), 1u);
+
+    const std::span<const WorldSubmissionRecord> onlyB(both + 1, 1u);
+    wdb.BeginFrame();
+    wdb.Submit(onlyA, 7u);
+    wdb.Submit(onlyB, 9u);
+    EXPECT_EQ(wdb.BuildBatchKeys(meshes, /*materialColorClass=*/{}, kTestMaterialGeneration), 1u);
+    wdb.BeginFrame();
+    wdb.Submit(onlyB, 9u);
+    wdb.Submit(onlyA, 7u);
+    EXPECT_EQ(wdb.BuildBatchKeys(meshes, /*materialColorClass=*/{}, kTestMaterialGeneration), 0u)
+        << "two sets keep the build in either submit order";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 2u);
+
+    rs.Shutdown();
+    device->Shutdown();
+}
+
+// The kept build re-checks every input the derivation reads beside the records: a
+// material whose pipeline goes invalid, a new material index generation, a mesh registry
+// edit and a color class that moves each derive again, and the keys follow the change.
+// A material with no index never lets the build be kept.
+TEST(RenderServicesWorldDrawBuilderTests, KeptBuildDerivesWhenAMaterialOrMeshInputMoves)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+
+    Material matA = Material::TestFactory::Create(GUID::Generate(), "KeptA", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matA, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matA, 1u);
+    Material matB = Material::TestFactory::Create(GUID::Generate(), "KeptB", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matB, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matB, 2u);
+    const Rendering::MeshGPUHandle mesh = RegisterTestMesh(rs);
+    const WorldSubmissionRecord both[] = {KeptBuildRecord(matA, mesh, 0u), KeptBuildRecord(matB, mesh, 1u)};
+
+    WorldDrawBuilder wdb(nullptr);
+    const auto& meshes = rs.GetMeshGPURegistry();
+    ASSERT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u);
+    ASSERT_EQ(BuildFrame(wdb, meshes, both, 7u), 0u);
+
+    Material::TestFactory::SetGraphicsPipelineId(matB, Rendering::GraphicsPipelineId{});
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u) << "a pipeline that goes invalid derives";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 1u);
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 0u);
+    Material::TestFactory::SetGraphicsPipelineId(matB, Rendering::GraphicsPipelineId{1u});
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u) << "a pipeline that turns valid derives";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 2u);
+
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u, kTestMaterialGeneration + 1u), 1u)
+        << "a new material index generation derives";
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u, kTestMaterialGeneration + 1u), 0u);
+
+    RegisterTestMesh(rs);
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u, kTestMaterialGeneration + 1u), 1u)
+        << "a mesh registry edit derives";
+
+    std::vector<uint32> colorClasses = {0u, 1u, 2u}; // identity: the classes of an empty map
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u, kTestMaterialGeneration + 1u, colorClasses), 0u);
+    colorClasses[2] = 1u; // B joins the class of A
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u, kTestMaterialGeneration + 1u, colorClasses), 1u)
+        << "a color class that moves derives";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 1u) << "A and B share one key";
+
+    Material matNoIndex = Material::TestFactory::Create(GUID::Generate(), "KeptNoIndex", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matNoIndex, Rendering::GraphicsPipelineId{1u});
+    const WorldSubmissionRecord withNoIndex[] = {KeptBuildRecord(matA, mesh, 0u),
+                                                 KeptBuildRecord(matNoIndex, mesh, 1u)};
+    EXPECT_EQ(BuildFrame(wdb, meshes, withNoIndex, 8u, kTestMaterialGeneration + 1u), 1u);
+    EXPECT_EQ(BuildFrame(wdb, meshes, withNoIndex, 8u, kTestMaterialGeneration + 1u), 1u)
+        << "a material with no index never keeps the build";
+
+    rs.Shutdown();
+    device->Shutdown();
+}
+
+// A record merged after the build (a late thumbnail submit) is not part of the
+// kept build: the next frame derives, and the late view starts empty.
+TEST(RenderServicesWorldDrawBuilderTests, LateMergeEndsTheKeptBuild)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+
+    Material matA = Material::TestFactory::Create(GUID::Generate(), "KeptA", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matA, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matA, 1u);
+    const Rendering::MeshGPUHandle mesh = RegisterTestMesh(rs);
+    const WorldSubmissionRecord scene[] = {KeptBuildRecord(matA, mesh, 0u)};
+    WorldSubmissionRecord late = KeptBuildRecord(matA, mesh, 1u);
+    late.viewId = kKeptBuildLateViewId;
+
+    WorldDrawBuilder wdb(nullptr);
+    const auto& meshes = rs.GetMeshGPURegistry();
+    ASSERT_EQ(BuildFrame(wdb, meshes, scene, 7u), 1u);
+    ASSERT_EQ(BuildFrame(wdb, meshes, scene, 7u), 0u);
+    wdb.Submit(std::span<const WorldSubmissionRecord>(&late, 1u));
+    wdb.BuildBatchKeysForView(kKeptBuildLateViewId, meshes);
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildLateViewId).size(), 1u);
+
+    EXPECT_EQ(BuildFrame(wdb, meshes, scene, 7u), 1u) << "the frame after a late merge derives";
+    EXPECT_TRUE(wdb.GetSubmissions(kKeptBuildLateViewId).empty());
+    EXPECT_EQ(wdb.GetSubmissions(kKeptBuildViewId).size(), 1u);
+    EXPECT_EQ(BuildFrame(wdb, meshes, scene, 7u), 0u);
+    EXPECT_TRUE(wdb.GetSubmissions(kKeptBuildLateViewId).empty()) << "the kept build holds no late record";
+
+    rs.Shutdown();
+    device->Shutdown();
+}
+
+// A frame that runs BeginFrame and no build leaves no views to keep: the next frame
+// derives again even when it submits the same set, and the view draws all its records.
+TEST(RenderServicesWorldDrawBuilderTests, FrameWithoutABuildEndsTheKeptBuild)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+
+    Material matA = Material::TestFactory::Create(GUID::Generate(), "KeptA", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matA, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matA, 1u);
+    Material matB = Material::TestFactory::Create(GUID::Generate(), "KeptB", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matB, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matB, 2u);
+    const Rendering::MeshGPUHandle mesh = RegisterTestMesh(rs);
+    const WorldSubmissionRecord both[] = {KeptBuildRecord(matA, mesh, 0u), KeptBuildRecord(matB, mesh, 1u)};
+
+    WorldDrawBuilder wdb(nullptr);
+    const auto& meshes = rs.GetMeshGPURegistry();
+    ASSERT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u);
+    wdb.BeginFrame();
+    EXPECT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u) << "the frame after a frame with no build derives";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 2u);
+    EXPECT_EQ(wdb.GetSubmissions(kKeptBuildViewId).size(), 2u);
+
+    rs.Shutdown();
+    device->Shutdown();
+}
+
+// A second build in one frame with no new submit returns 0 and leaves the views of
+// the first build in place, after a full build and after a kept build alike.
+TEST(RenderServicesWorldDrawBuilderTests, RepeatBuildInOneFrameKeepsTheFrameViews)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+
+    Material matA = Material::TestFactory::Create(GUID::Generate(), "KeptA", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matA, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matA, 1u);
+    Material matB = Material::TestFactory::Create(GUID::Generate(), "KeptB", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matB, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matB, 2u);
+    const Rendering::MeshGPUHandle mesh = RegisterTestMesh(rs);
+    const WorldSubmissionRecord both[] = {KeptBuildRecord(matA, mesh, 0u), KeptBuildRecord(matB, mesh, 1u)};
+
+    WorldDrawBuilder wdb(nullptr);
+    const auto& meshes = rs.GetMeshGPURegistry();
+    ASSERT_EQ(BuildFrame(wdb, meshes, both, 7u), 1u);
+    EXPECT_EQ(wdb.BuildBatchKeys(meshes, /*materialColorClass=*/{}, kTestMaterialGeneration), 0u);
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 2u) << "a repeat after a full build";
+    EXPECT_EQ(wdb.GetSubmissions(kKeptBuildViewId).size(), 2u);
+
+    ASSERT_EQ(BuildFrame(wdb, meshes, both, 7u), 0u);
+    EXPECT_EQ(wdb.BuildBatchKeys(meshes, /*materialColorClass=*/{}, kTestMaterialGeneration), 0u);
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 2u) << "a repeat after a kept build";
+    EXPECT_EQ(wdb.GetSubmissions(kKeptBuildViewId).size(), 2u);
+
+    rs.Shutdown();
+    device->Shutdown();
+}
+
+// ClearView ends the kept build: the next frame with the same set derives the view again.
+TEST(RenderServicesWorldDrawBuilderTests, ClearViewEndsTheKeptBuild)
+{
+    auto device = CreateVulkanDeviceFast();
+    if (!device)
+        GTEST_SKIP() << "No Vulkan device available";
+    RenderServices rs;
+    ASSERT_TRUE(rs.Initialize(device.get()));
+
+    Material matA = Material::TestFactory::Create(GUID::Generate(), "KeptA", 32u);
+    Material::TestFactory::SetGraphicsPipelineId(matA, Rendering::GraphicsPipelineId{1u});
+    Material::TestFactory::SetGpuSceneMaterialIndex(matA, 1u);
+    const Rendering::MeshGPUHandle mesh = RegisterTestMesh(rs);
+    const WorldSubmissionRecord scene[] = {KeptBuildRecord(matA, mesh, 0u)};
+
+    WorldDrawBuilder wdb(nullptr);
+    const auto& meshes = rs.GetMeshGPURegistry();
+    ASSERT_EQ(BuildFrame(wdb, meshes, scene, 7u), 1u);
+    ASSERT_EQ(BuildFrame(wdb, meshes, scene, 7u), 0u);
+    wdb.ClearView(kKeptBuildViewId);
+    EXPECT_EQ(BuildFrame(wdb, meshes, scene, 7u), 1u) << "the frame after ClearView derives";
+    EXPECT_EQ(wdb.GetBatchKeys(kKeptBuildViewId).size(), 1u);
 
     rs.Shutdown();
     device->Shutdown();

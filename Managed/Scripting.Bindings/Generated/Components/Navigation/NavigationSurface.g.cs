@@ -42,6 +42,7 @@ namespace GameEngine.Scripting
         SphericalTerrain = 2,
         TooLarge = 3,
         TileBuild = 4,
+        GridBuild = 5,
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 200)]

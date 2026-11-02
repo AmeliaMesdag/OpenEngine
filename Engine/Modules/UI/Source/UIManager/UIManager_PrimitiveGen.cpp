@@ -12,6 +12,7 @@
 #include "../TextShapeCache.h"
 #include "UI/UIFrameBufferRing.h"
 #include "UI/UIPrimitive.h"
+#include "../BubblePaint.h"
 #include "UI/NineSliceLayout.h"
 #include "UI/GlyphRunEmitter.h"
 #include "UI/TextSelectionFill.h"
@@ -219,26 +220,6 @@ void PatchAmbientClip(UI::UIPrimitive* prims, size_t count, uint16_t ambientIdx)
 // full-window borders stay well under this; past it the stroke is decorative
 // enough that a truncated tail is imperceptible.
 constexpr int kMaxBorderDecorationPrimitives = 4096;
-
-// The one colour every border path has to settle on: a UIPrimitive carries a
-// single BorderColor covering all four edges. AddBorderLTRB varies the per-edge
-// WIDTHS but takes that same single colour, so no path carries per-edge colours
-// to the GPU.
-//
-// It must come from a side that is actually DRAWN. Taking "the first non-zero
-// colour" reads Top first, and Top's initial value is 0x000000FF — non-zero,
-// and alpha 0 — so a box bordered on any other side alone drew a transparent
-// band. Callers gate on hasBorder, so at least one width is non-zero.
-uint32_t DrawnBorderColor(const ResolvedStyle& style)
-{
-    const Box4& bw = style.Layout.BorderWidth;
-    const BorderColorsTRBL& c = style.Visual.BorderColor;
-    if (bw.Top > 0)    return c.Top;
-    if (bw.Right > 0)  return c.Right;
-    if (bw.Bottom > 0) return c.Bottom;
-    if (bw.Left > 0)   return c.Left;
-    return 0;
-}
 
 // Emit `border-style: dotted` as evenly spaced square dots along each present
 // edge. Dots run the straight edges only; a per-corner inset keeps them clear
@@ -927,10 +908,7 @@ void UIManager::GenerateAllPrimitives()
     if (m_SdfTextureRegistry)
     {
         for (const auto& binding : m_SdfDeferredRGBindings)
-        {
-            if (binding.Slot != 0)
-                m_SdfTextureRegistry->ReleaseSlot(binding.Slot);
-        }
+            m_SdfTextureRegistry->ReleaseSlot(binding.Reservation);
     }
     m_SdfDeferredRGBindings.clear();
 
@@ -962,23 +940,15 @@ void UIManager::GenerateAllPrimitives()
            const PrimitiveGenContext::DeferredOverlay& b) {
             return static_cast<uint8_t>(a.Layer) < static_cast<uint8_t>(b.Layer);
         });
-    size_t overlayIdx = 0;
-    for (; overlayIdx < ctx.DeferredOverlays.size() &&
-           ctx.DeferredOverlays[overlayIdx].Layer < OverlayLayer::HoverTooltip; ++overlayIdx)
+    for (size_t overlayIdx = 0; overlayIdx < ctx.DeferredOverlays.size(); ++overlayIdx)
     {
         const auto def = ctx.DeferredOverlays[overlayIdx]; // copy: vector may grow
         GenerateOverlayPrimitives(def.Element, ctx, def.ParentAbsX, def.ParentAbsY, def.OwnerTransformIdx);
     }
 
-    // Between the lower layers and the hover tooltip: the arrow draws above
-    // everything generated so far but behind the tooltip body that follows.
+    // Last: the arrow draws over the tooltip body, so its fill covers the
+    // bubble's border where the two join (UI::MakePointerArrow).
     EmitTooltipArrowSlot(ctx);
-
-    for (; overlayIdx < ctx.DeferredOverlays.size(); ++overlayIdx)
-    {
-        const auto def = ctx.DeferredOverlays[overlayIdx];
-        GenerateOverlayPrimitives(def.Element, ctx, def.ParentAbsX, def.ParentAbsY, def.OwnerTransformIdx);
-    }
 
     // Stage 2 part 3: m_SdfPrimitiveBuffer is now solely a per-element
     // scratch buffer that FinalizeElementSlots pops after copying into
@@ -1037,19 +1007,21 @@ void UIManager::EmitTooltipArrowSlot(PrimitiveGenContext& ctx)
     if (!m_TooltipOverlay)
         return;
 
+    m_TooltipArrowCount = 0;
     const size_t scratchStart = ctx.Primitives.size();
-    m_TooltipOverlay->EmitArrowPrimitive(ctx.Primitives, 1.0f, ctx.ContentScale);
+    m_TooltipOverlay->EmitArrowPrimitives(ctx.Primitives, 1.0f, ctx.ContentScale);
     const size_t arrowCount = ctx.Primitives.size() - scratchStart;
     if (arrowCount == 0)
         return; // tooltip hidden this frame — the slot stays out of DrawOrder
 
-    if (m_TooltipArrowSlot == UI::SlotAllocator::kInvalidSlot)
+    if (m_TooltipArrowSlot != UI::SlotAllocator::kInvalidSlot && arrowCount > m_TooltipArrowSlotCap)
     {
-        uint16_t cap = 0;
-        m_TooltipArrowSlot = m_PrimitiveAllocator.Allocate(static_cast<uint16_t>(arrowCount), cap);
-        // (cap will be the size class for arrowCount; arrow is currently 1 primitive.)
-        (void)cap;
+        m_PrimitiveAllocator.Free(m_TooltipArrowSlot, m_TooltipArrowSlotCap);
+        m_TooltipArrowSlot = UI::SlotAllocator::kInvalidSlot;
     }
+    if (m_TooltipArrowSlot == UI::SlotAllocator::kInvalidSlot)
+        m_TooltipArrowSlot = m_PrimitiveAllocator.Allocate(static_cast<uint16_t>(arrowCount), m_TooltipArrowSlotCap);
+    m_TooltipArrowCount = static_cast<uint16_t>(arrowCount);
     const size_t neededSize = static_cast<size_t>(m_TooltipArrowSlot) + arrowCount;
     if (m_PersistentPrimitives.size() < neededSize)
         m_PersistentPrimitives.resize(neededSize);
@@ -1426,8 +1398,7 @@ bool UIManager::DrainPrimitiveDataDirty()
                 DeferredRGBinding& b = m_SdfDeferredRGBindings[read];
                 if (b.Owner == el)
                 {
-                    if (b.Slot != 0)
-                        m_SdfTextureRegistry->ReleaseSlot(b.Slot);
+                    m_SdfTextureRegistry->ReleaseSlot(b.Reservation);
                     continue;
                 }
                 if (write != read)
@@ -1600,8 +1571,7 @@ bool UIManager::DrainPrimitiveDataDirty()
                                            el->GetLayoutX() * pcs, el->GetLayoutY() * pcs,
                                            ew, eh, elText, /*warmOnly=*/true);
                 }
-                if (rs.Visual.BackgroundImage.HasImage ||
-                    el->HasBackgroundImageTextureOverride())
+                if (rs.Visual.BackgroundImage.HasImage)
                 {
                     float paddingX = 0.0f;
                     float paddingY = 0.0f;
@@ -1933,7 +1903,7 @@ bool UIManager::DrainPrimitiveDataDirty()
         }
 
         // Note: we do NOT call el->ClearDirty(VisualDirty) here. ClearDirty
-        // also calls Overrides::ClearDirty() which wipes m_NeedsCascadeRerun
+        // also calls Style().ClearDirty(), which wipes m_NeedsCascadeRerun
         // — and the cascade still needs that signal. Since no production
         // code reads UIElement::VisualDirty as a state, leaving it set is
         // harmless; the bit is effectively just "was queued for drain".
@@ -1973,6 +1943,14 @@ const UI::UIPrimitive* UIManager::PeekPrimitiveForTesting(const UIElement& el, u
         index >= el.m_PrimitiveRangeCount)
         return nullptr;
     const size_t slot = static_cast<size_t>(el.m_PrimitiveRangeStart) + index;
+    return slot < m_PersistentPrimitives.size() ? &m_PersistentPrimitives[slot] : nullptr;
+}
+
+const UI::UIPrimitive* UIManager::PeekTooltipArrowForTesting(uint16_t index) const
+{
+    if (m_TooltipArrowSlot == UI::SlotAllocator::kInvalidSlot || index >= m_TooltipArrowCount)
+        return nullptr;
+    const size_t slot = static_cast<size_t>(m_TooltipArrowSlot) + index;
     return slot < m_PersistentPrimitives.size() ? &m_PersistentPrimitives[slot] : nullptr;
 }
 
@@ -2384,8 +2362,8 @@ void UIManager::GeneratePrimitivesForElement(UIElement* el, PrimitiveGenContext&
                 EmitDashedBorder(ctx.Primitives, style, usedRadii, px, py, pw, ph, cs, clipIdx, ctx.EffectiveOpacity);
         }
 
-        // Background image (CSS background-image or per-element live texture override)
-        if (vs.BackgroundImage.HasImage || el->HasBackgroundImageTextureOverride())
+        // Background image
+        if (vs.BackgroundImage.HasImage)
         {
             EmitBackgroundImagePrimitive(el, ctx, vs, style.Layout.BorderWidth, px, py, pw, ph, clipIdx);
         }
@@ -2592,10 +2570,11 @@ UIManager::ResolvedBgSlot UIManager::ResolveBackgroundTextureSlot(
                 // RenderGraph-published name: the binding carries the NAME; RenderRG
                 // resolves it against the per-frame publish map at declare
                 // time (frame-local ids are never stored on the binding).
-                texSlot = ctx.Textures->ReserveSlot();
+                const ::GenerationalVector::Handle reservation = ctx.Textures->ReserveSlot();
+                texSlot = reservation.IsValid() ? reservation.Index() : 0u;
                 if (texSlot != 0)
                     ctx.Manager->m_SdfDeferredRGBindings.push_back(
-                        {texSlot, el, bgImg.Source.Value});
+                        {reservation, el, bgImg.Source.Value});
             }
         }
         else if (bgImg.Source.Kind == BackgroundImageSource::SourceKind::Guid ||

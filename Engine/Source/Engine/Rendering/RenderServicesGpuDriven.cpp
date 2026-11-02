@@ -92,7 +92,7 @@ using namespace ::GameEngine::Rendering;
 
 // Build per-view LOD selection params from a resolved camera. Disables LOD
 // (forces LOD0) for editor 2D ortho views (cameraPos.w == 1). projScaleY is
-// |proj[1][1]| (column-major proj[5]) — the focal term used to estimate the
+// |proj[1][1]| — the focal term used to estimate the
 // bounding sphere's screen-space coverage in draw_command_scatter.comp. The
 // SSE scales convert that coverage into projected-error pixels for the
 // SSE-normalized threshold slots (MeshLODThresholds.h); shadow buckets pass
@@ -104,11 +104,11 @@ static Rendering::GPUDrawStreamBuilder::ViewLODParams MakeViewLODParams(
     float lodHysteresisBand)
 {
     Rendering::GPUDrawStreamBuilder::ViewLODParams p{};
-    p.cameraPos[0] = cam.cameraPos[0];
-    p.cameraPos[1] = cam.cameraPos[1];
-    p.cameraPos[2] = cam.cameraPos[2];
-    const bool is2DOrtho = cam.cameraPos[3] == 1.0f;
-    p.projScaleY    = is2DOrtho ? 0.0f : std::abs(cam.proj[5]);
+    p.cameraPos.x = cam.cameraPos.x;
+    p.cameraPos.y = cam.cameraPos.y;
+    p.cameraPos.z = cam.cameraPos.z;
+    const bool is2DOrtho = cam.cameraPos.w == 1.0f;
+    p.projScaleY    = is2DOrtho ? 0.0f : std::abs(cam.proj[1][1]);
     p.lodBiasGlobal = globalBias;
     p.forceLod      = forceLevel;
     p.smallCullCoverage = smallCullCoverage;
@@ -194,6 +194,7 @@ std::span<const uint32_t> RenderServices::MeshPoolGroupSpanForDraws() const
 
 void RenderServices::BuildWorldBatchKeys()
 {
+    GE_CPU_PROFILE_SCOPE("RenderServices.BuildWorldBatchKeys");
     // Refresh the P2 color-class map (no-op unless the material set changed or
     // the merge flag is off) so the derived keys, the scatter color table, and
     // the scatter routing SSBO all key on one consistent per-frame snapshot.
@@ -211,8 +212,8 @@ void RenderServices::BuildWorldBatchKeys()
     const std::span<const uint32_t> colorClassMap =
         m_Profile.IsCompat() ? std::span<const uint32_t>{}
                              : m_MaterialSystem.MaterialColorClassSpan();
-    const uint32_t sortViewCount =
-        m_WorldDrawBuilder.BuildBatchKeys(GetMeshGPURegistry(), colorClassMap);
+    const uint32_t sortViewCount = m_WorldDrawBuilder.BuildBatchKeys(
+        GetMeshGPURegistry(), colorClassMap, m_MaterialSystem.MaterialSSBOGeneration());
     m_RenderTimelineStats.SortMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - sortBegin).count();
     m_RenderTimelineStats.SortViewCount = sortViewCount;
@@ -232,6 +233,7 @@ void RenderServices::BuildWorldBatchKeys()
     const uint64_t frameIdx = m_GpuScene ? static_cast<uint64_t>(m_GpuScene->GetFrameIndex()) : 0ull;
     m_WorldDrawListsBuiltFrameIndex = frameIdx;
 
+    GE_CPU_PROFILE_SCOPE("RenderServices.BuildWorldBatchKeys.EmitProducers");
     EmitProducerForwardCommands();
     EmitProducerDepthCommands();
 }
@@ -263,7 +265,11 @@ void RenderServices::ScheduleWorldBucketerDispatches(Rendering::RenderGraph::RGF
     if (m_GpuCullingPipeline->LastPublishArm() !=
         Rendering::GPUCullingPipeline::PublishArm::RenderGraph)
         return;
-    const uint32_t instanceCount = ScheduleWorldBucketerCommon();
+    uint32_t instanceCount = 0;
+    {
+        GE_CPU_PROFILE_SCOPE("RenderServices.Bucketer.Common");
+        instanceCount = ScheduleWorldBucketerCommon();
+    }
     if (instanceCount == 0u)
         return;
 
@@ -289,6 +295,7 @@ void RenderServices::ScheduleWorldBucketerDispatches(Rendering::RenderGraph::RGF
     // Captured snapshot: the spine flushed GPUScene just before this call
     // (BuildFrameGraph gate), so the registry snapshot matches the instance
     // buffer content this call's dispatches read.
+    GE_CPU_PROFILE_SCOPE("RenderServices.Bucketer.UnifiedScatter");
     RefreshScatterElisionContext();
     const ScatterGroupMaps groupMaps = MeshPoolGroupMapsForScatter();
     m_FrameRG.DrawStreamOrdering = m_DrawStreamBuilder->ScheduleUnifiedScatter(
@@ -656,10 +663,10 @@ uint32_t RenderServices::ScheduleWorldBucketerCommon()
                 if (const CascadeFrameData* fd = feature->GetCachedFrameData(viewId);
                     fd && cascadeIdx < fd->NumCascades)
                 {
-                    s.lod.cameraPos[0] = fd->LodCameraPos[cascadeIdx][0];
-                    s.lod.cameraPos[1] = fd->LodCameraPos[cascadeIdx][1];
-                    s.lod.cameraPos[2] = fd->LodCameraPos[cascadeIdx][2];
-                    const bool is2DOrtho = fd->LodCameraPos[cascadeIdx][3] == 1.0f;
+                    s.lod.cameraPos.x = fd->LodCameraPos[cascadeIdx].x;
+                    s.lod.cameraPos.y = fd->LodCameraPos[cascadeIdx].y;
+                    s.lod.cameraPos.z = fd->LodCameraPos[cascadeIdx].z;
+                    const bool is2DOrtho = fd->LodCameraPos[cascadeIdx].w == 1.0f;
                     s.lod.projScaleY = is2DOrtho ? 0.0f : fd->LodProjScaleY[cascadeIdx];
                 }
             }
@@ -1173,7 +1180,7 @@ void RenderServices::ScheduleViewCullingDispatches(Rendering::RenderGraph::RGFra
         // byte-identical to the world-space one (dark-ship).
         {
             const auto originSector = ComputeRenderOriginSector(
-                camData->cameraPos[0], camData->cameraPos[1], camData->cameraPos[2]);
+                camData->cameraPos.x, camData->cameraPos.y, camData->cameraPos.z);
             float ox, oy, oz;
             SectorToWorld(originSector, ox, oy, oz);
             ctx.CameraRelativeOrigin = Mathematics::Vector3{ox, oy, oz};
@@ -1351,9 +1358,10 @@ void RenderServices::RaiseAnimatedVertexModifierContentSignals(Rendering::ViewId
     }
 }
 
-void RenderServices::SubmitWorldSubmissions(std::span<const WorldSubmissionRecord> records)
+void RenderServices::SubmitWorldSubmissions(std::span<const WorldSubmissionRecord> records,
+                                            uint64_t setRevision)
 {
-    m_WorldDrawBuilder.Submit(records);
+    m_WorldDrawBuilder.Submit(records, setRevision);
     m_WorldSubmissionCountThisFrame.fetch_add(static_cast<uint32_t>(records.size()), std::memory_order_relaxed);
 }
 

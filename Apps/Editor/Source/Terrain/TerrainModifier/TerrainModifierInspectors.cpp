@@ -21,6 +21,7 @@
 #include "Editor/Entities/EditorECSHelpers.h"
 #include "EditorChangeNotifications.h"
 #include "Logger/Logger.h"
+#include "TerrainECS/TerrainGpuBake.h"
 #include "TerrainECS/TerrainModifierComponents.h"
 #include "TerrainECS/TerrainRoutePolyline.h"
 
@@ -323,19 +324,15 @@ void AddPoolingRows(const InspectorContext& ctx, const TEffect* comp)
     });
 }
 
-// Every pooled effect loses the GPU height bake: the kernel evaluates one
-// modifier record per texel with no scratch to accumulate into, so the packer
-// refuses the whole batch and the terrain's height bake drops to the CPU.
-// Not a new cost for the flatten — the packer refused pooled flattens before
-// the generalization too. Said at the row, because it is a real cost the
-// author is choosing.
-void AddPooledCpuBakeNotice(const InspectorContext& ctx, TerrainModifierBlend blend)
+// The slow-edit notice under the Blend row. It reads the refusal each bake records, never a field: a
+// row shows it only when this volume is the first refusal of a terrain that would otherwise bake on
+// the GPU. `ownCause` is the refusal the row holds apart from pooling (Stamp, Erosion), or None.
+void AddCpuHeightBakeRowNotice(const InspectorContext& ctx, TerrainModifierBlend blend,
+                               TerrainECS::GpuHeightBakeRefusalReason ownCause)
 {
-    if (blend != TerrainModifierBlend::Average)
-        return;
-    ctx.Parent->AddChild(std::make_unique<EditorUI::InspectorNotice>(
-        "Average pools this effect, which the GPU height bake cannot express - the whole "
-        "terrain's height bake falls back to the CPU while it is on."));
+    const TerrainECS::GpuHeightBakeRefusalReason rowCause =
+        blend == TerrainModifierBlend::Average ? TerrainECS::GpuHeightBakeRefusalReason::PooledBlend : ownCause;
+    Editor::AddCpuHeightBakeNotice(ctx, rowCause);
 }
 
 // The layer-0 trap, said at the row that arms it. The bake warns about the
@@ -542,7 +539,7 @@ void AddTerrainEffectButton(const InspectorContext& ctx)
     button->SetText("Add Effect");
     button->SetTooltip("Add a terrain effect to this volume.");
     button->AddClass("inspector-add-component-button");
-    button->Overrides()
+    button->Style()
         .Set(Style::Width, StyleLength::Px(kTerrainEffectPickerWidthPx))
         .Set(Style::AlignSelf, AlignItems::Center)
         .Set(Style::MarginTop, StyleLength::Px(6.0f))
@@ -685,7 +682,7 @@ void RegisterTerrainModifierInspectors()
                               || comp->Shape == TerrainVolumeShape::SplineArea;
         if (splineShape)
         {
-            InspectorUI::AddLine(ctx.Parent, "Shape comes from the Spline on this entity");
+            InspectorUI::AddInfoCard(ctx.Parent, "Shape comes from the Spline on this entity.");
             if (!ctx.World->GetComponent<SplineComponent>(ctx.Entity))
             {
                 ctx.Parent->AddChild(std::make_unique<EditorUI::InspectorNotice>(
@@ -820,7 +817,6 @@ void RegisterTerrainModifierInspectors()
         Editor::EditorChangeNotifications* n = ctx.ChangeNotifications;
 
         AddEffectHeader(ctx, comp);
-        AddPooledCpuBakeNotice(ctx, comp->Blend);
 
         AddToggleRow(ctx.Parent, "Relative To Volume", comp->UseVolumeHeight,
             [w, e, n](bool v) {
@@ -830,9 +826,10 @@ void RegisterTerrainModifierInspectors()
                 u.UseVolumeHeight = v;
                 Editor::CommitComponentUpdate(w, e, n, u);
             },
-            "Measure Target Height from the volume's own height - the entity Y for circle and "
-            "rectangle shapes, the spline Y at each point for spline shapes (so a sloped road "
-            "flattens to its own profile). Off = an absolute world Y.");
+            "Measures Target Height from the volume's own height: the entity's Y for a circle or "
+            "rectangle; the spline's Y at each point for a path, so a sloped road keeps its "
+            "profile; for a closed area, a smooth surface that follows the rim and meets each "
+            "road at its height. Off: Target Height is a world Y.");
 
         AddComponentFloatRowWithDrag<TerrainFlattenEffect>(
             ctx.Parent, comp->UseVolumeHeight ? "Height Offset" : "Target Height",
@@ -852,6 +849,7 @@ void RegisterTerrainModifierInspectors()
             },
             true);
         AddBlendSmoothingRow(ctx.Parent, comp, w, e, n);
+        AddCpuHeightBakeRowNotice(ctx, comp->Blend, TerrainECS::GpuHeightBakeRefusalReason::None);
 
         AddClaimsRow(ctx, comp,
             "Stop at ground another volume has claimed, instead of grading through it. Turn this "
@@ -988,7 +986,7 @@ void RegisterTerrainModifierInspectors()
             },
             true);
         AddBlendSmoothingRow(ctx.Parent, comp, w, e, n);
-        AddPooledCpuBakeNotice(ctx, comp->Blend);
+        AddCpuHeightBakeRowNotice(ctx, comp->Blend, TerrainECS::GpuHeightBakeRefusalReason::None);
 
         AddClaimsRow(ctx, comp,
             "Stop at ground another volume has claimed, instead of raising or lowering through "
@@ -1021,7 +1019,9 @@ void RegisterTerrainModifierInspectors()
             },
             true);
         AddBlendSmoothingRow(ctx.Parent, comp, w, e, n);
-        AddPooledCpuBakeNotice(ctx, comp->Blend);
+        AddCpuHeightBakeRowNotice(ctx, comp->Blend,
+                                  comp->ErosionStrength > 0.0f ? TerrainECS::GpuHeightBakeRefusalReason::Erosion
+                                                               : TerrainECS::GpuHeightBakeRefusalReason::None);
 
         AddComponentFloatRowWithDrag<TerrainNoiseEffect>(
             ctx.Parent, "Frequency", comp->Frequency, w, e, n,
@@ -1120,7 +1120,7 @@ void RegisterTerrainModifierInspectors()
             },
             true);
         AddBlendSmoothingRow(ctx.Parent, comp, w, e, n);
-        AddPooledCpuBakeNotice(ctx, comp->Blend);
+        AddCpuHeightBakeRowNotice(ctx, comp->Blend, TerrainECS::GpuHeightBakeRefusalReason::Stamp);
 
         AddComponentFloatRowWithDrag<TerrainStampEffect>(
             ctx.Parent, "Height Scale", comp->HeightScale, w, e, n,

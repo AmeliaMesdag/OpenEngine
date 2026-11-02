@@ -95,6 +95,17 @@ class TextureCookUsageTag : public testing::Test
     // as they do in an occlusion-roughness-metallic map.
     static fs::path WriteTexture(GUID& guid, uint32 size = 4)
     {
+        std::vector<uint8> texels;
+        texels.reserve(size_t(size) * size * 4);
+        for (uint32 y = 0; y < size; ++y)
+            for (uint32 x = 0; x < size; ++x)
+                texels.insert(texels.end(), {uint8(x * 7 + y * 3), uint8(x ^ y), uint8((x * y) >> 5), uint8(255)});
+        return WriteTga(guid, size, texels);
+    }
+
+    // A fresh square source in the project with no usage tag, from `size` x `size` RGBA texels.
+    static fs::path WriteTga(GUID& guid, uint32 size, const std::vector<uint8>& texels)
+    {
         const fs::path path = s_Workspace / "Assets" / (GUID::Generate().ToString() + ".tga");
         std::vector<uint8> bytes(18, 0);
         bytes[2] = 2;
@@ -104,10 +115,9 @@ class TextureCookUsageTag : public testing::Test
         bytes[15] = uint8(size >> 8);
         bytes[16] = 32;
         bytes[17] = 0x28;
-        bytes.reserve(bytes.size() + size_t(size) * size * 4);
-        for (uint32 y = 0; y < size; ++y)
-            for (uint32 x = 0; x < size; ++x)
-                bytes.insert(bytes.end(), {uint8(x * 7 + y * 3), uint8(x ^ y), uint8((x * y) >> 5), uint8(255)});
+        bytes.reserve(bytes.size() + texels.size());
+        for (size_t i = 0; i + 3 < texels.size(); i += 4)
+            bytes.insert(bytes.end(), {texels[i + 2], texels[i + 1], texels[i], texels[i + 3]});
         std::ofstream(path, std::ios::binary)
             .write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
         const auto registered = Assets().GetRegistry().RegisterAssetByPath(path);
@@ -199,6 +209,46 @@ TEST_F(TextureCookUsageTag, WideningATagReloadsTheLoadedTexture)
     Bind(texture, "metallicRoughnessMap");
     EXPECT_EQ(StoredUsage(path), "packed");
     EXPECT_TRUE(Assets().IsReloadInFlight(texture));
+}
+
+// Changing a cooked texture's type in the texture inspector writes the usage and asks for a
+// recook (TextureInspector's WriteTextureCookMeta): the next load cooks under the new usage. A
+// normal map gets its variance companion and a colour texture has none, in both directions.
+TEST_F(TextureCookUsageTag, ChangingATexturesTypeRecooksItWithAndWithoutTheVarianceCompanion)
+{
+    if (!IsTextureCookEncoderAvailable())
+        GTEST_SKIP() << "BC encoder unavailable";
+    TextureAsset::SetGpuTranscodeTarget(TextureGpuTranscodeTarget::BC7);
+    constexpr uint32 kSize = 16;
+    std::vector<uint8> checker;
+    for (uint32 y = 0; y < kSize; ++y)
+        for (uint32 x = 0; x < kSize; ++x)
+            checker.insert(checker.end(), {uint8(128), uint8(((x + y) & 1u) ? 64 : 191), uint8(238), uint8(255)});
+    GUID texture;
+    const fs::path path = WriteTga(texture, kSize, checker);
+    ASSERT_FALSE(texture.IsNull());
+    const auto setType = [this, &path, &texture](const char* usage) {
+        ASSERT_TRUE(Assets().GetRegistry().SetMetaValue(path, kTextureUsageMetaKey, usage));
+        m_Textures.RequestRecook(texture, AssetLoadPriority::High);
+    };
+    const auto companionOf = [](const SharedPtr<Asset>& asset) {
+        const auto* cooked = dynamic_cast<const TextureAsset*>(asset.get());
+        return cooked ? cooked->GetNormalVarianceCompanion() : nullptr;
+    };
+    ASSERT_TRUE(Assets().GetRegistry().SetMetaValue(path, kTextureUsageMetaKey, "color"));
+    const AssetLoadHandle load = Assets().LoadAsset(texture, [](Result<SharedPtr<Asset>, AssetError>) {});
+    ASSERT_TRUE(PumpUntil([&] { return load.IsComplete(); }));
+    const SharedPtr<Asset> loaded = load.GetResult();
+    ASSERT_NE(loaded, nullptr);
+    ASSERT_EQ(companionOf(loaded), nullptr) << "a colour cook has no variance companion";
+
+    setType("normal");
+    EXPECT_TRUE(PumpUntil([&] { return ResidentFormat(loaded) == TextureFormat::BC5 && companionOf(loaded) != nullptr; }))
+        << "after the change to a normal map, the cook must write the variance companion";
+
+    setType("color");
+    EXPECT_TRUE(PumpUntil([&] { return ResidentFormat(loaded) == TextureFormat::BC7 && companionOf(loaded) == nullptr; }))
+        << "after the change back to colour, the companion must be gone";
 }
 
 // A colour texture a data slot also binds: no one cooked artefact serves both, so the tag the

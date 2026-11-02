@@ -52,7 +52,7 @@ class SkyEnvironmentSource final : public IEnvironmentSource
     bool HasActiveContent() const override { return HasActiveSky(); }
     float IblIntensity() const override;
     float LowerHemisphereDarkness() const override;
-    void AmbientGradientTint(float outSky[3], float outEquator[3], float outGround[3]) const override;
+    EnvironmentAmbientGradientTint AmbientGradientTint() const override;
     void ScheduleBake(const EnvironmentBakeContext& ctx) override;
 
     // Digest of the sky state the renderer's sky-view LUT currently CONTAINS

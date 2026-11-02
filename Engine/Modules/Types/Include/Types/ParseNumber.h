@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -196,8 +197,8 @@ inline std::optional<float> ParseLeadingFloat(std::string_view text, size_t* cha
 // accept, so a string parses identically on every platform. ParseFloat and
 // ParseDouble above differ across platforms at the edges — strtod_l takes hex
 // ("0x10") and inf/nan, from_chars does not — and both stop at the first
-// character they cannot use. This one refuses hex, a leading '+', inf and nan,
-// refuses anything left over after the number, and refuses a non-finite
+// character they cannot use. This one allows one leading '+', refuses hex, inf
+// and nan, refuses anything left over after the number, and refuses a non-finite
 // result. Surrounding ASCII space is allowed and trimmed.
 //
 // Use it wherever a string has to mean the same number on Windows and macOS:
@@ -232,6 +233,17 @@ inline bool ParseStrictDecimal(std::string_view text, double& outValue)
     if (!parsed || consumed != number.size() || !std::isfinite(*parsed))
         return false;
     outValue = *parsed;
+    return true;
+}
+
+// ParseStrictDecimal for a float: the same strict decimal, refused when its magnitude is past a
+// float's largest finite value. A refusal leaves outValue unchanged.
+inline bool ParseStrictDecimalFloat(std::string_view text, float& outValue)
+{
+    double parsed = 0.0;
+    if (!ParseStrictDecimal(text, parsed) || std::abs(parsed) > std::numeric_limits<float>::max())
+        return false;
+    outValue = static_cast<float>(parsed);
     return true;
 }
 

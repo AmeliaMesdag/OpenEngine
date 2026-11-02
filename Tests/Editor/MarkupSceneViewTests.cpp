@@ -194,14 +194,14 @@ Rendering::CameraData CameraLookingAlongZ(const Vector3& position, float forward
     const Mathematics::Matrix4x4 projection =
         Mathematics::Matrix4x4::PerspectiveReverseZ(60.0f * 3.14159265f / 180.0f, width / height, 0.1f, 10000.0f);
     Rendering::CameraData camera{};
-    std::memcpy(camera.view, view.Data(), sizeof(camera.view));
-    std::memcpy(camera.proj, projection.Data(), sizeof(camera.proj));
-    std::memcpy(camera.viewProj, (projection * view).Data(), sizeof(camera.viewProj));
-    std::memcpy(camera.viewRel, camera.view, sizeof(camera.viewRel));
-    std::memcpy(camera.viewProjRel, camera.viewProj, sizeof(camera.viewProjRel));
-    camera.cameraPos[0] = position.x;
-    camera.cameraPos[1] = position.y;
-    camera.cameraPos[2] = position.z;
+    camera.view = view;
+    camera.proj = projection;
+    camera.viewProj = projection * view;
+    camera.viewRel = camera.view;
+    camera.viewProjRel = camera.viewProj;
+    camera.cameraPos.x = position.x;
+    camera.cameraPos.y = position.y;
+    camera.cameraPos.z = position.z;
     return camera;
 }
 
@@ -786,7 +786,7 @@ Rendering::CameraData ReadbackCamera()
 float ReadbackDeviceDepth(float z)
 {
     const Rendering::CameraData camera = ReadbackCamera();
-    return (camera.proj[10] * z + camera.proj[14]) / z;
+    return (camera.proj[2][2] * z + camera.proj[3][2]) / z;
 }
 
 // The texel x of the readback pane's center row in `texels` (RGBA16F), channel `channel`.

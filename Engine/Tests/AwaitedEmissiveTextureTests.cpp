@@ -19,6 +19,7 @@
 #include "Rendering/Materials/MaterialDocument.h"
 #include "TestDeviceHelper.h"
 #include "TestTempDir.h"
+#include "Types/Fnv1a.h"
 
 #include <chrono>
 #include <cstdint>
@@ -190,31 +191,6 @@ TEST_F(AwaitedEmissiveTexture, AnEvictedEmissiveMapAwaitsItsReloadInBlack)
     EXPECT_TRUE(mat->IsTextureAwaited(static_cast<uint32_t>(TextureSlot::kEmissive)));
 }
 
-// A model's embedded emissive image that cannot become a texture leaves the slot black; once it
-// is resident the slot samples the texture itself.
-TEST_F(AwaitedEmissiveTexture, AnEmbeddedEmissiveMapIsBlackWhenItFailsAndItsOwnTextureWhenResident)
-{
-    const GUID modelGuid = GUID::Generate();
-    MaterialDocument doc = MaterialDocument::CreateDefaultPBR("EmbeddedEmissive");
-    doc.textures["emissiveMap"] = std::string(kEmbeddedTexturePrefix) + "0";
-    Material* mat = m_Services->Materials().RegisterMaterialFromDocument(GUID::Generate(), doc);
-    ASSERT_NE(mat, nullptr);
-
-    Vector<EmbeddedImage> images(1);
-    images[0].MimeType = "image/png";
-    Textures().ResolveEmbeddedTextures(mat, doc, modelGuid, images);
-    EXPECT_EQ(mat->GetBindlessTextureIndex(kEmissive), Textures().DefaultBlackBindlessIndex())
-        << "an image with no bytes never becomes a texture";
-
-    images[0].Data.assign(std::begin(kOnePixelPng), std::end(kOnePixelPng));
-    Textures().ResolveEmbeddedTextures(mat, doc, modelGuid, images);
-    const uint32_t resident = mat->GetBindlessTextureIndex(kEmissive);
-    EXPECT_NE(resident, Textures().DefaultBlackBindlessIndex());
-    EXPECT_NE(resident, Textures().DefaultWhiteBindlessIndex());
-    EXPECT_TRUE(mat->GetTexture(kEmissive).IsValid());
-    EXPECT_FALSE(mat->IsTextureAwaited(static_cast<uint32_t>(TextureSlot::kEmissive)));
-}
-
 // A document reference that resolves to no asset is an assigned map that failed: black.
 TEST_F(AwaitedEmissiveTexture, AnEmissiveReferenceThatResolvesToNoAssetStaysBlack)
 {
@@ -269,4 +245,31 @@ TEST_F(AwaitedEmissiveTextureUploadJob, AnAssignedEmissiveMapIsBlackUntilItsUplo
     EXPECT_TRUE(mat->GetTexture(kEmissive).IsValid()) << "landed";
     EXPECT_NE(mat->GetBindlessTextureIndex(kEmissive), m_Textures.DefaultBlackBindlessIndex()) << "landed";
     EXPECT_FALSE(mat->IsTextureAwaited(kEmissiveOrdinal)) << "landed";
+}
+
+// A model's embedded emissive image that cannot become a texture leaves the slot black; once it
+// is resident the slot samples the texture itself.
+TEST_F(AwaitedEmissiveTextureUploadJob, AnEmbeddedEmissiveMapIsBlackWhenItFailsAndItsOwnTextureWhenResident)
+{
+    const GUID modelGuid = GUID::Generate();
+    MaterialDocument doc = MaterialDocument::CreateDefaultPBR("EmbeddedEmissive");
+    doc.textures["emissiveMap"] = std::string(kEmbeddedTexturePrefix) + "0";
+    Material* mat = m_Materials.Register(GUID::Generate(), doc);
+    ASSERT_NE(mat, nullptr);
+
+    Vector<EmbeddedImage> images(1);
+    images[0].MimeType = "image/png";
+    m_Textures.ResolveEmbeddedTextures(mat, doc, modelGuid, images);
+    EXPECT_EQ(mat->GetBindlessTextureIndex(kEmissive), m_Textures.DefaultBlackBindlessIndex())
+        << "an image with no bytes never becomes a texture";
+
+    images[0].Data.assign(std::begin(kOnePixelPng), std::end(kOnePixelPng));
+    images[0].ContentHash = Hashing::Fnv1a64(images[0].Data.data(), images[0].Data.size());
+    m_Textures.ResolveEmbeddedTextures(mat, doc, modelGuid, images);
+    PumpUntilSettled(mat->GetGuid());
+    const uint32_t resident = mat->GetBindlessTextureIndex(kEmissive);
+    EXPECT_NE(resident, m_Textures.DefaultBlackBindlessIndex());
+    EXPECT_NE(resident, m_Textures.DefaultWhiteBindlessIndex());
+    EXPECT_TRUE(mat->GetTexture(kEmissive).IsValid());
+    EXPECT_FALSE(mat->IsTextureAwaited(static_cast<uint32_t>(TextureSlot::kEmissive)));
 }

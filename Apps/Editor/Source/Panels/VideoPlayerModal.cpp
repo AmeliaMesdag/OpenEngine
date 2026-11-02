@@ -158,9 +158,9 @@ void VideoPlayerModal::BuildUI()
     {
         m_VideoArea = backdrop->FindById("vpm-video-area"_sid);
         // Background-image bound at runtime via UIManager external texture.
-        m_VideoArea->Styles()
-            .SetBackgroundResourceName(kVideoPlayerFrameTextureName)
-            .SetBackgroundSizeContain();
+        m_VideoArea->Style()
+            .Set(Style::BackgroundImage, BackgroundImageSource::Resource(kVideoPlayerFrameTextureName))
+            .Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Contain});
         m_VideoArea->RegisterEventHandler(kEventMouseDown, [this](UIEvent& e)
         {
             if (!m_Open || e.Button != 0)
@@ -284,7 +284,7 @@ void VideoPlayerModal::Open(const std::string& videoPath, const std::string& tit
     if (m_TitleLabel)
         m_TitleLabel->SetText(m_Title);
     if (m_SeekFill)
-        m_SeekFill->Overrides().Set(Style::Width, StyleLength::Percent(0.0f));
+        m_SeekFill->Style().Set(Style::Width, StyleLength::Percent(0.0f));
 
     AddClass("visible");
     if (m_UIManager)
@@ -613,7 +613,7 @@ void VideoPlayerModal::UpdateControlState()
     if (m_SeekFill && dur > 0.0f)
     {
         const float pct = Math::Clamp01(cur / dur) * 100.0f;
-        m_SeekFill->Overrides().Set(Style::Width, StyleLength::Percent(pct));
+        m_SeekFill->Style().Set(Style::Width, StyleLength::Percent(pct));
     }
 
     if (m_TimeLabel)
@@ -752,7 +752,7 @@ void VideoPlayerModal::PlaceWindow(float x, float y)
     {
         return;
     }
-    m_Window->Overrides()
+    m_Window->Style()
         .Set(Style::PositionLeft, StyleLength::Px(m_WindowOffsetX))
         .Set(Style::PositionTop,  StyleLength::Px(m_WindowOffsetY));
     m_Window->MarkDirty(UIElement::LayoutDirty | UIElement::StyleDirty);

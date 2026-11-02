@@ -368,6 +368,13 @@ std::filesystem::path ParserRegistry::ResolveReadPath(const AssetMetadata& metad
     return parser ? parser->ResolveReadPath(metadata, assetManager) : metadata.Path;
 }
 
+AssetDecodeInputs ParserRegistry::ResolveDecodeInputs(const AssetMetadata& metadata, const Vector<uint8>& bytes,
+                                                      AssetManager& assetManager) const
+{
+    const auto parser = FindParser(metadata.Path);
+    return parser ? parser->ResolveDecodeInputs(metadata, bytes, assetManager) : AssetDecodeInputs{};
+}
+
 std::vector<std::shared_ptr<AssetParser>> ParserRegistry::FindParsers(const std::string& extension) const
 {
     std::string normalizedExt = NormalizeExtension(extension);

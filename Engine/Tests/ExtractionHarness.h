@@ -63,9 +63,9 @@ inline void SetIdentityMatrix(float* m)
 inline CameraData MakeIdentityCamera()
 {
     CameraData data{};
-    SetIdentityMatrix(data.view);
-    SetIdentityMatrix(data.proj);
-    SetIdentityMatrix(data.viewProj);
+    data.view = Mathematics::Matrix4x4::Identity();
+    data.proj = Mathematics::Matrix4x4::Identity();
+    data.viewProj = Mathematics::Matrix4x4::Identity();
     return data;
 }
 

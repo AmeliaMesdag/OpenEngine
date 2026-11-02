@@ -5,7 +5,8 @@
 #include "TerrainECS/TerrainModifierSystem.h"
 #include "TerrainRowBands.h"
 
-#include "PageStreaming/HeightPageOverlay.h"
+#include "Core/CpuProfiler.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 #include "PageStreaming/PageSampleRect.h"
 #include "PageStreaming/PageStore/PageStoreFormat.h"
 
@@ -139,8 +140,10 @@ void ReleaseHeightPageOverlay(TiledTerrainData& tiled)
 void TerrainModifierSystem::BakeHeightPageOverlay(TiledTerrainData& tiled, float32 heightScale,
                                                   float32 terrainOriginY,
                                                   const std::vector<ResolvedModifier>& modifiers, bool fullBake,
-                                                  const DirtyUnion& heightDirty)
+                                                  const DirtyUnion& heightDirty, bool readBakedTiles)
 {
+    GE_CPU_PROFILE_SCOPE("Terrain.PageOverlay");
+    tiled.HeightBakeReport.PageOverlayComposedSamples = 0;
     const std::optional<TileLattice> lattice = MakeTileLattice(tiled);
     if (!lattice || tiled.PageOverlayByteCap == 0)
     {
@@ -218,14 +221,21 @@ void TerrainModifierSystem::BakeHeightPageOverlay(TiledTerrainData& tiled, float
         regions.push_back(BakeBandRegion{static_cast<int32>(r.MinX), static_cast<int32>(r.MinZ),
                                          static_cast<int32>(r.MaxX), static_cast<int32>(r.MaxZ)});
     static const std::vector<ResolvedModifier> kNoModifiers;
+    const LatticeBlockSource source = readBakedTiles ? LatticeBlockSource::BakedTiles : LatticeBlockSource::Compose;
+    std::atomic<uint64> composedSamples{0};
     RunBakeRowBands(regions, [&](std::size_t, int32 x0, int32 x1, int32 z0, int32 z1) {
         const uint32 countX = static_cast<uint32>(x1 - x0 + 1);
         const uint32 countZ = static_cast<uint32>(z1 - z0 + 1);
         std::vector<float32> baked;
         std::vector<float32> base;
-        if (!ComposeLatticeBlock(tiled, heightScale, terrainOriginY, modifiers, x0, z0, countX, countZ, baked) ||
-            !ComposeLatticeBlock(tiled, heightScale, terrainOriginY, kNoModifiers, x0, z0, countX, countZ, base))
+        uint64 bakedComposed = 0;
+        uint64 baseComposed = 0;
+        if (!BuildLatticeBlock(tiled, heightScale, terrainOriginY, modifiers, x0, z0, countX, countZ, source, baked,
+                               bakedComposed) ||
+            !BuildLatticeBlock(tiled, heightScale, terrainOriginY, kNoModifiers, x0, z0, countX, countZ,
+                               LatticeBlockSource::Compose, base, baseComposed))
             return;
+        composedSamples.fetch_add(bakedComposed, std::memory_order_relaxed);
         for (uint32 z = 0; z < countZ; ++z)
         {
             float32* out = delta.data() + static_cast<std::size_t>(z0 - static_cast<int32>(bake.MinZ) + z) * bake.Width() +
@@ -234,6 +244,8 @@ void TerrainModifierSystem::BakeHeightPageOverlay(TiledTerrainData& tiled, float
                 out[x] = baked[static_cast<std::size_t>(z) * countX + x] - base[static_cast<std::size_t>(z) * countX + x];
         }
     });
+
+    tiled.HeightBakeReport.PageOverlayComposedSamples = composedSamples.load(std::memory_order_relaxed);
 
     if (rebakeInPlace)
     {

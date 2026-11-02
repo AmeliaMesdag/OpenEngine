@@ -5,6 +5,7 @@
 #include "UI/Controls/Label.h"
 #include "UI/Controls/ScrollView.h"
 #include "../Layout/DropdownPopupPlacement.h"
+#include "UI/ElementBuilder.h"
 #include "UI/StyleProperties.h"
 #include "UI/UIElement.h"
 
@@ -61,6 +62,7 @@ void MaskField::SetOptions(std::span<const MaskOption> options)
     assert(options.size() <= kMaxOptions && "MaskField: at most 32 options");
     m_Options.assign(options.begin(), options.begin() + static_cast<std::ptrdiff_t>(std::min(options.size(), kMaxOptions)));
     // The rows are built when the popup opens: a list of fields (one per hierarchy row) holds no popup rows.
+    RemoveOptionRows();
     m_RowsStale = true;
     if (IsPopupOpen())
         RebuildOptionRows();
@@ -206,19 +208,27 @@ void MaskField::BuildPopup()
     m_Popup->AddChild(std::move(list));
 }
 
-void MaskField::RebuildOptionRows()
+void MaskField::RemoveOptionRows()
 {
     for (Checkbox* row : m_OptionRows)
         m_OptionList->GetViewport()->RemoveChild(row);
     m_OptionRows.clear();
+}
+
+void MaskField::RebuildOptionRows()
+{
+    RemoveOptionRows();
     m_RowsStale = false;
     for (size_t index = 0; index < m_Options.size(); ++index)
     {
-        auto row = std::make_unique<Checkbox>();
-        row->AddClass("dropdown-item");
-        row->AddClass("mask-field-option");
-        row->SetText(m_Options[index].Label);
-        row->SetFocusProxy(this);
+        std::unique_ptr<Checkbox> row = UI::Element<Checkbox>()
+            .Class("dropdown-item", "mask-field-option")
+            .Set(&Checkbox::SetText, m_Options[index].Label)
+            .Set(&UIElement::SetFocusProxy, static_cast<UIElement*>(this))
+            .Build();
+        // Build returns null only when the Checkbox registration is missing; the log names the fix.
+        if (!row)
+            return;
         row->SetOnValueChanged([this, index](const bool& on) { OnOptionRowChanged(index, on); });
         m_OptionRows.push_back(row.get());
         m_OptionList->AddContent(std::move(row));
@@ -266,8 +276,9 @@ void MaskField::ApplyBits(uint32 bits, bool on)
 
 void MaskField::OnOptionRowChanged(size_t index, bool on)
 {
-    if (m_Refreshing || index >= m_Options.size())
+    if (m_Refreshing)
         return;
+    assert(index < m_Options.size() && "MaskField: a row exists only for a current option");
     // A mixed row resolves to on: the click sets the bit on every entity of the selection.
     const uint32 bit = m_Options[index].Bits;
     ApplyBits(bit, (m_MixedBits & bit) != 0u ? true : on);
@@ -320,16 +331,16 @@ void MaskField::UpdatePopupPlacement()
     const UI::Layout::DropdownPopupRoom room = UI::Layout::PlaceDropdownPopup(*this, *m_Popup, requiredHeight);
     const float roomLayout = room.Height / room.WindowPerLayoutY;
 
-    const std::optional<StyleLength> bound = m_OptionList->Overrides().Get(Style::MaxHeight);
+    const std::optional<StyleLength> bound = m_OptionList->Style().Get(Style::MaxHeight);
     if (requiredHeight > roomLayout && GetOwnerManager())
     {
         const StyleLength wanted = StyleLength::Px(std::max(kEstimatedRowHeight, roomLayout - fixedHeight));
         if (!bound || *bound != wanted)
-            m_OptionList->Overrides().Set(Style::MaxHeight, wanted);
+            m_OptionList->Style().Set(Style::MaxHeight, wanted);
     }
     else if (bound)
     {
-        m_OptionList->Overrides().Reset(Style::MaxHeight);
+        m_OptionList->Style().Reset(Style::MaxHeight);
     }
 }
 

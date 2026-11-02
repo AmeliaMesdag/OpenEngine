@@ -7,7 +7,7 @@
 
 #include "TerrainECS/PageLevelRule.h"
 #include "TerrainECS/SurfaceHeightQuery.h"
-#include "TerrainECS/TerrainHeightPages.h"
+#include "TerrainECS/TerrainPages.h"
 #include "TerrainECS/TerrainService.h"
 
 #include "Components/Terrain/Terrain.h"
@@ -94,7 +94,7 @@ inline bool StreamPagesUntilTheCameraPageLands(TerrainService& service, const Pa
                                                const Mathematics::Vector3& camera)
 {
     constexpr uint64 kFramesToSettle = 2000;
-    TerrainHeightPages& pages = service.GetHeightPages();
+    TerrainPages& pages = service.GetTerrainPages();
     const PageLevelView view = MakePageLevelView(kPageLevelReferenceRows, 1.0f, 11.0f);
     pages.Update(1, 1.0f / 60.0f, false, 2);
     for (uint64 frame = 2; frame < kFramesToSettle; ++frame)

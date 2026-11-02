@@ -33,4 +33,38 @@ bool IsGpuHeightBakeEnabled()
 
 void SetGpuHeightBakeEnabledForTests(int state) { g_GpuHeightBakeTestOverride = state; }
 
+const char* GpuHeightBakeRefusalName(GpuHeightBakeRefusalReason reason)
+{
+    switch (reason)
+    {
+    case GpuHeightBakeRefusalReason::None:                  return "none";
+    case GpuHeightBakeRefusalReason::Disabled:              return "disabled (GE_TERRAIN_GPU_BAKE=0)";
+    case GpuHeightBakeRefusalReason::TextureLayout:         return "the height texture is not a whole-terrain atlas";
+    case GpuHeightBakeRefusalReason::BaseSource:            return "the base is not procedural noise";
+    case GpuHeightBakeRefusalReason::SplineShape:           return "spline shape";
+    case GpuHeightBakeRefusalReason::GlobalVolume:          return "global volume";
+    case GpuHeightBakeRefusalReason::InwardFeatherOrWeight: return "Falloff Inward or Weight";
+    case GpuHeightBakeRefusalReason::PooledBlend:           return "Average blend";
+    case GpuHeightBakeRefusalReason::HeightFromVolume:      return "Relative To Volume";
+    case GpuHeightBakeRefusalReason::Erosion:               return "erosion";
+    case GpuHeightBakeRefusalReason::HeightOffset:          return "height offset";
+    case GpuHeightBakeRefusalReason::Stamp:                 return "stamp";
+    case GpuHeightBakeRefusalReason::GroundClaim:           return "ground claim";
+    case GpuHeightBakeRefusalReason::OtherEffect:           return "an effect kind the GPU bake has no code for";
+    case GpuHeightBakeRefusalReason::SculptZone:            return "sculpt zone";
+    }
+    return "unknown";
+}
+
+const char* TerrainHeightBakePathName(TerrainHeightBakePath path)
+{
+    switch (path)
+    {
+    case TerrainHeightBakePath::Gpu:      return "gpu";
+    case TerrainHeightBakePath::Cpu:      return "cpu";
+    case TerrainHeightBakePath::NotBaked: return "not baked";
+    }
+    return "unknown";
+}
+
 } // namespace GameEngine::TerrainECS

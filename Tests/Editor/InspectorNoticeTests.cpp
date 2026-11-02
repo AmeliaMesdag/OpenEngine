@@ -1,13 +1,13 @@
-// The inspector's notice control: a statement on a plate, and optionally the one action that
-// resolves it. What every consumer rests on is that the text and the action are in the element tree
+// The inspector's notice control: a statement on a plate, optionally the one action that resolves it,
+// and optionally a Dismiss. What every consumer rests on is that the text and the action are in the element tree
 // from construction (the layout is instantiated by the constructor, not on attach), so the first
 // test reads them from a notice no UIManager has seen, and another builds one inside an event
 // dispatch, where an inspector rebuild can build it. An action that rebuilds its own notice runs to
 // its end on the real input path. The layout tests lay the real notice out over the real editor
 // stylesheets: the action at the end of the text's row on its first line, no space for an action
 // the notice does not have, a long text wrapping beside its action at a narrow inspector, the action
-// under the text only where the row has no room for both, and a notice keeping its height in a
-// crowded column.
+// under the text only where the row has no room for both, the dismiss after the action and wrapping
+// with it, and a notice keeping its height in a crowded column.
 
 #include <gtest/gtest.h>
 
@@ -59,6 +59,11 @@ Label* TextOf(UIElement& notice)
 Button* ActionOf(UIElement& notice)
 {
     return dynamic_cast<Button*>(FindByClass(&notice, "inspector-notice-action"));
+}
+
+Button* DismissOf(UIElement& notice)
+{
+    return dynamic_cast<Button*>(FindByClass(&notice, "inspector-notice-dismiss"));
 }
 
 void Click(Button& button)
@@ -119,6 +124,32 @@ TEST(InspectorNotice, ShowsItsTextAndFiresItsAction)
     EXPECT_EQ(invoked, 1) << "the button has to reach the action it was given";
 }
 
+// A notice the user may put away shows a Dismiss button after its action; one without it shows none,
+// and the button reaches the handler it was given, not the action.
+TEST(InspectorNotice, ShowsADismissOnlyWhenGivenOneAndItReachesItsHandler)
+{
+    InspectorNotice notice("This view is brighter than the game camera, so the game will look darker.");
+    Button* dismiss = DismissOf(notice);
+    ASSERT_NE(dismiss, nullptr) << "the notice's dismiss is not in the tree; InspectorNotice.uxml is staged beside "
+                                   "the test executable under Assets/UI/controls/InspectorNotice/";
+    EXPECT_TRUE(dismiss->HasClass("hidden")) << "a notice that was not given a dismiss shows one";
+    EXPECT_EQ(dismiss->GetText(), "") << "a notice that was not given a dismiss carries its word, which a scan of the "
+                                         "notice's text reads";
+
+    int invoked = 0;
+    int dismissed = 0;
+    notice.SetAction("Match game camera", "", [&invoked]() { ++invoked; });
+    EXPECT_TRUE(dismiss->HasClass("hidden")) << "giving the notice an action showed its dismiss";
+    notice.SetDismiss("Hide this notice", [&dismissed]() { ++dismissed; });
+
+    EXPECT_FALSE(dismiss->HasClass("hidden"));
+    EXPECT_EQ(dismiss->GetText(), "Dismiss");
+    EXPECT_EQ(dismiss->GetTooltip(), "Hide this notice");
+    Click(*dismiss);
+    EXPECT_EQ(dismissed, 1) << "the dismiss has to reach the handler it was given";
+    EXPECT_EQ(invoked, 0) << "the dismiss ran the action";
+}
+
 // Focus is tracked by element id, so two notices whose actions shared one would hand the keyboard
 // to the first whichever was focused: Tab to the second notice's Discard and Enter discards the
 // first field.
@@ -126,7 +157,7 @@ TEST(InspectorNotice, ShowsItsTextAndFiresItsAction)
 // the control and one on each part (the action included), which the stylesheet paints.
 TEST(InspectorNotice, TheKindIsOneClassOnTheControlAndOnEachPart)
 {
-    const std::vector<std::string> parts{"plate", "glyph", "title", "text", "action"};
+    const std::vector<std::string> parts{"plate", "glyph", "title", "text", "action", "dismiss"};
     const std::vector<std::pair<InspectorNotice::Kind, std::string>> kinds{
         {InspectorNotice::Kind::Warning, "warning"},
         {InspectorNotice::Kind::Information, "information"},
@@ -290,6 +321,49 @@ TEST(InspectorNoticeLayout, WithNoRoomBesideTheTextTheActionWrapsUnderIt)
     }
 }
 
+// The dismiss follows the action on its line, at the end of the text's row; where the row has no room
+// for the text beside them, the two wrap under the text together, the dismiss still ending the row.
+TEST(InspectorNoticeLayout, TheDismissFollowsTheActionAndWrapsWithIt)
+{
+    for (const int viewportWidth : {600, 300})
+    {
+        auto root = std::make_unique<UIElement>();
+        auto notice = std::make_unique<InspectorNotice>("This view is brighter than the game camera.");
+        notice->SetAction("Match game camera", "", []() {});
+        notice->SetDismiss("", []() {});
+        InspectorNotice* noticeRaw = notice.get();
+        root->AddChild(std::move(notice));
+
+        InspectorLayoutFixture fixture;
+        fixture.ViewportW = viewportWidth;
+        fixture.ExtraSheets = kNoticeSheets;
+        if (!fixture.Build(std::move(root)))
+            GTEST_SKIP() << fixture.Diagnostic;
+
+        Label* text = TextOf(*noticeRaw);
+        Button* action = ActionOf(*noticeRaw);
+        Button* dismiss = DismissOf(*noticeRaw);
+        UIElement* plate = FindByClass(noticeRaw, "inspector-notice-plate");
+        ASSERT_NE(text, nullptr);
+        ASSERT_NE(action, nullptr);
+        ASSERT_NE(dismiss, nullptr);
+        ASSERT_NE(plate, nullptr);
+        ASSERT_GT(text->GetLayoutHeight(), 0.0f) << "no text measured, so nothing below can be judged";
+        ASSERT_GT(dismiss->GetLayoutWidth(), 0.0f) << "the dismiss was not laid out at " << viewportWidth << " px";
+
+        EXPECT_GE(dismiss->GetLayoutX(), Right(*action)) << "the dismiss follows the action at " << viewportWidth << " px";
+        EXPECT_NEAR(dismiss->GetLayoutY(), action->GetLayoutY(), kLayoutTolerance)
+            << "the dismiss left the action's line at " << viewportWidth << " px";
+        EXPECT_NEAR(Right(*plate) - Right(*dismiss), text->GetLayoutX() - plate->GetLayoutX(), kLayoutTolerance)
+            << "the dismiss ends the row at " << viewportWidth << " px";
+        EXPECT_TRUE(Contains(*plate, *dismiss)) << "the dismiss runs past its plate at " << viewportWidth << " px";
+        if (viewportWidth == 600)
+            EXPECT_GE(action->GetLayoutX(), Right(*text)) << "the buttons left the text's row with room beside it";
+        else
+            EXPECT_GE(action->GetLayoutY(), Bottom(*text) - kLayoutTolerance) << "the buttons did not wrap under the text";
+    }
+}
+
 // Attaches the sheets each element in the tree requested, in request order, the way the editor's
 // UIManager attaches them when the element joins it. A control's sheet attached to an element sits
 // after its ancestors' sheets in that element's cascade.
@@ -315,8 +389,8 @@ bool AttachRequestedSheets(UIElement& element, std::string& diagnostic)
     return true;
 }
 
-// The action's edge is its kind's color, over the shared button's border, with the sheets attached in
-// the editor's order: the notice's on the notice, then the button's own on the action.
+// The action's and the dismiss's edges are their kind's color, over the shared button's border, with the
+// sheets attached in the editor's order: the notice's on the notice, then the button's own on each button.
 TEST(InspectorNoticeLayout, TheActionsEdgeIsItsKindsColor)
 {
     auto root = std::make_unique<UIElement>();
@@ -330,6 +404,7 @@ TEST(InspectorNoticeLayout, TheActionsEdgeIsItsKindsColor)
     {
         auto notice = std::make_unique<InspectorNotice>("Failed: the bounds need 390,625 tiles.", kind);
         notice->SetAction("Bake", "", []() {});
+        notice->SetDismiss("", []() {});
         notices.push_back(notice.get());
         root->AddChild(std::move(notice));
     }
@@ -343,9 +418,9 @@ TEST(InspectorNoticeLayout, TheActionsEdgeIsItsKindsColor)
         GTEST_SKIP() << fixture.Diagnostic;
 
     const uint32_t buttonEdge = plainRaw->GetResolvedStyle().Visual.BorderColor.Top;
-    for (size_t i = 0; i < notices.size(); ++i)
+    for (size_t noticeIndex = 0; noticeIndex < notices.size(); ++noticeIndex)
     {
-        InspectorNotice* notice = notices[i];
+        InspectorNotice* notice = notices[noticeIndex];
         Button* action = ActionOf(*notice);
         UIElement* plate = FindByClass(notice, "inspector-notice-plate");
         ASSERT_NE(action, nullptr);
@@ -354,7 +429,11 @@ TEST(InspectorNoticeLayout, TheActionsEdgeIsItsKindsColor)
         const uint32_t kindEdge = plate->GetResolvedStyle().Visual.BorderColor.Top;
         ASSERT_NE(kindEdge, buttonEdge) << "the kind's edge is the button's; this test is vacuous";
         EXPECT_EQ(action->GetResolvedStyle().Visual.BorderColor.Top, kindEdge)
-            << "the action keeps the shared button's edge in notice " << i;
+            << "the action keeps the shared button's edge in notice " << noticeIndex;
+        Button* dismiss = DismissOf(*notice);
+        ASSERT_NE(dismiss, nullptr);
+        EXPECT_EQ(dismiss->GetResolvedStyle().Visual.BorderColor.Top, kindEdge)
+            << "the dismiss keeps the shared button's edge in notice " << noticeIndex;
     }
 }
 

@@ -52,7 +52,7 @@ void SunAtHour(const SolarFrame& frame, float hours, float out[3])
     settings.timeOfDayHours = hours;
     SkySystemState state{};
     ComputeSimpleSunMoon(settings, SkySystemConfig{}, frame, state);
-    std::memcpy(out, state.sunDirWS, sizeof(state.sunDirWS));
+    std::memcpy(out, state.sunDirWS.v, sizeof(state.sunDirWS));
 }
 
 uint32_t Bits(float value)
@@ -248,8 +248,8 @@ TEST(SolarPath, TheDefaultIsTodaysGreatCircle)
             ComputeSimpleSunMoon(settings, SkySystemConfig{}, frame, state);
             const GreatCircle previous = PreviousGreatCircle(hours, moonArc);
 
-            EXPECT_TRUE(SameDirection(previous.Sun, state.sunDirWS)) << "sun at minute " << minute;
-            EXPECT_TRUE(SameDirection(previous.Moon, state.moonDirWS))
+            EXPECT_TRUE(SameDirection(previous.Sun, state.sunDirWS.v)) << "sun at minute " << minute;
+            EXPECT_TRUE(SameDirection(previous.Moon, state.moonDirWS.v))
                 << "moon at minute " << minute << ", arc " << moonArc;
             if (Bits(previous.Sun[2]) != Bits(state.sunDirWS[2]))
             {
@@ -319,7 +319,7 @@ TEST(SolarPath, TheHourRoundTripsThroughTheDirection)
     {
         float sun[3];
         SunAtHour(frame, hours, sun);
-        const float recovered = SolarHourFromDirection(frame, sun);
+        const float recovered = SolarHourFromDirection(frame, GameEngine::Mathematics::Vector3(sun[0], sun[1], sun[2]));
         EXPECT_NEAR(recovered, hours, kToleranceHours) << "hour " << hours;
     }
 }

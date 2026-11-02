@@ -205,33 +205,21 @@ namespace {
         Logger::Log::AddSink(std::make_unique<Logger::FileSink>(fileCfg));
         // Reported after the attach so both lines reach the file the run will be
         // read from, not only the console the run may not have.
-        if (!fileLevel.unrecognizedValue.empty())
-        {
-            Logger::Log::Warning("{}='{}' names no log level; the log file falls back to {}",
-                                 Logger::kFileLogLevelEnvVar, fileLevel.unrecognizedValue,
-                                 Logger::LogLevelToString(fileCfg.minLevel));
-        }
-        Logger::Log::Info("Editor logfile: {} (records {} and above; override with {}=<debug|info|warn|error>)",
-                          fileCfg.filename, Logger::LogLevelToString(fileCfg.minLevel),
-                          Logger::kFileLogLevelEnvVar);
+        Logger::AnnounceFileSink("Editor logfile:", fileCfg.filename, fileLevel);
     }
 #endif
 
-    // A crash handler must not be able to block. Log::Flush waits for the drain
-    // thread to acknowledge, and the drain thread cannot acknowledge while
-    // another thread holds the sink mutex — which is exactly the state a thread
-    // that faulted inside a sink leaves behind. Bound the wait well above the
-    // drain's own 200ms flush latency and let the process die either way.
-    constexpr std::chrono::milliseconds kCrashFlushTimeout{2000};
-
+    // A crash handler must not block. Log::Flush waits for the drain thread, which cannot answer
+    // while a thread that faulted inside a sink holds the sink mutex. So the wait is bounded, and
+    // the process dies either way.
     void FlushLogsBeforeDying() noexcept
     {
-        if (!Logger::Log::FlushForCrash(kCrashFlushTimeout))
+        if (!Logger::Log::FlushForCrash(Logger::Log::kCrashFlushTimeout))
         {
             std::fprintf(stderr,
                          "[CRASH] log flush did not complete within %llims; "
                          "the end of the log file may be missing\n",
-                         static_cast<long long>(kCrashFlushTimeout.count()));
+                         static_cast<long long>(Logger::Log::kCrashFlushTimeout.count()));
         }
     }
 
@@ -477,6 +465,10 @@ static int EditorMainImpl(int argc, char** argv) {
     std::signal(SIGABRT, SignalHandler);
 #ifdef SIGSEGV
     std::signal(SIGSEGV, SignalHandler);
+#endif
+#ifdef SIGTRAP
+    // A failed libc++ check in DebugFast traps (SIGTRAP on arm64).
+    std::signal(SIGTRAP, SignalHandler);
 #endif
 
     #if defined(GE_ENABLE_MIMALLOC) && GE_ENABLE_MIMALLOC

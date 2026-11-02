@@ -24,8 +24,9 @@
 #include "Ocean/OceanSeabedVisibility.h"
 #include "Terrain/TerrainMaterialRecord.h"
 #include "TerrainECS/PageLevelRule.h"
-#include "TerrainECS/TerrainHeightPageFeature.h"
+#include "TerrainECS/TerrainPageFeature.h"
 #include "TerrainECS/TerrainRenderFeature.h"
+#include "TerrainECS/TerrainSurface/TerrainSurfaceStore.h"
 
 #include "Rendering/Camera/CameraTypes.h" // CameraData
 #include "Rendering/Core/Device.h"
@@ -42,6 +43,7 @@
 #include "Types/Types.h" // HashStringId
 
 #include <algorithm> // std::min/max (sculpt region accumulation, water margin)
+#include <chrono>
 #include <type_traits>
 #include <cmath>     // std::sqrt (planet surface-height sampling)
 #include <cstdlib>   // getenv (GE_CBT_DESC_DEBUG)
@@ -247,7 +249,7 @@ CBTTerrain::CBTPlanetPageAnchor PlanetPageAnchor(uint32_t face, const Mathematic
 // origin, and relative to the render origin) and the anchor of every face of `samples` a side.
 void FillPlanetPageParams(const Rendering::CameraData& cam, uint32_t samples, CBTTerrain::CBTSurfaceParams& out)
 {
-    const Mathematics::Vector3 eye(cam.cameraPos[0], cam.cameraPos[1], cam.cameraPos[2]);
+    const Mathematics::Vector3 eye(cam.cameraPos.x, cam.cameraPos.y, cam.cameraPos.z);
     const double sectorSize = static_cast<double>(cam.renderOriginSector[3]);
     out.PlanetPaged = 1u;
     out.PageEye = Mathematics::Vector4(eye.x, eye.y, eye.z, 0.0f);
@@ -392,7 +394,6 @@ void CBTRenderFeature::OnDeviceRebuilt(IDevice* device)
     {
         m_AtlasUploadedTableVersion[i] = 0u;
         m_AtlasBoundTexture[i] = {};
-        m_PageUploadedTableVersion[i] = ~0ull;
     }
     // The sculpt/atlas rings come back zeroed, so the upload gates must forget what they
     // believe each slot holds or an edited planet would never re-upload its edits.
@@ -406,6 +407,8 @@ void CBTRenderFeature::OnDeviceRebuilt(IDevice* device)
     // at the same address would otherwise look like it had already claimed this frame.
     m_UpdateGraph = nullptr;
     m_UpdateRgFrame = ~0ull;
+    // The bring-up seeds a new tree from its roots; no restart is left to refine.
+    m_RestartedTreeUnrefined = false;
     // Every cached bisector corner was evaluated against textures that no longer exist.
     m_ForceVertexEval.store(true, std::memory_order_relaxed);
 
@@ -434,6 +437,7 @@ void CBTRenderFeature::EnsureSeeded(uint32_t frameCounter)
     m_Instance.RefineUniform(std::min(m_Classify.TargetDepth, CBTTreeSeed::kRestartSeedDepth),
                              frameCounter);
     m_TreeSeed.Seeded(m_DomainConfig.DomainMode, m_Classify.TargetDepth);
+    m_RestartedTreeUnrefined = true;
     // Defensive: a restart across domains re-creates the sculpt rings zeroed (CBTInstance::
     // InitializeRoots). The store's version is monotonic and a domain round trip clears the store, so
     // its next version already differs from every slot's record; the reset keeps the re-upload from
@@ -446,6 +450,22 @@ void CBTRenderFeature::EnsureSeeded(uint32_t frameCounter)
                       m_KernelSet.IsNarrowHeap() ? CBTTerrain::kHeap32DecodeSubdiv
                                                  : CBTTerrain::kMaxDecodeSubdiv,
                       ToString(reason));
+}
+
+void CBTRenderFeature::RefineRestartedTree(const CBTTerrain::CBTFrameParams& params, uint32_t frameCounter)
+{
+    if (!m_RestartedTreeUnrefined)
+        return;
+    m_RestartedTreeUnrefined = false;
+    CBTTerrain::CBTClassifyDesc classify = m_Classify;
+    classify.GateVertexEval = 1u;
+    classify.Settle = InputsHeld() ? 1u : 0u;
+    const auto start = std::chrono::steady_clock::now();
+    const uint32_t passes = m_Instance.RefineToView(
+        classify, params, std::min(m_Classify.TargetDepth, CBTTreeSeed::kRestartSeedDepth), frameCounter);
+    const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
+    Logger::Log::Info("CBT: the restarted tree refined to the camera in {} updates ({:.2f} ms)", passes,
+                      elapsed.count());
 }
 
 void CBTRenderFeature::ConsumeTerrainRetire(const TerrainECS::TerrainRenderFeature& terrainFeature)
@@ -547,6 +567,12 @@ bool CBTRenderFeature::WritesDynamicDepth() const
            TerrainSourceChanged();
 }
 
+bool CBTRenderFeature::RunsOffFrustumKeepStep() const
+{
+    return m_DomainConfig.DomainMode != CBTTerrain::kDomainSpherical &&
+           m_Classify.Mode == CBTTerrain::kClassifyScreenSpace && DemandTuningEnabled();
+}
+
 bool CBTRenderFeature::TerrainSourceChanged() const
 {
     const auto* terrainFeature =
@@ -572,11 +598,59 @@ bool CBTRenderFeature::TerrainSourceChanged() const
 Rendering::TextureHandle CBTRenderFeature::PagedHeightSource(uint32_t terrainIndex, std::span<const uint32_t>& words,
                                                              uint64_t& version) const
 {
-    const auto* pages = m_Services ? m_Services->GetFeature<TerrainECS::TerrainHeightPageFeature>() : nullptr;
+    const auto* pages = m_Services ? m_Services->GetFeature<TerrainECS::TerrainPageFeature>() : nullptr;
     if (pages == nullptr || m_KernelSet.IsNarrowHeap() || !pages->CacheTexture().IsValid() ||
         !pages->LatchedTable(terrainIndex, words, version))
         return {};
     return pages->CacheTexture();
+}
+
+namespace
+{
+// This frame's slot of the page-table ring the grass placement binds too. Invalid when the slot's first
+// word does not fit the frame params' float lane.
+TerrainECS::TerrainPageTableRing::Slot BindPageTableRing(Engine::Renderer::RenderServices* services, uint32_t terrainIndex,
+                                                         uint32_t generation)
+{
+    auto* pages = services ? services->GetFeature<TerrainECS::TerrainPageFeature>() : nullptr;
+    if (pages == nullptr)
+        return {};
+    TerrainECS::TerrainPageTableRing::Slot ring = pages->BindTableRing(terrainIndex, generation);
+    // The first word rides a float lane of the frame params (kCBTPageRingBaseLane).
+    constexpr uint32_t kExactFloatWords = 1u << 24;
+    if (ring.Buffer.IsValid() && ring.FirstWord >= kExactFloatWords)
+    {
+        Logger::Log::Error("CBT: page table ring slot starts at word {}, past the frame params' exact range; the "
+                           "terrain draws from its textures",
+                           ring.FirstWord);
+        return {};
+    }
+    return ring;
+}
+} // namespace
+
+uint32_t CBTRenderFeature::PagedSurfacePlanes(uint32_t terrainIndex, std::span<const uint32_t>& words,
+                                              uint64_t& version)
+{
+    // The plane bits in TerrainECS::kSurfacePlanes order.
+    constexpr std::array<uint32_t, 4> kPlaneBits = {
+        CBTTerrain::kCBTSurfacePlaneSplat, CBTTerrain::kCBTSurfacePlaneNormal, CBTTerrain::kCBTSurfacePlaneGrass,
+        CBTTerrain::kCBTSurfacePlaneColor};
+    constexpr uint32_t kRequired = CBTTerrain::kCBTSurfacePlaneSplat | CBTTerrain::kCBTSurfacePlaneNormal;
+    static_assert(kPlaneBits.size() == TerrainECS::kSurfacePlanes.size() &&
+                  kPlaneBits.size() == std::tuple_size_v<decltype(m_DrawSurfacePlanes)>);
+    m_DrawSurfacePlanes.fill({});
+    const auto* pages = m_Services ? m_Services->GetFeature<TerrainECS::TerrainPageFeature>() : nullptr;
+    if (pages == nullptr || !pages->LatchedSurfaceTable(terrainIndex, words, version))
+        return 0u;
+    uint32_t planes = 0u;
+    for (std::size_t plane = 0; plane < kPlaneBits.size(); ++plane)
+    {
+        m_DrawSurfacePlanes[plane] = pages->SurfacePlaneTexture(terrainIndex, TerrainECS::kSurfacePlanes[plane]);
+        if (m_DrawSurfacePlanes[plane].IsValid())
+            planes |= kPlaneBits[plane];
+    }
+    return (planes & kRequired) == kRequired ? planes : 0u;
 }
 
 void CBTRenderFeature::LogCommittedHeightSource(uint32_t terrainIndex, uint32_t generation, bool paged,
@@ -800,10 +874,10 @@ bool CBTRenderFeature::BuildDrawCommand(RenderServices& rs, ViewId /*viewId*/,
     // has no ring and draws no planet from pages: gVertex stands in there, and the fragment never reads it.
     if (res.GetPageTableBuffer().IsValid())
     {
-        const uint64_t pageSlotBytes = static_cast<uint64_t>(res.PageTableSlotWords()) * sizeof(uint32_t);
         m_DrawBuffers[10].Buffer = res.GetPageTableBuffer();
-        m_DrawBuffers[10].Offset = static_cast<uint64_t>(m_FrameSlot) * pageSlotBytes;
-        m_DrawBuffers[10].Range = pageSlotBytes;
+        m_DrawBuffers[10].Offset = m_PageRingOffset[m_FrameSlot];
+        m_DrawBuffers[10].Range = m_PageRingBytes[m_FrameSlot] != 0u ? m_PageRingBytes[m_FrameSlot]
+                                                                      : CBTTerrain::kCBTPageHeaderWords * sizeof(uint32_t);
     }
     else
     {
@@ -916,7 +990,7 @@ bool CBTRenderFeature::BuildDrawCommand(RenderServices& rs, ViewId /*viewId*/,
     {
         // The far-field normal chain the full-profile surface samples (cbt_NormalChain); the compat
         // surface declares none.
-        m_DrawTextures.resize(2u);
+        m_DrawTextures.resize(2u + m_DrawSurfacePlanes.size());
         m_DrawTextures[0] = Engine::Renderer::DrawBindings::TextureEntry{};
         m_DrawTextures[0].Name = HashStringId("cbt_NormalChain");
         m_DrawTextures[0].Texture = res.GetNormalChainTexture();
@@ -928,6 +1002,19 @@ bool CBTRenderFeature::BuildDrawCommand(RenderServices& rs, ViewId /*viewId*/,
         m_DrawTextures[1].Texture =
             m_DrawPageCache.IsValid() ? m_DrawPageCache : res.GetDefaultAtlasHeightTexture();
         m_DrawTextures[1].Sampler = res.GetHeightSampler();
+        // The surface plane caches of a paged planar terrain (bindings 34 to 37); the flat default for a
+        // plane it does not have (the fragment reads only the planes in SurfacePagedPlanes).
+        constexpr std::array<const char*, 4> kPlaneNames = {"cbt_SurfaceSplat", "cbt_SurfaceNormal",
+                                                            "cbt_SurfaceGrass", "cbt_SurfaceColor"};
+        for (std::size_t plane = 0; plane < kPlaneNames.size(); ++plane)
+        {
+            Engine::Renderer::DrawBindings::TextureEntry& entry = m_DrawTextures[2u + plane];
+            entry = Engine::Renderer::DrawBindings::TextureEntry{};
+            entry.Name = HashStringId(kPlaneNames[plane]);
+            entry.Texture = m_DrawSurfacePlanes[plane].IsValid() ? m_DrawSurfacePlanes[plane]
+                                                                 : res.GetDefaultAtlasHeightTexture();
+            entry.Sampler = res.GetHeightSampler();
+        }
         outCmd.Bindings.Textures = m_DrawTextures;
     }
 
@@ -948,7 +1035,7 @@ void CBTRenderFeature::ApplyHeightChain(const TerrainECS::TerrainInstanceInfo& t
                          samplesZ <= 0xFFFFu;
     const bool chained = unified && CBTTerrain::CBTHeightChainTopLevel(samplesX, samplesZ) > 0u &&
                          CBTTerrain::CBTHeightRangeFirstLevel(samplesX - 1u, samplesZ - 1u) != 0u &&
-                         std::abs(camera.proj[5]) > 0.0f &&
+                         std::abs(camera.proj[1][1]) > 0.0f &&
                          m_Instance.ProvisionHeightChainWords(CBTTerrain::CBTHeightChainWords(samplesX, samplesZ));
     out.HeightChain[0] = 0.0f;
     out.HeightChain[1] = 0.0f;
@@ -957,7 +1044,7 @@ void CBTRenderFeature::ApplyHeightChain(const TerrainECS::TerrainInstanceInfo& t
         // The page rule's view for this camera (TerrainHeightPageDriver states its view the same way),
         // and the level-0 texel the rule measures in: the coarser of the two axes.
         const TerrainECS::PageLevelView view = TerrainECS::MakePageLevelView(
-            TerrainECS::kPageLevelReferenceRows, 2.0f * std::atan(1.0f / std::abs(camera.proj[5])), m_TargetPixelError);
+            TerrainECS::kPageLevelReferenceRows, 2.0f * std::atan(1.0f / std::abs(camera.proj[1][1])), m_TargetPixelError);
         const float level0Texel = std::max(terrain.SizeX / static_cast<float>(samplesX - 1u),
                                            terrain.SizeZ / static_cast<float>(samplesZ - 1u));
         const float scale = view.TargetPixels / (view.FocalPixels * level0Texel);
@@ -1040,16 +1127,35 @@ bool CBTRenderFeature::BuildFrameParams(RenderServices& rs, Rendering::ViewId vi
     // flat default until it is uploaded). Only the current frame slot is rewritten, so
     // a mid-session heightmap handle change never touches an in-flight ring element.
     m_Instance.SetHeightSource(frameIndex, t.HeightmapTexture);
-    // The paged height resolve (TerrainHeightPageFeature): when the terrain's height is paged, the
+    // The paged height resolve (TerrainPageFeature): when the terrain's height is paged, the
     // update samples the page cache through its page table (bindings 23 and 22) instead of the
     // unified or atlas texture, which stay bound for the readers that still use them.
     std::span<const uint32_t> pageWords;
     uint64_t pageVersion = 0;
     Rendering::TextureHandle pageCache = PagedHeightSource(t.Handle.Index, pageWords, pageVersion);
-    // The ring slot grows to the terrain's table (its platform cap is checked where it is paged); a
-    // failed allocation keeps the terrain on its texture this frame.
-    if (pageCache.IsValid() && !m_Instance.ProvisionPageTableWords(static_cast<uint32_t>(pageWords.size())))
+    // A paged planar terrain's surface words follow its height words in the ring slot. A refused ring
+    // keeps the height and the surface on their textures this frame.
+    std::span<const uint32_t> surfaceWords;
+    uint64_t surfaceVersion = 0;
+    uint32_t surfacePlanes = pageCache.IsValid() && m_DomainConfig.DomainMode == CBTTerrain::kDomainPlanar
+                                 ? PagedSurfacePlanes(t.Handle.Index, surfaceWords, surfaceVersion)
+                                 : 0u;
+    const uint32_t pageSlot = CBTTerrain::CBTFrameRingSlot(frameIndex);
+    TerrainECS::TerrainPageTableRing::Slot ring{};
+    if (pageCache.IsValid())
+        ring = BindPageTableRing(m_Services, t.Handle.Index, t.Handle.Generation);
+    if (!ring.Buffer.IsValid())
+    {
         pageCache = {};
+        surfacePlanes = 0u;
+    }
+    if (surfacePlanes == 0u)
+        m_DrawSurfacePlanes.fill({});
+    m_Instance.SetPageTable(ring.Buffer, ring.FirstWord);
+    m_PageRingOffset[pageSlot] = ring.Offset;
+    m_PageRingBytes[pageSlot] = ring.Bytes;
+    m_DrawSurfacePageBase = static_cast<uint32_t>(pageWords.size());
+    m_DrawSurfacePlaneBits = surfacePlanes;
     m_BoundTerrainIndex = t.Handle.Index;
     m_HasBoundTerrain = true;
     // A switch re-evaluates every corner in this frame. The tree restarts in the next EnsureSeeded.
@@ -1117,23 +1223,9 @@ bool CBTRenderFeature::BuildFrameParams(RenderServices& rs, Rendering::ViewId vi
         m_AtlasUploadedTableVersion[atlasSlot] = ~0ull;
         out.AtlasParams1[2] = 0.0f; // disabled -> the unified height sample path
     }
-    const uint32_t pageSlot = CBTTerrain::CBTFrameRingSlot(frameIndex);
     m_Instance.SetPageCacheSource(frameIndex, pageCache);
     if (pageCache.IsValid())
-    {
-        // Upload the page table only when this slot has not seen this terrain's current version.
-        if (m_PageBoundTerrain[pageSlot] != t.Handle.Index || m_PageUploadedTableVersion[pageSlot] != pageVersion)
-        {
-            m_Instance.UploadPageTable(frameIndex, pageWords);
-            m_PageBoundTerrain[pageSlot] = t.Handle.Index;
-            m_PageUploadedTableVersion[pageSlot] = pageVersion;
-        }
         out.AtlasParams1[2] = 2.0f; // the paged resolve (cbt_layout.glsl CBT_SampleHeight)
-    }
-    else
-    {
-        m_PageUploadedTableVersion[pageSlot] = ~0ull; // a later page-in re-uploads the table
-    }
 
     const Rendering::CameraData cam = rs.Views().ResolveCameraData(viewId);
     // Earth-scale slice 1b: feed Classify the REBASED (render-origin-relative) view-proj and
@@ -1143,12 +1235,12 @@ bool CBTRenderFeature::BuildFrameParams(RenderServices& rs, Rendering::ViewId vi
     // the GE_ES_FORCE_WORLD_SPACE kill switch — honored inside ComputeRebasedView — pins BOTH
     // to sector 0 / world-space together (the A/B discriminator covers CBT for free). viewProjRel
     // == the world viewProj when the origin is inactive, so this is byte-identical near origin.
-    std::memcpy(out.ViewProjRel, cam.viewProjRel, sizeof(out.ViewProjRel));
+    std::memcpy(out.ViewProjRel, cam.viewProjRel.Data(), sizeof(out.ViewProjRel));
     // cameraPos stays FULL world (planet-center space): the horizon cull is a conservative
     // occlusion test about the planet centre and needs true radii, not the rebased frame.
-    out.CameraPos[0] = cam.cameraPos[0];
-    out.CameraPos[1] = cam.cameraPos[1];
-    out.CameraPos[2] = cam.cameraPos[2];
+    out.CameraPos[0] = cam.cameraPos.x;
+    out.CameraPos[1] = cam.cameraPos.y;
+    out.CameraPos[2] = cam.cameraPos.z;
     out.CameraPos[3] = 1.0f;
     // Sector as float(int) — exact for |sector| < 2^23; the shader reconstructs
     // originWorld = xyz * CBT_SECTOR_SIZE, matching GE_RenderOriginWorld bit-for-bit.
@@ -1361,6 +1453,8 @@ bool CBTRenderFeature::BuildFrameParams(RenderServices& rs, Rendering::ViewId vi
     m_DrawPageCache = pageCache;
     if (spherical && pageCache.IsValid() && !pageWords.empty())
         FillPlanetPageParams(cam, pageWords[0], surfaceParams);
+    surfaceParams.SurfacePageBase = m_DrawSurfacePageBase;
+    surfaceParams.SurfacePagedPlanes = m_DrawSurfacePlaneBits;
     // Uploaded for BOTH domains: the sphere fragment reads the relief/sculpt fields, and the
     // debug-view fragment (planar or sphere) reads DebugMode — so a stale slot must never be
     // read. It is a 32-byte host-visible ring write (not the ~6.3 MB sculpt atlas below), so

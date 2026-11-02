@@ -29,6 +29,13 @@ class ScopedEngineLogCapture
     {
     }
 
+    // Keeps whole records: a test reads LogMessage::ThreadId to tell which thread logged a line.
+    explicit ScopedEngineLogCapture(std::vector<Logger::LogMessage>* out,
+                                    Logger::LogLevel minLevel = Logger::LogLevel::Info)
+        : m_Capture(out, minLevel)
+    {
+    }
+
   private:
     // Adopts the engine's Logger state when constructed; declared before m_Capture, so the
     // capture's level and sink are set on the engine's state.

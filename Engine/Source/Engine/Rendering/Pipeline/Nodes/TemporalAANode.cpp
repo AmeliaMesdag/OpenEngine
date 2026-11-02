@@ -169,30 +169,6 @@ uint32_t TaaDebugMode()
 
 } // namespace
 
-bool TemporalAANode::ViewHasMovers(const RenderServices& rs, Rendering::ViewId viewId,
-                                   uint64_t worldId)
-{
-    if (rs.HasUnversionedMotion(viewId))
-        return true;
-    const auto movers = rs.GetFrameMovers();
-    if (movers.empty())
-        return false;
-    const auto* scene = rs.GetGPUScene();
-    if (scene == nullptr)
-        return true;
-    const uint32_t viewWorldKey = worldId != 0u ? Rendering::PackWorldKey16(worldId) : 0u;
-    const auto* view = rs.Views().FindViewDesc(viewId);
-    const bool dropEditorHidden = view != nullptr && view->DropsEditorHidden();
-    const auto& instances = scene->GetInstances();
-    for (const auto& mover : movers)
-    {
-        if (mover.InstanceIndex < instances.size() &&
-            ViewMotionVectors::DrawsMover(instances[mover.InstanceIndex], viewWorldKey, dropEditorHidden))
-            return true;
-    }
-    return false;
-}
-
 float TemporalAANode::HistoryClipMode(bool hasMovers, bool contentChanged, bool stationaryScene)
 {
     return hasMovers || contentChanged ? 1.0f : stationaryScene ? -1.0f : 0.0f;
@@ -250,7 +226,7 @@ void TemporalAANode::DeclareForView(ViewDeclare& d)
     // resolve (another AA mode, a letterbox, an input missing) advances that P without writing the
     // history, so the history state is dropped: the next resolve starts it from scratch.
     if (!DeclareResolve(d))
-        m_ViewHistory.erase(static_cast<uint32_t>(d.View.id));
+        m_ViewHistory.Erase(static_cast<uint32_t>(d.View.id));
 }
 
 bool TemporalAANode::DeclareResolve(ViewDeclare& d)
@@ -330,7 +306,7 @@ bool TemporalAANode::DeclareResolve(ViewDeclare& d)
     if (state == nullptr)
         return false;
 
-    ViewHistory& vh = m_ViewHistory[static_cast<uint32_t>(d.View.id)];
+    ViewHistory& vh = m_ViewHistory.GetOrInsert(static_cast<uint32_t>(d.View.id));
     // Folded with the pool's freshness answer once the history import below has
     // reported it; declared here because the snapshot fields are overwritten
     // further down.
@@ -396,20 +372,12 @@ bool TemporalAANode::DeclareResolve(ViewDeclare& d)
     // revoke the exemption.
     const auto* viewDesc = d.Services.Views().FindViewDesc(d.View.id);
     const uint64_t worldId = viewDesc != nullptr ? viewDesc->worldId : 0u;
-    const bool hasMovers = ViewHasMovers(d.Services, d.View.id, worldId);
-    const uint64_t renderVersion = d.Services.RenderContentVersion(worldId);
-    const uint64_t casterVersion = d.Services.ShadowCasterContentVersion(worldId);
-    const uint64_t lightVersion = d.Services.WorldLightListVersion(worldId);
-    // Procedural depth contributors (terrain/ocean/grass) are outside the
-    // instance extraction epochs; their frame-spine signal is conservative.
-    const uint64_t dynamicEpoch = d.Services.GetIdleElisionFrameState().DepthDynamicEpoch;
-    const bool contentUnchanged = historyValid && worldId != 0u && vh.WorldId == worldId &&
-        vh.RenderContentVersion == renderVersion &&
-        vh.ShadowCasterContentVersion == casterVersion && vh.LightListVersion == lightVersion &&
-        vh.DepthDynamicEpoch == dynamicEpoch;
-    const bool stationaryScene = contentUnchanged && !hasMovers &&
-        vh.RenderWidth == w && vh.RenderHeight == h &&
-        std::memcmp(state->CurrCamera.viewProj, state->PrevCamera.viewProj, sizeof(float) * 16) == 0;
+    const bool hasMovers = ViewMotionVectors::ViewHasMovers(d.Services, d.View.id, worldId);
+    const ViewContentStamp content = ViewContentStamp::Capture(d.Services, worldId);
+    const bool contentUnchanged = historyValid && worldId != 0u && vh.Content.SameContent(content);
+    const bool stationaryScene = historyValid && vh.RenderWidth == w && vh.RenderHeight == h &&
+        ViewContentStamp::ViewIsStill(vh.Content, content, state->PrevCamera, state->CurrCamera,
+                                      hasMovers);
     // ── Resolve ────────────────────────────────────────────────────────────
     // Common fields once; the native and TAAU upscale blocks differ only by
     // the extra OutExtent (and the shader that consumes them).
@@ -417,12 +385,10 @@ bool TemporalAANode::DeclareResolve(ViewDeclare& d)
     {
         // UNJITTERED inverse view-proj — reprojection must be phase-stable
         // (see the shader-side comment on uInvViewProj).
-        GameEngine::Rendering::Matrix4x4 vp;
-        std::memcpy(vp.Data(), state->CurrCamera.viewProj, sizeof(float) * 16);
-        const GameEngine::Rendering::Matrix4x4 invVp = GameEngine::Mathematics::Inverse(vp);
+        const GameEngine::Rendering::Matrix4x4 invVp = GameEngine::Mathematics::Inverse(state->CurrCamera.viewProj);
         std::memcpy(params.InvViewProj, invVp.Data(), sizeof(float) * 16);
         std::memcpy(params.PrevViewProj,
-                    state->PrevValid ? state->PrevCamera.viewProj : state->CurrCamera.viewProj,
+                    (state->PrevValid ? state->PrevCamera.viewProj : state->CurrCamera.viewProj).Data(),
                     sizeof(float) * 16);
         params.Extent[0] = static_cast<float>(w);
         params.Extent[1] = static_cast<float>(h);
@@ -572,11 +538,7 @@ bool TemporalAANode::DeclareResolve(ViewDeclare& d)
     // freshness arm on a frame that never declared the rewrite, and the next
     // frame would blend against an undefined physical as "resident" history.
     d.Frame.MarkPersistentTextureInitialized(historyWrite);
-    vh.WorldId = worldId;
-    vh.RenderContentVersion = renderVersion;
-    vh.ShadowCasterContentVersion = casterVersion;
-    vh.LightListVersion = lightVersion;
-    vh.DepthDynamicEpoch = dynamicEpoch;
+    vh.Content = content;
     vh.RenderWidth = w;
     vh.RenderHeight = h;
 

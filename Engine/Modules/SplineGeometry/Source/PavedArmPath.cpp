@@ -64,6 +64,23 @@ PavedArmPath::PavedArmPath(const PavedArm& arm) : m_LoopMeters(std::max(arm.Road
     }
 }
 
+std::vector<PavedArmPath> BuildPavedArmPaths(std::span<const PavedArm> arms)
+{
+    std::vector<PavedArmPath> paths;
+    paths.reserve(arms.size());
+    for (const PavedArm& arm : arms)
+        paths.emplace_back(arm);
+    for (std::size_t arm = 0; arm < arms.size(); ++arm)
+    {
+        for (std::size_t other = 0; other < arms.size(); ++other)
+        {
+            if (other != arm && arms[other].Road == arms[arm].Road)
+                paths[arm].ShareNodeSection(paths[other]);
+        }
+    }
+    return paths;
+}
+
 void PavedArmPath::ShareNodeSection(const PavedArmPath& partner)
 {
     if (m_Stations.size() < 2 || partner.m_Stations.size() < 2 ||
@@ -110,7 +127,42 @@ float32 PavedArmPath::StopAfter(std::size_t lastOverlap) const
     const std::size_t next = lastOverlap + 1;
     if (next >= m_Stations.size())
         return GetLength();
-    return std::min(GetLength(), m_Along[next] + kApproachStopAdvanceWidths * m_Sections[next].Width);
+    return StopClearOfTurns(std::min(GetLength(), m_Along[next] + kApproachStopAdvanceWidths * m_Sections[next].Width));
+}
+
+float32 PavedArmPath::StopClearOfTurns(float32 along) const
+{
+    float32 stop = std::min(along, GetLength());
+    for (std::size_t station = 0; stop < GetLength() && CapCrossesStations(stop); ++station)
+    {
+        while (station < m_Stations.size() && m_Along[station] <= stop)
+            ++station;
+        stop = station < m_Stations.size() ? m_Along[station] : GetLength();
+    }
+    return stop;
+}
+
+bool PavedArmPath::CapCrossesStations(float32 along) const
+{
+    const PavedArmSection cap = SectionAt(along);
+    const Vector2 across = cap.Right - cap.Left;
+    if (!(cap.Width > 0.0f) || !(across.Length() > 0.0f))
+        return false;
+    const Vector2 right = across.Normalize();
+    const Vector2 forward(-right.y, right.x);
+    const Vector2 middle = (cap.Left + cap.Right) * 0.5f;
+    for (std::size_t station = 0; station < m_Stations.size(); ++station)
+    {
+        const float32 offset = m_Along[station] - along;
+        if (std::abs(offset) <= kPavedTouchMeters || std::abs(offset) > cap.Width)
+            continue;
+        const float32 side = offset > 0.0f ? 1.0f : -1.0f;
+        const PavedArmSection& section = m_Sections[station];
+        if (side * Vector2::Dot(section.Left - middle, forward) < -kPavedTouchMeters ||
+            side * Vector2::Dot(section.Right - middle, forward) < -kPavedTouchMeters)
+            return true;
+    }
+    return false;
 }
 
 } // namespace GameEngine::SplineGeometry

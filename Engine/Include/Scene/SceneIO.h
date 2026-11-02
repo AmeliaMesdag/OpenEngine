@@ -36,6 +36,15 @@ struct SceneIOError
 const SceneIOError& GetLastSceneIOError();
 void ClearLastSceneIOError();
 
+// What a load-report row records: a line the load could not apply, an override line of a prefab instance whose
+// address names no entity of the prefab, or an override line under a child that the same instance removes.
+enum class SceneLoadSkipKind
+{
+    Unapplied,
+    OrphanedOverride,
+    UnderRemovedEntity,
+};
+
 // One component or field assignment the loader could not apply. The load CONTINUED past it, so the
 // entity exists and everything else about it is live — this records exactly what did not make it in.
 // A scene authored against a newer build than the one opening it (a field or an enumerator that this
@@ -61,9 +70,19 @@ struct SceneLoadSkip
     // what any surface reporting on a save's behaviour must ask instead.
     bool preserved = false;
 
-    // The entity the override was recorded on, so SkipIsOutstanding can find it in the store
-    // without resolving `entityId` back through the scene tags. Meaningless when !preserved.
+    // The entity the row describes, so SkipIsOutstanding can ask the live world about it without resolving
+    // `entityId` back through the scene tags; the instance root for an OrphanedOverride or an UnderRemovedEntity
+    // row. Null when the row describes no entity.
     ECS::EntityHandle entityHandle{};
+
+    // The registered type of `component` on a field row, so SkipIsOutstanding can ask whether the
+    // entity still carries it. 0 on a row that names no field or no registered component.
+    ECS::ComponentTypeId componentType = 0;
+
+    SceneLoadSkipKind kind = SceneLoadSkipKind::Unapplied;
+    // The address under the instance root that an OrphanedOverride or an UnderRemovedEntity row names (entity ids
+    // joined by '.'); else empty.
+    std::string address;
 };
 
 // Everything one load could not apply. Empty => the scene loaded cleanly.
@@ -77,8 +96,8 @@ struct SceneLoadDegradation
     // distinction is the whole point: a fully-preserved degraded scene round-trips without loss,
     // and telling the user otherwise would be crying wolf.
     //
-    // Invariant under the outstanding filter below, which only ever retires PRESERVED rows — so a
-    // discard can never turn a round-trip into a reported loss.
+    // On the outstanding view (see SkipIsOutstanding), this is what a save drops now: a row whose
+    // entity or component is gone does not count.
     std::size_t DroppedCount() const
     {
         std::size_t n = 0;
@@ -88,13 +107,10 @@ struct SceneLoadDegradation
     }
 };
 
-// Whether this skip still describes something a save has to answer for.
-//
-// A never-preserved skip always does: nothing can resolve it, and saving still drops it. A
-// preserved one does only while the world still holds its override — and three things retire that
-// after the load, none of which the census can see: the inspector's Discard, removing the
-// component, and destroying the entity on the handle-releasing path. Reporting a retired row as
-// preserved tells the user a save will write back text that is no longer there.
+// Whether this skip still describes text a save has to answer for, asked of the live world on each
+// call. A never-preserved row stands while its entity (and, on a field row, its component) is alive,
+// or until a save when it names no entity. A preserved row stands while the world holds its override.
+// An UnderRemovedEntity row never stands: the instance removes the child, and a save drops the line.
 bool SkipIsOutstanding(const ECS::World& world, const SceneLoadSkip& skip);
 
 // How many of a census's skips are still outstanding against `world`. See SkipIsOutstanding.

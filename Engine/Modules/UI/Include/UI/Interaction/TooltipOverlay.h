@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Mathematics/Vector2.h"
 #include "UI/UIElement.h"
 
 #include <cstdint>
@@ -13,17 +14,15 @@ class Label;
 namespace UI
 {
 struct UIPrimitive;
+enum class ArrowDirection : uint8_t;
 }
 
 namespace UI::Interaction
 {
 
-// Hover tooltip overlay. Owned by UIManager and updated each frame.
-// Shows a dark tooltip bubble with a dynamically-positioned arrow
-// whenever the hovered element (or any ancestor) has tooltip text.
-//
-// The arrow is rendered as a GPU triangle primitive (no DOM element),
-// so it works correctly for all placement directions.
+// The hover tooltip, owned by UIManager: the bubble (.tooltip) shows the text or the template
+// of the hovered element or its nearest ancestor with a tooltip. The arrow is not an element:
+// it is two triangles painted with the bubble's background and border.
 class TooltipOverlay final
 {
 public:
@@ -61,26 +60,53 @@ public:
     // Runtime configuration (called each frame by the editor from TooltipSettings).
     void SetHoverDelay(float seconds) { m_HoverDelaySeconds = seconds; }
     void SetHoverResetDelay(float seconds) { m_HoverResetDelaySeconds = seconds; }
-    void SetArrowColor(uint32_t argb) { m_ArrowColorARGB = argb; }
 
-    // Collect arrow triangle primitives for the current frame. Called by
-    // UIManager during primitive generation, after the tooltip DOM has
-    // been measured and placed.
-    // contentScale converts the arrow's logical-px verts / rounding to physical
-    // px for emission (arrow geometry is computed in logical space by PlaceTooltip).
-    void EmitArrowPrimitive(std::vector<UI::UIPrimitive>& prims, float opacity, float contentScale) const;
+    // Appends the arrow's triangles, to draw over the placed bubble. contentScale
+    // converts the arrow's logical px (PlaceArrow) to physical px.
+    void EmitArrowPrimitives(std::vector<UI::UIPrimitive>& prims, float opacity, float contentScale) const;
 
 private:
     void EnsureElements(UIElement* root);
     void ResetIfDetached();
     void ParkOffscreen();
-    bool UpdateText(const std::string& text);
 
-    // Walks up the element chain to the nearest tooltip text. The walk stops at a popup (an element on an
+    // A tooltip to show: a template or a text, and the element it belongs to.
+    struct TooltipContent
+    {
+        UIElement* Source = nullptr;
+        const std::string* Text = nullptr;
+        const UIElement::TooltipTemplate* Template = nullptr;
+
+        bool IsEmpty() const { return !Template && (!Text || Text->empty()); }
+    };
+    enum class ContentUpdate : uint8_t
+    {
+        Unchanged,
+        // The bubble's content changed: park it for a frame, so it measures before it is placed.
+        Changed,
+        // The template did not mount: show nothing.
+        Failed,
+    };
+
+    // Walks up the element chain to the nearest tooltip. The walk stops at a popup (an element on an
     // overlay layer), and a control with an open popup has no tooltip.
-    static const std::string* FindTooltipText(UIElement* element, UIElement** outSource = nullptr);
+    static TooltipContent FindTooltip(UIElement* element);
+    // The tooltip of `source` itself, for a pin.
+    static TooltipContent OwnTooltip(UIElement& source);
+
+    // A tooltip starts to show for `source`: its template mounts and binds again, and the
+    // wrapper takes the stylesheets of the source's document.
+    void BeginShow(const UIElement* source);
+    void AdoptSourceStylesheets(const UIElement* source);
+    ContentUpdate UpdateContent(const TooltipContent& content);
+    ContentUpdate MountTemplate(UIElement& source, const UIElement::TooltipTemplate& tooltipTemplate);
+    void UnmountTemplate();
 
     void PlaceTooltip(UIElement* root, UIElement* source, float mouseX, float mouseY);
+    // Puts the arrow on the bubble's edge that faces the source, at `anchor` along that
+    // edge, clear of the bubble's rounded corners. The bubble rect is in logical px.
+    void PlaceArrow(UI::ArrowDirection direction, float anchor, float bubbleX, float bubbleY, float bubbleW,
+                    float bubbleH);
 
     // The element whose tooltip is pinned; empty when none is.
     UIElement::WeakRef<> m_Pinned;
@@ -89,6 +115,17 @@ private:
     UIElement* m_Wrapper  = nullptr; // outer container (position/z-index, no clipping)
     UIElement* m_Tooltip  = nullptr; // visible box (background, border-radius, shadow)
     Label*     m_Label    = nullptr;
+    // While a template shows: its parts, children of m_Tooltip after the hidden label, and the
+    // classes that the layout's root and the binder added to m_Tooltip. Empty in text mode.
+    std::vector<UIElement*> m_TemplateParts;
+    std::vector<std::string> m_TemplateClasses;
+    // The element whose template is mounted, and the one whose template did not mount; 0 when none.
+    uint64_t   m_TemplateSourceId = 0;
+    uint64_t   m_FailedTemplateSourceId = 0;
+    // The last layout that did not mount, so its warning is logged once.
+    std::string m_FailedTemplatePath;
+    // The source document's stylesheets the wrapper holds (AdoptSourceStylesheets).
+    std::vector<StylesheetHandle> m_SourceStylesheets;
 
     std::string m_LastText;
     bool        m_Visible   = false;
@@ -106,10 +143,10 @@ private:
     float       m_LastPlacedY = 0.0f;
     bool        m_HasLastPlaced = false;
 
-    // Arrow triangle: computed by PlaceTooltip, emitted by EmitArrowPrimitive.
-    bool     m_HasArrow = false;
-    float    m_ArrowVerts[6] = {}; // v0.xy, v1.xy, v2.xy
-    uint32_t m_ResolvedArrowColorARGB = 0; // per-frame: read from tooltip bg
+    // The arrow: placed by PlaceArrow (logical px), emitted by EmitArrowPrimitives.
+    bool                 m_HasArrow = false;
+    UI::ArrowDirection   m_ArrowDirection{}; // Up
+    Mathematics::Vector2 m_ArrowTip;
 
     // Hover delay tracking
     uint64_t    m_HoveredId                = 0;
@@ -121,8 +158,6 @@ private:
     // the tooltip box so long text wraps; short text keeps its natural width.
     static constexpr float kMaxTooltipWidth = 512.0f;
     bool  m_MiddleMousePending = false;
-
-    uint32_t m_ArrowColorARGB = 0xFF000000u; // black default
 };
 
 } // namespace UI::Interaction

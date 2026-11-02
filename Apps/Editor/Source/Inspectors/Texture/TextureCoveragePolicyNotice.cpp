@@ -171,7 +171,7 @@ TextureCoveragePolicyRows AddTextureCoveragePolicyRows(
     Label* noticeLabel = rows.Notice;
     Toggle* enableToggle = rows.Enable;
     FloatField* cutoffField = rows.Cutoff;
-    enableToggle->SetDisabled(!settingsWritable);
+    enableToggle->SetEnabled(settingsWritable);
     *refresh = [noticeLabel, enableToggle, cutoffField, readInputs, settingsWritable]() {
         const TextureCoveragePolicyState state = ReadTextureCoveragePolicy(readInputs());
         noticeLabel->SetText(state.Notice);

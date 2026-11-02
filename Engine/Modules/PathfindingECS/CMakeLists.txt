@@ -80,6 +80,7 @@ if(BUILD_TESTING)
         Tests/NavigationSurfacePagedTerrainTests.cpp
         Tests/NavigationSurfaceBakedDataTests.cpp
         Tests/NavigationSurfaceDirtyTileTests.cpp
+        Tests/NavigationGridJobTests.cpp
         ${CMAKE_SOURCE_DIR}/Tests/EngineShutdownTestEnvironment.cpp
     )
     # Test files each declare anonymous-namespace constants (kDeltaTime,
@@ -93,6 +94,7 @@ if(BUILD_TESTING)
     # needed either.
     target_link_libraries(PathfindingECSTests PRIVATE Engine GTest::gtest GTest::gtest_main)
     target_include_directories(PathfindingECSTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source # NavigationSourceCollector.h
         ${CMAKE_SOURCE_DIR}/Tests          # TestTempDir.h
         ${CMAKE_SOURCE_DIR}/Engine/Tests)  # EngineLogCapture.h
     ge_set_output_tests(PathfindingECSTests)

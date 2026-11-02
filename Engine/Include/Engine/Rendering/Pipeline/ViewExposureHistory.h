@@ -4,6 +4,11 @@
 
 #include <cstdint>
 
+namespace GameEngine::Rendering::Passes
+{
+struct MsaaResolveViewBuffers;
+}
+
 namespace GameEngine::Engine::Renderer::Pipeline
 {
 struct ViewDeclare;
@@ -20,4 +25,10 @@ inline constexpr uint32_t kViewExposureHistoryBytes = 16u;
 /// The caller declares its read of the returned Graph buffer, which orders it after the snapshot.
 /// Invalid only when the import fails.
 PipelineBufferBindingRG ResolveViewExposureHistory(ViewDeclare& d);
+
+/// The view's ViewParams and ExposureHistory as the MSAA color resolve's inputs. An invalid binding takes
+/// `placeholder`, a zeroed buffer that reads as the Neutral look at exposure 1, no metering and a pre-exposure of 1.
+Rendering::Passes::MsaaResolveViewBuffers MsaaResolveViewBuffersFor(const PipelineBufferBindingRG& viewParams,
+                                                                    const PipelineBufferBindingRG& exposureHistory,
+                                                                    Rendering::BufferHandle placeholder);
 } // namespace GameEngine::Engine::Renderer::Pipeline

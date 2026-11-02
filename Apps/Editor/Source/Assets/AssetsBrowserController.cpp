@@ -1449,14 +1449,14 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
             for (auto* extra : extraDots)
             {
                 if (extra)
-                    extra->Overrides().Set(Style::Display, DisplayMode::None);
+                    extra->Style().Set(Style::Display, DisplayMode::None);
             }
 
             // Hide any extra folder icons (avoid structural removal in pooled rows).
             for (auto* extra : extraFolderIcons)
             {
                 if (extra)
-                    extra->Overrides().Set(Style::Display, DisplayMode::None);
+                    extra->Style().Set(Style::Display, DisplayMode::None);
             }
 
             if (!titleLabel)
@@ -1486,7 +1486,7 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
             if (folderIconElement && m_Tree)
             {
                 float iconSize = m_Tree->GetIconSize();
-                folderIconElement->Overrides()
+                folderIconElement->Style()
                     .Set(Style::Width, StyleLength::Px(iconSize))
                     .Set(Style::Height, StyleLength::Px(iconSize))
                     .Set(Style::MinWidth, StyleLength::Px(iconSize))
@@ -1508,9 +1508,9 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
             if (path.empty())
             {
                 if (dotElement)
-                    dotElement->Overrides().Set(Style::Display, DisplayMode::None);
+                    dotElement->Style().Set(Style::Display, DisplayMode::None);
                 titleLabel->SetText(displayName);
-                titleLabel->Overrides().Reset(Style::Color);
+                titleLabel->Style().Reset(Style::Color);
                 return;
             }
             
@@ -1520,9 +1520,9 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
             {
                 // No VCS repo - hide dot if exists, show plain name
                 if (dotElement)
-                    dotElement->Overrides().Set(Style::Display, DisplayMode::None);
+                    dotElement->Style().Set(Style::Display, DisplayMode::None);
                 titleLabel->SetText(displayName);
-                titleLabel->Overrides().Reset(Style::Color);
+                titleLabel->Style().Reset(Style::Color);
                 return;
             }
             
@@ -1555,31 +1555,31 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
                 // Show the dot with colored tint
                 if (colorDotOnly || colorWholeText)
                 {
-                    dotElement->Overrides()
+                    dotElement->Style()
                         .Set(Style::BackgroundTint, statusArgb)
                         .Set(Style::Display, DisplayMode::Flex);
                 }
                 else
                 {
-                    dotElement->Overrides().Reset(Style::BackgroundTint);
-                    dotElement->Overrides().Set(Style::Display, DisplayMode::Flex);
+                    dotElement->Style().Reset(Style::BackgroundTint);
+                    dotElement->Style().Set(Style::Display, DisplayMode::Flex);
                 }
 
                 // Set title text (without dot) and optionally color it
                 // Never color text when status is Clean or NotConfigured
                 titleLabel->SetText(displayName);
                 if (colorWholeText && status != VCSFileStatus::Clean && status != VCSFileStatus::NotConfigured)
-                    titleLabel->Overrides().Set(Style::Color, (uint32_t)statusArgb);
+                    titleLabel->Style().Set(Style::Color, (uint32_t)statusArgb);
                 else
-                    titleLabel->Overrides().Reset(Style::Color);
+                    titleLabel->Style().Reset(Style::Color);
             }
             else
             {
                 // No status - hide dot, show plain name
                 if (dotElement)
-                    dotElement->Overrides().Set(Style::Display, DisplayMode::None);
+                    dotElement->Style().Set(Style::Display, DisplayMode::None);
                 titleLabel->SetText(displayName);
-                titleLabel->Overrides().Reset(Style::Color);
+                titleLabel->Style().Reset(Style::Color);
             }
             
             // TreeView handles positioning of known extra elements (dot/icon) during bind.
@@ -1896,39 +1896,39 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
                     // Show and color the dot
                     if (colorDotOnly || colorWholeText)
                     {
-                        gitDotEl->Overrides()
+                        gitDotEl->Style()
                             .Set(Style::BackgroundTint, statusArgb)
                             .Set(Style::Display, DisplayMode::Flex);
                     }
                     else
                     {
-                        gitDotEl->Overrides().Reset(Style::BackgroundTint);
-                        gitDotEl->Overrides().Set(Style::Display, DisplayMode::Flex);
+                        gitDotEl->Style().Reset(Style::BackgroundTint);
+                        gitDotEl->Style().Set(Style::Display, DisplayMode::Flex);
                     }
 
                     // Color title if colorWholeText is enabled
                     // Never color text when status is Clean or NotConfigured
                     if (titleEl && colorWholeText && status != VCSFileStatus::Clean && status != VCSFileStatus::NotConfigured)
-                        titleEl->Overrides().Set(Style::Color, (uint32_t)statusArgb);
+                        titleEl->Style().Set(Style::Color, (uint32_t)statusArgb);
                     else if (titleEl)
-                        titleEl->Overrides().Reset(Style::Color);
+                        titleEl->Style().Reset(Style::Color);
                 }
                 else
                 {
                     // No status - hide dot
                     if (gitDotEl)
-                        gitDotEl->Overrides().Set(Style::Display, DisplayMode::None);
+                        gitDotEl->Style().Set(Style::Display, DisplayMode::None);
                     if (titleEl)
-                        titleEl->Overrides().Reset(Style::Color);
+                        titleEl->Style().Reset(Style::Color);
                 }
             }
             else
             {
                 // Not a file or no VCS or status icons disabled - hide dot
                 if (gitDotEl)
-                    gitDotEl->Overrides().Set(Style::Display, DisplayMode::None);
+                    gitDotEl->Style().Set(Style::Display, DisplayMode::None);
                 if (titleEl)
-                    titleEl->Overrides().Reset(Style::Color);
+                    titleEl->Style().Reset(Style::Color);
             }
 
             // Check if this Polyhaven item has been fully downloaded (model + textures)
@@ -1942,7 +1942,7 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
                 if (polyhavenDownloaded && titleEl)
                 {
                     constexpr uint32_t kDownloadedBlue = 0xFF4499FF;
-                    titleEl->Overrides().Set(Style::Color, kDownloadedBlue);
+                    titleEl->Style().Set(Style::Color, kDownloadedBlue);
                 }
             }
 
@@ -1970,13 +1970,13 @@ void AssetsBrowserController::Initialize(TreeView* tree, GridView* grid, ListVie
                     float cellWidth = iconSize + 16.0f - 4.0f;
                     size_t maxChars = std::max(10, (int)(cellWidth / 7.0f));
                     titleEl->SetText(MiddleTruncate(displayName, maxChars));
-                    titleEl->Overrides().Set(Style::MaxWidth, StyleLength::Px(textMaxWidth));
+                    titleEl->Style().Set(Style::MaxWidth, StyleLength::Px(textMaxWidth));
                 }
                 else
                 {
                     // No truncation - show full name with word wrap
                     titleEl->SetText(displayName);
-                    titleEl->Overrides().Set(Style::MaxWidth, StyleLength::Px(textMaxWidth));
+                    titleEl->Style().Set(Style::MaxWidth, StyleLength::Px(textMaxWidth));
                 }
             }
 
@@ -3011,7 +3011,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
             lbl = dynamic_cast<Label*>(cell->GetChildren()[0].get());
         }
         if (lbl)
-            lbl->Overrides().Set(Style::FontSize, StyleLength::Px(fontSize));
+            lbl->Style().Set(Style::FontSize, StyleLength::Px(fontSize));
         return lbl;
     };
 
@@ -3056,7 +3056,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
 
         if (nameLabel)
         {
-            nameLabel->Overrides().Set(Style::FontSize, StyleLength::Px(fontSize));
+            nameLabel->Style().Set(Style::FontSize, StyleLength::Px(fontSize));
             const char* nm = m_ListProvider->GetLabel(id);
             std::string displayName = nm ? std::string(nm) : std::string();
             if (!isDir)
@@ -3071,7 +3071,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
             // Name colour: dim by default; colorWholeText paints it with the VCS status colour
             // (this column owns that, since the Git cell can no longer reach the name label);
             // a downloaded Polyhaven asset wins with blue.
-            nameLabel->Overrides().Reset(Style::Color);
+            nameLabel->Style().Reset(Style::Color);
             RefreshCachedVcsUiSettings();
             // Gate on showStatusIcons too: the old binder only tinted the name when status icons
             // were enabled (the colour came from inside the icon block), and the grid view still
@@ -3087,12 +3087,12 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
                     {
                         const char* statusColor = Editor::VcsStatusToColor(status);
                         if (statusColor)
-                            nameLabel->Overrides().Set(Style::Color, (uint32_t)StatusColorToArgb(statusColor));
+                            nameLabel->Style().Set(Style::Color, (uint32_t)StatusColorToArgb(statusColor));
                     }
                 }
             }
             if (downloaded)
-                nameLabel->Overrides().Set(Style::Color, 0xFF4499FFu);
+                nameLabel->Style().Set(Style::Color, 0xFF4499FFu);
         }
 
         if (icon)
@@ -3106,7 +3106,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
             const int   gapPerSide = std::max(1, std::min(2, (int)(rowHeight / 24.0f)));
             const int   totalGap   = gapPerSide * 2;
             const int   iconSize   = std::max(16, (int)(rowHeight - totalGap));
-            icon->Overrides()
+            icon->Style()
                 .Set(Style::Width, StyleLength::Px((float)iconSize))
                 .Set(Style::Height, StyleLength::Px((float)iconSize))
                 .Set(Style::MinWidth, StyleLength::Px((float)iconSize))
@@ -3272,7 +3272,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
             }
         }
         if (text)
-            text->Overrides().Set(Style::FontSize, StyleLength::Px(fontSize));
+            text->Style().Set(Style::FontSize, StyleLength::Px(fontSize));
 
         if (container && dot && text)
         {
@@ -3294,26 +3294,26 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
                 if (statusColor && statusStr && statusStr[0] != '\0')
                 {
                     if (shouldHideDot)
-                        dot->Overrides().Set(Style::Display, DisplayMode::None);
+                        dot->Style().Set(Style::Display, DisplayMode::None);
                     else
-                        dot->Overrides().Set(Style::BackgroundTint, statusArgb).Set(Style::Display, DisplayMode::Flex);
+                        dot->Style().Set(Style::BackgroundTint, statusArgb).Set(Style::Display, DisplayMode::Flex);
                     text->SetText(statusStr);
                     if (status == VCSFileStatus::Clean || status == VCSFileStatus::NotConfigured || colorDotOnly)
-                        text->Overrides().Reset(Style::Color);
+                        text->Style().Reset(Style::Color);
                     else
-                        text->Overrides().Set(Style::Color, (uint32_t)statusArgb);
+                        text->Style().Set(Style::Color, (uint32_t)statusArgb);
                 }
                 else if (statusStr && statusStr[0] != '\0')
                 {
-                    dot->Overrides().Set(Style::Display, DisplayMode::None);
+                    dot->Style().Set(Style::Display, DisplayMode::None);
                     text->SetText(statusStr);
-                    text->Overrides().Reset(Style::Color);
+                    text->Style().Reset(Style::Color);
                 }
                 else
                 {
-                    dot->Overrides().Set(Style::Display, DisplayMode::None);
+                    dot->Style().Set(Style::Display, DisplayMode::None);
                     text->SetText("");
-                    text->Overrides().Reset(Style::Color);
+                    text->Style().Reset(Style::Color);
                 }
 
                 container->RemoveClass("git-modified");
@@ -3333,12 +3333,12 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
             }
             else
             {
-                dot->Overrides().Set(Style::Display, DisplayMode::None);
+                dot->Style().Set(Style::Display, DisplayMode::None);
                 if (!vcs || !vcs->IsRepository())
                     text->SetText("not active");
                 else
                     text->SetText("-");
-                text->Overrides().Reset(Style::Color);
+                text->Style().Reset(Style::Color);
             }
         }
         return;
@@ -3378,7 +3378,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
             }
         }
         if (text)
-            text->Overrides().Set(Style::FontSize, StyleLength::Px(fontSize));
+            text->Style().Set(Style::FontSize, StyleLength::Px(fontSize));
 
         if (dots && text)
         {
@@ -3444,7 +3444,7 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
                         }
                         auto d = std::make_unique<UIElement>("div");
                         d->AddClass("tag-dot");
-                        d->Overrides()
+                        d->Style()
                             .Set(Style::Width, StyleLength::Px(8.0f))
                             .Set(Style::Height, StyleLength::Px(8.0f))
                             .Set(Style::MinWidth, StyleLength::Px(8.0f))
@@ -3454,13 +3454,13 @@ void AssetsBrowserController::BindListCell(UIElement* cell, StringId colKey, Lis
                             .Set(Style::MarginRight, StyleLength::Px(2.0f));
                         if (color.empty())
                         {
-                            d->Overrides()
+                            d->Style()
                                 .Set(Style::BorderWidth, Box4{1.0f, 1.0f, 1.0f, 1.0f})
                                 .Set(Style::BorderColor, BorderColorsTRBL{0xFF666666u, 0xFF666666u, 0xFF666666u, 0xFF666666u});
                         }
                         else
                         {
-                            d->Overrides().Set(Style::BackgroundColor, (uint32_t)StatusColorToArgb(color.c_str(), 0xFF888888u));
+                            d->Style().Set(Style::BackgroundColor, (uint32_t)StatusColorToArgb(color.c_str(), 0xFF888888u));
                         }
                         dots->AddChild(std::move(d));
                     }
@@ -4869,7 +4869,7 @@ bool AssetsBrowserController::IsGridViewShowing() const
     if (!m_List)
         return true;
     // AssetsPanel toggles the views through their Display override.
-    const std::optional<DisplayMode> display = m_Grid->Overrides().Get(Style::Display);
+    const std::optional<DisplayMode> display = m_Grid->Style().Get(Style::Display);
     return !display.has_value() || *display != DisplayMode::None;
 }
 

@@ -944,20 +944,20 @@ TEST(AiAssistantPanelTests, AnImageResultIsOneInlineImageOfBoundedSize)
     ASSERT_EQ(images.size(), 1u);
     EXPECT_EQ(asked, (std::vector<std::string>{capture}))
         << "the picture is the thumbnail service's inline copy";
-    EXPECT_FALSE(images[0]->Overrides().Get(Style::BackgroundImage).has_value())
+    EXPECT_FALSE(images[0]->Style().Get(Style::BackgroundImage).has_value())
         << "the view never loads the full-size capture itself";
 
     // The image is sized within the row's width and the height cap, at its own aspect.
     auto& view = static_cast<AgentCallImageView&>(*images[0]);
     EXPECT_TRUE(view.Fit(300.0f, 180.0f));
-    const auto width = view.Overrides().Get(Style::Width);
-    const auto height = view.Overrides().Get(Style::Height);
+    const auto width = view.Style().Get(Style::Width);
+    const auto height = view.Style().Get(Style::Height);
     ASSERT_TRUE(width.has_value() && height.has_value());
     EXPECT_FLOAT_EQ(width->Value, 300.0f);
     EXPECT_FLOAT_EQ(height->Value, 168.75f);
     EXPECT_TRUE(view.Fit(1200.0f, 180.0f));
-    EXPECT_FLOAT_EQ(view.Overrides().Get(Style::Width)->Value, 320.0f) << "the cap holds a wide row";
-    EXPECT_FLOAT_EQ(view.Overrides().Get(Style::Height)->Value, 180.0f);
+    EXPECT_FLOAT_EQ(view.Style().Get(Style::Width)->Value, 320.0f) << "the cap holds a wide row";
+    EXPECT_FLOAT_EQ(view.Style().Get(Style::Height)->Value, 180.0f);
     EXPECT_FALSE(view.Fit(1200.0f, 180.0f)) << "an unchanged fit reports no movement";
 }
 
@@ -1018,17 +1018,17 @@ TEST(AiAssistantPanelTests, AnInlineImageReleasesItsPictureWhenItLeavesThePanel)
                                    1920, 1080});
         ui.Update(0.0f, /*interactive=*/false);
         ASSERT_EQ(requests, 1);
-        ASSERT_TRUE(image->Overrides().Get(Style::BackgroundImage).has_value());
+        ASSERT_TRUE(image->Style().Get(Style::BackgroundImage).has_value());
 
         std::unique_ptr<UIElement> taken = root->TakeChild(image);
         ui.Update(0.0f, /*interactive=*/false);
-        EXPECT_FALSE(image->Overrides().Get(Style::BackgroundImage).has_value())
+        EXPECT_FALSE(image->Style().Get(Style::BackgroundImage).has_value())
             << "an image out of the panel holds no picture";
 
         root->AddChild(std::move(taken));
         ui.Update(0.0f, /*interactive=*/false);
         EXPECT_EQ(requests, 2) << "an image back in the panel asks for its picture again";
-        EXPECT_TRUE(image->Overrides().Get(Style::BackgroundImage).has_value());
+        EXPECT_TRUE(image->Style().Get(Style::BackgroundImage).has_value());
     }
     Editor::SetEditorAssetActions({});
 }
@@ -1131,7 +1131,7 @@ std::string BuildConversation(ConversationLayout& layout, float listWidth, const
     layout.Ui = std::make_unique<UIManager>(layout.Device.get(), &layout.Assets);
     layout.Ui->SetLayoutSizeOverride(static_cast<uint32_t>(listWidth), 900);
     auto list = std::make_unique<FittingHistoryList>();
-    list->Overrides().Set(Style::Width, StyleLength::Px(listWidth));
+    list->Style().Set(Style::Width, StyleLength::Px(listWidth));
     layout.List = list.get();
     layout.Ui->SetRoot(std::move(list));
     layout.List->AddStylesheet(sheet);
@@ -1272,7 +1272,7 @@ TEST(AiAssistantPanelTests, TheConversationTextFollowsTheTextScale)
         const std::string built = BuildConversation(layout, 1200.0f, TurnWithALongReason("(failed) short"));
         ASSERT_TRUE(built.empty()) << built;
         if (scales[index] > 0.0f)
-            layout.List->Overrides().SetCustomNumber("--prompt_text_scale"_sid, scales[index]);
+            layout.List->Style().SetCustomNumber("--prompt_text_scale"_sid, scales[index]);
         layout.List->MarkDirtySubtree(UIElement::StyleDirty | UIElement::LayoutDirty | UIElement::VisualDirty);
         layout.Ui->Update(0.016f, /*interactive=*/false);
         const UIElement* text = FindByClass(*layout.Row, "agent-row-text");
@@ -1312,8 +1312,8 @@ TEST(AiAssistantPanelTests, TheTextSizeSliderStaysInsideTheStatusRow)
         auto host = std::make_unique<UIElement>();
         host->AddClass("prompt-panel-text-size-host");
         auto slider = std::make_unique<UIElement>();
-        slider->Overrides().Set(Style::Width, StyleLength::Px(kSliderWidth));
-        slider->Overrides().Set(Style::Height, StyleLength::Px(16.0f));
+        slider->Style().Set(Style::Width, StyleLength::Px(kSliderWidth));
+        slider->Style().Set(Style::Height, StyleLength::Px(16.0f));
         UIElement* hostRaw = host.get();
         host->AddChild(std::move(slider));
         row->AddChild(std::move(host));
@@ -1721,15 +1721,15 @@ TEST(AiAssistantPanelTests, TheModelButtonTakesItsWidestTextAndShortensItsTextTo
         for (const AiAssistantSettings::Choice& effort : AiAssistantSettings::EffortChoices(session))
             widest = std::max(widest, button.WidthForText(std::string(model.Label) + " · " + std::string(effort.Label)));
     ASSERT_GT(widest, 0.0f) << "the button's text is measured once laid out";
-    const auto width = button.Overrides().Get(Style::Width);
+    const auto width = button.Style().Get(Style::Width);
     ASSERT_TRUE(width && width->IsPx());
     EXPECT_FLOAT_EQ(width->Value, std::ceil(widest));
     EXPECT_EQ(button.GetText(), "Opus (latest) · High");
 
-    button.Overrides().Set(Style::Width, StyleLength::Px(std::ceil(button.WidthForText("Opus · High"))));
+    button.Style().Set(Style::Width, StyleLength::Px(std::ceil(button.WidthForText("Opus · High"))));
     settle();
     EXPECT_EQ(button.GetText(), "Opus · High") << "\"(latest)\" goes first";
-    button.Overrides().Set(Style::Width, StyleLength::Px(std::ceil(button.WidthForText("Opus"))));
+    button.Style().Set(Style::Width, StyleLength::Px(std::ceil(button.WidthForText("Opus"))));
     settle();
     EXPECT_EQ(button.GetText(), "Opus") << "then the effort; the tooltip keeps both";
     EXPECT_TRUE(button.GetTooltip().starts_with("Opus (latest) · High\n"));

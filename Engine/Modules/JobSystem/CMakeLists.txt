@@ -51,8 +51,11 @@ target_include_directories(JobSystem PRIVATE Source ${CMAKE_SOURCE_DIR}/Engine/I
 find_package(concurrentqueue CONFIG REQUIRED)
 target_link_libraries(JobSystem PUBLIC concurrentqueue::concurrentqueue)
 
-# JobSystem module dependencies (target-based; avoid hardcoded include paths)
-target_link_libraries(JobSystem PUBLIC Logger Types)
+# JobSystem module dependencies (target-based; avoid hardcoded include paths).
+# Memory: the pool carries Memory's frame-joined bit to the units of a fork (Debug and DebugFast).
+# An executable that links JobSystem without Engine links Memory too: OBJECT objects reach only
+# the targets that link them directly.
+target_link_libraries(JobSystem PUBLIC Logger Memory Types)
 
 # Platform-specific definitions
 if(WIN32)

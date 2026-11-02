@@ -18,11 +18,13 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <random>
 #include <set>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace GameEngine;
@@ -32,6 +34,12 @@ using namespace GameEngine::TerrainECS::Test;
 
 namespace
 {
+
+// A camera at `position` that looks every way.
+std::array<PageRequestCamera, 1> DiscCamera(const Mathematics::Vector3& position)
+{
+    return {PageRequestCamera{position, {}, 0.0f, false}};
+}
 
 // The design note's measured viewport: 900 rows, 60 degree vertical field, TargetPixelError 11.
 PageLevelView NoteView()
@@ -57,7 +65,216 @@ std::tuple<uint32, uint32, uint32> Key(const PageAddress& a)
     return {a.Level, a.X, a.Z};
 }
 
+// The surface's level rule: one texel a pixel (lambda_s, design 3.3).
+PageLevelView SurfaceView()
+{
+    PageLevelView view = NoteView();
+    view.TargetPixels = 1.0f;
+    return view;
+}
+
+// The pages `area` requests for `camera` on the user's terrain at the surface's level rule.
+std::set<std::tuple<uint32, uint32, uint32>> SurfaceRequests(PageRequestArea area, const PageRequestCamera& camera)
+{
+    PageRequester requester;
+    requester.Configure(UserTerrain(), area);
+    std::vector<PageStreaming::PageWant> wants;
+    requester.Build(std::span(&camera, 1), SurfaceView(), wants);
+    std::set<std::tuple<uint32, uint32, uint32>> keys;
+    for (const PageStreaming::PageWant& want : wants)
+        keys.insert(Key(want.Address));
+    return keys;
+}
+
+
+// The desktop surface field's slots (kDesktopSurfacePages).
+constexpr uint32 kSurfaceSlots = 2048u;
+
+// The wedge model by bearing angles (the planets design 3.5): the footprint's corner bearings meet
+// forward +- (half field + margin), or the footprint is within the foot pages, or the view has no
+// bearing. `margin` is the angular gap's distance to the reach: small near a boundary.
+bool BearingWedgeHolds(const PageRequestTerrain& terrain, const PageAddress& address,
+                       const PageRequestCamera& camera, float32& margin)
+{
+    constexpr float32 kPi = std::numbers::pi_v<float32>;
+    margin = kPi;
+    const float32 reach = camera.HorizontalHalfFov + kPageWedgeMarginRadians;
+    if (!camera.HasDirection || std::hypot(camera.Forward.x, camera.Forward.z) < 1e-3f || reach >= kPi)
+        return true;
+    const float32 span = static_cast<float32>(PageStreaming::kPageOwnedSamples << address.Level);
+    const float32 minX = terrain.OriginX + static_cast<float32>(address.X) * span * terrain.Level0TexelX;
+    const float32 minZ = terrain.OriginZ + static_cast<float32>(address.Z) * span * terrain.Level0TexelZ;
+    const float32 maxX = minX + span * terrain.Level0TexelX;
+    const float32 maxZ = minZ + span * terrain.Level0TexelZ;
+    const float32 dx = std::max({minX - camera.Position.x, 0.0f, camera.Position.x - maxX});
+    const float32 dz = std::max({minZ - camera.Position.z, 0.0f, camera.Position.z - maxZ});
+    if (std::hypot(dx, dz) <= kPageWedgeFootPages * std::max(maxX - minX, maxZ - minZ))
+        return true;
+    const auto wrap = [](float32 angle) { return std::remainder(angle, 2.0f * kPi); };
+    const float32 center =
+        std::atan2(0.5f * (minX + maxX) - camera.Position.x, 0.5f * (minZ + maxZ) - camera.Position.z);
+    float32 low = kPi;
+    float32 high = -kPi;
+    for (const float32 x : {minX, maxX})
+        for (const float32 z : {minZ, maxZ})
+        {
+            const float32 corner = wrap(std::atan2(x - camera.Position.x, z - camera.Position.z) - center);
+            low = std::min(low, corner);
+            high = std::max(high, corner);
+        }
+    const float32 forward = wrap(std::atan2(camera.Forward.x, camera.Forward.z) - center);
+    const float32 gap = forward < low ? std::min(low - forward, forward + 2.0f * kPi - high)
+                        : forward > high ? std::min(forward - high, low + 2.0f * kPi - forward)
+                                         : 0.0f;
+    margin = std::abs(gap - reach);
+    return gap <= reach;
+}
+
+// The request set by the documented rule with the bearing model; false when some page's wedge test
+// is within 1e-5 rad of its boundary, where float rounding may decide either way.
+bool BearingModelRequests(const PageRequestTerrain& terrain, std::span<const PageRequestCamera> cameras,
+                          const PageLevelView& view, uint32 cacheSlots,
+                          std::set<std::tuple<uint32, uint32, uint32>>& keys)
+{
+    const auto levels = PageStreaming::BuildPageStoreLevels(terrain.SamplesX, terrain.SamplesZ);
+    const uint32 firstPinned = FirstPinnedPageLevel(levels, 1u, terrain.Level0TexelX, cacheSlots);
+    bool clear = true;
+    const auto distance = [&](const PageAddress& address, bool wedge) {
+        const float32 span =
+            static_cast<float32>(PageStreaming::kPageOwnedSamples << address.Level) * terrain.Level0TexelX;
+        const float32 minX = terrain.OriginX + static_cast<float32>(address.X) * span;
+        const float32 minZ = terrain.OriginZ + static_cast<float32>(address.Z) * span;
+        float32 nearest = std::numeric_limits<float32>::max();
+        for (const PageRequestCamera& camera : cameras)
+        {
+            float32 margin = std::numbers::pi_v<float32>;
+            const bool holds = !wedge || BearingWedgeHolds(terrain, address, camera, margin);
+            clear = clear && margin > 1e-5f;
+            if (!holds)
+                continue;
+            const float32 dx = std::max({minX - camera.Position.x, 0.0f, camera.Position.x - (minX + span)});
+            const float32 dz = std::max({minZ - camera.Position.z, 0.0f, camera.Position.z - (minZ + span)});
+            const float32 dy =
+                std::max({terrain.MinHeight - camera.Position.y, 0.0f, camera.Position.y - terrain.MaxHeight});
+            nearest = std::min(nearest, std::sqrt(dx * dx + dy * dy + dz * dz));
+        }
+        return nearest;
+    };
+    std::vector<PageAddress> frontier;
+    for (uint32 level = static_cast<uint32>(levels.size()); level-- > firstPinned;)
+        for (uint32 z = 0; z < levels[level].PagesZ; ++z)
+            for (uint32 x = 0; x < levels[level].PagesX; ++x)
+            {
+                keys.insert({level, x, z});
+                if (level == firstPinned)
+                    frontier.push_back(PageAddress{0, uint8(level), x, z});
+            }
+    while (!frontier.empty())
+    {
+        const PageAddress page = frontier.back();
+        frontier.pop_back();
+        if (page.Level == 0 || GeometryPageLevel(distance(page, true), terrain.Level0TexelX, view) >= page.Level)
+            continue;
+        for (uint32 child = 0; child < 4u; ++child)
+        {
+            const PageAddress next{0, uint8(page.Level - 1u), 2u * page.X + (child & 1u),
+                                   2u * page.Z + (child >> 1u)};
+            if (next.X >= levels[next.Level].PagesX || next.Z >= levels[next.Level].PagesZ ||
+                GeometryPageLevel(distance(next, true), terrain.Level0TexelX, view) >= page.Level)
+                continue;
+            keys.insert(Key(next));
+            frontier.push_back(next);
+        }
+    }
+    return clear;
+}
+
 } // namespace
+
+// A camera without a direction looks every way: the wedge requests the disc's pages.
+TEST(PageLevelRule, AWedgeCameraWithoutADirectionRequestsTheDisc)
+{
+    const PageRequestCamera camera{{30000.0f, 289.0f, 7500.0f}, {1.0f, 0.0f, 0.0f}, 0.8f, false};
+    EXPECT_EQ(SurfaceRequests(PageRequestArea::Wedge, camera), SurfaceRequests(PageRequestArea::Disc, camera));
+}
+
+// A camera looking along +X: the wedge keeps the level-0 pages the disc requests in the field of
+// view, and drops the ones behind the camera past two page widths of its foot.
+TEST(PageLevelRule, TheWedgeRefinesInTheViewAndAtTheFootOnly)
+{
+    const PageRequestTerrain terrain = UserTerrain();
+    const PageRequestCamera camera{{30000.0f, 289.0f, 7500.0f}, {1.0f, 0.0f, 0.0f}, 0.8f, true};
+    const auto wedge = SurfaceRequests(PageRequestArea::Wedge, camera);
+    const auto disc = SurfaceRequests(PageRequestArea::Disc, camera);
+    const float32 page = static_cast<float32>(PageStreaming::kPageOwnedSamples) * terrain.Level0TexelX;
+    uint32 behind = 0;
+    for (const auto& key : disc)
+    {
+        const auto [level, x, z] = key;
+        if (level != 0u)
+            continue;
+        const float32 centerX = terrain.OriginX + (static_cast<float32>(x) + 0.5f) * page - camera.Position.x;
+        const float32 centerZ = terrain.OriginZ + (static_cast<float32>(z) + 0.5f) * page - camera.Position.z;
+        if (centerX + 0.5f * page < -kPageWedgeFootPages * page)
+        {
+            ++behind;
+            EXPECT_FALSE(wedge.count(key)) << "level-0 page " << x << "," << z << " behind the camera";
+        }
+        else if (centerX > 0.0f && std::abs(std::atan2(centerZ, centerX)) < camera.HorizontalHalfFov)
+            EXPECT_TRUE(wedge.count(key)) << "level-0 page " << x << "," << z << " in the view";
+    }
+    EXPECT_GT(behind, 0u) << "the disc requests no level-0 page behind the camera: the test proves nothing";
+    const std::size_t levels = PageStreaming::BuildPageStoreLevels(terrain.SamplesX, terrain.SamplesZ).size();
+    for (const auto& key : wedge)
+    {
+        const auto [level, x, z] = key;
+        if (level + 1u < levels)
+            EXPECT_TRUE(wedge.count(Key(PageStreaming::PageAddress{0, uint8(level), x, z}.Parent())))
+                << "level " << level << " page without its parent";
+    }
+}
+
+// Random views on the user's terrain, some with two cameras, wide fields past a quarter turn, views
+// straight down and views from off the terrain: the wedge requests the bearing model's pages.
+TEST(PageLevelRule, TheWedgeRequestsTheBearingModelsPagesOnRandomViews)
+{
+    const PageRequestTerrain terrain = UserTerrain();
+    std::mt19937 random(5);
+    std::uniform_real_distribution<float32> x(-3000.0f, 63000.0f);
+    std::uniform_real_distribution<float32> z(-3000.0f, 18000.0f);
+    std::uniform_real_distribution<float32> height(180.0f, 2500.0f);
+    std::uniform_real_distribution<float32> yaw(-std::numbers::pi_v<float32>, std::numbers::pi_v<float32>);
+    std::uniform_real_distribution<float32> halfFov(0.2f, 1.6f);
+    uint32 compared = 0;
+    for (uint32 trial = 0; trial < 48u; ++trial)
+    {
+        std::vector<PageRequestCamera> cameras(trial % 3u == 0u ? 2u : 1u);
+        for (PageRequestCamera& camera : cameras)
+        {
+            const float32 heading = yaw(random);
+            camera.Position = {x(random), height(random), z(random)};
+            camera.Forward = trial % 8u == 7u ? Mathematics::Vector3{0.0f, -1.0f, 0.0f}
+                                              : Mathematics::Vector3{std::sin(heading), -0.2f, std::cos(heading)};
+            camera.HorizontalHalfFov = halfFov(random);
+            camera.HasDirection = true;
+        }
+        std::set<std::tuple<uint32, uint32, uint32>> model;
+        if (!BearingModelRequests(terrain, cameras, SurfaceView(), kSurfaceSlots, model))
+            continue; // a page on the wedge's boundary: rounding decides it
+        PageRequestTerrain configured = terrain;
+        configured.CacheSlots = kSurfaceSlots;
+        PageRequester requester;
+        requester.Configure(configured, PageRequestArea::Wedge);
+        std::vector<PageStreaming::PageWant> wants;
+        requester.Build(cameras, SurfaceView(), wants);
+        std::set<std::tuple<uint32, uint32, uint32>> built;
+        for (const PageStreaming::PageWant& want : wants)
+            built.insert(Key(want.Address));
+        EXPECT_EQ(built, model) << "trial " << trial << ": " << built.size() << " pages against " << model.size();
+        ++compared;
+    }
+    EXPECT_GE(compared, 40u) << "most trials had a page on the wedge's boundary: the test proves little";
+}
 
 TEST(PageLevelRule, GeometryLevelsStartAtTwentyOneMetersAndDoubleAsTheNoteComputes)
 {
@@ -124,13 +341,13 @@ TEST(PageLevelRule, TheFarFieldIsRequestedByTheLevelRuleBelowThePinnedFloor)
     // distance needs (or the pinned floor, when that is finer) is wanted.
     PageRequestTerrain terrain = UserTerrain();
     terrain.CacheSlots = kDesktopHeightPages.Slots;
-    HeightPageRequester requester;
-    requester.Configure(terrain);
+    PageRequester requester;
+    requester.Configure(terrain, PageRequestArea::Disc);
     ASSERT_EQ(requester.FirstPinnedLevel(), 7u);
     const PageLevelView view{779.0f, 9.17f};
     const Mathematics::Vector3 camera{21000.0f, 330.0f, 7300.0f};
     std::vector<PageStreaming::PageWant> wants;
-    requester.Build({&camera, 1}, view, wants);
+    requester.Build(DiscCamera(camera), view, wants);
     std::set<std::tuple<uint32, uint32, uint32>> wanted;
     for (const PageStreaming::PageWant& want : wants)
         wanted.insert(Key(want.Address));
@@ -181,15 +398,15 @@ TEST(PageLevelRule, ASmallPyramidIsPinnedWholeWithinAQuarterOfTheCache)
         terrain.SamplesX = terrain.SamplesZ = c.Samples;
         terrain.Level0TexelX = terrain.Level0TexelZ = c.Texel;
         terrain.CacheSlots = c.Slots;
-        HeightPageRequester requester;
-        requester.Configure(terrain);
+        PageRequester requester;
+        requester.Configure(terrain, PageRequestArea::Disc);
         EXPECT_EQ(requester.FirstPinnedLevel() == 0u, c.Whole) << c.Samples << " samples, " << c.Slots << " slots";
 
         // Whole: every page is requested and pinned, with the camera far away. Not whole: only the
         // texel rule's levels are pinned.
         const Mathematics::Vector3 far{1.0e6f, 1.0e6f, 1.0e6f};
         std::vector<PageStreaming::PageWant> wants;
-        requester.Build(std::span(&far, 1), NoteView(), wants);
+        requester.Build(DiscCamera(far), NoteView(), wants);
         const bool everyPagePinned =
             wants.size() == pagesOf(c.Samples) &&
             std::all_of(wants.begin(), wants.end(), [](const PageStreaming::PageWant& w) { return w.Pinned; });
@@ -211,9 +428,9 @@ TEST(PageLevelRule, RequestsAreClosedUnderParentsAndFineOnlyNearTheCamera)
     const PageLevelView view = NoteView();
     const Mathematics::Vector3 eye{30000.0f, 289.0f, 7500.0f}; // 1.7 m above the ridge
     std::vector<PageStreaming::PageWant> requests;
-    HeightPageRequester requester;
-    requester.Configure(terrain);
-    requester.Build(std::span(&eye, 1), view, requests);
+    PageRequester requester;
+    requester.Configure(terrain, PageRequestArea::Disc);
+    requester.Build(DiscCamera(eye), view, requests);
 
     std::set<std::tuple<uint32, uint32, uint32>> seen;
     std::map<std::tuple<uint32, uint32, uint32>, float32> distance;
@@ -245,19 +462,35 @@ TEST(PageLevelRule, RequestsAreClosedUnderParentsAndFineOnlyNearTheCamera)
     EXPECT_LT(requests.size(), 2000u);
 }
 
-TEST(PageLevelRule, AParkedCameraRequestsTheSameSetEveryFrame)
+// A parked camera's request is built once: Build skips the walk while its inputs stand, and a fresh
+// requester gives the same set, so the request that stands is the one a walk would give.
+TEST(PageLevelRule, AParkedCameraBuildsItsRequestOnce)
 {
     const PageRequestTerrain terrain = UserTerrain();
-    const Mathematics::Vector3 eye{12000.0f, 800.0f, 3000.0f};
+    const PageRequestCamera camera{{12000.0f, 800.0f, 3000.0f}, {1.0f, 0.0f, 0.0f}, 0.6f, true};
+    const std::span<const PageRequestCamera> cameras(&camera, 1);
     std::vector<PageStreaming::PageWant> first;
-    std::vector<PageStreaming::PageWant> second;
-    HeightPageRequester requester;
-    requester.Configure(terrain);
-    requester.Build(std::span(&eye, 1), NoteView(), first);
-    requester.Build(std::span(&eye, 1), NoteView(), second);
-    ASSERT_EQ(first.size(), second.size());
-    for (std::size_t i = 0; i < first.size(); ++i)
-        EXPECT_EQ(first[i].Address, second[i].Address);
+    std::vector<PageStreaming::PageWant> again;
+    PageRequester requester;
+    requester.Configure(terrain, PageRequestArea::Wedge);
+    ASSERT_TRUE(requester.Build(cameras, NoteView(), first));
+    EXPECT_FALSE(requester.Build(cameras, NoteView(), again)) << "a parked camera walked the pyramid again";
+    EXPECT_TRUE(again.empty()) << "a skipped Build wrote its output";
+
+    PageRequester fresh;
+    fresh.Configure(terrain, PageRequestArea::Wedge);
+    ASSERT_TRUE(fresh.Build(cameras, NoteView(), again));
+    EXPECT_EQ(again, first);
+
+    // Each input is part of the stamp: the forward, the view and the configuration.
+    PageRequestCamera turned = camera;
+    turned.Forward = {0.0f, 0.0f, 1.0f};
+    EXPECT_TRUE(requester.Build(std::span(&turned, 1), NoteView(), again));
+    PageLevelView coarser = NoteView();
+    coarser.TargetPixels *= 2.0f;
+    EXPECT_TRUE(requester.Build(std::span(&turned, 1), coarser, again));
+    requester.Configure(terrain, PageRequestArea::Wedge);
+    EXPECT_TRUE(requester.Build(std::span(&turned, 1), coarser, again));
 }
 
 // ---- The page cache and the paged resolve -------------------------------------------------------
@@ -491,12 +724,12 @@ TEST(PageCacheResidency, ACameraHoveringAtARingBoundaryDoesNotChurnTheCache)
     PageStreaming::PageCache cache;
     cache.Configure(4096, 2, 0.4f);
     std::vector<PageStreaming::PageWant> wants;
-    HeightPageRequester requester;
-    requester.Configure(terrain);
+    PageRequester requester;
+    requester.Configure(terrain, PageRequestArea::Disc);
     uint64 frame = 0;
     const auto step = [&](float32 height) {
         const Mathematics::Vector3 eye{30000.0f, terrain.MaxHeight + height, 7500.0f};
-        requester.Build(std::span(&eye, 1), view, wants);
+        requester.Build(DiscCamera(eye), view, wants);
         for (PageStreaming::PageWant& want : wants)
             want.Top = want.Address.Level >= top;
         cache.Update(++frame, 1.0f / 60.0f, wants, 4096);
@@ -666,6 +899,136 @@ TEST(PagedHeightResolve, TheGlslResolveIsTheMirrorBitForBit)
                 ++compared;
             }
     EXPECT_EQ(compared, 9u * 65u * 49u);
+}
+
+namespace
+{
+
+// The shipped locate of the surface planes (cbt_page.glsl CBT_PageLocate, CBT_PageOwnedAt,
+// CBT_PageSlotTexelX/Z) at (u, v, level), fetched bilinearly from `texels`: a plane cache of `stride`-texel
+// slots whose pages hold their owned samples `apron` texels in. The fragment sums each plane the same way.
+float32 LocateAndFetch(const PagedField& field, const std::vector<float32>& texels, uint32 stride, uint32 apron,
+                       float32 u, float32 v, float32 level)
+{
+    using namespace PageResolveGlsl;
+    s_Bound = Bound{&field.Table, nullptr, 0u};
+    CBTPageField shape{};
+    shape.Level0SamplesX = field.Table.Levels().front().SamplesX;
+    shape.Level0SamplesZ = field.Table.Levels().front().SamplesZ;
+    shape.LevelCount = uint32(field.Table.Levels().size());
+    shape.SlotsPerRow = field.Geometry.SlotsPerRow;
+    const CBTPagePoint point = CBT_PagePointAtUV(u, v, shape);
+    const CBTPageLocation location = CBT_PageLocate(point, level, shape);
+    const std::array<std::tuple<uint32, uint32, float32>, 4> pages = {{
+        {location.Level0, location.Slot0, location.Weight0},
+        {location.Level1, location.Slot1, location.Weight1},
+        {location.Level2, location.Slot2, location.Weight2},
+        {location.Level3, location.Slot3, location.Weight3},
+    }};
+    const uint32 dim = field.Geometry.SlotsPerRow * stride;
+    float32 sum = 0.0f;
+    for (uint32 i = 0; i < location.Count; ++i)
+    {
+        const auto [pageLevel, slot, weight] = pages[i];
+        const CBTPageOwned owned = CBT_PageOwnedAt(point, pageLevel);
+        sum += weight * SampleGridBilinearTexel(texels.data(), dim, dim,
+                                                CBT_PageSlotTexelX(owned, slot, stride, apron, shape),
+                                                CBT_PageSlotTexelZ(owned, slot, stride, apron, shape));
+    }
+    return sum;
+}
+
+// The field's resident pages as a plane cache of `stride`-texel slots, each page's owned samples `apron`
+// texels in and its lattice edge-clamped past the field.
+std::vector<float32> PlaneTexels(const PagedField& field, uint32 stride, uint32 apron)
+{
+    const uint32 dim = field.Geometry.SlotsPerRow * stride;
+    std::vector<float32> texels(std::size_t(dim) * dim, 0.0f);
+    for (const PageAddress& page : field.AllPages())
+    {
+        const uint32 slot = field.Cache.SlotOf(PagedField::Page(page));
+        if (slot == PageStreaming::kNoResidentSlot)
+            continue;
+        const PageStreaming::PageStoreLevel& shape = field.Table.Levels()[page.Level];
+        for (uint32 r = 0; r < stride; ++r)
+            for (uint32 c = 0; c < stride; ++c)
+            {
+                const int64 j = std::clamp<int64>(int64(page.X) * 128 + c - apron, 0, shape.SamplesX - 1);
+                const int64 k = std::clamp<int64>(int64(page.Z) * 128 + r - apron, 0, shape.SamplesZ - 1);
+                texels[std::size_t((slot / field.Geometry.SlotsPerRow) * stride + r) * dim +
+                       (slot % field.Geometry.SlotsPerRow) * stride + c] =
+                    FieldHeight(float32(j << page.Level), float32(k << page.Level));
+            }
+    }
+    return texels;
+}
+
+constexpr float32 kLocateTolerance = 1e-4f; // the locate sums (1 - w) and w where the mirror lerps
+
+} // namespace
+
+TEST(PagedSurfaceResolve, EachPlaneFetchesTheLocatedPagesAtItsStrideAndApron)
+{
+    // Every page resident and settled: a lattice plane (130, apron 1) and a block plane (136, apron 4, the BC5
+    // normal) both read the height mirror's value at every level.
+    PagedField field(64);
+    const std::vector<PageAddress> all = field.AllPages();
+    for (int frame = 0; frame < 40; ++frame)
+        field.Step(all);
+    const PagedHeightSampler mirror = field.Sampler();
+    // The texels as the store lays them out; the fetch at the shader's strides and aprons.
+    const std::vector<float32> lattice =
+        PlaneTexels(field, PageStreaming::kPageStrideSamples, PageStreaming::kPageApronSamples);
+    const std::vector<float32> block = PlaneTexels(
+        field, PageStreaming::PageStrideTexels(PageStreaming::PageFieldFormat::Bc5), PageStreaming::kPageBlockTexels);
+    using PageResolveGlsl::CBT_PAGE_APRON;
+    using PageResolveGlsl::CBT_PAGE_BLOCK_APRON;
+    using PageResolveGlsl::CBT_PAGE_BLOCK_STRIDE;
+    using PageResolveGlsl::CBT_PAGE_STRIDE;
+    for (float32 level : {0.0f, 0.5f, 0.9f, 1.3f, 2.95f, 40.0f})
+        for (uint32 i = 0; i <= 32; ++i)
+            for (uint32 k = 0; k <= 24; ++k)
+            {
+                const float32 u = float32(i) / 32.0f;
+                const float32 v = float32(k) / 24.0f;
+                const float32 expected = mirror.Sample(u, v, level);
+                ASSERT_NEAR(LocateAndFetch(field, lattice, CBT_PAGE_STRIDE, CBT_PAGE_APRON, u, v, level), expected,
+                            kLocateTolerance)
+                    << "lattice plane, uv " << u << "," << v << " level " << level;
+                ASSERT_NEAR(LocateAndFetch(field, block, CBT_PAGE_BLOCK_STRIDE, CBT_PAGE_BLOCK_APRON, u, v, level),
+                            expected, kLocateTolerance)
+                    << "block plane, uv " << u << "," << v << " level " << level;
+            }
+}
+
+TEST(PagedSurfaceResolve, TheLocateWeighsThePagesTheHeightResolveReads)
+{
+    // A missing page (the fallback walk) and a page fading in over its settled parent: the locate's pages and
+    // weights, fetched from the height cache, give the height resolve's value.
+    PagedField field(64);
+    std::vector<PageAddress> partial;
+    for (const PageAddress& page : field.AllPages())
+        if (!(page.Level == 0 && page.X == 1 && page.Z == 1) && !(page.Level == 0 && page.X == 3 && page.Z == 2))
+            partial.push_back(page);
+    for (int frame = 0; frame < 40; ++frame)
+        field.Step(partial);
+    partial.push_back(PageAddress{0, 0, 1, 1});
+    field.Step(partial, 0.1f);
+    ASSERT_LT(field.Cache.FadeOf(PagedField::Page(PageAddress{0, 0, 1, 1})), 1.0f);
+    ASSERT_EQ(field.Cache.SlotOf(PagedField::Page(PageAddress{0, 0, 3, 2})), PageStreaming::kNoResidentSlot);
+
+    const PagedHeightSampler mirror = field.Sampler();
+    for (float32 level : {0.0f, 0.3f, 0.8f, 0.9375f, 1.0f, 1.5f, 1.9f, 2.6f, 40.0f})
+        for (uint32 i = 0; i <= 64; ++i)
+            for (uint32 k = 0; k <= 48; ++k)
+            {
+                const float32 u = float32(i) / 64.0f;
+                const float32 v = float32(k) / 48.0f;
+                ASSERT_NEAR(LocateAndFetch(field, field.Texels, PageResolveGlsl::CBT_PAGE_STRIDE,
+                                           PageResolveGlsl::CBT_PAGE_APRON, u, v, level),
+                            mirror.Sample(u, v, level), kLocateTolerance)
+                    << "uv " << u << "," << v << " level " << level;
+            }
 }
 
 TEST(PagedHeightResolve, AWalkThatFindsNoResidentPageUpToTheTopCountsOneUnresolvedSample)
@@ -886,10 +1249,44 @@ TEST(PagedHeightResolve, APageWhoseBlockPoolIsFullWaitsForABlockThenTakesItsEntr
 namespace
 {
 
+// True when some point of the level-`level` page (x, z) lies in the wedge of `camera`: within two page
+// widths of its foot, or within its horizontal field plus the margin. Samples the footprint's edges,
+// so it does not share the requester's corner-bearing test.
+bool ModelPageInWedge(const PageRequestTerrain& terrain, uint32 level, uint32 x, uint32 z,
+                      const PageRequestCamera& camera)
+{
+    constexpr uint32 kEdgeSamples = 32;
+    const float32 span = float32(PageStreaming::kPageOwnedSamples << level) * terrain.Level0TexelX;
+    const float32 minX = terrain.OriginX + float32(x) * span;
+    const float32 minZ = terrain.OriginZ + float32(z) * span;
+    const float32 dx = std::max({minX - camera.Position.x, 0.0f, camera.Position.x - minX - span});
+    const float32 dz = std::max({minZ - camera.Position.z, 0.0f, camera.Position.z - minZ - span});
+    if (std::sqrt(dx * dx + dz * dz) <= kPageWedgeFootPages * span)
+        return true;
+    const float32 forward = std::atan2(camera.Forward.x, camera.Forward.z);
+    const float32 limit = camera.HorizontalHalfFov + kPageWedgeMarginRadians;
+    for (uint32 i = 0; i <= kEdgeSamples; ++i)
+    {
+        const float32 along = span * float32(i) / float32(kEdgeSamples);
+        const std::array<std::pair<float32, float32>, 4> points{{{minX + along, minZ},
+                                                                 {minX + along, minZ + span},
+                                                                 {minX, minZ + along},
+                                                                 {minX + span, minZ + along}}};
+        for (const auto& [px, pz] : points)
+        {
+            const float32 off = std::atan2(px - camera.Position.x, pz - camera.Position.z) - forward;
+            if (std::abs(std::remainder(off, 2.0f * std::numbers::pi_v<float32>)) <= limit)
+                return true;
+        }
+    }
+    return false;
+}
+
 // The needed-plus-parents model (design page-streaming-planets 3.5): a page is needed where its own
 // nearest point needs exactly its level, or when it is pinned; then every ancestor of a needed page.
+// With `wedge`, a page outside that camera's wedge is needed only when pinned.
 std::size_t NeededPlusParents(const PageRequestTerrain& terrain, uint32 firstPinned, const Mathematics::Vector3& camera,
-                              const PageLevelView& view)
+                              const PageLevelView& view, const PageRequestCamera* wedge = nullptr)
 {
     const std::vector<PageStreaming::PageStoreLevel> levels =
         PageStreaming::BuildPageStoreLevels(terrain.SamplesX, terrain.SamplesZ);
@@ -905,7 +1302,8 @@ std::size_t NeededPlusParents(const PageRequestTerrain& terrain, uint32 firstPin
                 const float32 dy = std::max({terrain.MinHeight - camera.y, 0.0f, camera.y - terrain.MaxHeight});
                 const float32 lambda = GeometryPageLevel(std::sqrt(dx * dx + dy * dy + dz * dz), terrain.Level0TexelX, view);
                 const uint32 wants = std::min(uint32(std::max(0.0f, std::floor(lambda))), top);
-                if (level < firstPinned && wants != level)
+                const bool inArea = wedge == nullptr || ModelPageInWedge(terrain, level, x, z, *wedge);
+                if (level < firstPinned && (wants != level || !inArea))
                     continue;
                 for (PageAddress page{0, uint8(level), x, z}; page.Level <= top; page = page.Parent())
                     needed.insert(Key(page));
@@ -929,15 +1327,48 @@ TEST(PageLevelRule, TheRequestAtTheThreeDemPosesIsTheNeededPagesWithTheirParents
     terrain.MaxHeight = 287.1f;
     terrain.CacheSlots = kDesktopHeightPages.Slots;
     const PageLevelView view{779.0f, 9.17f};
-    HeightPageRequester requester;
-    requester.Configure(terrain);
+    PageRequester requester;
+    requester.Configure(terrain, PageRequestArea::Disc);
     for (float32 eye : {288.8f, 788.8f, 3288.8f})
     {
         const Mathematics::Vector3 camera{3493.0f, eye, 899.0f};
         std::vector<PageStreaming::PageWant> wants;
-        requester.Build({&camera, 1}, view, wants);
+        requester.Build(DiscCamera(camera), view, wants);
         const std::size_t model = NeededPlusParents(terrain, requester.FirstPinnedLevel(), camera, view);
         EXPECT_LE(std::fabs(float64(wants.size()) - float64(model)), 0.25 * float64(model))
             << "eye " << eye << " m: requested " << wants.size() << ", needed with parents " << model;
     }
+}
+
+// The surface stream at the DEM eye pose: the wedge's request is the needed-plus-parents model inside
+// the wedge, and well below the disc's request.
+TEST(PageLevelRule, TheSurfaceRequestAtTheDemEyePoseIsTheNeededPagesInTheWedgeWithTheirParents)
+{
+    // The near terrain and viewport of the three-pose test, the surface's rule (one texel a pixel) and
+    // the surface field's desktop slots. The eye looks along +X (yaw 0); a 16:9 view is assumed.
+    PageRequestTerrain terrain;
+    terrain.Level0TexelX = terrain.Level0TexelZ = 1.0f;
+    terrain.SamplesX = 8193u;
+    terrain.SamplesZ = 2049u;
+    terrain.MinHeight = 236.0f;
+    terrain.MaxHeight = 287.1f;
+    terrain.CacheSlots = 2048u;
+    const PageLevelView view{779.0f, 1.0f};
+    const float32 halfFov = std::atan(std::tan(std::numbers::pi_v<float32> / 6.0f) * 16.0f / 9.0f);
+    const PageRequestCamera camera{{3493.0f, 288.8f, 899.0f}, {1.0f, 0.0f, 0.0f}, halfFov, true};
+
+    PageRequester wedge;
+    wedge.Configure(terrain, PageRequestArea::Wedge);
+    std::vector<PageStreaming::PageWant> wants;
+    wedge.Build(std::span(&camera, 1), view, wants);
+    const std::size_t model = NeededPlusParents(terrain, wedge.FirstPinnedLevel(), camera.Position, view, &camera);
+    EXPECT_LE(std::fabs(float64(wants.size()) - float64(model)), 0.25 * float64(model))
+        << "requested " << wants.size() << ", needed in the wedge with parents " << model;
+
+    PageRequester disc;
+    disc.Configure(terrain, PageRequestArea::Disc);
+    std::vector<PageStreaming::PageWant> discWants;
+    disc.Build(std::span(&camera, 1), view, discWants);
+    EXPECT_LT(float64(wants.size()), 0.75 * float64(discWants.size()))
+        << "the wedge requests " << wants.size() << " of the disc's " << discWants.size();
 }

@@ -1,6 +1,6 @@
 #include "PageStreaming/PageResidency.h"
 
-#include "PageStreaming/HeightPageOverlay.h"
+#include "PageStreaming/Height/HeightPageOverlay.h"
 
 #include "PageStreaming/GeneratedHeightPageProvider.h"
 #include "PageStreaming/PageLoader.h"
@@ -21,23 +21,45 @@ namespace
 // for a reader that reads the record every frame.
 constexpr std::size_t kCpuChangeRecordLength = 4096;
 
+// True when page `page` reads a level-0 sample of one of `rects`.
+bool ReadsAnyRect(const PageAddress& page, std::span<const PageSampleRect> rects)
+{
+    return std::ranges::any_of(rects, [&page](const PageSampleRect& rect) { return PageReadsLevel0Rect(page, rect); });
+}
+
 std::span<const PageStoreLevel> LevelsOf(const PageSource& source)
 {
     if (source.Store)
         return source.Store->Layout().Levels;
-    if (source.Access)
-        return source.Access->Levels();
+    if (!source.Planes.empty())
+        return source.Planes.front()->Levels();
     if (source.Generated)
         return source.Generated->Levels();
     return {};
+}
+
+// True when every plane of `source` has the faces and the levels of its first plane.
+[[maybe_unused]] bool PlanesShareLattice(const PageSource& source)
+{
+    for (const std::shared_ptr<const PageStoreAccess>& plane : source.Planes)
+    {
+        const std::span<const PageStoreLevel> own = plane->Levels();
+        const std::span<const PageStoreLevel> first = source.Planes.front()->Levels();
+        if (plane->FaceCount() != source.Planes.front()->FaceCount() || own.size() != first.size())
+            return false;
+        for (std::size_t level = 0; level < own.size(); ++level)
+            if (own[level].SamplesX != first[level].SamplesX || own[level].SamplesZ != first[level].SamplesZ)
+                return false;
+    }
+    return true;
 }
 
 uint32 FaceCountOf(const PageSource& source)
 {
     if (source.Store)
         return source.Store->Layout().Header.FaceCount;
-    if (source.Access)
-        return source.Access->FaceCount();
+    if (!source.Planes.empty())
+        return source.Planes.front()->FaceCount();
     return source.Generated ? source.Generated->FaceCount() : 1u;
 }
 
@@ -91,6 +113,7 @@ void PageResidencyManager::ConfigureField(uint32 field, uint32 slotCount, uint32
 void PageResidencyManager::Configure(uint32 stream, uint32 field, PageSource source)
 {
     assert(m_Fields.count(field) && "a stream's field is configured before the stream");
+    assert(PlanesShareLattice(source) && "a stream's planes are on one lattice");
     Forget(stream);
     Stream& state = m_Streams[stream];
     state.Source = std::move(source);
@@ -98,7 +121,10 @@ void PageResidencyManager::Configure(uint32 stream, uint32 field, PageSource sou
     state.TopLevel = TopLevelOf(state.Source);
     state.PageBytes = state.Source.PayloadBytes();
     state.Epoch = m_NextEpoch++;
-    state.SourceVersion = state.Source.Access ? state.Source.Access->Version() : 0u;
+    state.SourceVersion = state.Source.PlanesVersion();
+    state.PlaneVersions.clear();
+    for (const std::shared_ptr<const PageStoreAccess>& plane : state.Source.Planes)
+        state.PlaneVersions.push_back(plane->Version());
     state.EntriesPerFace = static_cast<uint32>(DensePageCount(LevelsOf(state.Source)));
     // The CPU directory is built by the stream's first RequestCpu: a stream with no CPU reader holds none.
     state.CpuDirectory.clear();
@@ -146,8 +172,8 @@ void PageResidencyManager::RequestCpu(uint32 stream, uint32 firstPinnedLevel, st
         return;
     Stream& state = it->second;
     // A CPU read runs on the frame thread, and a read of a store being baked waits on the bake.
-    assert(!state.Source.Access && "RequestCpu on a stream over a PageStoreAccess: read its pages through Request, on workers");
-    if (state.Source.Access)
+    assert(state.Source.Planes.empty() && "RequestCpu on a stream over a PageStoreAccess: read its pages through Request, on workers");
+    if (!state.Source.Planes.empty())
         return;
     // The CPU readers (SurfaceHeightQuery) read planar terrain: the pins and fetches walk face 0 only.
     assert(FaceCountOf(state.Source) == 1u && "CPU height pages of a stream with more than one face");
@@ -254,6 +280,7 @@ void PageResidencyManager::DrainCompletions(uint64 frameIndex)
         std::lock_guard lock(m_Completions->Mutex);
         m_Drained.swap(m_Completions->Completions);
     }
+    m_LoadsChanged = m_LoadsChanged || !m_Drained.empty();
     for (Completion& done : m_Drained)
     {
         --m_InFlightCount; // every load started is counted out once, its stream alive or not
@@ -279,6 +306,7 @@ void PageResidencyManager::Land(Stream& stream, uint64 frameIndex, PageFetchOutc
         assert(page->second.Bytes->size() == stream.PageBytes && "a loaded page holds its source's page bytes");
         SetCpuEntry(stream, outcome.Address, CpuPageEntry{page->second.Bytes->data(), CpuPageState::Resident});
         stream.Failures.erase(outcome.Address);
+        m_ChangedFields.Insert(stream.Field);
         if (inserted)
             m_CpuBytes += stream.PageBytes;
         return;
@@ -294,6 +322,7 @@ void PageResidencyManager::Land(Stream& stream, uint64 frameIndex, PageFetchOutc
         Logger::Log::Warning("Terrain page (level {}, {}, {}) did not load: {}. It is retried.", outcome.Address.Level,
                              outcome.Address.X, outcome.Address.Z, outcome.Error);
     failure.RetryAtFrame = NextPageFetchRetryFrame(frameIndex, failure.Attempts);
+    m_NextRetryFrame = std::min(m_NextRetryFrame, failure.RetryAtFrame);
     ++failure.Attempts;
 }
 
@@ -309,19 +338,54 @@ void PageResidencyManager::RetryAbsentPages()
 {
     for (auto& [id, stream] : m_Streams)
     {
-        if (!stream.Source.Access)
+        if (stream.Source.Planes.empty() || stream.Source.PlanesVersion() == stream.SourceVersion)
             continue;
-        const uint64 version = stream.Source.Access->Version();
-        if (version == stream.SourceVersion)
-            continue;
-        stream.SourceVersion = version;
-        stream.Absent.clear();
+        m_ReadableRects.clear();
+        bool whole = false;
+        uint64 reached = 0;
+        for (std::size_t plane = 0; plane < stream.Source.Planes.size(); ++plane)
+        {
+            uint64& version = stream.PlaneVersions[plane];
+            version = stream.Source.Planes[plane]->ReadableSince(version, m_ReadableRects, whole);
+            reached += version;
+        }
+        stream.SourceVersion = reached;
+        const std::size_t absent = stream.Absent.size();
+        if (whole)
+            stream.Absent.clear();
+        else if (!m_ReadableRects.empty())
+        {
+            m_Visits += static_cast<uint32>(absent);
+            std::erase_if(stream.Absent,
+                          [this](const PageAddress& page) { return ReadsAnyRect(page, m_ReadableRects); });
+        }
+        m_LoadsChanged = m_LoadsChanged || stream.Absent.size() != absent;
     }
+}
+
+void PageResidencyManager::DropUploadedPlaneBytes()
+{
+    // The owner copied them after that Update. A page released or refreshed since loads again.
+    for (const CachedPage& page : m_UploadedPlanePages)
+    {
+        const auto it = m_Streams.find(page.Stream);
+        if (it != m_Streams.end() && it->second.Loaded.erase(page.Address) != 0)
+            m_CpuBytes -= it->second.PageBytes;
+    }
+    m_UploadedPlanePages.clear();
+}
+
+void PageResidencyManager::ListUploadedPlanePages()
+{
+    for (const auto& [field, cache] : m_Fields)
+        for (const PageUploadRequest& upload : cache.Uploads())
+            if (!m_Streams.at(upload.Page.Stream).Source.Planes.empty())
+                m_UploadedPlanePages.push_back(upload.Page);
 }
 
 void PageResidencyManager::FetchNow(Stream& stream, uint64 frameIndex, const PageAddress& address)
 {
-    assert(!stream.Source.Access && "a store being baked is read on workers: a read here waits on the bake");
+    assert(stream.Source.Planes.empty() && "a store being baked is read on workers: a read here waits on the bake");
     PageFetchOutcome outcome = FetchPage(stream.Source, address);
     Land(stream, frameIndex, outcome);
 }
@@ -401,7 +465,7 @@ void PageResidencyManager::StartCpuLoads(uint64 frameIndex, bool pinned)
     }
 }
 
-void PageResidencyManager::RebuildCandidates()
+void PageResidencyManager::RebuildCandidates(uint64 lastFrame)
 {
     bool changed = m_CandidatesStale;
     m_CandidatesStale = false;
@@ -412,9 +476,17 @@ void PageResidencyManager::RebuildCandidates()
     }
     if (!changed)
         return; // a parked camera: the order stands
+    m_LoadsChanged = true;
+    for (const auto& [field, cache] : m_Fields)
+        m_ChangedFields.Insert(field);
     m_Candidates.clear();
     for (auto& [id, stream] : m_Streams)
     {
+        // The trim drops the least recently placeable pages first: these were placeable at the last Update.
+        m_Visits += static_cast<uint32>(stream.Placeable.size() + stream.Wanted.size());
+        for (const PageWant& want : stream.Placeable)
+            if (const auto page = stream.Loaded.find(want.Address); page != stream.Loaded.end())
+                page->second.LastWantedFrame = lastFrame;
         stream.Placeable.clear();
         stream.PlaceableSet.clear();
         for (const PageWant& want : stream.Wanted)
@@ -485,34 +557,51 @@ void PageResidencyManager::StartLoads(uint64 frameIndex)
             if (!stream.Loaded.count(address) && !stream.InFlight.count(address))
                 StartLoad(id, stream, address, false);
         }
+    // A candidate needs a load only after the order, a load, a residency change or a retry's frame.
+    for (const auto& [field, cache] : m_Fields)
+        m_LoadsChanged = m_LoadsChanged || !cache.Transitions().empty();
+    if (!m_LoadsChanged && frameIndex < m_NextRetryFrame)
+        return;
+    m_LoadsChanged = false; // a pass cut short by the budget runs again at the next completion
+    m_NextRetryFrame = ~0ull;
     for (const Candidate& candidate : m_Candidates)
     {
         if (m_InFlightCount >= m_Budget.LoadsInFlight)
             return;
+        ++m_Visits;
         Stream& stream = m_Streams.at(candidate.Stream);
         const PageAddress& address = candidate.Want.Address;
-        if (const auto it = stream.Loaded.find(address); it != stream.Loaded.end())
-        {
-            it->second.LastWantedFrame = frameIndex;
+        if (stream.Loaded.count(address) != 0)
             continue;
-        }
         if (m_Fields.at(stream.Field).SlotOf(candidate.Want.Page()) != kNoResidentSlot)
             continue; // resident: its samples were uploaded and trimmed since
         if (NeedsLoad(stream, address, frameIndex))
             StartLoad(candidate.Stream, stream, address, false);
+        else if (const auto failed = stream.Failures.find(address);
+                 failed != stream.Failures.end() && frameIndex < failed->second.RetryAtFrame)
+            m_NextRetryFrame = std::min(m_NextRetryFrame, failed->second.RetryAtFrame);
     }
+}
+
+bool PageResidencyManager::FieldChanged(uint32 field, const PageCache& cache) const
+{
+    return m_ChangedFields.Contains(field) || cache.DeferredThisFrame() != 0 || !cache.Transitions().empty();
 }
 
 void PageResidencyManager::AssignLoaded(uint64 frameIndex, float32 deltaSeconds, bool teleport)
 {
-    // The upload cap goes to the loaded, placeable, not yet resident pages in the one order.
+    // The upload cap goes to the loaded, placeable, not yet resident pages in the one order. A field
+    // whose pages did not change since an Update that placed them all has none of them.
     uint32 uploads = teleport ? m_Budget.UploadsPerFrameTeleport : m_Budget.UploadsPerFrame;
     for (auto& [field, allowance] : m_Allowance)
         allowance = 0;
+    const bool anyChanged =
+        std::ranges::any_of(m_Fields, [this](const auto& entry) { return FieldChanged(entry.first, entry.second); });
     for (const Candidate& candidate : m_Candidates)
     {
-        if (uploads == 0)
+        if (uploads == 0 || !anyChanged)
             break;
+        ++m_Visits;
         const Stream& stream = m_Streams.at(candidate.Stream);
         if (stream.Loaded.count(candidate.Want.Address) &&
             m_Fields.at(stream.Field).SlotOf(candidate.Want.Page()) == kNoResidentSlot)
@@ -523,11 +612,18 @@ void PageResidencyManager::AssignLoaded(uint64 frameIndex, float32 deltaSeconds,
     }
     for (auto& [field, cache] : m_Fields)
     {
+        if (!FieldChanged(field, cache))
+        {
+            cache.Tick(frameIndex, deltaSeconds);
+            RewriteRefreshed(field, cache);
+            continue;
+        }
         m_LoadedPlaceable.clear();
         for (const auto& [id, stream] : m_Streams)
         {
             if (stream.Field != field)
                 continue;
+            m_Visits += static_cast<uint32>(stream.Placeable.size());
             for (const PageWant& want : stream.Placeable)
                 if (stream.Loaded.count(want.Address) || cache.SlotOf(want.Page()) != kNoResidentSlot)
                     m_LoadedPlaceable.push_back(want);
@@ -536,6 +632,7 @@ void PageResidencyManager::AssignLoaded(uint64 frameIndex, float32 deltaSeconds,
         cache.Update(frameIndex, deltaSeconds, m_LoadedPlaceable, allowance == m_Allowance.end() ? 0u : allowance->second);
         RewriteRefreshed(field, cache);
     }
+    m_ChangedFields.Clear();
 }
 
 void PageResidencyManager::RewriteRefreshed(uint32 field, PageCache& cache)
@@ -585,16 +682,20 @@ void PageResidencyManager::TrimCpuPages(uint64 frameIndex)
 void PageResidencyManager::Update(uint64 frameIndex, float32 deltaSeconds, bool teleport)
 {
     const std::chrono::steady_clock::time_point start = m_Clock();
+    const uint64 lastFrame = m_FrameIndex;
     m_FrameIndex = frameIndex;
     m_LoadsStarted = 0;
+    m_Visits = 0;
     RetryAbsentPages();
+    DropUploadedPlaneBytes();
     DrainCompletions(frameIndex);
     FetchCpuNow(frameIndex, start);
-    RebuildCandidates();
+    RebuildCandidates(lastFrame);
     StartCpuLoads(frameIndex, false);
     StartLoads(frameIndex);
     StartCpuLoads(frameIndex, true);
     AssignLoaded(frameIndex, deltaSeconds, teleport);
+    ListUploadedPlanePages();
     TrimCpuPages(frameIndex);
     for (auto& [id, stream] : m_Streams)
     {
@@ -602,6 +703,8 @@ void PageResidencyManager::Update(uint64 frameIndex, float32 deltaSeconds, bool 
         stream.KeptCpuWindow.swap(stream.CpuWindow);
         stream.CpuWindow.clear();
     }
+    for (const auto& [field, cache] : m_Fields)
+        m_Visits += cache.PageVisitsThisFrame();
 }
 
 } // namespace GameEngine::PageStreaming

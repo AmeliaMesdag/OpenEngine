@@ -361,6 +361,7 @@ struct MaterialData
     vec4 TextureST[8];  // per-texture affine row 0: x'=dot(vec3(uv,1), xyz)
     vec4 TextureST2[8]; // per-texture affine row 1: y'=dot(vec3(uv,1), xyz)
     uint SamplerIndices; // 8 × 4-bit sampler-preset indices into ge_BindlessSamplers (slot i = bits[i*4..i*4+4))
+    uint NormalVarianceIndex; // bindless index of the normal map's BC4 variance companion (black when none)
 };
 
 layout(std430, set = 0, binding = 13) readonly buffer MaterialParamsSSBO

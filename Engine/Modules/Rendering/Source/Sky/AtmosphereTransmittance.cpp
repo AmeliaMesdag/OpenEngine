@@ -37,15 +37,15 @@ float SurfacePathLength(const AtmosphereParametersGPU& atmosphere, float mu)
     return std::sqrt(shellDepth + rMu * rMu) - rMu;
 }
 
-// Optical depth from the planet surface out along `mu`.
-void OpticalDepth(const AtmosphereParametersGPU& atmosphere, float mu, float outTau[3])
+// Optical depth per RGB channel from the planet surface out along `mu`.
+Mathematics::Vector3 OpticalDepth(const AtmosphereParametersGPU& atmosphere, float mu)
 {
-    outTau[0] = outTau[1] = outTau[2] = 0.0f;
+    Mathematics::Vector3 tau(0.0f, 0.0f, 0.0f);
 
     const float r = atmosphere.planetRadius;
     const float sMax = SurfacePathLength(atmosphere, mu);
     if (sMax <= 0.0f)
-        return;
+        return tau;
 
     const float ds = sMax / static_cast<float>(kOpticalDepthSteps);
     for (int step = 0; step < kOpticalDepthSteps; ++step)
@@ -59,11 +59,12 @@ void OpticalDepth(const AtmosphereParametersGPU& atmosphere, float mu, float out
         const float ozone = std::max(
             0.0f, 1.0f - std::fabs(height - atmosphere.ozoneCenterHeight) / atmosphere.ozoneHalfWidth);
         for (int c = 0; c < 3; ++c)
-            outTau[c] += (atmosphere.betaRayleigh[c] * rayleigh +
-                          (atmosphere.betaMie[c] + atmosphere.mieAbsorption[c]) * mie +
-                          atmosphere.ozoneAbsorption[c] * ozone) *
-                         ds;
+            tau[c] += (atmosphere.betaRayleigh[c] * rayleigh +
+                       (atmosphere.betaMie[c] + atmosphere.mieAbsorption[c]) * mie +
+                       atmosphere.ozoneAbsorption[c] * ozone) *
+                      ds;
     }
+    return tau;
 }
 
 } // namespace
@@ -78,17 +79,14 @@ const AtmosphereParametersGPU& ScatteringAtmosphere()
     return atmosphere;
 }
 
-void EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
-                                 const float colorAboveAtmosphere[3],
-                                 float sourceUpDot,
-                                 float outColor[3])
+ColorLinear EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
+                                        const ColorLinear& colorAboveAtmosphere,
+                                        float sourceUpDot)
 {
     const float mu = std::clamp(sourceUpDot, -1.0f, 1.0f);
 
-    float tau[3];
-    float zenithTau[3];
-    OpticalDepth(atmosphere, mu, tau);
-    OpticalDepth(atmosphere, 1.0f, zenithTau);
+    Mathematics::Vector3 tau = OpticalDepth(atmosphere, mu);
+    const Mathematics::Vector3 zenithTau = OpticalDepth(atmosphere, 1.0f);
 
     if (mu < 0.0f)
     {
@@ -96,8 +94,7 @@ void EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
         // integral makes a source get brighter for the first degree after it sets. The extinction
         // a set source suffers is at least the horizon's, and the chord takes over from there —
         // which keeps the whole descent monotonic through the crossing.
-        float grazingTau[3];
-        OpticalDepth(atmosphere, 0.0f, grazingTau);
+        const Mathematics::Vector3 grazingTau = OpticalDepth(atmosphere, 0.0f);
         for (int c = 0; c < 3; ++c)
             tau[c] = std::max(tau[c], grazingTau[c]);
     }
@@ -106,48 +103,51 @@ void EvaluateGroundLevelSunColor(const AtmosphereParametersGPU& atmosphere,
     // light's authored illuminance is already its GROUND value, and subtracting the overhead
     // extinction from it a second time would dim every scene's key light by ~10% at noon. What
     // varies over the day is the EXTRA air mass a lower sun's light travels through.
-    for (int c = 0; c < 3; ++c)
-        outColor[c] = colorAboveAtmosphere[c] * std::exp(zenithTau[c] - tau[c]);
+    return ColorLinear(colorAboveAtmosphere.r * std::exp(zenithTau.x - tau.x),
+                       colorAboveAtmosphere.g * std::exp(zenithTau.y - tau.y),
+                       colorAboveAtmosphere.b * std::exp(zenithTau.z - tau.z));
 }
 
 float SkySourceIlluminanceScale(const AtmosphereParametersGPU& atmosphere)
 {
-    float zenithTau[3];
-    OpticalDepth(atmosphere, 1.0f, zenithTau);
-    const ColorLinear zenithTransmittance(std::exp(-zenithTau[0]), std::exp(-zenithTau[1]), std::exp(-zenithTau[2]));
+    const Mathematics::Vector3 zenithTau = OpticalDepth(atmosphere, 1.0f);
+    const ColorLinear zenithTransmittance(std::exp(-zenithTau.x), std::exp(-zenithTau.y), std::exp(-zenithTau.z));
     return 1.0f / ColorUtils::LinearRec709Luminance(zenithTransmittance);
 }
 
 SkyBodyGroundColors EvaluateBodyGroundColors(const AtmosphereParametersGPU& atmosphere,
                                              const SkySystemConfig& config,
                                              const SkySystemState& state,
-                                             const float sunTint[3])
+                                             const ColorLinear& sunTint)
 {
     SkyBodyGroundColors bodies;
-    EvaluateGroundLevelSunColor(atmosphere, sunTint, state.sunDirWS[1], bodies.Sun);
+    bodies.Sun = EvaluateGroundLevelSunColor(atmosphere, sunTint, state.sunDirWS.y);
 
     // The moon's source is its own colour, NOT the sun's tint times it. The tint is art direction
     // for the sun, and the moon disc is drawn from this same untinted colour, so tinting moonlight
     // here would light the ground in a colour the visible moon does not have.
-    const float moonColor[3] = {config.moonColor.r, config.moonColor.g, config.moonColor.b};
-    EvaluateGroundLevelSunColor(atmosphere, moonColor, state.moonDirWS[1], bodies.Moon);
+    bodies.Moon = EvaluateGroundLevelSunColor(atmosphere, config.moonColor, state.moonDirWS.y);
 
     bodies.MoonBlend =
         config.useMoonWhenSunBelowHorizon ? Math::Clamp01(state.primaryMoonBlend) : 0.0f;
     return bodies;
 }
 
-void MixPrimaryGroundColor(const SkyBodyGroundColors& bodies, float outColor[3])
+ColorLinear MixPrimaryGroundColor(const SkyBodyGroundColors& bodies)
 {
-    for (int c = 0; c < 3; ++c)
-        outColor[c] = bodies.Sun[c] * (1.0f - bodies.MoonBlend) + bodies.Moon[c] * bodies.MoonBlend;
+    const float sunWeight = 1.0f - bodies.MoonBlend;
+    return ColorLinear(bodies.Sun.r * sunWeight + bodies.Moon.r * bodies.MoonBlend,
+                       bodies.Sun.g * sunWeight + bodies.Moon.g * bodies.MoonBlend,
+                       bodies.Sun.b * sunWeight + bodies.Moon.b * bodies.MoonBlend);
 }
 
-void MixLinkedLightGroundColor(const SkyBodyGroundColors& bodies, float moonLightScale, float outColor[3])
+ColorLinear MixLinkedLightGroundColor(const SkyBodyGroundColors& bodies, float moonLightScale)
 {
+    const float sunWeight = 1.0f - bodies.MoonBlend;
     const float moonWeight = bodies.MoonBlend * moonLightScale;
-    for (int c = 0; c < 3; ++c)
-        outColor[c] = bodies.Sun[c] * (1.0f - bodies.MoonBlend) + bodies.Moon[c] * moonWeight;
+    return ColorLinear(bodies.Sun.r * sunWeight + bodies.Moon.r * moonWeight,
+                       bodies.Sun.g * sunWeight + bodies.Moon.g * moonWeight,
+                       bodies.Sun.b * sunWeight + bodies.Moon.b * moonWeight);
 }
 
 } // namespace Rendering

@@ -156,7 +156,7 @@ private:
     OceanClipParamsGPU m_Params;
     bool m_HasSpline = false;
     bool m_HasSplineBounds = false;
-    float m_SplineBounds[4] = {};
+    Mathematics::Vector4 m_SplineBounds;
     bool m_DispatchDirty = true;
 };
 

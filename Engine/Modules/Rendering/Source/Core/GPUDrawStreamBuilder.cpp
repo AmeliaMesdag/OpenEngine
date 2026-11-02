@@ -1962,9 +1962,9 @@ RenderGraph::RGBuffer GPUDrawStreamBuilder::ScheduleUnifiedScatter(
             b.Append(s.visibilityOffsetBytes);
             b.Append(s.disableVisibilityCheck);
             b.Append(s.viewWorldKey);
-            b.Append(s.lod.cameraPos[0]);
-            b.Append(s.lod.cameraPos[1]);
-            b.Append(s.lod.cameraPos[2]);
+            b.Append(s.lod.cameraPos.x);
+            b.Append(s.lod.cameraPos.y);
+            b.Append(s.lod.cameraPos.z);
             b.Append(s.lod.projScaleY);
             b.Append(s.lod.lodBiasGlobal);
             b.Append(s.lod.forceLod);
@@ -2710,9 +2710,9 @@ RenderGraph::RGBuffer GPUDrawStreamBuilder::ScheduleUnifiedScatter(
                 pc.recordBase      = callRecordBase + s * snapshotRecords;
                 pc.disableVisCheck = slice.disableVisibilityCheck ? 1u : 0u;
                 pc.viewWorldKey    = slice.viewWorldKey;
-                pc.cameraPosX      = slice.lod.cameraPos[0];
-                pc.cameraPosY      = slice.lod.cameraPos[1];
-                pc.cameraPosZ      = slice.lod.cameraPos[2];
+                pc.cameraPosX      = slice.lod.cameraPos.x;
+                pc.cameraPosY      = slice.lod.cameraPos.y;
+                pc.cameraPosZ      = slice.lod.cameraPos.z;
                 pc.projScaleY      = slice.lod.projScaleY;
                 pc.lodBiasGlobal   = slice.lod.lodBiasGlobal;
                 pc.forceLod        = slice.lod.forceLod;

@@ -511,7 +511,7 @@ TEST(DropdownTests, OptionIconClassReachesHeaderAndRows)
     EXPECT_TRUE(headerIcon->HasClass("test-icon-first"));
     // The control names a class and nothing else: no image, tint or visibility
     // is decided here, so the stylesheet stays the only authority on appearance.
-    EXPECT_FALSE(headerIcon->Overrides().Get(Style::BackgroundImage).has_value());
+    EXPECT_FALSE(headerIcon->Style().Get(Style::BackgroundImage).has_value());
 
     int changes = 0;
     dropdown.SetOnValueChanged([&](const std::string& value) { ++changes; EXPECT_EQ(value, "b"); });
@@ -622,10 +622,10 @@ TEST(DropdownTests, OptionColorLandsOnTheTextOfAnIconRow)
     // the option — and with an icon the text is a child, not the row itself.
     auto* selectedLabel = dynamic_cast<Label*>(ChildWithClass(*rows[0], "dropdown-item-label"));
     ASSERT_NE(selectedLabel, nullptr);
-    EXPECT_FALSE(selectedLabel->Overrides().Get(Style::Color).has_value());
+    EXPECT_FALSE(selectedLabel->Style().Get(Style::Color).has_value());
     auto* restingLabel = dynamic_cast<Label*>(ChildWithClass(*rows[1], "dropdown-item-label"));
     ASSERT_NE(restingLabel, nullptr);
-    EXPECT_EQ(restingLabel->Overrides().Get(Style::Color), 0xff00ff00u);
+    EXPECT_EQ(restingLabel->Style().Get(Style::Color), 0xff00ff00u);
 }
 
 TEST(DropdownTests, EnumEntryIconClassReachesTheDropdown)
@@ -665,7 +665,7 @@ TEST(DropdownTests, PictureOptionsShowTheSelectedPictureInTheHeader)
     ASSERT_NE(headerPicture, nullptr);
     EXPECT_EQ(ChildWithClass(*dropdown.GetHeaderContainer(), "dropdown-header-icon"), nullptr);
     EXPECT_TRUE(headerPicture->HasClass("test-picture-vivid"));
-    EXPECT_FALSE(headerPicture->Overrides().Get(Style::BackgroundImage).has_value());
+    EXPECT_FALSE(headerPicture->Style().Get(Style::BackgroundImage).has_value());
     EXPECT_TRUE(dropdown.GetItemsContainer()->HasClass("fit-content"));
 
     dropdown.SetSelectedIndex(1);

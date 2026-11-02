@@ -11,9 +11,9 @@
 #include "GrassBladeInstanceGPU.h"
 #include "Terrain/Heightfield.h"
 #include "Terrain/TerrainTypes.h"
-#include "TerrainColorMapCompose.h"
+#include "TerrainColorMap/TerrainColorMapCompose.h"
 #include "TerrainFieldUploader.h"
-#include "TerrainECS/TerrainColorMap.h"
+#include "TerrainECS/TerrainColorMap/TerrainColorMap.h"
 #include "Rendering/Core/CommandList.h"
 #include "Rendering/Materials/Shader/ShaderCompileService.h"
 #include "Rendering/Materials/MaterialBuilder.h"
@@ -166,8 +166,8 @@ protected:
         Pipeline = Device->CreatePipeline(desc);
         ASSERT_TRUE(Pipeline.IsValid());
         ASSERT_FALSE(desc.descriptorSetLayouts.empty());
-        // All seven buffers, twelve named data maps and the shared sampler.
-        ASSERT_EQ(desc.descriptorSetLayouts[0].bindings.size(), 20u);
+        // Five buffers, the four named unified maps and the shared sampler.
+        ASSERT_EQ(desc.descriptorSetLayouts[0].bindings.size(), 10u);
         DescriptorSetDesc set{};
         set.layout = desc.descriptorSetLayouts[0];
         DescriptorSet = Device->CreateDescriptorSet(set);
@@ -219,7 +219,7 @@ protected:
     }
 
     // heightmap: the unified height texture the placement reads; invalid = the flat ground field.
-    Placement Place(bool card, bool controls, uint8 height, uint8 density, bool atlas = false, bool resident = true,
+    Placement Place(bool card, bool controls, uint8 height, uint8 density, bool atlas = false,
                     TextureHandle heightmap = {})
     {
         constexpr uint32 slots = 1024;
@@ -246,20 +246,9 @@ protected:
         terrain.Flags = Terrain::kTerrainFlagHasHeightmap
                       | (controls ? Terrain::kTerrainFlagHasGrassControls : 0u);
         terrain.GrassControlBindless = 0; // real compat device contract
-        TerrainGrassRenderFeature::GrassAtlasParamsGPU atlasParams{};
-        TileAtlasSlot row{};
-        row.Slot = resident ? 0 : kAtlasNoSlot;
+        // An atlas-backed terrain: its ground lives in the terrain's atlas, which the grass does not read.
         if (atlas)
-        {
             terrain.Flags = Terrain::kTerrainFlagAtlasBacked;
-            atlasParams.Enabled = 1;
-            atlasParams.GrassEnabled = controls ? 1 : 0;
-            atlasParams.TileRes = 3; atlasParams.SlotStride = 5;
-            atlasParams.AtlasDim = 5; atlasParams.SlotsPerRow = 1;
-            atlasParams.TilesPerAxisX = atlasParams.TilesPerAxisZ = 1;
-            atlasParams.CoarseDim = 5; atlasParams.RowCount = 1;
-            // Both named maps below are valid; their bindless indices remain zero.
-        }
         TerrainGrassRenderFeature::GrassPlaceParamsGPU place{};
         place.CellWindow[2] = place.CellWindow[3] = 1;
         place.CameraPos[3] = 1;
@@ -268,25 +257,18 @@ protected:
         std::memcpy(plan.data() + kGrassRingHistogramWords, &cell, sizeof(cell));
         GrassIndirectBlockGPU args{}; args.Capacity = slots;
         std::vector<Blade> blank(slots);
-        const std::array<BufferHandle,7> buffers = {
+        // Bindings 0-3 and 6 (the placement set's buffers on the narrow arm).
+        const std::array<BufferHandle,5> buffers = {
             Buffer(&terrain, sizeof(terrain), BufferUsage::Storage),
             Buffer(plan.data(), plan.size()*4, BufferUsage::Storage),
             Buffer(blank.data(), blank.size()*sizeof(Blade), BufferUsage::Storage),
             Buffer(&args, sizeof(args), BufferUsage::Storage),
-            Buffer(&atlasParams, sizeof(atlasParams), BufferUsage::Uniform),
-            Buffer(&row, sizeof(row), BufferUsage::Storage),
             Buffer(&place, sizeof(place), BufferUsage::Uniform)};
-        const size_t sizes[] = {sizeof(terrain), plan.size()*4, blank.size()*sizeof(Blade), sizeof(args), sizeof(atlasParams), sizeof(row), sizeof(place)};
-        for (uint32 i=0; i<7; ++i)
-        {
-            if (i == 4 || i == 6)
-                Device->UpdateBufferBinding(DescriptorSet, i, buffers[i], 0, sizes[i]);
-            else
-                Device->UpdateStorageBufferBinding(DescriptorSet, i, buffers[i], 0, sizes[i]);
-        }
-        for (uint32 i=7; i<19; ++i) Device->UpdateImageBinding(DescriptorSet, i, texture);
-        Device->UpdateImageBinding(DescriptorSet, 7, groundTexture);
-        Device->UpdateImageBinding(DescriptorSet, 8, groundTexture);
+        const size_t sizes[] = {sizeof(terrain), plan.size()*4, blank.size()*sizeof(Blade), sizeof(args), sizeof(place)};
+        for (uint32 i=0; i<4; ++i)
+            Device->UpdateStorageBufferBinding(DescriptorSet, i, buffers[i], 0, sizes[i]);
+        Device->UpdateBufferBinding(DescriptorSet, 6, buffers[4], 0, sizes[4]);
+        for (const uint32 map : {14u, 15u, 18u}) Device->UpdateImageBinding(DescriptorSet, map, texture);
         Device->UpdateImageBinding(DescriptorSet, 13, heightmap.IsValid() ? heightmap : groundTexture);
         Device->UpdateSamplerBinding(DescriptorSet, 19, Sampler);
         auto command = Device->CreateCommandList(IDevice::QueueType::Graphics);
@@ -462,33 +444,10 @@ TEST_F(TerrainGrassRegionGpu, ProductionPlacementKeepsNeutralSitesAndScalesCards
         }
         EXPECT_EQ(Place(cards,true,0,255).Accepted,0u);
         EXPECT_EQ(Place(cards,true,255,0).Accepted,0u);
-        // Real compat availability: named atlas/coarse textures, zero bindless IDs.
-        EXPECT_EQ(Place(cards,true,0,255,true,true).Accepted,0u);
-        EXPECT_EQ(Place(cards,true,0,255,true,false).Accepted,0u);
-        for (bool resident : {false, true})
-        {
-            const auto atlasLegacy = Place(cards,false,255,255,true,resident);
-            const auto atlasNeutral = Place(cards,true,255,255,true,resident);
-            ASSERT_EQ(atlasLegacy.Accepted,1024u);
-            ASSERT_EQ(atlasNeutral.Accepted,atlasLegacy.Accepted);
-            EXPECT_EQ(std::memcmp(atlasLegacy.Blades.data(),atlasNeutral.Blades.data(),
-                                  atlasLegacy.Blades.size()*sizeof(Blade)),0);
-            const auto atlasReduced = Place(cards,true,128,102,true,resident);
-            ASSERT_GT(atlasReduced.Accepted,200u);
-            ASSERT_LT(atlasReduced.Accepted,700u);
-            for (size_t i=0;i<atlasReduced.Blades.size();++i)
-            {
-                const auto& blade = atlasReduced.Blades[i];
-                if (blade.Height == 0) continue;
-                const auto& before = atlasLegacy.Blades[i];
-                EXPECT_EQ(blade.X,before.X); EXPECT_EQ(blade.Z,before.Z);
-                EXPECT_EQ(blade.Y,before.Y);
-                EXPECT_EQ(blade.Yaw,before.Yaw); EXPECT_EQ(blade.RandomAndCoverage & 0xFFFFu,before.RandomAndCoverage & 0xFFFFu);
-                EXPECT_NEAR(blade.Height,before.Height*(128.0f/255.0f),1e-6f);
-                if (cards) EXPECT_NEAR(blade.Width,before.Width*(128.0f/255.0f),1e-6f);
-                else       EXPECT_EQ(blade.Width,before.Width);
-            }
-        }
+        // An atlas-backed terrain on the narrow arm: no surface page answers, so its ground is not
+        // readable and no blade stands on it.
+        EXPECT_EQ(Place(cards,false,255,255,true).Accepted,0u);
+        EXPECT_EQ(Place(cards,true,255,255,true).Accepted,0u);
     }
 }
 
@@ -504,7 +463,7 @@ TEST_F(TerrainGrassRegionGpu, PlacedRootsStandOnTheCpuHeightfield)
     for (uint32 z = 0; z < kDim; ++z)
         for (uint32 x = 0; x < kDim; ++x)
             field.SetSample(x, z, 0.15f * static_cast<float32>(x / 4u) + 0.3f * static_cast<float32>(z) / (kDim - 1));
-    const auto placement = Place(false, false, 255, 255, false, true, HeightTexture(field));
+    const auto placement = Place(false, false, 255, 255, false, HeightTexture(field));
     ASSERT_GT(placement.Accepted, 0u);
     uint32 checked = 0;
     float32 worst = 0.0f;

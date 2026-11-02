@@ -16,7 +16,8 @@
  * ticks) and its thumb, the toggle's knob, the checkbox's box and the scrollbar's
  * thumb; the `hidden` class the controls set on parts they are not showing
  * (a slider's second thumb outside range mode, a dock tab bar's scroll buttons);
- * and MarkdownText, whose words would otherwise stack one per line.
+ * the hover tooltip's bubble, which has no fill or border without one; and
+ * MarkdownText, whose words would otherwise stack one per line.
  * Colours are the variables below; a theme recolours a control by setting the
  * variable.
  */
@@ -31,6 +32,9 @@
     --ui_color_checkbox_box_border: #777777;
     --ui_color_checkbox_box_checked: #3B85E0;
     --ui_color_scrollbar_thumb: #808080;
+    --ui_color_tooltip: #1E1E1E;
+    --ui_color_tooltip_border: #5A5A5A;
+    --ui_color_tooltip_text: #EEEEEE;
     --ui_color_markdown_link: #4C9AFF;
     --ui_color_markdown_link_hover: #8CC0FF;
     --ui_color_markdown_muted: #9A9A9A;
@@ -84,6 +88,20 @@
 
 .scrollbar-thumb {
     background-color: var(--ui_color_scrollbar_thumb);
+}
+
+/* The hover tooltip's bubble (TooltipOverlay). Its arrow takes the bubble's
+ * background, border color and border width, so one .tooltip rule styles both. */
+.tooltip {
+    background-color: var(--ui_color_tooltip);
+    border-width: 1px;
+    border-color: var(--ui_color_tooltip_border);
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+.tooltip-text {
+    color: var(--ui_color_tooltip_text);
 }
 
 /* MarkdownText: only what Markdown adds. The element's own font, size, line

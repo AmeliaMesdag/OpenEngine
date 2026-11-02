@@ -199,7 +199,7 @@ void MaterialGraphNode::BindSyntheticDetailRow(const Graph::Node& node, int extr
         const std::uint32_t argb = PackSrgbSwatchArgb(rgb);
         UIElement* swatch = EnsureDetailSwatch(*host);
         UI::Layout::SetElementHidden(*swatch, false);
-        swatch->Overrides().Set(Style::BackgroundColor, argb);
+        swatch->Style().Set(Style::BackgroundColor, argb);
 
         /* Rebound on every change, so the handler is registered once and reads
            the picker's colour straight into the node's parameters. */
@@ -235,7 +235,7 @@ void MaterialGraphNode::BindSyntheticDetailRow(const Graph::Node& node, int extr
         float rgb[3] = {1.f, 1.f, 1.f};
         if (variable)
             ParseVariableFloats(variable->Value, rgb, 3);
-        swatch->Overrides().Set(Style::BackgroundColor, PackSrgbSwatchArgb(rgb));
+        swatch->Style().Set(Style::BackgroundColor, PackSrgbSwatchArgb(rgb));
         swatch->MarkDirty(UIElement::StyleDirty | UIElement::VisualDirty);
         return;
     }
@@ -334,7 +334,7 @@ bool MaterialGraphNode::BindTextureSlot(const Graph::Node& node, GraphPortDropSl
     const float side = nodeWidth - 2.f * inset;
     if (layoutHeight <= 0.f || nodeWidth <= 0.f || side <= 0.f)
         return true;
-    slot.Overrides()
+    slot.Style()
         .Set(Style::Position, PositionType::Absolute)
         .Set(Style::PositionTop,
              StyleLength::Percent((DetailBlockTopGraph(node) + inset) / layoutHeight * 100.f))
@@ -379,7 +379,7 @@ void MaterialGraphNode::BindPreviewPlate(const Graph::Node& node)
        to the grid, and that slack has to land somewhere. Above the plate it is
        invisible node body; below it, it would be a seam — and pinning all four
        edges would stretch the square by exactly that remainder. */
-    m_PreviewPlate->Overrides()
+    m_PreviewPlate->Style()
         .Set(Style::PositionTop, StyleLength::Auto())
         .Set(Style::PositionBottom, StyleLength::Percent(0.f))
         .Set(Style::PositionLeft, StyleLength::Percent(0.f))
@@ -404,12 +404,12 @@ void MaterialGraphNode::BindPreviewPlate(const Graph::Node& node)
        node's cell into it. Must be set AFTER SetBackgroundResourceName, which
        force-overrides background-size to Contain. The atlas frames the sphere
        at render time, so the plate shows its cell 1:1 — no oversize crop. */
-    m_PreviewPlate->Overrides()
+    m_PreviewPlate->Style()
         .Set(Style::BackgroundSize,
              BackgroundSizeValue{BackgroundSizeMode::Explicit, preview.SizeXPercent, true,
                                  preview.SizeYPercent, true})
         .Set(Style::BackgroundPosition,
-             BackgroundPositionValue{preview.PosXPercent, true, preview.PosYPercent, true});
+             BackgroundPositionValue::Percent(preview.PosXPercent, preview.PosYPercent));
 }
 
 } // namespace GameEngine

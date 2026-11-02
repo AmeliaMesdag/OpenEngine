@@ -4,8 +4,8 @@
 <UIElement class="script-packages">
   <UIElement class="script-packages-rows" />
   <UIElement class="script-packages-row">
-    <TextField class="settings-row-field script-packages-id script-packages-new-id" placeholder="Package id" />
-    <TextField class="settings-row-field script-packages-version script-packages-new-version" placeholder="Version" />
+    <TextField class="settings-row-field script-packages-id script-packages-new-id" />
+    <TextField class="settings-row-field script-packages-version script-packages-new-version" />
     <Button class="script-packages-add">Add Package</Button>
   </UIElement>
   <Label class="settings-description script-packages-status" />

@@ -57,6 +57,13 @@ endif()
 # call below resolves `CMAKE_TOOLCHAIN_FILE`).
 set(VCPKG_APPLOCAL_DEPS OFF CACHE BOOL "vcpkg redundant — we stage runtime DLLs ourselves via ge_stage_runtime_dependencies" FORCE)
 
+# The oldest macOS the binaries run on. Set it before project(). CMake caches an
+# empty value, so set the default while the value is empty; an explicit
+# -DCMAKE_OSX_DEPLOYMENT_TARGET wins. Keep equal to cmake/triplets/*-osx.cmake.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS version the binaries run on" FORCE)
+endif()
+
 # Include automated dependency management
 include(cmake/Dependencies.cmake)
 
@@ -288,6 +295,23 @@ add_compile_definitions($<$<OR:$<CONFIG:Debug>,$<CONFIG:DebugFast>,$<CONFIG:RelW
 # GE_DEBUG_INSTRUMENTATION_VALUE instead of restating it.
 set(GE_DEBUG_INSTRUMENTATION_VALUE "$<IF:$<OR:$<CONFIG:Debug>,$<CONFIG:DebugFast>>,1,0>")
 add_compile_definitions(GE_DEBUG_INSTRUMENTATION=${GE_DEBUG_INSTRUMENTATION_VALUE})
+
+# Standard-library precondition checks where GE_DEBUG_INSTRUMENTATION is 1; Release has none. The switches are
+# per translation unit and keep the ABI. libc++ runs every check in Debug and aborts through LibcxxVerboseAbort.cpp;
+# DebugFast runs the fast checks and traps (SIGTRAP on arm64). MSVC and libstdc++ abort in both configurations.
+set(_ge_std_hardening "$<BOOL:${GE_DEBUG_INSTRUMENTATION_VALUE}>")
+if(MSVC)
+    add_compile_definitions(
+        $<${_ge_std_hardening}:_MSVC_STL_HARDENING=1>
+        $<${_ge_std_hardening}:_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION>
+    )
+else()
+    add_compile_definitions(
+        $<$<CONFIG:Debug>:_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG>
+        $<$<CONFIG:DebugFast>:_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST>
+        $<${_ge_std_hardening}:_GLIBCXX_ASSERTIONS>
+    )
+endif()
 
 # UISystem removed during redesign; keep permanently disabled
 

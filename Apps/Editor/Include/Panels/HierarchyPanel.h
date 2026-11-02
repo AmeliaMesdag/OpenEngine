@@ -27,6 +27,7 @@ namespace GameEngine {
 
 struct Bookmark;
 struct EditorContext;
+class HierarchyDataProvider;
 class INativeContextMenu;
 class TextField;
 class UIElement;
@@ -202,8 +203,6 @@ private:
     void DeferTreeTextureDrop(const std::filesystem::path& texturePath, const GUID& textureGuid,
                               ECS::EntityHandle parent);
     friend class Editor::HierarchyVcsController;
-    // Private provider implementation
-    class HierarchyDataProvider;
 
     // Expand every ancestor of `entity` so its row exists in the flattened
     // tree (callers must RefreshFromProvider afterwards).

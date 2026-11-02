@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include "UI/ResolvedStyle.h"
-#include "UI/StyleOverrides.h"
+#include "UI/StyleDeclaration.h"
 #include "UI/UIElement.h"
 #include "UI/UIStyle.h"
 
@@ -126,8 +126,8 @@ public:
                                  const UIElement* hoverTarget = nullptr,
                                  uint16_t* outMatchedPseudoStates = nullptr);
 
-    // Parse inline style declarations into a StyleOverrides bag.
-    static void ParseInlineStyleToOverrides(std::string_view inlineStyle, StyleOverrides& out);
+    // Parse inline style declarations into a StyleDeclaration bag.
+    static void ParseInlineStyleToOverrides(std::string_view inlineStyle, StyleDeclaration& out);
 
     // Cascade-matcher memoization Phase 3: build the per-element rule
     // cache. Walks each stylesheet's candidate rules (using the rule

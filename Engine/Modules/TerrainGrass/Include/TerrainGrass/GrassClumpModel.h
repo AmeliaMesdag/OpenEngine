@@ -54,8 +54,10 @@ inline constexpr float32 kGrassMaxHueShiftRadians = 0.5235988f; // 30 degrees
 //   bits 0-1  LOD index (written per cell by the placement compute)
 //   bits 2-9  clump colour code (8 bits, this file)
 //   bits 10-25 minimum projected width, as a multiple of the blade's authored width (16 bits)
-//   bits 26-31 unused
+//   bit  26    the root height and normal come from the terrain's surface pages
+//   bits 27-31 unused
 inline constexpr uint32 kGrassFlagLodMask = 3u;
+inline constexpr uint32 kGrassFlagGroundFromPages = 1u << 26u;
 inline constexpr uint32 kGrassClumpCodeShift = 2u;
 inline constexpr uint32 kGrassClumpCodeMask = 255u;
 inline constexpr uint32 kGrassMinWidthScaleShift = 10u;

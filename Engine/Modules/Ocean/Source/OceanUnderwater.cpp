@@ -40,31 +40,31 @@ constexpr uint32_t kUnderwaterFragmentStage = kShaderStageFragment;
 // side each frame; the shader reads it at set 0 binding 2.
 struct alignas(16) OceanUnderwaterParamsGPU
 {
-    float InvViewProj[16]{};
-    float ViewProj[16]{};    // world -> clip (god-ray sun projection)
-    float View[16]{};        // world -> view (shadow cascade selection)
-    float CameraPos[4]{};    // xyz world camera; w unused
-    float FogDensity[4]{};   // rgb extinction; w = max fog distance (m)
-    float FogFalloff[4]{};   // x start, y end, z power, w mode
-    float DeepTint[4]{};     // rgb deep body colour; a unused
-    float ShallowTint[4]{};  // rgb shallow scatter; a = meniscus brightness
-    float Misc[4]{};         // x seaLevel, y meniscusWidth, z submergedDepth, w time
-    float SunDirection[4]{}; // xyz toward the sun
-    float SunColor[4]{};     // rgb light colour * intensity
-    float FFTParams[4]{};    // x legacy waveMode, y fftCascadeCount, z shapeWeight, w maxVertical
-    float LocalFFT[4]{}; // x = ready local FFT stream bit mask, yzw pad
-    float LocalFFTMaskCascadeOriginScale[kMaxOceanLodCascades * 4]{};
-    float LocalFFTMaskCascadeMeta[4]{}; // x lod count
-    float Shape[4]{};        // x maxHorizontal, y iorWater, z probeReach, w waterlineEdge
-    float Inscatter[4]{};    // x enable, y strength, z HG phase g, w camera-depth falloff
-    float Distortion[4]{};   // x enable, y lensK1, z lensK2, w intersection strength
-    float GodRays[4]{};      // x mode, y strength, z density, w secondary density
-    float ReflectedCaustics[4]{}; // x strength, y height, z falloff, w pad
-    float Caustics[4]{};     // scale, average, strength, focal depth
-    float CausticsFocus[4]{}; // depth of field, distortion strength/scale, pad
-    float Gerstner[4]{};     // legacy ABI pad
-    float Portal[4]{};       // x enabled, y volume count, z exclusion count, w polygon count
-    float PortalExtra[4]{};  // x occluder count, y ribbon count, z 1 = dry camera (portal-only), w pad
+    Mathematics::Matrix4x4 InvViewProj;
+    Mathematics::Matrix4x4 ViewProj;    // world -> clip (god-ray sun projection)
+    Mathematics::Matrix4x4 View;        // world -> view (shadow cascade selection)
+    Mathematics::Vector4 CameraPos;    // xyz world camera; w unused
+    Mathematics::Vector4 FogDensity;   // rgb extinction; w = max fog distance (m)
+    Mathematics::Vector4 FogFalloff;   // x start, y end, z power, w mode
+    Mathematics::Vector4 DeepTint;     // rgb deep body colour; a unused
+    Mathematics::Vector4 ShallowTint;  // rgb shallow scatter; a = meniscus brightness
+    Mathematics::Vector4 Misc;         // x seaLevel, y meniscusWidth, z submergedDepth, w time
+    Mathematics::Vector4 SunDirection; // xyz toward the sun
+    Mathematics::Vector4 SunColor;     // rgb light colour * intensity
+    Mathematics::Vector4 FFTParams;    // x waveMode, y fftCascadeCount, z shapeWeight, w maxVertical
+    Mathematics::Vector4 LocalFFT; // x = ready local FFT stream bit mask, yzw pad
+    Mathematics::Vector4 LocalFFTMaskCascadeOriginScale[kMaxOceanLodCascades];
+    Mathematics::Vector4 LocalFFTMaskCascadeMeta; // x lod count
+    Mathematics::Vector4 Shape;        // x maxHorizontal, y iorWater, z probeReach, w waterlineEdge
+    Mathematics::Vector4 Inscatter;    // x enable, y strength, z HG phase g, w camera-depth falloff
+    Mathematics::Vector4 Distortion;   // x enable, y lensK1, z lensK2, w intersection strength
+    Mathematics::Vector4 GodRays;      // x mode, y strength, z density, w secondary density
+    Mathematics::Vector4 ReflectedCaustics; // x strength, y height, z falloff, w pad
+    Mathematics::Vector4 Caustics;     // scale, average, strength, focal depth
+    Mathematics::Vector4 CausticsFocus; // depth of field, distortion strength/scale, pad
+    Mathematics::Vector4 Gerstner;     // pad
+    Mathematics::Vector4 Portal;       // x enabled, y volume count, z exclusion count, w polygon count
+    Mathematics::Vector4 PortalExtra;  // x occluder count, y ribbon count, z 1 = dry camera (portal-only), w pad
     float PortalVolumeBoxes[kMaxOceanUnderwaterPortalVolumes * 8]{};       // min/max vec4 pairs
     float PortalExclusionBoxes[kMaxOceanUnderwaterPortalExclusions * 8]{}; // min/max vec4 pairs
     float PortalOccluderBoxes[kMaxOceanUnderwaterPortalOccluders * 8]{};   // min/max vec4 pairs
@@ -305,16 +305,17 @@ namespace
 // in a render-graph upload-ring allocation and the composite pass captures only
 // {buffer, offset} — no per-class buffer ring.
 void FillUnderwaterParams(OceanUnderwaterParamsGPU& out, const OceanParamsGPU& params,
-                          float submergedDepth, const float* invViewProj, const float* viewProj,
-                          const float* view, const float* cameraPos, bool causticsAvailable,
+                          float submergedDepth, const Mathematics::Matrix4x4& invViewProj,
+                          const Mathematics::Matrix4x4& viewProj, const Mathematics::Matrix4x4& view,
+                          const Mathematics::Vector3& cameraPos, bool causticsAvailable,
                           const OceanUnderwaterSettings& settings, uint32_t localFFTReadyMask,
                           const OceanCascadeLayoutGPU* localFFTMaskLayout,
                           const OceanUnderwaterPortalData* portalData)
 {
     OceanUnderwaterParamsGPU u{};
-    std::memcpy(u.InvViewProj, invViewProj, sizeof(float) * 16);
-    std::memcpy(u.ViewProj, viewProj, sizeof(float) * 16);
-    std::memcpy(u.View, view, sizeof(float) * 16);
+    u.InvViewProj = invViewProj;
+    u.ViewProj = viewProj;
+    u.View = view;
     u.CameraPos[0] = cameraPos[0];
     u.CameraPos[1] = cameraPos[1];
     u.CameraPos[2] = cameraPos[2];
@@ -336,7 +337,7 @@ void FillUnderwaterParams(OceanUnderwaterParamsGPU& out, const OceanParamsGPU& p
     if (authoredFogEnd == 0.0f && portalData)
         for (const auto& material : portalData->Materials)
         {
-            const float localDensity = std::max({material.Fog[0], material.Fog[1], material.Fog[2], 1e-3f});
+            const float localDensity = std::max({material.Fog.x, material.Fog.y, material.Fog.z, 1e-3f});
             u.FogDensity[3] = std::max(u.FogDensity[3], fogStart + 8.0f / localDensity);
         }
     u.FogFalloff[0] = fogStart;
@@ -346,15 +347,15 @@ void FillUnderwaterParams(OceanUnderwaterParamsGPU& out, const OceanParamsGPU& p
 
     // Deep body = the authored deep-water colour; the alpha lane carries an
     // overall tint strength that ramps with how deep the camera sits.
-    u.DeepTint[0] = params.DeepColor[0];
-    u.DeepTint[1] = params.DeepColor[1];
-    u.DeepTint[2] = params.DeepColor[2];
+    u.DeepTint[0] = params.DeepColor.r;
+    u.DeepTint[1] = params.DeepColor.g;
+    u.DeepTint[2] = params.DeepColor.b;
 
     // Shallow scatter tint (the near-surface "alive" colour) also drives the
     // meniscus brightness in the alpha lane.
-    u.ShallowTint[0] = params.SubSurfaceShallowCol[0];
-    u.ShallowTint[1] = params.SubSurfaceShallowCol[1];
-    u.ShallowTint[2] = params.SubSurfaceShallowCol[2];
+    u.ShallowTint[0] = params.SubSurfaceShallowCol.r;
+    u.ShallowTint[1] = params.SubSurfaceShallowCol.g;
+    u.ShallowTint[2] = params.SubSurfaceShallowCol.b;
     u.ShallowTint[3] = 0.9f;
 
     u.Misc[0] = params.SeaLevel;
@@ -371,9 +372,9 @@ void FillUnderwaterParams(OceanUnderwaterParamsGPU& out, const OceanParamsGPU& p
     u.SunDirection[0] = params.SunDirection[0];
     u.SunDirection[1] = params.SunDirection[1];
     u.SunDirection[2] = params.SunDirection[2];
-    u.SunColor[0] = params.SunColor[0];
-    u.SunColor[1] = params.SunColor[1];
-    u.SunColor[2] = params.SunColor[2];
+    u.SunColor[0] = params.SunColor.r;
+    u.SunColor[1] = params.SunColor.g;
+    u.SunColor[2] = params.SunColor.b;
 
     // FFT surface-height inputs so the waterline conforms to the same shaped/clamped
     // wave height the visible surface uses.
@@ -388,8 +389,7 @@ void FillUnderwaterParams(OceanUnderwaterParamsGPU& out, const OceanParamsGPU& p
             std::min<uint32_t>(localFFTMaskLayout->LodCount, kMaxOceanLodCascades);
         for (uint32_t i = 0; i < lodCount; ++i)
         {
-            std::memcpy(u.LocalFFTMaskCascadeOriginScale + i * 4u,
-                        localFFTMaskLayout->CascadeOriginScale[i], sizeof(float) * 4u);
+            u.LocalFFTMaskCascadeOriginScale[i] = localFFTMaskLayout->CascadeOriginScale[i];
         }
         u.LocalFFTMaskCascadeMeta[0] = static_cast<float>(lodCount);
     }
@@ -534,7 +534,7 @@ class OverlayInputs
 };
 } // namespace
 
-bool IsUnderwaterPortalInView(const OceanUnderwaterPortalData& data, const float* viewProj)
+bool IsUnderwaterPortalInView(const OceanUnderwaterPortalData& data, const Mathematics::Matrix4x4& viewProj)
 {
     const OceanFootprintFrustum frustum(viewProj);
     // The ribbon tree's first record is its root branch, whose A/B carry the
@@ -618,8 +618,7 @@ bool OceanUnderwater::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d,
     if (!camera)
         return false;
 
-    Mathematics::Matrix4x4 vp{};
-    std::memcpy(vp.Data(), camera->viewProj, sizeof(float) * 16);
+    Mathematics::Matrix4x4 vp = camera->viewProj;
     const Mathematics::Matrix4x4 invVp = Mathematics::Inverse(vp);
 
     uint32_t validLocalFFTMask =
@@ -653,8 +652,9 @@ bool OceanUnderwater::DeclareForView(Engine::Renderer::Pipeline::ViewDeclare& d,
     const auto paramsAlloc = d.Frame.AllocUpload<OceanUnderwaterParamsGPU>();
     if (!paramsAlloc.Valid())
         return false;
-    FillUnderwaterParams(*paramsAlloc.Ptr, params, submergedDepth, invVp.Data(), vp.Data(),
-                         camera->view, camera->cameraPos, caustics.IsValid(), settings,
+    const Mathematics::Vector3 cameraPos(camera->cameraPos.x, camera->cameraPos.y, camera->cameraPos.z);
+    FillUnderwaterParams(*paramsAlloc.Ptr, params, submergedDepth, invVp, vp,
+                         camera->view, cameraPos, caustics.IsValid(), settings,
                          validLocalFFTMask, shape.LocalFFTMaskLayout, portalData);
 
     const uint32_t renderW = d.RenderWidth;

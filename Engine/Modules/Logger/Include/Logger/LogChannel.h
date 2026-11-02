@@ -26,11 +26,12 @@ struct LogChannel
 /// game and its packages. The level table stays at 256 bytes.
 inline constexpr std::uint16_t kMaxLogChannels = 256;
 
-/// GE_LOG removes Trace and Debug records from builds that define NDEBUG.
-#if defined(NDEBUG)
-inline constexpr LogLevel kCompiledMinLogLevel = LogLevel::Info;
-#else
+/// GE_LOG removes Trace and Debug records where the engine is built without debug instrumentation.
+/// A public header reads the engine's switch, not NDEBUG: every module and game then gets the engine's value.
+#if GE_DEBUG_INSTRUMENTATION
 inline constexpr LogLevel kCompiledMinLogLevel = LogLevel::Trace;
+#else
+inline constexpr LogLevel kCompiledMinLogLevel = LogLevel::Info;
 #endif
 
 /// Registers a channel, or returns the channel already registered under this name with its first default
@@ -98,7 +99,7 @@ void Write(const LogChannel& channel, LogLevel level, const char* file, int line
 // ========================================
 
 // The Core channel with the call site's file, line and function; GE_LOG removes Trace and Debug where
-// NDEBUG is defined.
+// the engine is built without debug instrumentation.
 #define LOG_TRACE(format, ...) GE_LOG(::Logger::CoreLog, Trace, format __VA_OPT__(,) __VA_ARGS__)
 #define LOG_DEBUG(format, ...) GE_LOG(::Logger::CoreLog, Debug, format __VA_OPT__(,) __VA_ARGS__)
 #define LOG_INFO(format, ...) GE_LOG(::Logger::CoreLog, Info, format __VA_OPT__(,) __VA_ARGS__)

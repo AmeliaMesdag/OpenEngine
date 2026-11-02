@@ -8,6 +8,7 @@
 #include "Components/Rendering/MorphTargetWeights.h"
 #include "Components/Spline/SplineComponent.h"
 #include "Components/Spline/SplineNetworkOverrides.h"
+#include "Components/Spline/SplinePaving.h"
 #include "Components/Terrain/Terrain.h"
 #include "Components/Transform.h"
 #include "ECS/Entity.h"
@@ -122,6 +123,7 @@ class CopiedEntityRuntimeRefs
         {
             RepairMarkupRegionMembers(world, copy);
             RepairSplineNetworkOverrides(world, copy);
+            RepairPavingMembers(world, copy);
         }
     }
 
@@ -164,6 +166,25 @@ class CopiedEntityRuntimeRefs
             const ECS::EntityHandle partner = record.Other;
             record.Other = CloneOf(partner, partner);
             remapped = remapped || record.Other != partner;
+        }
+        if (remapped)
+            world.AddComponentImmediate(copy, updated);
+    }
+
+    // A paving's member list is byte-copied: a member duplicated in the same payload (a bed
+    // copied with its square) names its copy; a member duplicated without it stays shared.
+    void RepairPavingMembers(ECS::World& world, ECS::EntityHandle copy) const
+    {
+        const auto* paved = world.GetComponent<Components::SplinePaving>(copy);
+        if (!paved)
+            return;
+        Components::SplinePaving updated = *paved;
+        bool remapped = false;
+        for (uint32 i = 0; i < std::min(updated.MemberCount, Components::kMaxPavingMembers); ++i)
+        {
+            const ECS::EntityHandle member = updated.Members[i].Entity;
+            updated.Members[i].Entity = CloneOf(member, member);
+            remapped = remapped || updated.Members[i].Entity != member;
         }
         if (remapped)
             world.AddComponentImmediate(copy, updated);

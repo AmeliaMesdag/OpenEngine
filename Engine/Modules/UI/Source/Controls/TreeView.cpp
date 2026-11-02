@@ -53,8 +53,8 @@ void ApplyTreeFoldoutToggleLayout(Label* toggle, float iconSizePx)
     // Runs on every row rebind. Every write below is a same-value no-op in
     // the override store, and real changes raise layout/visual dirt through
     // the wired dirty callback — pure recycling marks nothing.
-    toggle->Styles().SetBackgroundSizeExplicit(s, false, s, false);
-    toggle->Overrides()
+    toggle->Style().Set(Style::BackgroundSize, BackgroundSizeValue{BackgroundSizeMode::Explicit, s, false, s, false});
+    toggle->Style()
         .Set(Style::Width, StyleLength::Px(s))
         .Set(Style::Height, StyleLength::Px(s))
         .Set(Style::MinWidth, StyleLength::Px(s))
@@ -457,10 +457,11 @@ void TreeView::SetIconSize(float px)
             // (i.e., does NOT have tree-title-no-icon class which uses separate icon element)
             if (!slot.title->HasClass("tree-title-no-icon"))
             {
-                slot.title->Styles().SetBackgroundSizeExplicit(px, false, px, false);
+                slot.title->Style().Set(Style::BackgroundSize,
+                                        BackgroundSizeValue{BackgroundSizeMode::Explicit, px, false, px, false});
                 
                 // Add extra spacing after the icon: icon size + 8px gap
-                slot.title->Overrides().Set(Style::PaddingLeft, StyleLength::Px(px + 8.0f));
+                slot.title->Style().Set(Style::PaddingLeft, StyleLength::Px(px + 8.0f));
             }
         }
     }
@@ -692,7 +693,8 @@ void TreeView::EnsureRowPoolSize(int desired)
         title->AddClass("tree-title");
         Label* titleRaw = title.get();
         titleRaw->SetDisableClipCulling(true);
-        titleRaw->Styles().SetBackgroundSizeExplicit(m_IconSizePx, false, m_IconSizePx, false);
+        titleRaw->Style().Set(Style::BackgroundSize,
+                              BackgroundSizeValue{BackgroundSizeMode::Explicit, m_IconSizePx, false, m_IconSizePx, false});
         ApplyTreeFoldoutToggleLayout(toggleRaw, m_IconSizePx);
 
         const auto beginIconInteraction = [this, slotIndex](UIEvent& e)
@@ -1160,7 +1162,7 @@ bool TreeView::BindRow(int slotIndex, int itemIndex)
                                         static_cast<float>(std::max(0, heightPx)),
                                     },
                                     /*positionOnlyFastPath=*/true);
-    slot.row->Overrides().Set(Style::PaddingLeft, StyleLength::Px(8.0f + static_cast<float>(indentPx)));
+    slot.row->Style().Set(Style::PaddingLeft, StyleLength::Px(8.0f + static_cast<float>(indentPx)));
 
     // Per-row customization hook for callers (e.g., to add state classes and/or
     // inject icon/dot elements into the row). Rows are virtualized and reused.
@@ -1172,9 +1174,9 @@ bool TreeView::BindRow(int slotIndex, int itemIndex)
     if (slot.title)
     {
         if (slot.title->HasClass("tree-title-no-icon"))
-            slot.title->Overrides().Reset(Style::PaddingLeft);
+            slot.title->Style().Reset(Style::PaddingLeft);
         else
-            slot.title->Overrides().Set(Style::PaddingLeft, StyleLength::Px(m_IconSizePx + 8.0f));
+            slot.title->Style().Set(Style::PaddingLeft, StyleLength::Px(m_IconSizePx + 8.0f));
     }
     if (slot.toggle)
         ApplyTreeFoldoutToggleLayout(slot.toggle, m_IconSizePx);
@@ -2578,7 +2580,7 @@ void TreeView::SetDropPreview(const UI::Interaction::DropPreviewState& state)
             auto ind = std::make_unique<UIElement>();
             ind->SetId("tree-drop-indicator");
             ind->AddClass("tree-drop-indicator");
-            ind->Overrides()
+            ind->Style()
                 .Set(Style::Position, PositionType::Absolute)
                 .Set(Style::PointerEvents, false)
                 .Set(Style::Display, DisplayMode::None);
@@ -2601,7 +2603,7 @@ void TreeView::SetDropPreview(const UI::Interaction::DropPreviewState& state)
         }
 
         const uint32_t color = state.Allowed ? 0xE600C8FFu : 0xE6FF5050u; // rgba(0,200,255,0.9) / rgba(255,80,80,0.9)
-        m_DropIndicator->Overrides()
+        m_DropIndicator->Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::PointerEvents, false)
             .Set(Style::ZIndex, 9000)
@@ -2616,7 +2618,7 @@ void TreeView::SetDropPreview(const UI::Interaction::DropPreviewState& state)
     {
         if (m_DropIndicator)
         {
-            m_DropIndicator->Overrides().Set(Style::Display, DisplayMode::None);
+            m_DropIndicator->Style().Set(Style::Display, DisplayMode::None);
         }
     }
 }

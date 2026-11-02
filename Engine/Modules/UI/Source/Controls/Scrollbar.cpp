@@ -19,7 +19,7 @@ class ScrollbarThumbElement final : public UIElement
     {
         AddClass("scrollbar-thumb");
         constexpr float kDefaultThumbRadius = 4.0f;
-        Overrides()
+        Style()
             .Set(Style::Position, PositionType::Absolute)
             .Set(Style::FlexGrow, 0.0f)
             .Set(Style::FlexShrink, 0.0f)
@@ -39,7 +39,7 @@ Scrollbar::Scrollbar(Orientation o)
     else
         AddClass("vertical");
 
-    Overrides()
+    Style()
         .Set(Style::Position, PositionType::Relative)
         .Set(Style::PositionLeft, StyleLength::Auto())
         .Set(Style::PositionTop, StyleLength::Auto())
@@ -50,13 +50,13 @@ Scrollbar::Scrollbar(Orientation o)
 
     if (o == Orientation::Vertical)
     {
-        Overrides()
+        Style()
             .Set(Style::Width, StyleLength::Px(m_ThicknessPx))
             .Set(Style::MinWidth, StyleLength::Px(m_ThicknessPx));
     }
     else
     {
-        Overrides()
+        Style()
             .Set(Style::Height, StyleLength::Px(m_ThicknessPx))
             .Set(Style::MinHeight, StyleLength::Px(m_ThicknessPx));
     }

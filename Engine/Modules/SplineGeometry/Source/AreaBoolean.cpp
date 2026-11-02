@@ -26,6 +26,10 @@ constexpr double kTouchingScale = 1.0e5;
 // limit of 1,000 only has to pass the sharpest corner (about 0.1 degree), so it squares none.
 constexpr double kFirstOffsetMiterLimit = 2.0;
 constexpr double kSecondOffsetMiterLimit = 1.0e3;
+// Grid steps under which two points of a first offset are one point (0.1 mm). The first offset can leave two points
+// one step apart at a shallow concave corner, and the second offset would miter their edge, whose direction is noise,
+// into a spike.
+constexpr double kOffsetNearPointSteps = 10.0;
 
 // `ring` on a grid of `scale` steps per meter, wound counter-clockwise, so the nonzero fill adds
 // every operand whichever way it was authored.
@@ -49,9 +53,11 @@ Clipper2Lib::Paths64 CounterClockwisePaths(std::span<const AreaRing> rings, doub
     return paths;
 }
 
-// `path` back in meters as a ring wound counter-clockwise (`outer`) or clockwise.
-AreaRing RingOf(const Clipper2Lib::Path64& path, double scale, bool outer)
+// `path` back in meters as a ring wound counter-clockwise (`outer`) or clockwise, less each point
+// closer than `mergeSteps` grid steps to the point kept before it.
+AreaRing RingOf(const Clipper2Lib::Path64& unmerged, double scale, double mergeSteps, bool outer)
 {
+    const Clipper2Lib::Path64 path = Clipper2Lib::StripNearEqual(unmerged, mergeSteps * mergeSteps, true);
     AreaRing ring;
     ring.reserve(path.size());
     for (const Clipper2Lib::Point64& point : path)
@@ -62,17 +68,18 @@ AreaRing RingOf(const Clipper2Lib::Path64& path, double scale, bool outer)
     return ring;
 }
 
-// The outer rings under `node` as pieces with their holes, and the islands inside those holes.
-void CollectPieces(const Clipper2Lib::PolyPath64& node, double scale, std::vector<AreaPiece>& pieces)
+// The outer rings under `node` as pieces with their holes, and the islands inside those holes,
+// each ring less the points closer than `mergeSteps` grid steps to the point before.
+void CollectPieces(const Clipper2Lib::PolyPath64& node, double scale, double mergeSteps, std::vector<AreaPiece>& pieces)
 {
     for (const auto& outer : node)
     {
         AreaPiece& piece = pieces.emplace_back();
-        piece.Outer = RingOf(outer->Polygon(), scale, true);
+        piece.Outer = RingOf(outer->Polygon(), scale, mergeSteps, true);
         for (const auto& hole : *outer)
-            piece.Holes.push_back(RingOf(hole->Polygon(), scale, false));
+            piece.Holes.push_back(RingOf(hole->Polygon(), scale, mergeSteps, false));
         for (const auto& hole : *outer)
-            CollectPieces(*hole, scale, pieces);
+            CollectPieces(*hole, scale, mergeSteps, pieces);
     }
 }
 
@@ -80,6 +87,16 @@ Clipper2Lib::Paths64 Offset(const Clipper2Lib::Paths64& paths, double delta, dou
 {
     return Clipper2Lib::InflatePaths(paths, delta, Clipper2Lib::JoinType::Miter, Clipper2Lib::EndType::Polygon,
                                      miterLimit);
+}
+
+// The first offset of a closing or an opening, less each point within kOffsetNearPointSteps of the
+// point kept before it.
+Clipper2Lib::Paths64 FirstOffset(const Clipper2Lib::Paths64& paths, double delta)
+{
+    Clipper2Lib::Paths64 offset = Offset(paths, delta, kFirstOffsetMiterLimit);
+    for (Clipper2Lib::Path64& path : offset)
+        path = Clipper2Lib::StripNearEqual(path, kOffsetNearPointSteps * kOffsetNearPointSteps, true);
+    return offset;
 }
 
 // Twice the area of `path` over its perimeter, in grid steps: its width on average.
@@ -121,7 +138,7 @@ std::vector<AreaPiece> CombineAreas(std::span<const AreaRing> unions, std::span<
     std::vector<AreaPiece> pieces;
     if (!clipper.Execute(Clipper2Lib::ClipType::Difference, Clipper2Lib::FillRule::NonZero, tree))
         return pieces;
-    CollectPieces(tree, kBooleanScale, pieces);
+    CollectPieces(tree, kBooleanScale, 0.0, pieces);
     return pieces;
 }
 
@@ -134,17 +151,18 @@ std::vector<AreaPiece> CombineTouchingAreas(std::span<const AreaRing> unions, st
     const Clipper2Lib::Paths64 joined =
         Clipper2Lib::Union(CounterClockwisePaths(unions, kTouchingScale), Clipper2Lib::FillRule::NonZero);
     const Clipper2Lib::Paths64 closed =
-        WithoutSliverHoles(Offset(Offset(joined, offset, kFirstOffsetMiterLimit), -offset, kSecondOffsetMiterLimit),
+        WithoutSliverHoles(Offset(FirstOffset(joined, offset), -offset, kSecondOffsetMiterLimit),
                            static_cast<double>(sliverMeters) * kTouchingScale);
     const Clipper2Lib::Paths64 paved =
         Clipper2Lib::Difference(closed, CounterClockwisePaths(cuts, kTouchingScale), Clipper2Lib::FillRule::NonZero);
     Clipper2Lib::ClipperOffset opening(kSecondOffsetMiterLimit);
-    opening.AddPaths(Offset(paved, -offset, kFirstOffsetMiterLimit), Clipper2Lib::JoinType::Miter,
+    opening.AddPaths(FirstOffset(paved, -offset), Clipper2Lib::JoinType::Miter,
                      Clipper2Lib::EndType::Polygon);
     Clipper2Lib::PolyTree64 tree;
     opening.Execute(offset, tree);
     std::vector<AreaPiece> pieces;
-    CollectPieces(tree, kTouchingScale, pieces);
+    // The offsets can leave two points of one corner closer than the tolerance.
+    CollectPieces(tree, kTouchingScale, static_cast<double>(touchMeters) * kTouchingScale, pieces);
     return pieces;
 }
 

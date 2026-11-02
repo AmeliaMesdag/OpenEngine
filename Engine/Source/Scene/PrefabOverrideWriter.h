@@ -4,6 +4,7 @@
 // differ from its prefab, found against the prefab placed once per save. Private to the scene IO
 // sources.
 
+#include "Scene/PrefabAuthoring.h"
 #include "Scene/PrefabPlacement.h"
 #include "Types/FlatMap.h"
 #include "Types/FlatSet.h"
@@ -13,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -73,6 +75,27 @@ bool CollectPrefabInstances(ECS::World& world, const std::vector<ECS::EntityHand
                             std::unordered_map<ECS::EntityId, std::string>& tagByEntity,
                             std::unordered_set<ECS::EntityId>& excluded, PrefabTemplates& templates,
                             std::vector<SavedPrefabInstance>& instances);
+
+// One component of an entity as the scene saver writes it: its file token and its lines.
+struct ComponentText
+{
+    std::string token;
+    std::string key; // the token lowercased
+    std::vector<std::string> lines;
+};
+
+// The lines the scene saver writes for `entity`, grouped by component.
+void CollectComponentText(ECS::World& world, ECS::EntityHandle entity, const SceneSaveContext& context,
+                          const std::vector<const ISceneComponentSchema*>& schemas, std::vector<ComponentText>& out);
+
+// True for a component of an instance's root that places it in the scene: never an override.
+bool IsPlacementComponent(std::string_view key);
+
+// DescribePrefabInstance against the generation `prefab` of the instance's prefab. `outAddresses[i]` is the
+// address of `out[i]` under the root: empty for the root and for an entity that the instance added.
+void DescribePrefabInstanceAgainst(ECS::World& world, ECS::EntityHandle root, PrefabLibrary& library,
+                                   const PrefabTemplate& prefab, std::vector<PrefabInstanceEntity>& out,
+                                   std::vector<std::string>& outAddresses);
 
 // Writes the body of one instance's [prefab] section.
 void WritePrefabInstanceBody(ECS::World& world, const SavedPrefabInstance& instance,

@@ -1,4 +1,5 @@
 #include "UI/Controls/Button.h"
+#include "UI/ElementBuilder.h"
 #include "UI/UIManager.h"
 #include "UI/UIHotReload.h"
 #include "UI/ResolvedStyle.h"
@@ -236,8 +237,17 @@ TEST_P(SharedStylesheetReloadTests, ManagersObserveOneCommitAndKeepCachedRulesAl
     for (UIManager* ui : {&first, &second})
     {
         std::unique_ptr<UIElement> root;
-        ASSERT_TRUE(UIParsing::XMLParser::ParseLayoutFromString(
-            "<uielement id='root'><uielement id='sample'/></uielement>", root));
+        if (ui == &first)
+        {
+            root = UI::Element<UIElement>().Id("root").Children(
+                UI::Element<UIElement>().Id("sample")).Build();
+            ASSERT_NE(root, nullptr);
+        }
+        else
+        {
+            ASSERT_TRUE(UIParsing::XMLParser::ParseLayoutFromString(
+                "<uielement id='root'><uielement id='sample'/></uielement>", root));
+        }
         ui->SetRoot(std::move(root));
         ui->OnMouseMove(-100.0f, -100.0f);
     }
@@ -619,7 +629,7 @@ TEST(UIHotReloadTests, ImportedLeaf_ModifiedUpdatesMountedSubtreeNextUpdate)
     auto panel = std::make_unique<UIElement>();
     UIElement* panelRaw = panel.get();
     panelRaw->SetId("panel");
-    panelRaw->Overrides()
+    panelRaw->Style()
         .Set(Style::Width, StyleLength::Px(300.0f))
         .Set(Style::Height, StyleLength::Px(200.0f));
 
@@ -1561,10 +1571,10 @@ TEST(UIHotReloadTests, ReconcileAnnouncesToTheBoundTargetAfterReplacingElements)
                                 {
                                     EXPECT_EQ(e.Target, panel);
                                     ++reconciles;
-                                    keep = UIElement::MakeWeakRef(dynamic_cast<Button*>(panel->FindById("keep"_sid)));
-                                    gone = UIElement::MakeWeakRef(panel->FindById("gone"_sid));
-                                    renamed = UIElement::MakeWeakRef(panel->FindById("renamed"_sid));
-                                    slot = UIElement::MakeWeakRef(panel->FindById("slot"_sid));
+                                    keep = panel->FindById<Button>("keep"_sid);
+                                    gone = panel->FindById<UIElement>("gone"_sid);
+                                    renamed = panel->FindById<UIElement>("renamed"_sid);
+                                    slot = panel->FindById<UIElement>("slot"_sid);
                                     Button* button = keep.Get();
                                     if (!button || button == wiredKeep.Get())
                                         return;
